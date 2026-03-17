@@ -76,7 +76,7 @@ export default function HomeScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const [inputText, setInputText] = useState('');
 
-  const { status, history, error, send } = useOrchestrator('en', SAMPLE_BRIEF);
+  const { status, history, lastResponse, error, send } = useOrchestrator('en', SAMPLE_BRIEF);
   const { voiceState, startListening, isSupported } = useVoice('en');
 
   function getGreeting(): string {
@@ -166,6 +166,22 @@ export default function HomeScreen() {
               ))}
             </View>
           )}
+
+          {/* Draft message card */}
+          {lastResponse?.actions.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => (
+            <View key={i} style={styles.draftCard}>
+              <Text style={styles.draftLabel}>✉ Draft ready</Text>
+              <Text style={styles.draftField}>
+                <Text style={styles.draftFieldLabel}>To: </Text>
+                {String(action.to)}
+              </Text>
+              <Text style={styles.draftField}>
+                <Text style={styles.draftFieldLabel}>Subject: </Text>
+                {String(action.subject)}
+              </Text>
+              <Text style={styles.draftBody}>{String(action.body)}</Text>
+            </View>
+          ))}
 
           {/* Status indicator */}
           {statusLabel ? (
@@ -284,6 +300,37 @@ const styles = StyleSheet.create({
   errorText: {
     color: Colors.error,
     fontStyle: 'normal',
+  },
+  draftCard: {
+    marginTop: 12,
+    backgroundColor: '#EEF2FF',
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.info,
+    padding: 14,
+    gap: 6,
+  },
+  draftLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.info,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  draftField: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+  },
+  draftFieldLabel: {
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  draftBody: {
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+    marginTop: 6,
+    lineHeight: Typography.lineHeightBase,
   },
   inputBar: {
     flexDirection: 'row',
