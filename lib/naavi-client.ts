@@ -178,13 +178,6 @@ export async function sendToNaavi(
   briefItems: BriefItem[] = [],
   language: 'en' | 'fr' = 'en'
 ): Promise<NaaviResponse> {
-  const apiKey = await getApiKey();
-
-  if (!apiKey) {
-    throw new Error('API key not configured. Please add your Anthropic API key in Settings.');
-  }
-
-  // Build the message array for Claude
   const messages = [
     ...conversationHistory,
     { role: 'user' as const, content: userMessage },
@@ -198,6 +191,10 @@ export async function sendToNaavi(
     rawText = await callNaaviEdgeFunction(system, messages);
   } else {
     // Fallback — local API key (Phase 7 behaviour)
+    const apiKey = await getApiKey();
+    if (!apiKey) {
+      throw new Error('API key not configured. Please add your Anthropic API key in Settings.');
+    }
     const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
