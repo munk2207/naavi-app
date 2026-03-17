@@ -78,7 +78,7 @@ export default function HomeScreen() {
   const [inputText, setInputText] = useState('');
 
   const { status, history, drafts, error, send } = useOrchestrator('en', SAMPLE_BRIEF);
-  const { voiceState, startListening, isSupported } = useVoice('en');
+  const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
 
   function getGreeting(): string {
     const hour = new Date().getHours();
@@ -225,6 +225,13 @@ export default function HomeScreen() {
               ) : null}
             </View>
           ))}
+
+          {/* Voice error message */}
+          {voiceError ? (
+            <View style={styles.statusRow}>
+              <Text style={styles.errorText}>{voiceError}</Text>
+            </View>
+          ) : null}
 
           {/* Status indicator */}
           {statusLabel ? (
