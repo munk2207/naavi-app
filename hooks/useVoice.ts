@@ -115,7 +115,13 @@ export function useVoice(language: 'en' | 'fr' = 'en'): UseVoiceResult {
       } else {
         navigator.mediaDevices
           .getUserMedia({ audio: true })
-          .then(() => recognition.start())
+          .then((stream) => {
+            // Stop the stream immediately — we only needed it to trigger
+            // the permission prompt. recognition.start() opens its own
+            // mic session and will conflict if we leave this stream open.
+            stream.getTracks().forEach(t => t.stop());
+            recognition.start();
+          })
           .catch((err) => {
             console.error('[useVoice] mic permission denied:', err);
             setVoiceError('Microphone blocked. Allow it in your browser settings.');
