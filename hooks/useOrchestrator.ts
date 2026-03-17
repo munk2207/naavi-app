@@ -11,7 +11,7 @@
 import { useState, useCallback } from 'react';
 import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
-import { sendToNaavi, type NaaviMessage, type NaaviResponse, type BriefItem } from '@/lib/naavi-client';
+import { sendToNaavi, type NaaviMessage, type NaaviResponse, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
 
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'error';
 
@@ -26,6 +26,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const [status, setStatus] = useState<OrchestratorStatus>('idle');
   const [history, setHistory] = useState<NaaviMessage[]>([]);
   const [lastResponse, setLastResponse] = useState<NaaviResponse | null>(null);
+  const [drafts, setDrafts] = useState<NaaviAction[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const send = useCallback(async (userMessage: string) => {
@@ -37,6 +38,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     try {
       const response = await sendToNaavi(userMessage, history, briefItems, language);
 
+      console.log('[Orchestrator] actions:', JSON.stringify(response.actions));
+
       // Update conversation history
       setHistory(prev => [
         ...prev,
@@ -45,6 +48,14 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       ]);
 
       setLastResponse(response);
+
+      // Accumulate draft and contact actions across the session
+      const newActions = response.actions.filter(
+        a => a.type === 'DRAFT_MESSAGE' || a.type === 'ADD_CONTACT'
+      );
+      if (newActions.length > 0) {
+        setDrafts(prev => [...prev, ...newActions]);
+      }
 
       // Speak the response aloud
       setStatus('speaking');
@@ -61,11 +72,12 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const clearHistory = useCallback(() => {
     setHistory([]);
     setLastResponse(null);
+    setDrafts([]);
     setError(null);
     setStatus('idle');
   }, []);
 
-  return { status, history, lastResponse, error, send, clearHistory };
+  return { status, history, lastResponse, drafts, error, send, clearHistory };
 }
 
 // ─── Speech helper ────────────────────────────────────────────────────────────

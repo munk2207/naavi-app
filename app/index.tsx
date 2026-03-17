@@ -77,7 +77,7 @@ export default function HomeScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const [inputText, setInputText] = useState('');
 
-  const { status, history, lastResponse, error, send } = useOrchestrator('en', SAMPLE_BRIEF);
+  const { status, history, drafts, error, send } = useOrchestrator('en', SAMPLE_BRIEF);
   const { voiceState, startListening, isSupported } = useVoice('en');
 
   function getGreeting(): string {
@@ -169,7 +169,7 @@ export default function HomeScreen() {
           )}
 
           {/* Draft message card */}
-          {lastResponse?.actions.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => {
+          {drafts.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => {
             const mailtoUrl =
               `mailto:${encodeURIComponent(String(action.to))}` +
               `?subject=${encodeURIComponent(String(action.subject))}` +
@@ -196,7 +196,7 @@ export default function HomeScreen() {
           })}
 
           {/* Add contact card */}
-          {lastResponse?.actions.filter(a => a.type === 'ADD_CONTACT').map((action, i) => (
+          {drafts.filter(a => a.type === 'ADD_CONTACT').map((action, i) => (
             <View key={i} style={styles.contactCard}>
               <Text style={styles.contactLabel}>+ Contact saved</Text>
               {action.name ? (
