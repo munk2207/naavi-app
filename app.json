@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Naavi",
+    "slug": "naavi",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "ca.naavi.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Naavi uses the microphone so Robert can speak to it.",
+        "NSSpeechRecognitionUsageDescription": "Naavi listens to Robert's voice to understand his requests.",
+        "NSHealthShareUsageDescription": "Naavi reads health data to include it in Robert's daily brief."
+      }
+    },
+    "android": {
+      "package": "ca.naavi.app",
+      "permissions": [
+        "RECORD_AUDIO",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-sqlite",
+      "expo-localization"
+    ],
+    "scheme": "naavi"
+  }
+}
