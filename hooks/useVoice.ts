@@ -76,7 +76,20 @@ export function useVoice(language: 'en' | 'fr' = 'en'): UseVoiceResult {
       };
 
       recognitionRef.current = recognition;
-      recognition.start();
+
+      // Request microphone permission explicitly before starting.
+      // This ensures the browser shows the permission prompt rather than
+      // blocking silently.
+      navigator.mediaDevices
+        .getUserMedia({ audio: true })
+        .then(() => {
+          recognition.start();
+        })
+        .catch((err) => {
+          console.error('[useVoice] Microphone permission denied:', err);
+          setVoiceState('error');
+          setTimeout(() => setVoiceState('idle'), 2000);
+        });
     },
     [isSupported, language]
   );
