@@ -108,38 +108,58 @@ ${languageNote}
 
 ${briefContext}
 
-You must ALWAYS respond with valid JSON in this exact format:
+You must ALWAYS respond with valid JSON in this exact format — no exceptions, no plain text:
 {
   "speech": "What you say out loud — concise and direct",
   "actions": [],
   "pendingThreads": []
 }
 
-Action rules — follow these exactly:
-- Whenever Robert asks you to write, draft, compose, or send an email or message, you MUST include a DRAFT_MESSAGE action. Do not put the email text only in "speech". The full email body must appear in the action.
-- Whenever Robert asks you to set a reminder or alert, you MUST include a SET_REMINDER action.
-- Whenever Robert gives you a name + email/phone to remember, you MUST include an ADD_CONTACT action.
+CRITICAL ACTION RULES — you must follow these without exception:
 
-Action formats:
-- DRAFT_MESSAGE: { "type": "DRAFT_MESSAGE", "to": "string", "subject": "string", "body": "string", "channel": "email" }
+RULE 1 — EMAIL / MESSAGE:
+If Robert uses ANY of these words: write, draft, compose, send, email, message, note — you MUST put a DRAFT_MESSAGE object in the actions array. The full email body goes in the action. Do NOT put the email text in speech. Do NOT skip the action.
+
+RULE 2 — REMINDER:
+If Robert asks to set a reminder, alert, or notification — you MUST include a SET_REMINDER action.
+
+RULE 3 — CONTACT:
+If Robert gives you a person's name with an email address or phone number — you MUST include an ADD_CONTACT action. Write email addresses exactly as given — do not change or reformat them.
+
+Action formats (copy these exactly):
+- DRAFT_MESSAGE: { "type": "DRAFT_MESSAGE", "to": "name or email", "subject": "subject line", "body": "full email text", "channel": "email" }
 - SET_REMINDER: { "type": "SET_REMINDER", "title": "string", "datetime": "ISO 8601", "source": "string" }
 - ADD_CONTACT: { "type": "ADD_CONTACT", "name": "string", "email": "string", "phone": "string", "relationship": "string" }
 - LOG_CONCERN: { "type": "LOG_CONCERN", "category": "health|social|routine", "note": "string", "severity": "low|medium|high" }
 
-Example — if Robert says "draft an email to Louise saying happy birthday":
+Example 1 — Robert says "draft an email to Louise saying happy birthday":
 {
-  "speech": "Draft is ready for you to review.",
+  "speech": "Draft ready for your review.",
   "actions": [{ "type": "DRAFT_MESSAGE", "to": "Louise", "subject": "Happy Birthday", "body": "Hi Louise,\n\nWishing you a very happy birthday!\n\nRobert", "channel": "email" }],
   "pendingThreads": []
 }
 
-Important: email addresses must be written as plain strings inside JSON — do not escape the @ sign.
+Example 2 — Robert says "save John, his email is john@gmail.com":
+{
+  "speech": "John saved to your contacts.",
+  "actions": [{ "type": "ADD_CONTACT", "name": "John", "email": "john@gmail.com", "phone": "", "relationship": "contact" }],
+  "pendingThreads": []
+}
+
+Example 3 — Robert says "send an email to Dr. Patel confirming tomorrow's appointment":
+{
+  "speech": "Draft ready — tap the card to open it in your email app.",
+  "actions": [{ "type": "DRAFT_MESSAGE", "to": "Dr. Patel", "subject": "Appointment Confirmation", "body": "Dear Dr. Patel,\n\nI am writing to confirm my appointment tomorrow.\n\nThank you,\nRobert", "channel": "email" }],
+  "pendingThreads": []
+}
+
+Important: write all email addresses as plain strings — the @ sign does not need escaping in JSON strings.
 
 Guardrails:
 - Never give medical advice. Flag health items and suggest contacting a doctor.
 - Never ask for or store passwords.
 - Never fabricate information not provided to you.
-- You cannot send emails directly. When asked to send something, use DRAFT_MESSAGE and tell Robert the draft is ready to review — never say "sent".
+- You cannot send emails. ALWAYS use DRAFT_MESSAGE and say "draft ready" — NEVER say "sent" or "I sent" or "email sent".
 `.trim();
 }
 
@@ -174,7 +194,7 @@ export async function sendToNaavi(
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
+    max_tokens: 2048,
     system: buildSystemPrompt(language, briefItems),
     messages,
   });
@@ -187,9 +207,30 @@ export async function sendToNaavi(
 
 // ─── Response parser ──────────────────────────────────────────────────────────
 
+function fixSentLanguage(speech: string, actions: NaaviAction[]): string {
+  // If Claude said "sent" but there is a DRAFT_MESSAGE action, correct it
+  const hasDraft = actions.some(a => a.type === 'DRAFT_MESSAGE');
+  if (!hasDraft) return speech;
+  return speech
+    .replace(/\b(I've sent|I have sent|email sent|message sent|sent the email|sent the message)\b/gi,
+      'Draft is ready for your review')
+    .replace(/\bsent\b/gi, 'drafted');
+}
+
+function buildFallback(rawText: string): NaaviResponse {
+  // Last resort — try to pull the speech value out with a simple regex
+  // so Robert always gets a spoken response even if the JSON is broken
+  const speechMatch = rawText.match(/"speech"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  const speech = speechMatch
+    ? speechMatch[1].replace(/\\n/g, ' ').replace(/\\"/g, '"')
+    : 'I had trouble with that — could you try again?';
+  console.error('[NaaviClient] All parse attempts failed. Raw:', rawText);
+  return { speech, actions: [], pendingThreads: [] };
+}
+
 function parseResponse(rawText: string): NaaviResponse {
   // Strip markdown code blocks if present
-  let cleaned = rawText
+  const cleaned = rawText
     .replace(/```json\s*/g, '')
     .replace(/```\s*/g, '')
     .trim();
@@ -197,46 +238,58 @@ function parseResponse(rawText: string): NaaviResponse {
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
 
-  // If there's no JSON at all, treat the whole response as speech
+  // No JSON at all — treat whole response as speech
   if (start === -1 || end === -1) {
-    console.warn('[NaaviClient] No JSON in response — treating as plain speech:', rawText);
-    return {
-      speech: cleaned || 'I did not catch that — could you say it again?',
-      actions: [],
-      pendingThreads: [],
-    };
+    console.warn('[NaaviClient] No JSON in response:', rawText);
+    return { speech: cleaned || 'I did not catch that — could you say it again?', actions: [], pendingThreads: [] };
   }
 
   const jsonSlice = cleaned.slice(start, end + 1);
 
+  // Pass 1 — standard parse
   try {
     const json = JSON.parse(jsonSlice);
+    const actions = Array.isArray(json.actions) ? json.actions : [];
+    const speech = typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?';
     return {
-      speech: typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?',
-      actions: Array.isArray(json.actions) ? json.actions : [],
+      speech: fixSentLanguage(speech, actions),
+      actions,
       pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
     };
-  } catch (firstError) {
-    // Second attempt: replace literal newlines inside string values, which
-    // Claude occasionally emits and which break JSON.parse
-    try {
-      const sanitized = jsonSlice.replace(
-        /"((?:[^"\\]|\\.)*)"/g,
-        (_, inner) => `"${inner.replace(/\n/g, '\\n').replace(/\r/g, '')}"`
-      );
-      const json = JSON.parse(sanitized);
-      return {
-        speech: typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?',
-        actions: Array.isArray(json.actions) ? json.actions : [],
-        pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
-      };
-    } catch {
-      console.error('[NaaviClient] Failed to parse response after sanitization:', rawText);
-      return {
-        speech: 'I had trouble understanding that — could you rephrase it?',
-        actions: [],
-        pendingThreads: [],
-      };
-    }
-  }
+  } catch { /* fall through */ }
+
+  // Pass 2 — fix literal newlines inside string values
+  try {
+    const sanitized = jsonSlice.replace(
+      /"((?:[^"\\]|\\.)*)"/g,
+      (_, inner) => `"${inner.replace(/\n/g, '\\n').replace(/\r/g, '')}"`
+    );
+    const json = JSON.parse(sanitized);
+    const actions = Array.isArray(json.actions) ? json.actions : [];
+    const speech = typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?';
+    return {
+      speech: fixSentLanguage(speech, actions),
+      actions,
+      pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
+    };
+  } catch { /* fall through */ }
+
+  // Pass 3 — aggressively strip all control characters and retry
+  try {
+    const aggressive = jsonSlice
+      .replace(/[\u0000-\u001F\u007F]/g, ' ')  // remove all control chars
+      .replace(/,\s*([}\]])/g, '$1')             // remove trailing commas
+      .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":'); // quote unquoted keys
+    const json = JSON.parse(aggressive);
+    const actions = Array.isArray(json.actions) ? json.actions : [];
+    const speech = typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?';
+    return {
+      speech: fixSentLanguage(speech, actions),
+      actions,
+      pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
+    };
+  } catch { /* fall through */ }
+
+  // All passes failed — extract speech with regex as last resort
+  return buildFallback(rawText);
 }
