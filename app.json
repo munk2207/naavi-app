@@ -28,6 +28,12 @@
       "expo-sqlite",
       "expo-localization"
     ],
-    "scheme": "naavi"
+    "scheme": "naavi",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "be293d9d-cab2-48ff-85a5-d27187ff4340"
+      }
+    }
   }
 }
