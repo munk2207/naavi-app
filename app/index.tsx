@@ -10,7 +10,7 @@
  * Phase 7.5: voice recording via expo-av replaces the text input
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -35,10 +35,11 @@ import { ConversationBubble } from '@/components/ConversationBubble';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { BriefItem } from '@/lib/naavi-client';
+import { fetchOttawaWeather } from '@/lib/weather';
 
-// ─── Sample morning brief (replaced by real integration data in Phase 8) ──────
+// ─── Base brief items (calendar, health, social — real data in Phase 8) ───────
 
-const SAMPLE_BRIEF: BriefItem[] = [
+const BASE_BRIEF: BriefItem[] = [
   {
     id: '1',
     category: 'calendar',
@@ -60,13 +61,6 @@ const SAMPLE_BRIEF: BriefItem[] = [
     detail: 'Last contact was 3 weeks ago',
     urgent: false,
   },
-  {
-    id: '4',
-    category: 'weather',
-    title: '−8°C, light snow this morning',
-    detail: 'Sidewalks icy — consider yaktrax for your walk',
-    urgent: false,
-  },
 ];
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -76,8 +70,16 @@ export default function HomeScreen() {
   const router = useRouter();
   const scrollRef = useRef<ScrollView>(null);
   const [inputText, setInputText] = useState('');
+  const [brief, setBrief] = useState<BriefItem[]>(BASE_BRIEF);
 
-  const { status, history, drafts, error, send } = useOrchestrator('en', SAMPLE_BRIEF);
+  // Fetch live Ottawa weather and add it to the brief on load
+  useEffect(() => {
+    fetchOttawaWeather().then(weatherItem => {
+      setBrief([...BASE_BRIEF, weatherItem]);
+    });
+  }, []);
+
+  const { status, history, drafts, error, send } = useOrchestrator('en', brief);
   const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
 
   function getGreeting(): string {
@@ -145,7 +147,7 @@ export default function HomeScreen() {
           {history.length === 0 && (
             <View style={styles.briefSection}>
               <Text style={styles.sectionTitle}>{t('home.briefTitle')}</Text>
-              {SAMPLE_BRIEF.map(item => (
+              {brief.map(item => (
                 <BriefCard
                   key={item.id}
                   item={item}
