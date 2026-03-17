@@ -13,6 +13,7 @@ import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
 import { sendToNaavi, type NaaviMessage, type NaaviResponse, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
 import { saveContact, saveReminder } from '@/lib/supabase';
+import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
 
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'error';
 
@@ -41,7 +42,17 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     setError(null);
 
     try {
-      const response = await sendToNaavi(userMessage, history, briefRef.current, language);
+      // Check if Robert is asking about a person — inject their full context
+      let enrichedMessage = userMessage;
+      const personName = extractPersonQuery(userMessage);
+      if (personName) {
+        const ctx = await getPersonContext(personName);
+        if (ctx) {
+          enrichedMessage = `${userMessage}\n\n${formatPersonContext(ctx)}`;
+        }
+      }
+
+      const response = await sendToNaavi(enrichedMessage, history, briefRef.current, language);
 
       console.log('[Orchestrator] actions:', JSON.stringify(response.actions));
 
@@ -62,11 +73,19 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         setDrafts(prev => [...prev, ...newActions]);
       }
 
-      // Persist contacts and reminders to Supabase
+      // Persist actions to Supabase
       for (const action of response.actions) {
         if (action.type === 'ADD_CONTACT') {
+          const name = String(action.name ?? '');
           await saveContact({
-            name:         String(action.name         ?? ''),
+            name,
+            email:        String(action.email        ?? ''),
+            phone:        String(action.phone        ?? ''),
+            relationship: String(action.relationship ?? ''),
+          });
+          // Also save to people table for richer memory
+          await savePerson({
+            name,
             email:        String(action.email        ?? ''),
             phone:        String(action.phone        ?? ''),
             relationship: String(action.relationship ?? ''),
@@ -76,6 +95,18 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             title:    String(action.title    ?? ''),
             datetime: String(action.datetime ?? ''),
             source:   String(action.source   ?? ''),
+          });
+        } else if (action.type === 'LOG_CONCERN') {
+          await saveTopic({
+            subject:  String(action.category ?? 'general'),
+            note:     String(action.note     ?? ''),
+            category: String(action.severity ?? 'low'),
+          });
+        } else if (action.type === 'UPDATE_PROFILE') {
+          await saveTopic({
+            subject:  String(action.key      ?? 'preference'),
+            note:     String(action.value    ?? ''),
+            category: 'preference',
           });
         }
       }
