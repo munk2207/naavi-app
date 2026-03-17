@@ -8,7 +8,7 @@
  * - Returning loading/error state to the UI
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
 import { sendToNaavi, type NaaviMessage, type NaaviResponse, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
@@ -30,6 +30,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const [drafts, setDrafts] = useState<NaaviAction[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // Always-current ref — send() reads this so it never uses a stale brief
+  const briefRef = useRef(briefItems);
+  useEffect(() => { briefRef.current = briefItems; }, [briefItems]);
+
   const send = useCallback(async (userMessage: string) => {
     if (status === 'thinking' || status === 'speaking') return;
 
@@ -37,7 +41,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     setError(null);
 
     try {
-      const response = await sendToNaavi(userMessage, history, briefItems, language);
+      const response = await sendToNaavi(userMessage, history, briefRef.current, language);
 
       console.log('[Orchestrator] actions:', JSON.stringify(response.actions));
 
@@ -86,7 +90,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       setError(message);
       setStatus('error');
     }
-  }, [status, history, language, briefItems]);
+  }, [status, history, language]);
 
   const clearHistory = useCallback(() => {
     setHistory([]);
