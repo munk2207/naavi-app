@@ -67,7 +67,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       setError(message);
       setStatus('error');
     }
-  }, [status, history, language]);
+  }, [status, history, language, briefItems]);
 
   const clearHistory = useCallback(() => {
     setHistory([]);
