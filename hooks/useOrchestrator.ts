@@ -12,6 +12,7 @@ import { useState, useCallback } from 'react';
 import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
 import { sendToNaavi, type NaaviMessage, type NaaviResponse, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
+import { saveContact, saveReminder } from '@/lib/supabase';
 
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'error';
 
@@ -55,6 +56,24 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       );
       if (newActions.length > 0) {
         setDrafts(prev => [...prev, ...newActions]);
+      }
+
+      // Persist contacts and reminders to Supabase
+      for (const action of response.actions) {
+        if (action.type === 'ADD_CONTACT') {
+          await saveContact({
+            name:         String(action.name         ?? ''),
+            email:        String(action.email        ?? ''),
+            phone:        String(action.phone        ?? ''),
+            relationship: String(action.relationship ?? ''),
+          });
+        } else if (action.type === 'SET_REMINDER') {
+          await saveReminder({
+            title:    String(action.title    ?? ''),
+            datetime: String(action.datetime ?? ''),
+            source:   String(action.source   ?? ''),
+          });
+        }
       }
 
       // Speak the response aloud

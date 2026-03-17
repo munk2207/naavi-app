@@ -13,6 +13,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { isSupabaseConfigured, callNaaviEdgeFunction } from './supabase';
 
 // ─── Platform-aware storage ───────────────────────────────────────────────────
 // expo-secure-store only works on iOS/Android.
@@ -189,20 +190,23 @@ export async function sendToNaavi(
     { role: 'user' as const, content: userMessage },
   ];
 
-  const client = new Anthropic({
-    apiKey,
-    dangerouslyAllowBrowser: true,
-  });
+  const system = buildSystemPrompt(language, briefItems);
+  let rawText: string;
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 2048,
-    system: buildSystemPrompt(language, briefItems),
-    messages,
-  });
-
-  const rawText: string =
-    response.content[0].type === 'text' ? response.content[0].text : '';
+  if (isSupabaseConfigured()) {
+    // Phase 8 — API key lives on the server, never on the device
+    rawText = await callNaaviEdgeFunction(system, messages);
+  } else {
+    // Fallback — local API key (Phase 7 behaviour)
+    const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2048,
+      system,
+      messages,
+    });
+    rawText = response.content[0].type === 'text' ? response.content[0].text : '';
+  }
 
   return parseResponse(rawText);
 }
