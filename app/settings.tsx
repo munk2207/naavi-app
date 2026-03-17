@@ -23,6 +23,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import i18n from '@/lib/i18n';
 import { saveApiKey, getApiKey, hasApiKey } from '@/lib/naavi-client';
+import { isCalendarConnected, connectGoogleCalendar, disconnectGoogleCalendar } from '@/lib/calendar';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 
@@ -30,12 +31,14 @@ export default function SettingsScreen() {
   const { t } = useTranslation();
   const [apiKey, setApiKey] = useState('');
   const [apiKeySet, setApiKeySet] = useState(false);
+  const [calendarConnected, setCalendarConnected] = useState(false);
   const [language, setLanguage] = useState<'en' | 'fr'>(
     (i18n.language as 'en' | 'fr') ?? 'en'
   );
 
   useEffect(() => {
     hasApiKey().then(setApiKeySet);
+    isCalendarConnected().then(setCalendarConnected);
   }, []);
 
   async function handleSaveApiKey() {
@@ -119,8 +122,33 @@ export default function SettingsScreen() {
         {/* Connected tools */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('settings.connected')}</Text>
+
+          {/* Google Calendar */}
+          <View style={styles.toolRow}>
+            <View>
+              <Text style={styles.toolLabel}>Google Calendar</Text>
+              <Text style={styles.toolStatus}>
+                {calendarConnected ? '✓ Connected — real events in brief' : 'Not connected'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.connectBtn, calendarConnected && styles.connectBtnActive]}
+              onPress={async () => {
+                if (calendarConnected) {
+                  await disconnectGoogleCalendar();
+                  setCalendarConnected(false);
+                } else {
+                  await connectGoogleCalendar();
+                }
+              }}
+            >
+              <Text style={styles.connectBtnText}>
+                {calendarConnected ? 'Disconnect' : 'Connect'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           {[
-            { label: t('settings.calendar'),  status: 'coming' },
             { label: t('settings.health'),    status: 'coming' },
             { label: t('settings.smartHome'), status: 'coming' },
           ].map(tool => (
@@ -229,6 +257,27 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     color: Colors.textMuted,
     fontStyle: 'italic',
+  },
+  toolStatus: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  connectBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    minHeight: 36,
+    justifyContent: 'center',
+  },
+  connectBtnActive: {
+    backgroundColor: Colors.error,
+  },
+  connectBtnText: {
+    color: Colors.textOnDark,
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
   },
   version: {
     fontSize: Typography.sm,

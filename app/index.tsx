@@ -36,6 +36,7 @@ import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { BriefItem } from '@/lib/naavi-client';
 import { fetchOttawaWeather } from '@/lib/weather';
+import { fetchTodayEvents } from '@/lib/calendar';
 
 // ─── Base brief items (calendar, health, social — real data in Phase 8) ───────
 
@@ -72,11 +73,19 @@ export default function HomeScreen() {
   const [inputText, setInputText] = useState('');
   const [brief, setBrief] = useState<BriefItem[]>(BASE_BRIEF);
 
-  // Fetch live Ottawa weather and add it to the brief on load
+  // Fetch live data on load — weather + real calendar events
   useEffect(() => {
-    fetchOttawaWeather().then(weatherItem => {
-      setBrief([...BASE_BRIEF, weatherItem]);
-    });
+    async function loadBrief() {
+      const [weatherItem, calendarItems] = await Promise.all([
+        fetchOttawaWeather(),
+        fetchTodayEvents(),
+      ]);
+      // If real calendar events loaded, replace the sample calendar items
+      const nonCalendarBase = BASE_BRIEF.filter(i => i.category !== 'calendar');
+      const calendarSection = calendarItems.length > 0 ? calendarItems : BASE_BRIEF.filter(i => i.category === 'calendar');
+      setBrief([...calendarSection, ...nonCalendarBase, weatherItem]);
+    }
+    loadBrief();
   }, []);
 
   const { status, history, drafts, error, send } = useOrchestrator('en', brief);
