@@ -47,7 +47,7 @@ export interface NaaviResponse {
 }
 
 export interface NaaviAction {
-  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN';
+  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT';
   [key: string]: unknown;
 }
 
@@ -118,7 +118,10 @@ You must ALWAYS respond with valid JSON in this exact format:
 Allowed action types:
 - SET_REMINDER: { "type": "SET_REMINDER", "title": "string", "datetime": "ISO 8601", "source": "string" }
 - DRAFT_MESSAGE: { "type": "DRAFT_MESSAGE", "to": "string", "subject": "string", "body": "string", "channel": "email" }
+- ADD_CONTACT: { "type": "ADD_CONTACT", "name": "string", "email": "string", "phone": "string", "relationship": "string" }
 - LOG_CONCERN: { "type": "LOG_CONCERN", "category": "health|social|routine", "note": "string", "severity": "low|medium|high" }
+
+Important: email addresses must be written as plain strings inside JSON — do not escape the @ sign.
 
 Guardrails:
 - Never give medical advice. Flag health items and suggest contacting a doctor.
@@ -172,30 +175,55 @@ export async function sendToNaavi(
 // ─── Response parser ──────────────────────────────────────────────────────────
 
 function parseResponse(rawText: string): NaaviResponse {
+  // Strip markdown code blocks if present
+  let cleaned = rawText
+    .replace(/```json\s*/g, '')
+    .replace(/```\s*/g, '')
+    .trim();
+
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+
+  // If there's no JSON at all, treat the whole response as speech
+  if (start === -1 || end === -1) {
+    console.warn('[NaaviClient] No JSON in response — treating as plain speech:', rawText);
+    return {
+      speech: cleaned || 'I did not catch that — could you say it again?',
+      actions: [],
+      pendingThreads: [],
+    };
+  }
+
+  const jsonSlice = cleaned.slice(start, end + 1);
+
   try {
-    // Strip markdown code blocks if present
-    const cleaned = rawText
-      .replace(/```json\s*/g, '')
-      .replace(/```\s*/g, '')
-      .trim();
-
-    const start = cleaned.indexOf('{');
-    const end = cleaned.lastIndexOf('}');
-    if (start === -1 || end === -1) throw new Error('No JSON found');
-
-    const json = JSON.parse(cleaned.slice(start, end + 1));
-
+    const json = JSON.parse(jsonSlice);
     return {
       speech: typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?',
       actions: Array.isArray(json.actions) ? json.actions : [],
       pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
     };
-  } catch {
-    console.error('[NaaviClient] Failed to parse response:', rawText);
-    return {
-      speech: 'Something went wrong on my end — please try again.',
-      actions: [],
-      pendingThreads: [],
-    };
+  } catch (firstError) {
+    // Second attempt: replace literal newlines inside string values, which
+    // Claude occasionally emits and which break JSON.parse
+    try {
+      const sanitized = jsonSlice.replace(
+        /"((?:[^"\\]|\\.)*)"/g,
+        (_, inner) => `"${inner.replace(/\n/g, '\\n').replace(/\r/g, '')}"`
+      );
+      const json = JSON.parse(sanitized);
+      return {
+        speech: typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?',
+        actions: Array.isArray(json.actions) ? json.actions : [],
+        pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
+      };
+    } catch {
+      console.error('[NaaviClient] Failed to parse response after sanitization:', rawText);
+      return {
+        speech: 'I had trouble understanding that — could you rephrase it?',
+        actions: [],
+        pendingThreads: [],
+      };
+    }
   }
 }

@@ -183,6 +183,37 @@ export default function HomeScreen() {
             </View>
           ))}
 
+          {/* Add contact card */}
+          {lastResponse?.actions.filter(a => a.type === 'ADD_CONTACT').map((action, i) => (
+            <View key={i} style={styles.contactCard}>
+              <Text style={styles.contactLabel}>+ Contact saved</Text>
+              {action.name ? (
+                <Text style={styles.draftField}>
+                  <Text style={styles.draftFieldLabel}>Name: </Text>
+                  {String(action.name)}
+                </Text>
+              ) : null}
+              {action.email ? (
+                <Text style={styles.draftField}>
+                  <Text style={styles.draftFieldLabel}>Email: </Text>
+                  {String(action.email)}
+                </Text>
+              ) : null}
+              {action.phone ? (
+                <Text style={styles.draftField}>
+                  <Text style={styles.draftFieldLabel}>Phone: </Text>
+                  {String(action.phone)}
+                </Text>
+              ) : null}
+              {action.relationship ? (
+                <Text style={styles.draftField}>
+                  <Text style={styles.draftFieldLabel}>Relationship: </Text>
+                  {String(action.relationship)}
+                </Text>
+              ) : null}
+            </View>
+          ))}
+
           {/* Status indicator */}
           {statusLabel ? (
             <View style={styles.statusRow}>
@@ -300,6 +331,23 @@ const styles = StyleSheet.create({
   errorText: {
     color: Colors.error,
     fontStyle: 'normal',
+  },
+  contactCard: {
+    marginTop: 12,
+    backgroundColor: '#F0FDF4',
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.success,
+    padding: 14,
+    gap: 6,
+  },
+  contactLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.success,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
   },
   draftCard: {
     marginTop: 12,
