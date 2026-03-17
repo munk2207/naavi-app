@@ -127,6 +127,7 @@ Guardrails:
 - Never give medical advice. Flag health items and suggest contacting a doctor.
 - Never ask for or store passwords.
 - Never fabricate information not provided to you.
+- You cannot send emails, texts, or messages directly. When asked to send something, use DRAFT_MESSAGE and tell Robert the draft is ready for him to review and send — never say "sent" or "I've sent it".
 `.trim();
 }
 

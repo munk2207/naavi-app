@@ -10,7 +10,7 @@
  * Phase 7.5: voice recording via expo-av replaces the text input
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,7 @@ import {
   Platform,
   TouchableOpacity,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -168,20 +169,31 @@ export default function HomeScreen() {
           )}
 
           {/* Draft message card */}
-          {lastResponse?.actions.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => (
-            <View key={i} style={styles.draftCard}>
-              <Text style={styles.draftLabel}>✉ Draft ready</Text>
-              <Text style={styles.draftField}>
-                <Text style={styles.draftFieldLabel}>To: </Text>
-                {String(action.to)}
-              </Text>
-              <Text style={styles.draftField}>
-                <Text style={styles.draftFieldLabel}>Subject: </Text>
-                {String(action.subject)}
-              </Text>
-              <Text style={styles.draftBody}>{String(action.body)}</Text>
-            </View>
-          ))}
+          {lastResponse?.actions.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => {
+            const mailtoUrl =
+              `mailto:${encodeURIComponent(String(action.to))}` +
+              `?subject=${encodeURIComponent(String(action.subject))}` +
+              `&body=${encodeURIComponent(String(action.body))}`;
+            return (
+              <TouchableOpacity
+                key={i}
+                style={styles.draftCard}
+                onPress={() => Linking.openURL(mailtoUrl)}
+                accessibilityLabel="Open draft in email app"
+              >
+                <Text style={styles.draftLabel}>✉ Draft — tap to open in Gmail</Text>
+                <Text style={styles.draftField}>
+                  <Text style={styles.draftFieldLabel}>To: </Text>
+                  {String(action.to)}
+                </Text>
+                <Text style={styles.draftField}>
+                  <Text style={styles.draftFieldLabel}>Subject: </Text>
+                  {String(action.subject)}
+                </Text>
+                <Text style={styles.draftBody}>{String(action.body)}</Text>
+              </TouchableOpacity>
+            );
+          })}
 
           {/* Add contact card */}
           {lastResponse?.actions.filter(a => a.type === 'ADD_CONTACT').map((action, i) => (
