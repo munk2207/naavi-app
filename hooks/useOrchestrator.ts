@@ -30,6 +30,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const [history, setHistory] = useState<NaaviMessage[]>([]);
   const [lastResponse, setLastResponse] = useState<NaaviResponse | null>(null);
   const [drafts, setDrafts] = useState<NaaviAction[]>([]);
+  const [driveFiles, setDriveFiles] = useState<import('@/lib/drive').DriveFile[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Always-current ref — send() reads this so it never uses a stale brief
@@ -60,11 +61,13 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
       // Check if Robert is asking about a document — search Drive and inject results
       const driveQuery = extractDriveQuery(userMessage);
+      let foundDriveFiles: import('@/lib/drive').DriveFile[] = [];
       if (driveQuery) {
         console.log('[Orchestrator] Drive query detected:', driveQuery);
-        const files = await searchDriveFiles(driveQuery);
-        if (files.length > 0) {
-          enrichedMessage += formatDriveResults(files, driveQuery);
+        foundDriveFiles = await searchDriveFiles(driveQuery);
+        if (foundDriveFiles.length > 0) {
+          enrichedMessage += formatDriveResults(foundDriveFiles, driveQuery);
+          setDriveFiles(foundDriveFiles);
         }
       }
 
@@ -143,11 +146,12 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     setHistory([]);
     setLastResponse(null);
     setDrafts([]);
+    setDriveFiles([]);
     setError(null);
     setStatus('idle');
   }, []);
 
-  return { status, history, lastResponse, drafts, error, send, clearHistory };
+  return { status, history, lastResponse, drafts, driveFiles, error, send, clearHistory };
 }
 
 // ─── Speech helper ────────────────────────────────────────────────────────────

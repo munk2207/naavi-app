@@ -113,7 +113,7 @@ export default function HomeScreen() {
     }).catch(() => {});
   }, [currentUserId]);
 
-  const { status, history, drafts, error, send } = useOrchestrator('en', brief);
+  const { status, history, drafts, driveFiles, error, send } = useOrchestrator('en', brief);
   const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
 
   function getGreeting(): string {
@@ -231,6 +231,26 @@ export default function HomeScreen() {
             );
           })}
 
+          {/* Drive file cards */}
+          {driveFiles.length > 0 && (
+            <View style={styles.driveSection}>
+              <Text style={styles.draftLabel}>📄 Drive documents</Text>
+              {driveFiles.map((file, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={styles.driveCard}
+                  onPress={() => Linking.openURL(file.webViewLink)}
+                  accessibilityLabel={`Open ${file.name} in Google Drive`}
+                >
+                  <Text style={styles.driveFileName}>{file.name}</Text>
+                  <Text style={styles.driveFileMeta}>
+                    {friendlyMimeType(file.mimeType)} · modified {new Date(file.modifiedTime).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
           {/* Add contact card */}
           {drafts.filter(a => a.type === 'ADD_CONTACT').map((action, i) => (
             <View key={i} style={styles.contactCard}>
@@ -317,6 +337,19 @@ export default function HomeScreen() {
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
+}
+
+function friendlyMimeType(mimeType: string): string {
+  const types: Record<string, string> = {
+    'application/vnd.google-apps.document':     'Google Doc',
+    'application/vnd.google-apps.spreadsheet':  'Google Sheet',
+    'application/vnd.google-apps.presentation': 'Google Slides',
+    'application/vnd.google-apps.folder':       'Folder',
+    'application/pdf':                          'PDF',
+    'application/msword':                       'Word',
+    'text/plain':                               'Text file',
+  };
+  return types[mimeType] ?? 'File';
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -434,6 +467,27 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     marginTop: 6,
     lineHeight: Typography.lineHeightBase,
+  },
+  driveSection: {
+    marginTop: 12,
+    gap: 8,
+  },
+  driveCard: {
+    backgroundColor: '#F0F7FF',
+    borderRadius: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: '#4285F4',
+    padding: 12,
+    gap: 4,
+  },
+  driveFileName: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  driveFileMeta: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
   },
   inputBar: {
     flexDirection: 'row',
