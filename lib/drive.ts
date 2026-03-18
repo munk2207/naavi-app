@@ -16,6 +16,7 @@ export interface DriveFile {
   mimeType: string;
   modifiedTime: string;
   webViewLink: string;
+  parentFolderName?: string; // set when file came from inside a matched folder
 }
 
 // ─── Search Drive files ────────────────────────────────────────────────────────
@@ -122,9 +123,11 @@ export function extractDriveQuery(message: string): string | null {
     /(?:show|find|search|get|pull up|look for)(?:\s+my)?\s+(?:documents?|docs?|files?|notes?|contracts?|reports?)\s+(?:related to|about|on|for|with|called|named)?\s*(.+)/i,
     // "documents related to X" / "files about X"
     /(?:documents?|docs?|files?|notes?|contracts?|reports?)\s+(?:related to|about|on|for|with|called|named)\s+(.+)/i,
-    // "find X in my drive" / "search drive for X"
-    /(?:find|search|look for)\s+(.+?)\s+in\s+(?:my\s+)?(?:drive|google drive|documents?|files?)/i,
-    /(?:search|check)\s+(?:my\s+)?(?:drive|google drive)\s+(?:for|about)\s+(.+)/i,
+    // "find X in my/your drive" / "search drive for X"
+    /(?:find|search|look for)\s+(.+?)\s+in\s+(?:my\s+|your\s+)?(?:drive|google drive|documents?|files?)/i,
+    /(?:search|check)\s+(?:my\s+|your\s+)?(?:drive|google drive)\s+(?:for|about)\s+(.+)/i,
+    // "search X in drive" (no possessive)
+    /(?:find|search|look for)\s+(.+?)\s+in\s+(?:the\s+)?drive/i,
     // "do I have anything on X" / "anything saved about X"
     /(?:do i have|is there)\s+(?:anything|something)\s+(?:on|about|for|related to)\s+(.+)/i,
     /anything\s+(?:saved|filed|written|documented)\s+(?:on|about|for)\s+(.+)/i,
