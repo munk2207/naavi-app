@@ -237,7 +237,7 @@ export default function HomeScreen() {
             <View style={styles.driveSection}>
               <Text style={styles.draftLabel}>📄 Drive documents</Text>
               {driveFiles.map((file, i) => (
-                <View key={i} style={styles.driveCard}>
+                <View key={i} style={[styles.driveCard, file.parentFolderName ? styles.driveCardIndented : null]}>
                   <TouchableOpacity
                     onPress={() => Linking.openURL(file.webViewLink)}
                     accessibilityLabel={`Open ${file.name} in Google Drive`}
@@ -245,6 +245,7 @@ export default function HomeScreen() {
                     <Text style={styles.driveFileName}>{file.name}</Text>
                     <Text style={styles.driveFileMeta}>
                       {friendlyMimeType(file.mimeType)} · modified {new Date(file.modifiedTime).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      {file.parentFolderName ? ` · in "${file.parentFolderName}"` : ''}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -504,6 +505,11 @@ const styles = StyleSheet.create({
     borderLeftColor: '#4285F4',
     padding: 12,
     gap: 4,
+  },
+  driveCardIndented: {
+    marginLeft: 16,
+    borderLeftColor: '#8AB4F8',
+    backgroundColor: '#E8F0FE',
   },
   driveFileName: {
     fontSize: Typography.base,
