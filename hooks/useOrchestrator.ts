@@ -14,7 +14,7 @@ import * as Speech from 'expo-speech';
 import { sendToNaavi, type NaaviMessage, type NaaviResponse, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
 import { saveContact, saveReminder } from '@/lib/supabase';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
-import { extractDriveQuery, searchDriveFiles, formatDriveResults } from '@/lib/drive';
+import { searchDriveFiles, formatDriveResults } from '@/lib/drive';
 
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'error';
 
@@ -59,18 +59,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
       }
 
-      // Check if Robert is asking about a document — search Drive and inject results
-      const driveQuery = extractDriveQuery(userMessage);
-      let foundDriveFiles: import('@/lib/drive').DriveFile[] = [];
-      if (driveQuery) {
-        console.log('[Orchestrator] Drive query detected:', driveQuery);
-        foundDriveFiles = await searchDriveFiles(driveQuery);
-        if (foundDriveFiles.length > 0) {
-          enrichedMessage += formatDriveResults(foundDriveFiles, driveQuery);
-          setDriveFiles(foundDriveFiles);
-        }
-      }
-
       const response = await sendToNaavi(enrichedMessage, history, briefRef.current, language);
 
       console.log('[Orchestrator] actions:', JSON.stringify(response.actions));
@@ -83,6 +71,18 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       ]);
 
       setLastResponse(response);
+
+      // Execute DRIVE_SEARCH actions detected by Claude
+      for (const action of response.actions) {
+        if (action.type === 'DRIVE_SEARCH') {
+          const query = String(action.query ?? '').trim();
+          console.log('[Orchestrator] Drive query detected:', query);
+          if (query) {
+            const files = await searchDriveFiles(query);
+            if (files.length > 0) setDriveFiles(files);
+          }
+        }
+      }
 
       // Accumulate draft and contact actions across the session
       const newActions = response.actions.filter(

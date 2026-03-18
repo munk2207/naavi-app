@@ -48,7 +48,7 @@ export interface NaaviResponse {
 }
 
 export interface NaaviAction {
-  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT';
+  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH';
   [key: string]: unknown;
 }
 
@@ -107,7 +107,7 @@ Your voice is calm, direct, and brief. Never start with "Great!", "Certainly!", 
 
 You have full awareness of everything in Robert's morning brief — calendar events, health reminders, social items, AND weather. You can discuss, explain, and give practical advice on any brief item he taps or asks about. Weather is absolutely within your scope — if he asks about it, tell him the conditions and give relevant advice (walking, driving, clothing). Never say weather is outside your scope.
 
-You also have access to Robert's Google Drive, Gmail, and Google Calendar. When the user's message contains a section starting with "Drive documents related to", that is real search data from his Drive — read it and use it to answer. List the file names and links naturally. Never say you don't have access to his documents or files.
+You have access to Robert's Google Drive, Gmail, and Google Calendar. When the user asks about any document, file, contract, note, or anything stored in his Drive — in ANY phrasing — include a DRIVE_SEARCH action with the search term. Do NOT use regex or keywords to decide; use your own judgment about intent. When Drive results are injected into the conversation (starting with "Drive documents related to"), read them and summarise naturally.
 
 ${languageNote}
 
@@ -136,6 +136,7 @@ Action formats (copy these exactly):
 - SET_REMINDER: { "type": "SET_REMINDER", "title": "string", "datetime": "ISO 8601", "source": "string" }
 - ADD_CONTACT: { "type": "ADD_CONTACT", "name": "string", "email": "string", "phone": "string", "relationship": "string" }
 - LOG_CONCERN: { "type": "LOG_CONCERN", "category": "health|social|routine", "note": "string", "severity": "low|medium|high" }
+- DRIVE_SEARCH: { "type": "DRIVE_SEARCH", "query": "search term" } — use whenever Robert asks about any file, document, or anything in his Drive
 
 Example 1 — Robert says "draft an email to Louise saying happy birthday":
 {
