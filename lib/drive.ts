@@ -85,10 +85,18 @@ function friendlyType(mimeType: string): string {
  */
 export function extractDriveQuery(message: string): string | null {
   const patterns = [
-    /(?:find|search|look for|do i have|show me|pull up|get me)\s+(?:the\s+)?(?:document|doc|file|notes?|contract|report|spreadsheet|slides?|presentation)\s+(?:about|on|for|with|called|named)?\s+(.+)/i,
-    /(?:document|doc|file|notes?|contract|report)\s+(?:about|on|for|with|called|named)\s+(.+)/i,
-    /(?:anything|something)\s+(?:written|documented|saved|filed)\s+(?:about|on|for)\s+(.+)/i,
-    /(?:open|read)\s+(?:the\s+)?(?:document|doc|file|notes?)\s+(?:about|on|for|called|named)?\s+(.+)/i,
+    // "show my documents related to X" / "show my files about X"
+    /(?:show|find|search|get|pull up|look for)(?:\s+my)?\s+(?:documents?|docs?|files?|notes?|contracts?|reports?)\s+(?:related to|about|on|for|with|called|named)?\s*(.+)/i,
+    // "documents related to X" / "files about X"
+    /(?:documents?|docs?|files?|notes?|contracts?|reports?)\s+(?:related to|about|on|for|with|called|named)\s+(.+)/i,
+    // "find X in my drive" / "search drive for X"
+    /(?:find|search|look for)\s+(.+?)\s+in\s+(?:my\s+)?(?:drive|google drive|documents?|files?)/i,
+    /(?:search|check)\s+(?:my\s+)?(?:drive|google drive)\s+(?:for|about)\s+(.+)/i,
+    // "do I have anything on X" / "anything saved about X"
+    /(?:do i have|is there)\s+(?:anything|something)\s+(?:on|about|for|related to)\s+(.+)/i,
+    /anything\s+(?:saved|filed|written|documented)\s+(?:on|about|for)\s+(.+)/i,
+    // "open/read the document about X"
+    /(?:open|read|show me)\s+(?:the\s+)?(?:document|doc|file|notes?)\s+(?:about|on|for|called|named)?\s*(.+)/i,
   ];
 
   for (const pattern of patterns) {
