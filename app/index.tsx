@@ -331,7 +331,7 @@ export default function HomeScreen() {
             >
               <Text style={styles.eventLabel}>📅 Event added to calendar</Text>
               <Text style={styles.eventTitle}>{ev.summary}</Text>
-              {ev.htmlLink ? <Text style={styles.eventLink}>Tap to open in Google Calendar</Text> : null}
+              {ev.htmlLink ? <Text style={styles.eventLink}>Already saved — tap to view in Google Calendar</Text> : null}
             </TouchableOpacity>
           ))}
 
