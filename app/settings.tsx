@@ -160,11 +160,11 @@ export default function SettingsScreen() {
                 try {
                   if (calendarConnected) {
                     await disconnectGoogleCalendar();
-                    setCalendarConnected(false);
                   } else {
                     await connectGoogleCalendar();
                   }
                 } finally {
+                  if (calendarConnected) setCalendarConnected(false);
                   setCalendarLoading(false);
                 }
               }}

@@ -27,10 +27,19 @@ export function markCalendarDisconnected(): void {
 export async function isCalendarConnected(): Promise<boolean> {
   // Fast check — flag set when token was stored server-side
   if (typeof localStorage !== 'undefined' && localStorage.getItem(CONNECTED_FLAG)) return true;
-  // Fallback — check session provider token
+  // Fallback — check user_tokens table (provider_token is always set while logged in, so don't use it)
   if (!supabase) return false;
   const { data: { session } } = await supabase.auth.getSession();
-  return Boolean(session?.provider_token);
+  if (!session?.user) return false;
+  const { data } = await supabase
+    .from('user_tokens')
+    .select('id')
+    .eq('user_id', session.user.id)
+    .eq('provider', 'google')
+    .limit(1);
+  const connected = Boolean(data && data.length > 0);
+  if (connected) markCalendarConnected(); // sync localStorage flag
+  return connected;
 }
 
 // ─── OAuth connect ────────────────────────────────────────────────────────────
