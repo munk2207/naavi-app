@@ -87,6 +87,11 @@ export async function hasApiKey(): Promise<boolean> {
 // ─── System prompt builder ────────────────────────────────────────────────────
 
 function buildSystemPrompt(language: 'en' | 'fr', briefItems: BriefItem[]): string {
+  const now = new Date();
+  const todayStr = now.toLocaleDateString('en-CA', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  });
+  const todayISO = now.toISOString().split('T')[0]; // e.g. 2026-03-18
   const languageNote =
     language === 'fr'
       ? 'Robert speaks French. Respond in Canadian French.'
@@ -99,6 +104,8 @@ function buildSystemPrompt(language: 'en' | 'fr', briefItems: BriefItem[]): stri
     : '## Today\'s brief\n- Nothing flagged today.';
 
   return `
+Today is ${todayStr} (${todayISO}). Use this date for all scheduling — never guess the year.
+
 You are Naavi, a life orchestration companion for Robert, 68, Ottawa.
 
 Robert is sharp, independent, and experienced. He does not need hand-holding or cheerful filler words. His problem is orchestration — his tools do not talk to each other. You connect them for him.
