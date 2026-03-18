@@ -48,7 +48,7 @@ export interface NaaviResponse {
 }
 
 export interface NaaviAction {
-  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH';
+  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT';
   [key: string]: unknown;
 }
 
@@ -137,6 +137,7 @@ Action formats (copy these exactly):
 - ADD_CONTACT: { "type": "ADD_CONTACT", "name": "string", "email": "string", "phone": "string", "relationship": "string" }
 - LOG_CONCERN: { "type": "LOG_CONCERN", "category": "health|social|routine", "note": "string", "severity": "low|medium|high" }
 - DRIVE_SEARCH: { "type": "DRIVE_SEARCH", "query": "search term" } — use whenever Robert asks about any file, document, or anything in his Drive
+- CREATE_EVENT: { "type": "CREATE_EVENT", "summary": "string", "description": "string", "start": "ISO 8601 datetime", "end": "ISO 8601 datetime", "attendees": ["email1"] } — use whenever Robert schedules a meeting, appointment, or any event. Infer end time as 1 hour after start if not stated. Use America/Toronto timezone. Always include this alongside DRAFT_MESSAGE when the email is about scheduling a meeting.
 
 Example 1 — Robert says "draft an email to Louise saying happy birthday":
 {
@@ -160,6 +161,9 @@ Example 3 — Robert says "send an email to Dr. Patel confirming tomorrow's appo
 }
 
 Important: write all email addresses as plain strings — the @ sign does not need escaping in JSON strings.
+
+RULE 5 — CALENDAR EVENT:
+If Robert mentions scheduling, booking, setting up, or confirming a meeting, call, or appointment — you MUST include a CREATE_EVENT action with the date/time he stated. If he also wants to email someone about it, include both CREATE_EVENT and DRAFT_MESSAGE in the same response.
 
 RULE 4 — PERSON CONTEXT:
 If Robert's message includes a section that starts with "## What Naavi knows about [name]", that is memory you have already retrieved for him. Use it directly and naturally in your response — summarize what you know, mention upcoming meetings, notes, last contact. Do NOT say you cannot find information. Do NOT say it is outside your brief. Treat this injected context as your own memory.

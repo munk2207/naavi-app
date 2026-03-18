@@ -15,6 +15,7 @@ import { sendToNaavi, type NaaviMessage, type NaaviResponse, type NaaviAction, t
 import { saveContact, saveReminder } from '@/lib/supabase';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
 import { searchDriveFiles, formatDriveResults } from '@/lib/drive';
+import { createCalendarEvent } from '@/lib/calendar';
 
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'error';
 
@@ -30,6 +31,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const [history, setHistory] = useState<NaaviMessage[]>([]);
   const [lastResponse, setLastResponse] = useState<NaaviResponse | null>(null);
   const [drafts, setDrafts] = useState<NaaviAction[]>([]);
+  const [createdEvents, setCreatedEvents] = useState<{ summary: string; htmlLink?: string }[]>([]);
   const [driveFiles, setDriveFiles] = useState<import('@/lib/drive').DriveFile[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,6 +73,24 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       ]);
 
       setLastResponse(response);
+
+      // Execute CREATE_EVENT actions
+      for (const action of response.actions) {
+        if (action.type === 'CREATE_EVENT') {
+          const result = await createCalendarEvent({
+            summary:     String(action.summary     ?? ''),
+            description: String(action.description ?? ''),
+            start:       String(action.start       ?? ''),
+            end:         String(action.end         ?? ''),
+            attendees:   Array.isArray(action.attendees) ? action.attendees.map(String) : [],
+          });
+          if (result.success) {
+            setCreatedEvents(prev => [...prev, { summary: String(action.summary ?? ''), htmlLink: result.htmlLink }]);
+          } else {
+            console.error('[Orchestrator] CREATE_EVENT failed:', result.error);
+          }
+        }
+      }
 
       // Execute DRIVE_SEARCH actions detected by Claude
       for (const action of response.actions) {
@@ -146,12 +166,13 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     setHistory([]);
     setLastResponse(null);
     setDrafts([]);
+    setCreatedEvents([]);
     setDriveFiles([]);
     setError(null);
     setStatus('idle');
   }, []);
 
-  return { status, history, lastResponse, drafts, driveFiles, error, send, clearHistory };
+  return { status, history, lastResponse, drafts, createdEvents, driveFiles, error, send, clearHistory };
 }
 
 // ─── Speech helper ────────────────────────────────────────────────────────────

@@ -170,7 +170,7 @@ export default function HomeScreen() {
     }).catch(() => {});
   }, [currentUserId]);
 
-  const { status, history, drafts, driveFiles, error, send } = useOrchestrator('en', brief);
+  const { status, history, drafts, createdEvents, driveFiles, error, send } = useOrchestrator('en', brief);
   const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
 
   function getGreeting(): string {
@@ -310,6 +310,20 @@ export default function HomeScreen() {
               ))}
             </View>
           )}
+
+          {/* Calendar event created cards */}
+          {createdEvents.map((ev, i) => (
+            <TouchableOpacity
+              key={i}
+              style={styles.eventCard}
+              onPress={() => ev.htmlLink ? Linking.openURL(ev.htmlLink) : undefined}
+              accessibilityLabel="Open event in Google Calendar"
+            >
+              <Text style={styles.eventLabel}>📅 Event added to calendar</Text>
+              <Text style={styles.eventTitle}>{ev.summary}</Text>
+              {ev.htmlLink ? <Text style={styles.eventLink}>Tap to open in Google Calendar</Text> : null}
+            </TouchableOpacity>
+          ))}
 
           {/* Add contact card */}
           {drafts.filter(a => a.type === 'ADD_CONTACT').map((action, i) => (
@@ -479,6 +493,33 @@ const styles = StyleSheet.create({
   errorText: {
     color: Colors.error,
     fontStyle: 'normal',
+  },
+  eventCard: {
+    marginTop: 12,
+    backgroundColor: '#F0FDF4',
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#22C55E',
+    padding: 14,
+    gap: 4,
+  },
+  eventLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: '#16A34A',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  eventTitle: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+    marginTop: 2,
+  },
+  eventLink: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+    marginTop: 2,
   },
   contactCard: {
     marginTop: 12,

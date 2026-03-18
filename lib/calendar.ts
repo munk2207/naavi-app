@@ -52,7 +52,7 @@ export async function connectGoogleCalendar(): Promise<void> {
     provider: 'google',
     options: {
       redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
-      scopes: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.readonly',
+      scopes: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.readonly',
       queryParams: {
         access_type: 'offline',
         prompt: 'consent',
@@ -280,6 +280,28 @@ export async function fetchUpcomingEvents(days = 7, passedUserId?: string): Prom
     });
   } catch {
     return [];
+  }
+}
+
+// ─── Create a calendar event ──────────────────────────────────────────────────
+
+export async function createCalendarEvent(opts: {
+  summary: string;
+  description?: string;
+  start: string;   // ISO 8601 datetime e.g. "2026-03-20T14:00:00"
+  end: string;     // ISO 8601 datetime
+  attendees?: string[]; // email addresses
+}): Promise<{ success: boolean; eventId?: string; htmlLink?: string; error?: string }> {
+  if (!supabase) return { success: false, error: 'Not configured' };
+
+  try {
+    const { data, error } = await supabase.functions.invoke('create-calendar-event', {
+      body: opts,
+    });
+    if (error) return { success: false, error: error.message ?? 'Create failed' };
+    return { success: true, eventId: data?.eventId, htmlLink: data?.htmlLink };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
   }
 }
 
