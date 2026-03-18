@@ -666,21 +666,18 @@ const styles = StyleSheet.create({
     fontWeight: Typography.semibold,
   },
   memoBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: Colors.surfaceAlt,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#EF4444',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
   },
   memoBtnRecording: {
-    backgroundColor: '#FEE2E2',
-    borderColor: '#EF4444',
+    backgroundColor: '#B91C1C',
   },
   memoBtnText: {
-    fontSize: 18,
+    fontSize: 22,
   },
   inputBar: {
     flexDirection: 'row',
