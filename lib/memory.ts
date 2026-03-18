@@ -13,6 +13,7 @@
 import { supabase } from './supabase';
 import { fetchNotionNotesForPerson } from './notion';
 import { fetchEmailsFromPerson } from './gmail';
+import { searchDriveFiles, type DriveFile } from './drive';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ export interface PersonContext {
   pastMeetings: CalendarEntry[];
   savedNotes: string[];
   recentEmails: { subject: string; snippet: string; received_at: string; is_unread: boolean }[];
+  driveFiles: DriveFile[];
 }
 
 interface CalendarEntry {
@@ -56,15 +58,16 @@ export async function getPersonContext(name: string): Promise<PersonContext | nu
   ]);
   const userId = sessionRace.data.session?.user?.id;
 
-  const [calendarEvents, notionNotes, emails] = await Promise.all([
+  const [calendarEvents, notionNotes, emails, driveFiles] = await Promise.all([
     getCalendarEventsForPerson(name),
     fetchNotionNotesForPerson(name),
     userId ? fetchEmailsFromPerson(name, userId) : Promise.resolve([]),
+    searchDriveFiles(name),
   ]);
 
-  console.log('[Memory] Results for', name, '— calendar:', calendarEvents.length, 'notion:', notionNotes.length, 'emails:', emails.length);
+  console.log('[Memory] Results for', name, '— calendar:', calendarEvents.length, 'notion:', notionNotes.length, 'emails:', emails.length, 'drive:', driveFiles.length);
 
-  if (calendarEvents.length === 0 && notionNotes.length === 0 && emails.length === 0) {
+  if (calendarEvents.length === 0 && notionNotes.length === 0 && emails.length === 0 && driveFiles.length === 0) {
     console.log('[Memory] No data found for', name);
     return null;
   }
@@ -79,6 +82,7 @@ export async function getPersonContext(name: string): Promise<PersonContext | nu
     pastMeetings: past,
     savedNotes: notionNotes,
     recentEmails: emails,
+    driveFiles,
   };
 }
 
@@ -180,6 +184,14 @@ export function formatPersonContext(ctx: PersonContext): string {
       const unread = e.is_unread ? ' [unread]' : '';
       lines.push(`- ${label}${unread}: ${e.subject}`);
       if (e.snippet) lines.push(`  "${e.snippet.slice(0, 100)}"`);
+    });
+  }
+
+  if (ctx.driveFiles && ctx.driveFiles.length > 0) {
+    lines.push(`\nDrive documents (${ctx.driveFiles.length}):`);
+    ctx.driveFiles.slice(0, 5).forEach(f => {
+      const modified = new Date(f.modifiedTime).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' });
+      lines.push(`- ${f.name} (modified ${modified}) — ${f.webViewLink}`);
     });
   }
 

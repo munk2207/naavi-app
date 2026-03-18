@@ -14,6 +14,7 @@ import * as Speech from 'expo-speech';
 import { sendToNaavi, type NaaviMessage, type NaaviResponse, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
 import { saveContact, saveReminder } from '@/lib/supabase';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
+import { extractDriveQuery, searchDriveFiles, formatDriveResults } from '@/lib/drive';
 
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'error';
 
@@ -54,6 +55,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           enrichedMessage = `${userMessage}\n\n${contextBlock}`;
         } else {
           console.log('[Orchestrator] No context found for', personName);
+        }
+      }
+
+      // Check if Robert is asking about a document — search Drive and inject results
+      const driveQuery = extractDriveQuery(userMessage);
+      if (driveQuery) {
+        console.log('[Orchestrator] Drive query detected:', driveQuery);
+        const files = await searchDriveFiles(driveQuery);
+        if (files.length > 0) {
+          enrichedMessage += formatDriveResults(files, driveQuery);
         }
       }
 
