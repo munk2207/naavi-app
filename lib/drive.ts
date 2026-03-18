@@ -25,23 +25,11 @@ export async function searchDriveFiles(query: string): Promise<DriveFile[]> {
   if (!supabase || !query.trim()) return [];
 
   try {
-    // Force a token refresh so the Edge Function always gets a valid JWT
-    let { data: { session } } = await supabase.auth.refreshSession();
-    if (!session) ({ data: { session } } = await supabase.auth.getSession());
-    if (!session?.access_token) return [];
-
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/search-google-drive`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ query }),
+    const { data, error } = await supabase.functions.invoke('search-google-drive', {
+      body: { query },
     });
-
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.files ?? [];
+    if (error) { console.error('[Drive] Search failed:', error); return []; }
+    return data?.files ?? [];
   } catch (err) {
     console.error('[Drive] Search failed:', err);
     return [];
@@ -61,21 +49,10 @@ export async function sendDriveFileAsEmail(opts: {
   if (!supabase) return { success: false, error: 'Not configured' };
 
   try {
-    let { data: { session } } = await supabase.auth.refreshSession();
-    if (!session) ({ data: { session } } = await supabase.auth.getSession());
-    if (!session?.access_token) return { success: false, error: 'Not signed in' };
-
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-drive-file`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify(opts),
+    const { data, error } = await supabase.functions.invoke('send-drive-file', {
+      body: opts,
     });
-
-    const data = await res.json();
-    if (!res.ok) return { success: false, error: data.error ?? 'Send failed' };
+    if (error) return { success: false, error: error.message ?? 'Send failed' };
     return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
