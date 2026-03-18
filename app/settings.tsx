@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next';
 import i18n from '@/lib/i18n';
 import { saveApiKey, getApiKey, hasApiKey } from '@/lib/naavi-client';
 import { isCalendarConnected, connectGoogleCalendar, disconnectGoogleCalendar } from '@/lib/calendar';
+import { saveNotionToken, getNotionToken, removeNotionToken, hasNotionToken } from '@/lib/notion';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 
@@ -32,6 +33,9 @@ export default function SettingsScreen() {
   const [apiKey, setApiKey] = useState('');
   const [apiKeySet, setApiKeySet] = useState(false);
   const [calendarConnected, setCalendarConnected] = useState(false);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [notionToken, setNotionToken] = useState('');
+  const [notionConnected, setNotionConnected] = useState(false);
   const [language, setLanguage] = useState<'en' | 'fr'>(
     (i18n.language as 'en' | 'fr') ?? 'en'
   );
@@ -39,6 +43,7 @@ export default function SettingsScreen() {
   useEffect(() => {
     hasApiKey().then(setApiKeySet);
     isCalendarConnected().then(setCalendarConnected);
+    hasNotionToken().then(setNotionConnected);
   }, []);
 
   async function handleSaveApiKey() {
@@ -54,6 +59,21 @@ export default function SettingsScreen() {
     setApiKeySet(true);
     setApiKey('');
     Alert.alert('Saved', 'API key saved securely.');
+  }
+
+  async function handleSaveNotionToken() {
+    const token = notionToken.trim();
+    if (!token) return;
+    await saveNotionToken(token);
+    setNotionConnected(true);
+    setNotionToken('');
+    Alert.alert('Connected', 'Notion integration token saved.');
+  }
+
+  async function handleDisconnectNotion() {
+    await removeNotionToken();
+    setNotionConnected(false);
+    Alert.alert('Disconnected', 'Notion token removed.');
   }
 
   function handleLanguageToggle(value: boolean) {
@@ -133,20 +153,66 @@ export default function SettingsScreen() {
             </View>
             <TouchableOpacity
               style={[styles.connectBtn, calendarConnected && styles.connectBtnActive]}
+              disabled={calendarLoading}
               onPress={async () => {
-                if (calendarConnected) {
-                  await disconnectGoogleCalendar();
-                  setCalendarConnected(false);
-                } else {
-                  await connectGoogleCalendar();
+                if (calendarLoading) return;
+                setCalendarLoading(true);
+                try {
+                  if (calendarConnected) {
+                    await disconnectGoogleCalendar();
+                    setCalendarConnected(false);
+                  } else {
+                    await connectGoogleCalendar();
+                  }
+                } finally {
+                  setCalendarLoading(false);
                 }
               }}
             >
               <Text style={styles.connectBtnText}>
-                {calendarConnected ? 'Disconnect' : 'Connect'}
+                {calendarLoading ? '...' : calendarConnected ? 'Disconnect' : 'Connect'}
               </Text>
             </TouchableOpacity>
           </View>
+
+          {/* Notion */}
+          <View style={styles.toolRow}>
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={styles.toolLabel}>Notion</Text>
+              <Text style={styles.toolStatus}>
+                {notionConnected ? '✓ Connected — pages searched for contacts' : 'Paste your integration token below'}
+              </Text>
+            </View>
+            {notionConnected ? (
+              <TouchableOpacity
+                style={[styles.connectBtn, styles.connectBtnActive]}
+                onPress={handleDisconnectNotion}
+              >
+                <Text style={styles.connectBtnText}>Disconnect</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          {!notionConnected && (
+            <View style={{ marginBottom: 8 }}>
+              <TextInput
+                style={styles.keyInput}
+                value={notionToken}
+                onChangeText={setNotionToken}
+                placeholder="secret_..."
+                placeholderTextColor={Colors.textMuted}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={[styles.saveBtn, !notionToken.trim() && styles.saveBtnDisabled]}
+                onPress={handleSaveNotionToken}
+                disabled={!notionToken.trim()}
+              >
+                <Text style={styles.saveBtnText}>Connect Notion</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {[
             { label: t('settings.health'),    status: 'coming' },

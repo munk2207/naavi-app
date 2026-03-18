@@ -1,112 +1,306 @@
 /**
- * Google Calendar integration — Phase 8
+ * Google Calendar integration — Phase 9
  *
- * Fetches today's events from Robert's primary Google Calendar
- * using the OAuth access token stored in the Supabase session.
- *
- * Robert connects once via Settings → Connect Google Calendar.
- * After that, his real events appear in the morning brief automatically.
+ * Robert connects once. The refresh token is stored server-side.
+ * A scheduled Edge Function syncs his Calendar every 6 hours.
+ * All lookups query the Supabase cache — no token expiry issues.
  */
 
 import { supabase } from './supabase';
 import type { BriefItem } from './naavi-client';
 
+const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL      ?? '';
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+
+// ─── Connection status ────────────────────────────────────────────────────────
+
+const CONNECTED_FLAG = 'naavi_google_calendar_connected';
+
+export function markCalendarConnected(): void {
+  if (typeof localStorage !== 'undefined') localStorage.setItem(CONNECTED_FLAG, '1');
+}
+
+export function markCalendarDisconnected(): void {
+  if (typeof localStorage !== 'undefined') localStorage.removeItem(CONNECTED_FLAG);
+}
+
 export async function isCalendarConnected(): Promise<boolean> {
+  // Fast check — flag set when token was stored server-side
+  if (typeof localStorage !== 'undefined' && localStorage.getItem(CONNECTED_FLAG)) return true;
+  // Fallback — check session provider token
   if (!supabase) return false;
   const { data: { session } } = await supabase.auth.getSession();
   return Boolean(session?.provider_token);
 }
+
+// ─── OAuth connect ────────────────────────────────────────────────────────────
 
 export async function connectGoogleCalendar(): Promise<void> {
   if (!supabase) return;
   await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      scopes: 'https://www.googleapis.com/auth/calendar.readonly',
       redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
-      queryParams: { access_type: 'offline', prompt: 'consent' },
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent',
+        scope: [
+          'openid',
+          'email',
+          'profile',
+          'https://www.googleapis.com/auth/calendar.readonly',
+          'https://www.googleapis.com/auth/gmail.readonly',
+        ].join(' '),
+      },
     },
   });
 }
 
 export async function disconnectGoogleCalendar(): Promise<void> {
   if (!supabase) return;
-  await supabase.auth.signOut();
+  // Only remove the stored Google token — do NOT sign Robert out of Supabase.
+  // Signing out clears the entire session and breaks all DB queries until reconnect.
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user) {
+    await supabase
+      .from('user_tokens')
+      .delete()
+      .eq('user_id', session.user.id)
+      .eq('provider', 'google');
+  }
+  markCalendarDisconnected();
 }
 
-export async function fetchTodayEvents(): Promise<BriefItem[]> {
-  if (!supabase) return [];
+// ─── Token capture — called on auth state change after OAuth ──────────────────
+
+/**
+ * Called when Supabase fires SIGNED_IN after Google OAuth.
+ * Stores the refresh token server-side and triggers the first sync.
+ * After this, Robert never needs to reconnect.
+ */
+export async function captureAndStoreGoogleToken(): Promise<void> {
+  if (!supabase) return;
 
   const { data: { session } } = await supabase.auth.getSession();
-  const accessToken = session?.provider_token;
+  const refreshToken = session?.provider_refresh_token;
 
-  if (!accessToken) return [];
+  if (!refreshToken) {
+    console.log('[Calendar] No refresh token in session — skipping store');
+    return;
+  }
 
-  const now = new Date();
-  const startOfDay = new Date(
-    now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0
-  ).toISOString();
-  const endOfDay = new Date(
-    now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59
-  ).toISOString();
+  console.log('[Calendar] Storing Google refresh token server-side...');
 
   try {
-    const res = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/primary/events` +
-      `?maxResults=5&orderBy=startTime&singleEvents=true` +
-      `&timeMin=${encodeURIComponent(startOfDay)}&timeMax=${encodeURIComponent(endOfDay)}`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
+    // Store refresh token in Supabase via Edge Function
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/store-google-token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
 
-    if (res.status === 401) {
-      // Token expired — sign out so user can reconnect
-      await supabase.auth.signOut();
-      return [];
+    if (!res.ok) {
+      console.error('[Calendar] Failed to store token:', await res.text());
+      return;
     }
 
-    if (!res.ok) throw new Error(`Calendar API ${res.status}`);
+    markCalendarConnected();
+    console.log('[Calendar] Token stored. Triggering first sync...');
+
+    // Trigger an immediate sync so calendar data is available right away
+    await triggerCalendarSync(session.access_token);
+
+  } catch (err) {
+    console.error('[Calendar] Error storing token:', err);
+  }
+}
+
+// ─── Trigger sync ─────────────────────────────────────────────────────────────
+
+export async function triggerCalendarSync(accessToken?: string): Promise<void> {
+  try {
+    let token = accessToken;
+    if (!token) {
+      const { data: { session } } = await supabase!.auth.getSession();
+      token = session?.access_token;
+    }
+    if (!token) return;
+
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/sync-google-calendar`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    });
 
     const data = await res.json();
-    const events: CalendarEvent[] = data.items ?? [];
-
-    if (events.length === 0) return [];
-
-    return events.map((event, i) => {
-      const startRaw = event.start?.dateTime ?? event.start?.date ?? '';
-      const isAllDay = !event.start?.dateTime;
-
-      const timeLabel = isAllDay
-        ? 'All day'
-        : new Date(startRaw).toLocaleTimeString('en-CA', {
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true,
-          });
-
-      const title = `${event.summary ?? 'Event'} at ${timeLabel}`;
-      const detail = event.location ?? event.description ?? '';
-
-      // Flag events within the next 2 hours as urgent
-      const urgent = !isAllDay && (new Date(startRaw).getTime() - Date.now()) < 2 * 60 * 60 * 1000;
-
-      return {
-        id: event.id ?? `cal-${i}`,
-        category: 'calendar' as const,
-        title,
-        detail,
-        urgent,
-      };
-    });
+    console.log('[Calendar] Sync result:', JSON.stringify(data));
   } catch (err) {
-    console.error('[Calendar] Failed to fetch events:', err);
+    console.error('[Calendar] Sync trigger failed:', err);
+  }
+}
+
+// ─── Shared session helper ────────────────────────────────────────────────────
+
+async function getSessionUserId(): Promise<string | null> {
+  if (!supabase) return null;
+  const sessionRace = await Promise.race([
+    supabase.auth.getSession(),
+    new Promise<{ data: { session: null } }>((resolve) =>
+      setTimeout(() => resolve({ data: { session: null } }), 5000)
+    ),
+  ]);
+  const uid = sessionRace.data.session?.user?.id ?? null;
+  console.log('[Calendar] getSessionUserId:', uid ?? 'null');
+  return uid;
+}
+
+function mapEventToBriefItem(event: {
+  google_event_id: string;
+  title: string;
+  start_time: string | null;
+  location: string | null;
+  description: string | null;
+}, dayLabel?: string): BriefItem {
+  const startRaw = event.start_time ?? '';
+  const isAllDay = !startRaw.includes('T');
+
+  const timeLabel = isAllDay
+    ? 'All day'
+    : new Date(startRaw).toLocaleTimeString('en-CA', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+
+  const urgent = !isAllDay &&
+    (new Date(startRaw).getTime() - Date.now()) < 2 * 60 * 60 * 1000 &&
+    new Date(startRaw).getTime() > Date.now();
+
+  const prefix = dayLabel ? `${dayLabel} — ` : '';
+
+  return {
+    id: event.google_event_id,
+    category: 'calendar' as const,
+    title: `${prefix}${event.title} at ${timeLabel}`,
+    detail: event.location || event.description || '',
+    urgent,
+  };
+}
+
+// ─── Fetch today's events from Supabase cache ─────────────────────────────────
+
+export async function fetchTodayEvents(): Promise<BriefItem[]> {
+  const userId = await getSessionUserId();
+  if (!userId || !supabase) return [];
+
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date();
+  endOfDay.setHours(23, 59, 59, 999);
+
+  try {
+    const { data: events, error } = await supabase
+      .from('calendar_events')
+      .select('google_event_id, title, start_time, location, description')
+      .eq('user_id', userId)
+      .gte('start_time', startOfDay.toISOString())
+      .lte('start_time', endOfDay.toISOString())
+      .order('start_time', { ascending: true })
+      .limit(10);
+
+    if (error || !events) return [];
+    return events.map(e => mapEventToBriefItem(e));
+  } catch {
     return [];
   }
 }
 
-interface CalendarEvent {
-  id?: string;
-  summary?: string;
-  location?: string;
-  description?: string;
-  start?: { dateTime?: string; date?: string };
+// ─── Fetch upcoming events (next N days) for the brief ────────────────────────
+
+export async function fetchUpcomingEvents(days = 7, passedUserId?: string): Promise<BriefItem[]> {
+  const userId = passedUserId ?? await getSessionUserId();
+  if (!userId || !supabase) return [];
+
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const future = new Date();
+  future.setDate(future.getDate() + days);
+
+  try {
+    const { data: events, error } = await supabase
+      .from('calendar_events')
+      .select('google_event_id, title, start_time, location, description')
+      .eq('user_id', userId)
+      .gte('start_time', startOfDay.toISOString())
+      .lte('start_time', future.toISOString())
+      .order('start_time', { ascending: true })
+      .limit(20);
+
+    console.log('[Calendar] fetchUpcomingEvents — found:', events?.length ?? 0, 'error:', error?.message ?? 'none');
+    if (error || !events) return [];
+
+    return events.map(event => {
+      const startRaw = event.start_time ?? '';
+      const date = new Date(startRaw);
+      const today = new Date();
+      const tomorrow = new Date(); tomorrow.setDate(today.getDate() + 1);
+
+      let dayLabel: string;
+      if (date.toDateString() === today.toDateString()) {
+        dayLabel = 'Today';
+      } else if (date.toDateString() === tomorrow.toDateString()) {
+        dayLabel = 'Tomorrow';
+      } else {
+        dayLabel = date.toLocaleDateString('en-CA', { weekday: 'long', month: 'short', day: 'numeric' });
+      }
+
+      return mapEventToBriefItem(event, dayLabel);
+    });
+  } catch {
+    return [];
+  }
+}
+
+// ─── Fetch upcoming birthdays (next 30 days) ──────────────────────────────────
+
+export async function fetchUpcomingBirthdays(passedUserId?: string): Promise<BriefItem[]> {
+  const userId = passedUserId ?? await getSessionUserId();
+  if (!userId || !supabase) return [];
+
+  const now = new Date();
+  const future = new Date();
+  future.setDate(future.getDate() + 30);
+
+  try {
+    const { data: events, error } = await supabase
+      .from('calendar_events')
+      .select('google_event_id, title, start_time, location, description')
+      .eq('user_id', userId)
+      .ilike('title', '%birthday%')
+      .gte('start_time', now.toISOString())
+      .lte('start_time', future.toISOString())
+      .order('start_time', { ascending: true })
+      .limit(10);
+
+    if (error || !events) return [];
+
+    return events.map(event => {
+      const date = new Date(event.start_time ?? '');
+      const dayLabel = date.toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' });
+      return {
+        id: event.google_event_id,
+        category: 'social' as const,
+        title: `${event.title} — ${dayLabel}`,
+        detail: '',
+        urgent: false,
+      };
+    });
+  } catch {
+    return [];
+  }
 }

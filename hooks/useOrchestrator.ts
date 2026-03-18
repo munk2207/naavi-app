@@ -45,10 +45,15 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       // Check if Robert is asking about a person — inject their full context
       let enrichedMessage = userMessage;
       const personName = extractPersonQuery(userMessage);
+      console.log('[Orchestrator] extractPersonQuery result:', personName);
       if (personName) {
         const ctx = await getPersonContext(personName);
         if (ctx) {
-          enrichedMessage = `${userMessage}\n\n${formatPersonContext(ctx)}`;
+          const contextBlock = formatPersonContext(ctx);
+          console.log('[Orchestrator] Injecting context for', personName, ':\n', contextBlock);
+          enrichedMessage = `${userMessage}\n\n${contextBlock}`;
+        } else {
+          console.log('[Orchestrator] No context found for', personName);
         }
       }
 

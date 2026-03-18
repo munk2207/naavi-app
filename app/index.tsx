@@ -36,33 +36,11 @@ import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { BriefItem } from '@/lib/naavi-client';
 import { fetchOttawaWeather } from '@/lib/weather';
-import { fetchTodayEvents } from '@/lib/calendar';
+import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
+import { fetchImportantEmails, triggerGmailSync } from '@/lib/gmail';
+import { supabase } from '@/lib/supabase';
 
-// ─── Base brief items (calendar, health, social — real data in Phase 8) ───────
-
-const BASE_BRIEF: BriefItem[] = [
-  {
-    id: '1',
-    category: 'calendar',
-    title: 'Dr. Patel at 2:00 pm',
-    detail: 'Riverside Clinic — 1967 Riverside Drive',
-    urgent: true,
-  },
-  {
-    id: '2',
-    category: 'health',
-    title: 'Metformin refill due in two weeks',
-    detail: 'Around April 10 — call pharmacy before then',
-    urgent: false,
-  },
-  {
-    id: '3',
-    category: 'social',
-    title: "Louise's birthday is Friday",
-    detail: 'Last contact was 3 weeks ago',
-    urgent: false,
-  },
-];
+// No hardcoded brief — all items come from real data (calendar, weather)
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -71,22 +49,69 @@ export default function HomeScreen() {
   const router = useRouter();
   const scrollRef = useRef<ScrollView>(null);
   const [inputText, setInputText] = useState('');
-  const [brief, setBrief] = useState<BriefItem[]>(BASE_BRIEF);
+  const [brief, setBrief] = useState<BriefItem[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-  // Fetch live data on load — weather + real calendar events
+  // Load weather immediately (no auth needed)
   useEffect(() => {
-    async function loadBrief() {
-      const [weatherItem, calendarItems] = await Promise.all([
-        fetchOttawaWeather(),
-        fetchTodayEvents(),
-      ]);
-      // If real calendar events loaded, replace the sample calendar items
-      const nonCalendarBase = BASE_BRIEF.filter(i => i.category !== 'calendar');
-      const calendarSection = calendarItems.length > 0 ? calendarItems : BASE_BRIEF.filter(i => i.category === 'calendar');
-      setBrief([...calendarSection, ...nonCalendarBase, weatherItem]);
-    }
-    loadBrief();
+    fetchOttawaWeather().then(w => setBrief([w]));
   }, []);
+
+  // Resolve user ID — from getSession on mount OR onAuthStateChange
+  useEffect(() => {
+    if (!supabase) return;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log('[Home] getSession:', session?.user?.id ?? 'none');
+      if (session?.user) setCurrentUserId(session.user.id);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('[Home] onAuthStateChange:', event, 'user:', session?.user?.id ?? 'none');
+        if (event === 'SIGNED_IN' && session?.provider_refresh_token) {
+          await captureAndStoreGoogleToken();
+        }
+        if (session?.user) setCurrentUserId(session.user.id);
+      }
+    );
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Load calendar data whenever user ID becomes available
+  useEffect(() => {
+    if (!currentUserId) return;
+    console.log('[Home] loading calendar for user:', currentUserId);
+
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    Promise.all([
+      fetchUpcomingEvents(7, currentUserId),
+      fetchUpcomingBirthdays(currentUserId),
+      fetchImportantEmails(currentUserId),
+    ]).then(([calendarItems, birthdayItems, emailItems]) => {
+      console.log('[Home] calendar:', calendarItems.length, 'birthdays:', birthdayItems.length, 'emails:', emailItems.length);
+      setBrief(prev => {
+        const weather = prev.find(i => i.id === 'weather');
+        return [...calendarItems, ...birthdayItems, ...emailItems, ...(weather ? [weather] : [])];
+      });
+    });
+
+    // Background sync — refresh after Google Calendar + Gmail are polled
+    Promise.all([triggerCalendarSync(), triggerGmailSync()]).then(() =>
+      Promise.all([
+        fetchUpcomingEvents(7, currentUserId),
+        fetchUpcomingBirthdays(currentUserId),
+        fetchImportantEmails(currentUserId),
+      ])
+    ).then(([fresh, freshBirthdays, freshEmails]) => {
+      setBrief(prev => {
+        const weather = prev.find(i => i.id === 'weather');
+        return [...fresh, ...freshBirthdays, ...freshEmails, ...(weather ? [weather] : [])];
+      });
+    }).catch(() => {});
+  }, [currentUserId]);
 
   const { status, history, drafts, error, send } = useOrchestrator('en', brief);
   const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
