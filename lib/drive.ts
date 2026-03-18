@@ -25,7 +25,9 @@ export async function searchDriveFiles(query: string): Promise<DriveFile[]> {
   if (!supabase || !query.trim()) return [];
 
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    // Force a token refresh so the Edge Function always gets a valid JWT
+    let { data: { session } } = await supabase.auth.refreshSession();
+    if (!session) ({ data: { session } } = await supabase.auth.getSession());
     if (!session?.access_token) return [];
 
     const res = await fetch(`${SUPABASE_URL}/functions/v1/search-google-drive`, {
@@ -59,7 +61,8 @@ export async function sendDriveFileAsEmail(opts: {
   if (!supabase) return { success: false, error: 'Not configured' };
 
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    let { data: { session } } = await supabase.auth.refreshSession();
+    if (!session) ({ data: { session } } = await supabase.auth.getSession());
     if (!session?.access_token) return { success: false, error: 'Not signed in' };
 
     const res = await fetch(`${SUPABASE_URL}/functions/v1/send-drive-file`, {
