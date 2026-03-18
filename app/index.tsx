@@ -248,7 +248,7 @@ export default function HomeScreen() {
                       {file.parentFolderName ? ` · in "${file.parentFolderName}"` : ''}
                     </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity
+                  {file.mimeType !== 'application/vnd.google-apps.folder' && <TouchableOpacity
                     style={styles.driveSendBtn}
                     onPress={async () => {
                       const to = typeof window !== 'undefined'
@@ -271,7 +271,7 @@ export default function HomeScreen() {
                     accessibilityLabel={`Send ${file.name} as email attachment`}
                   >
                     <Text style={styles.driveSendBtnText}>✉ Send</Text>
-                  </TouchableOpacity>
+                  </TouchableOpacity>}
                 </View>
               ))}
             </View>
