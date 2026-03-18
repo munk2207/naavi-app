@@ -36,6 +36,7 @@ import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { BriefItem } from '@/lib/naavi-client';
 import { fetchOttawaWeather } from '@/lib/weather';
+import { sendDriveFileAsEmail } from '@/lib/drive';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { fetchImportantEmails, triggerGmailSync } from '@/lib/gmail';
 import { supabase } from '@/lib/supabase';
@@ -236,17 +237,45 @@ export default function HomeScreen() {
             <View style={styles.driveSection}>
               <Text style={styles.draftLabel}>📄 Drive documents</Text>
               {driveFiles.map((file, i) => (
-                <TouchableOpacity
-                  key={i}
-                  style={styles.driveCard}
-                  onPress={() => Linking.openURL(file.webViewLink)}
-                  accessibilityLabel={`Open ${file.name} in Google Drive`}
-                >
-                  <Text style={styles.driveFileName}>{file.name}</Text>
-                  <Text style={styles.driveFileMeta}>
-                    {friendlyMimeType(file.mimeType)} · modified {new Date(file.modifiedTime).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </Text>
-                </TouchableOpacity>
+                <View key={i} style={styles.driveCard}>
+                  <TouchableOpacity
+                    onPress={() => Linking.openURL(file.webViewLink)}
+                    accessibilityLabel={`Open ${file.name} in Google Drive`}
+                  >
+                    <Text style={styles.driveFileName}>{file.name}</Text>
+                    <Text style={styles.driveFileMeta}>
+                      {friendlyMimeType(file.mimeType)} · modified {new Date(file.modifiedTime).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.driveSendBtn}
+                    onPress={async () => {
+                      Alert.prompt(
+                        'Send as attachment',
+                        `Send "${file.name}" to:`,
+                        async (to) => {
+                          if (!to?.trim()) return;
+                          const result = await sendDriveFileAsEmail({
+                            fileId: file.id,
+                            fileName: file.name,
+                            mimeType: file.mimeType,
+                            to: to.trim(),
+                          });
+                          Alert.alert(
+                            result.success ? 'Sent' : 'Failed',
+                            result.success
+                              ? `"${file.name}" sent to ${to.trim()}.`
+                              : result.error ?? 'Could not send the file.'
+                          );
+                        },
+                        'plain-text'
+                      );
+                    }}
+                    accessibilityLabel={`Send ${file.name} as email attachment`}
+                  >
+                    <Text style={styles.driveSendBtnText}>✉ Send</Text>
+                  </TouchableOpacity>
+                </View>
               ))}
             </View>
           )}
@@ -488,6 +517,19 @@ const styles = StyleSheet.create({
   driveFileMeta: {
     fontSize: Typography.sm,
     color: Colors.textMuted,
+  },
+  driveSendBtn: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    backgroundColor: '#4285F4',
+    borderRadius: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+  },
+  driveSendBtnText: {
+    color: '#fff',
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
   },
   inputBar: {
     flexDirection: 'row',

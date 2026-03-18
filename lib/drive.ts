@@ -45,6 +45,39 @@ export async function searchDriveFiles(query: string): Promise<DriveFile[]> {
   }
 }
 
+// ─── Send a Drive file as email attachment ────────────────────────────────────
+
+export async function sendDriveFileAsEmail(opts: {
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+  to: string;
+  subject?: string;
+  message?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) return { success: false, error: 'Not configured' };
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return { success: false, error: 'Not signed in' };
+
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-drive-file`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(opts),
+    });
+
+    const data = await res.json();
+    if (!res.ok) return { success: false, error: data.error ?? 'Send failed' };
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
 // ─── Format Drive results for context injection ────────────────────────────────
 
 export function formatDriveResults(files: DriveFile[], query: string): string {
