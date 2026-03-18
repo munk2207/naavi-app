@@ -38,10 +38,66 @@ import type { BriefItem } from '@/lib/naavi-client';
 import { fetchOttawaWeather } from '@/lib/weather';
 import { sendDriveFileAsEmail } from '@/lib/drive';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
-import { fetchImportantEmails, triggerGmailSync } from '@/lib/gmail';
+import { fetchImportantEmails, triggerGmailSync, sendEmail } from '@/lib/gmail';
 import { supabase } from '@/lib/supabase';
 
 // No hardcoded brief — all items come from real data (calendar, weather)
+
+// ─── Draft card component ─────────────────────────────────────────────────────
+
+function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviAction }) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  async function handleSendEmail() {
+    setSending(true);
+    setSendError(null);
+    const result = await sendEmail({
+      to:      String(action.to      ?? ''),
+      subject: String(action.subject ?? ''),
+      body:    String(action.body    ?? ''),
+    });
+    setSending(false);
+    if (result.success) {
+      setSent(true);
+    } else {
+      setSendError(result.error ?? 'Send failed');
+    }
+  }
+
+  return (
+    <View style={styles.draftCard}>
+      <Text style={styles.draftLabel}>
+        {sent ? '✓ Email sent' : '✉ Draft ready'}
+      </Text>
+      <Text style={styles.draftField}>
+        <Text style={styles.draftFieldLabel}>To: </Text>
+        {String(action.to ?? '')}
+      </Text>
+      <Text style={styles.draftField}>
+        <Text style={styles.draftFieldLabel}>Subject: </Text>
+        {String(action.subject ?? '')}
+      </Text>
+      <Text style={styles.draftBody}>{String(action.body ?? '')}</Text>
+      {sendError ? (
+        <Text style={styles.draftSendError}>{sendError}</Text>
+      ) : null}
+      {!sent && (
+        <TouchableOpacity
+          style={[styles.draftSendBtn, sending && styles.draftSendBtnDisabled]}
+          onPress={handleSendEmail}
+          disabled={sending}
+          accessibilityLabel="Send email"
+        >
+          <Text style={styles.draftSendBtnText}>
+            {sending ? 'Sending…' : '✉ Send'}
+          </Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -206,31 +262,9 @@ export default function HomeScreen() {
           )}
 
           {/* Draft message card */}
-          {drafts.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => {
-            const mailtoUrl =
-              `mailto:${encodeURIComponent(String(action.to))}` +
-              `?subject=${encodeURIComponent(String(action.subject))}` +
-              `&body=${encodeURIComponent(String(action.body))}`;
-            return (
-              <TouchableOpacity
-                key={i}
-                style={styles.draftCard}
-                onPress={() => Linking.openURL(mailtoUrl)}
-                accessibilityLabel="Open draft in email app"
-              >
-                <Text style={styles.draftLabel}>✉ Draft — tap to open in Gmail</Text>
-                <Text style={styles.draftField}>
-                  <Text style={styles.draftFieldLabel}>To: </Text>
-                  {String(action.to)}
-                </Text>
-                <Text style={styles.draftField}>
-                  <Text style={styles.draftFieldLabel}>Subject: </Text>
-                  {String(action.subject)}
-                </Text>
-                <Text style={styles.draftBody}>{String(action.body)}</Text>
-              </TouchableOpacity>
-            );
-          })}
+          {drafts.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => (
+            <DraftCard key={i} action={action} />
+          ))}
 
           {/* Drive file cards */}
           {driveFiles.length > 0 && (
@@ -493,6 +527,27 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     marginTop: 6,
     lineHeight: Typography.lineHeightBase,
+  },
+  draftSendBtn: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.info,
+    borderRadius: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+  },
+  draftSendBtnDisabled: {
+    opacity: 0.5,
+  },
+  draftSendBtnText: {
+    color: '#fff',
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+  },
+  draftSendError: {
+    marginTop: 6,
+    fontSize: Typography.sm,
+    color: Colors.error,
   },
   driveSection: {
     marginTop: 12,

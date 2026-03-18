@@ -75,6 +75,26 @@ export async function fetchImportantEmails(passedUserId?: string): Promise<Brief
   }
 }
 
+// ─── Send an email via Gmail API ─────────────────────────────────────────────
+
+export async function sendEmail(opts: {
+  to: string;
+  subject: string;
+  body: string;
+}): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) return { success: false, error: 'Not configured' };
+
+  try {
+    const { data, error } = await supabase.functions.invoke('send-email', {
+      body: opts,
+    });
+    if (error) return { success: false, error: error.message ?? 'Send failed' };
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
 // ─── Search emails by person name ────────────────────────────────────────────
 
 export async function fetchEmailsFromPerson(name: string, userId: string): Promise<{
