@@ -88,10 +88,17 @@ export async function hasApiKey(): Promise<boolean> {
 
 function buildSystemPrompt(language: 'en' | 'fr', briefItems: BriefItem[]): string {
   const now = new Date();
-  const todayStr = now.toLocaleDateString('en-CA', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-  });
-  const todayISO = now.toISOString().split('T')[0]; // e.g. 2026-03-18
+  const todayISO = now.toISOString().split('T')[0];
+
+  // Build the next 7 days so Claude never miscalculates day names
+  const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const upcomingDays = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(now);
+    d.setDate(now.getDate() + i);
+    const iso = d.toISOString().split('T')[0];
+    const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : dayNames[d.getDay()];
+    return `${label} = ${iso}`;
+  }).join(', ');
   const languageNote =
     language === 'fr'
       ? 'Robert speaks French. Respond in Canadian French.'
@@ -104,7 +111,7 @@ function buildSystemPrompt(language: 'en' | 'fr', briefItems: BriefItem[]): stri
     : '## Today\'s brief\n- Nothing flagged today.';
 
   return `
-Today is ${todayStr} (${todayISO}). Use this date for all scheduling — never guess the year.
+Today is ${todayISO}. Upcoming days: ${upcomingDays}. Always use these exact dates — never guess.
 
 You are Naavi, a life orchestration companion for Robert, 68, Ottawa.
 
