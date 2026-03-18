@@ -46,6 +46,8 @@ export async function isCalendarConnected(): Promise<boolean> {
 
 export async function connectGoogleCalendar(): Promise<void> {
   if (!supabase) return;
+  // Mark that we intentionally started an OAuth flow — captureAndStoreGoogleToken checks this
+  if (typeof sessionStorage !== 'undefined') sessionStorage.setItem('naavi_google_oauth_pending', '1');
   await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
@@ -70,14 +72,19 @@ export async function disconnectGoogleCalendar(): Promise<void> {
   // Only remove the stored Google token — do NOT sign Robert out of Supabase.
   // Signing out clears the entire session and breaks all DB queries until reconnect.
   const { data: { session } } = await supabase.auth.getSession();
+  console.log('[Calendar] Disconnecting — session user:', session?.user?.id ?? 'none');
   if (session?.user) {
-    await supabase
+    const { error } = await supabase
       .from('user_tokens')
       .delete()
       .eq('user_id', session.user.id)
       .eq('provider', 'google');
+    if (error) console.error('[Calendar] Disconnect delete error:', error.message, error.code);
+    else console.log('[Calendar] Token deleted successfully');
   }
   markCalendarDisconnected();
+  // Clear the OAuth pending flag so captureAndStoreGoogleToken won't re-store on next load
+  if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem('naavi_google_oauth_pending');
 }
 
 // ─── Token capture — called on auth state change after OAuth ──────────────────
@@ -89,6 +96,12 @@ export async function disconnectGoogleCalendar(): Promise<void> {
  */
 export async function captureAndStoreGoogleToken(): Promise<void> {
   if (!supabase) return;
+
+  // Only capture token after an intentional OAuth connect — not on every page load
+  if (typeof sessionStorage !== 'undefined' && !sessionStorage.getItem('naavi_google_oauth_pending')) {
+    console.log('[Calendar] Skipping token capture — no pending OAuth flow');
+    return;
+  }
 
   const { data: { session } } = await supabase.auth.getSession();
   const refreshToken = session?.provider_refresh_token;
@@ -117,6 +130,7 @@ export async function captureAndStoreGoogleToken(): Promise<void> {
     }
 
     markCalendarConnected();
+    if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem('naavi_google_oauth_pending');
     console.log('[Calendar] Token stored. Triggering first sync...');
 
     // Trigger an immediate sync so calendar data is available right away
