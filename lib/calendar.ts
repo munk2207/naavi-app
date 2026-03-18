@@ -52,16 +52,10 @@ export async function connectGoogleCalendar(): Promise<void> {
     provider: 'google',
     options: {
       redirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+      scopes: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly',
       queryParams: {
         access_type: 'offline',
         prompt: 'consent',
-        scope: [
-          'openid',
-          'email',
-          'profile',
-          'https://www.googleapis.com/auth/calendar.readonly',
-          'https://www.googleapis.com/auth/gmail.readonly',
-        ].join(' '),
       },
     },
   });
