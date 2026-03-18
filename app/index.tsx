@@ -53,8 +53,18 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
   async function handleSendEmail() {
     setSending(true);
     setSendError(null);
+
+    let to = String(action.to ?? '').trim();
+
+    // If no email address, ask for one
+    if (!to.includes('@') && typeof window !== 'undefined') {
+      const entered = window.prompt(`Enter email address for ${to || 'recipient'}:`);
+      if (!entered?.trim()) { setSending(false); return; }
+      to = entered.trim();
+    }
+
     const result = await sendEmail({
-      to:      String(action.to      ?? ''),
+      to,
       subject: String(action.subject ?? ''),
       body:    String(action.body    ?? ''),
     });
