@@ -250,26 +250,22 @@ export default function HomeScreen() {
                   <TouchableOpacity
                     style={styles.driveSendBtn}
                     onPress={async () => {
-                      Alert.prompt(
-                        'Send as attachment',
-                        `Send "${file.name}" to:`,
-                        async (to) => {
-                          if (!to?.trim()) return;
-                          const result = await sendDriveFileAsEmail({
-                            fileId: file.id,
-                            fileName: file.name,
-                            mimeType: file.mimeType,
-                            to: to.trim(),
-                          });
-                          Alert.alert(
-                            result.success ? 'Sent' : 'Failed',
-                            result.success
-                              ? `"${file.name}" sent to ${to.trim()}.`
-                              : result.error ?? 'Could not send the file.'
-                          );
-                        },
-                        'plain-text'
-                      );
+                      const to = typeof window !== 'undefined'
+                        ? window.prompt(`Send "${file.name}" to (enter email address):`)
+                        : null;
+                      if (!to?.trim()) return;
+                      const result = await sendDriveFileAsEmail({
+                        fileId: file.id,
+                        fileName: file.name,
+                        mimeType: file.mimeType,
+                        to: to.trim(),
+                      });
+                      if (typeof window !== 'undefined') {
+                        window.alert(result.success
+                          ? `"${file.name}" sent to ${to.trim()}.`
+                          : `Failed: ${result.error ?? 'Could not send the file.'}`
+                        );
+                      }
                     }}
                     accessibilityLabel={`Send ${file.name} as email attachment`}
                   >
