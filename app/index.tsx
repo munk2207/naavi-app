@@ -29,6 +29,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useOrchestrator } from '@/hooks/useOrchestrator';
 import { useVoice } from '@/hooks/useVoice';
+import { useWhisperMemo } from '@/hooks/useWhisperMemo';
 import { VoiceButton } from '@/components/VoiceButton';
 import { BriefCard } from '@/components/BriefCard';
 import { ConversationBubble } from '@/components/ConversationBubble';
@@ -182,6 +183,7 @@ export default function HomeScreen() {
 
   const { status, history, drafts, createdEvents, driveFiles, error, send } = useOrchestrator('en', brief);
   const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
+  const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
 
   function getGreeting(): string {
     const hour = new Date().getHours();
@@ -389,8 +391,32 @@ export default function HomeScreen() {
           ) : null}
         </ScrollView>
 
+        {/* Memo error */}
+        {memoError ? (
+          <View style={styles.statusRow}>
+            <Text style={styles.errorText}>{memoError}</Text>
+          </View>
+        ) : null}
+
         {/* Input bar */}
         <View style={styles.inputBar}>
+          {/* Whisper memo button */}
+          {memoSupported && (
+            <TouchableOpacity
+              style={[styles.memoBtn, memoState === 'recording' && styles.memoBtnRecording]}
+              onPressIn={startRecording}
+              onPressOut={() => stopRecording(async (transcript) => {
+                if (transcript.trim()) await send(transcript);
+              })}
+              disabled={memoState === 'transcribing' || status === 'thinking'}
+              accessibilityLabel="Hold to record voice memo"
+            >
+              <Text style={styles.memoBtnText}>
+                {memoState === 'recording' ? '⏹' : memoState === 'transcribing' ? '…' : '🎙'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
           <TextInput
             style={styles.input}
             value={inputText}
@@ -638,6 +664,23 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: Typography.sm,
     fontWeight: Typography.semibold,
+  },
+  memoBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: Colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  memoBtnRecording: {
+    backgroundColor: '#FEE2E2',
+    borderColor: '#EF4444',
+  },
+  memoBtnText: {
+    fontSize: 18,
   },
   inputBar: {
     flexDirection: 'row',
