@@ -38,6 +38,7 @@ import { Typography } from '@/constants/Typography';
 import type { BriefItem } from '@/lib/naavi-client';
 import { fetchOttawaWeather } from '@/lib/weather';
 import { sendDriveFileAsEmail } from '@/lib/drive';
+import { lookupContact } from '@/lib/contacts';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { fetchImportantEmails, triggerGmailSync, sendEmail } from '@/lib/gmail';
 import { supabase } from '@/lib/supabase';
@@ -50,6 +51,17 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [resolvedEmail, setResolvedEmail] = useState<string | null>(null);
+
+  // Auto-lookup email on mount if to field has no @
+  React.useEffect(() => {
+    const to = String(action.to ?? '').trim();
+    if (!to.includes('@')) {
+      lookupContact(to).then(contact => {
+        if (contact?.email) setResolvedEmail(contact.email);
+      });
+    }
+  }, [action.to]);
 
   async function handleSendEmail() {
     setSending(true);
@@ -57,11 +69,16 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
 
     let to = String(action.to ?? '').trim();
 
-    // If no email address, ask for one
-    if (!to.includes('@') && typeof window !== 'undefined') {
-      const entered = window.prompt(`Enter email address for ${to || 'recipient'}:`);
-      if (!entered?.trim()) { setSending(false); return; }
-      to = entered.trim();
+    // If no email address, try Google Contacts first
+    if (!to.includes('@')) {
+      const contact = await lookupContact(to);
+      if (contact?.email) {
+        to = contact.email;
+      } else if (typeof window !== 'undefined') {
+        const entered = window.prompt(`No email found for ${to}. Enter email address:`);
+        if (!entered?.trim()) { setSending(false); return; }
+        to = entered.trim();
+      }
     }
 
     const result = await sendEmail({
@@ -84,7 +101,10 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
       </Text>
       <Text style={styles.draftField}>
         <Text style={styles.draftFieldLabel}>To: </Text>
-        {String(action.to ?? '')}
+        {resolvedEmail ?? String(action.to ?? '')}
+        {resolvedEmail && !String(action.to ?? '').includes('@')
+          ? <Text style={styles.contactResolved}> (from Contacts)</Text>
+          : null}
       </Text>
       <Text style={styles.draftField}>
         <Text style={styles.draftFieldLabel}>Subject: </Text>
@@ -657,6 +677,11 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     marginTop: 6,
     lineHeight: Typography.lineHeightBase,
+  },
+  contactResolved: {
+    fontSize: Typography.sm,
+    color: Colors.success,
+    fontStyle: 'italic',
   },
   draftSendBtn: {
     marginTop: 10,
