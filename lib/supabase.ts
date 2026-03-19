@@ -55,7 +55,13 @@ export async function saveContact(contact: {
   relationship: string;
 }): Promise<void> {
   if (!supabase) return;
-  const { error } = await supabase.from('contacts').insert(contact);
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) {
+    console.error('[Supabase] Cannot save contact — no user session');
+    return;
+  }
+  const { error } = await supabase.from('contacts').insert({ ...contact, user_id: userId });
   if (error) console.error('[Supabase] Failed to save contact:', error.message);
   else console.log('[Supabase] Contact saved:', contact.name);
 }
