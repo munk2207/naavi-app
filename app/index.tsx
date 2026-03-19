@@ -48,41 +48,61 @@ import { supabase } from '@/lib/supabase';
 
 // ─── Integrations data ────────────────────────────────────────────────────────
 
-const INTEGRATIONS = [
+const INTEGRATION_CATEGORIES = [
   {
-    icon: '🤖',
-    name: 'Naavi AI',
-    description: 'Claude-powered assistant. Robert speaks or types naturally — Naavi understands intent and takes action without any app switching.',
+    category: 'AI Core',
+    items: [
+      {
+        icon: '🤖',
+        name: 'Naavi AI',
+        description: 'Claude-powered assistant. Robert speaks or types naturally — Naavi understands intent and takes action without any app switching.',
+      },
+      {
+        icon: '🎙',
+        name: 'Whisper Voice',
+        description: 'Tap the red button, speak, release. OpenAI Whisper transcribes the audio and Naavi responds. Enables fully hands-free interaction.',
+      },
+    ],
   },
   {
-    icon: '📅',
-    name: 'Google Calendar',
-    description: 'Reads upcoming events into the morning brief. Robert can create events by voice ("schedule a meeting with Sarah on Friday at 2pm") — automatically added to Google Calendar.',
+    category: 'Email & Contacts',
+    items: [
+      {
+        icon: '✉️',
+        name: 'Gmail',
+        description: 'Surfaces important unread emails in the brief. Robert can send emails by voice ("send John a message saying I\'ll be late") — draft appears for review, one tap to send.',
+      },
+      {
+        icon: '👤',
+        name: 'Google Contacts',
+        description: 'Automatically resolves contact names to email addresses. Robert says a name — Naavi finds the email. Unknown contacts are saved for future use.',
+      },
+    ],
   },
   {
-    icon: '✉️',
-    name: 'Gmail',
-    description: 'Surfaces important unread emails in the brief. Robert can send emails by voice ("send John a message saying I\'ll be late") — draft appears for review, one tap to send.',
+    category: 'Calendar & Navigation',
+    items: [
+      {
+        icon: '📅',
+        name: 'Google Calendar',
+        description: 'Reads upcoming events into the morning brief. Robert can create events by voice ("schedule a meeting with Sarah on Friday at 2pm") — automatically added to Google Calendar.',
+      },
+      {
+        icon: '🗺️',
+        name: 'Google Maps',
+        description: 'Shows driving time and leave-by time for meetings with a location. A banner automatically appears when it\'s time to leave — tap to open Google Maps navigation.',
+      },
+    ],
   },
   {
-    icon: '👤',
-    name: 'Google Contacts',
-    description: 'Automatically resolves contact names to email addresses. Robert says a name — Naavi finds the email. Unknown contacts are saved for future use.',
-  },
-  {
-    icon: '📁',
-    name: 'Google Drive',
-    description: 'Search documents by voice. Save voice notes or text directly as Google Docs. Send Drive files as email attachments — all without opening Drive.',
-  },
-  {
-    icon: '🎙',
-    name: 'Whisper Voice Memos',
-    description: 'Tap the red button, speak, release. OpenAI Whisper transcribes the audio and Naavi responds. Enables fully hands-free interaction.',
-  },
-  {
-    icon: '🗺️',
-    name: 'Google Maps',
-    description: 'Shows driving time and leave-by time for meetings with a location. A banner automatically appears when it\'s time to leave — tap to open Google Maps navigation.',
+    category: 'Files & Notes',
+    items: [
+      {
+        icon: '📁',
+        name: 'Google Drive',
+        description: 'Search documents by voice. Save voice notes or text directly as Google Docs. Send Drive files as email attachments — all without opening Drive.',
+      },
+    ],
   },
 ];
 
@@ -98,13 +118,18 @@ function IntegrationsModal({ visible, onClose }: { visible: boolean; onClose: ()
             </TouchableOpacity>
           </View>
           <ScrollView showsVerticalScrollIndicator={false}>
-            {INTEGRATIONS.map(int => (
-              <View key={int.name} style={intStyles.card}>
-                <Text style={intStyles.cardIcon}>{int.icon}</Text>
-                <View style={intStyles.cardBody}>
-                  <Text style={intStyles.cardName}>{int.name}</Text>
-                  <Text style={intStyles.cardDesc}>{int.description}</Text>
-                </View>
+            {INTEGRATION_CATEGORIES.map(group => (
+              <View key={group.category}>
+                <Text style={intStyles.categoryLabel}>{group.category}</Text>
+                {group.items.map(int => (
+                  <View key={int.name} style={intStyles.card}>
+                    <Text style={intStyles.cardIcon}>{int.icon}</Text>
+                    <View style={intStyles.cardBody}>
+                      <Text style={intStyles.cardName}>{int.name}</Text>
+                      <Text style={intStyles.cardDesc}>{int.description}</Text>
+                    </View>
+                  </View>
+                ))}
               </View>
             ))}
             <View style={{ height: 32 }} />
@@ -167,6 +192,15 @@ const intStyles = StyleSheet.create({
   },
   cardBody: {
     flex: 1,
+  },
+  categoryLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1a5c35',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginTop: 16,
+    marginBottom: 8,
   },
   cardName: {
     fontSize: 15,
