@@ -552,7 +552,7 @@ export default function HomeScreen() {
               ].map(({ key, label }) => {
                 const items = brief.filter(i => i.category === key);
                 if (items.length === 0) return null;
-                const collapsed = collapsedGroups[key] ?? false;
+                const collapsed = collapsedGroups[key] ?? true;
                 return (
                   <View key={key} style={styles.briefGroup}>
                     <TouchableOpacity
@@ -921,10 +921,10 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   briefGroupArrow: {
-    fontSize: 22,
-    fontWeight: '400',
+    fontSize: 28,
+    fontWeight: '300',
     color: '#1a5c35',
-    lineHeight: 24,
+    lineHeight: 28,
   },
   briefSection: {
     marginBottom: 16,
