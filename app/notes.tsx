@@ -1,7 +1,7 @@
 /**
  * Notes screen — repository for all notes Robert has created:
  * - 🧠 Memory notes (knowledge_fragments saved via REMEMBER)
- * - 📁 Drive notes (Google Docs saved via SAVE_TO_DRIVE)
+ * - 📁 Drive notes (naavi_notes table + Drive search for older docs)
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -14,9 +14,11 @@ import {
   ActivityIndicator,
   Linking,
   RefreshControl,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '@/lib/supabase';
+import { searchDriveFiles, type DriveFile } from '@/lib/drive';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 
@@ -46,6 +48,11 @@ export default function NotesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'memory' | 'drive'>('memory');
+
+  // Drive search state
+  const [driveQuery, setDriveQuery] = useState('');
+  const [driveSearchResults, setDriveSearchResults] = useState<DriveFile[]>([]);
+  const [driveSearching, setDriveSearching] = useState(false);
 
   const loadNotes = useCallback(async () => {
     if (!supabase) return;
@@ -81,6 +88,15 @@ export default function NotesScreen() {
     setRefreshing(true);
     await loadNotes();
     setRefreshing(false);
+  }
+
+  async function handleDriveSearch() {
+    const q = driveQuery.trim();
+    if (!q) return;
+    setDriveSearching(true);
+    const files = await searchDriveFiles(q);
+    setDriveSearchResults(files);
+    setDriveSearching(false);
   }
 
   function formatDate(iso: string): string {
@@ -161,28 +177,77 @@ export default function NotesScreen() {
           {/* ── Drive notes tab ── */}
           {activeTab === 'drive' && (
             <>
+              {/* Drive search — find older docs saved before this table existed */}
+              <View style={styles.searchRow}>
+                <TextInput
+                  style={styles.searchInput}
+                  value={driveQuery}
+                  onChangeText={setDriveQuery}
+                  placeholder="Search your Google Drive…"
+                  placeholderTextColor={Colors.textMuted}
+                  returnKeyType="search"
+                  onSubmitEditing={handleDriveSearch}
+                />
+                <TouchableOpacity
+                  style={styles.searchBtn}
+                  onPress={handleDriveSearch}
+                  disabled={driveSearching || !driveQuery.trim()}
+                >
+                  {driveSearching
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <Text style={styles.searchBtnText}>Search</Text>}
+                </TouchableOpacity>
+              </View>
+
+              {/* Drive search results */}
+              {driveSearchResults.length > 0 && (
+                <>
+                  <Text style={styles.sectionLabel}>Search Results</Text>
+                  {driveSearchResults.map(file => (
+                    <TouchableOpacity
+                      key={file.id}
+                      style={styles.driveCard}
+                      onPress={() => Linking.openURL(file.webViewLink)}
+                      activeOpacity={0.75}
+                      accessibilityLabel={`Open ${file.name} in Google Drive`}
+                    >
+                      <Text style={styles.driveTitle}>{file.name}</Text>
+                      <Text style={styles.cardDate}>
+                        Modified {new Date(file.modifiedTime).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </Text>
+                      <Text style={styles.driveLink}>Tap to open ↗</Text>
+                    </TouchableOpacity>
+                  ))}
+                  <View style={styles.divider} />
+                </>
+              )}
+
+              {/* Saved notes from naavi_notes table */}
               {driveNotes.length === 0 ? (
                 <Text style={styles.empty}>
-                  No Drive notes yet.{'\n'}Say "save a note called…" to Naavi to create one.
+                  No saved notes yet.{'\n\n'}Notes you create going forward ("save a note called…") will appear here.{'\n\n'}Use the search above to find any older notes in your Google Drive.
                 </Text>
               ) : (
-                driveNotes.map(note => (
-                  <TouchableOpacity
-                    key={note.id}
-                    style={styles.driveCard}
-                    onPress={() => note.web_view_link ? Linking.openURL(note.web_view_link) : undefined}
-                    activeOpacity={note.web_view_link ? 0.75 : 1}
-                    accessibilityLabel={`Open ${note.title} in Google Docs`}
-                  >
-                    <View style={styles.cardHeader}>
-                      <Text style={styles.driveTitle}>{note.title}</Text>
-                    </View>
-                    <Text style={styles.cardDate}>{formatDate(note.created_at)}</Text>
-                    {note.web_view_link && (
-                      <Text style={styles.driveLink}>Tap to open in Google Docs ↗</Text>
-                    )}
-                  </TouchableOpacity>
-                ))
+                <>
+                  <Text style={styles.sectionLabel}>Saved Notes</Text>
+                  {driveNotes.map(note => (
+                    <TouchableOpacity
+                      key={note.id}
+                      style={styles.driveCard}
+                      onPress={() => note.web_view_link ? Linking.openURL(note.web_view_link) : undefined}
+                      activeOpacity={note.web_view_link ? 0.75 : 1}
+                      accessibilityLabel={`Open ${note.title} in Google Docs`}
+                    >
+                      <View style={styles.cardHeader}>
+                        <Text style={styles.driveTitle}>{note.title}</Text>
+                      </View>
+                      <Text style={styles.cardDate}>{formatDate(note.created_at)}</Text>
+                      {note.web_view_link && (
+                        <Text style={styles.driveLink}>Tap to open in Google Docs ↗</Text>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </>
               )}
             </>
           )}
@@ -242,6 +307,48 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 48,
     lineHeight: 24,
+  },
+  sectionLabel: {
+    fontSize: Typography.sm,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: 16,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  searchInput: {
+    flex: 1,
+    backgroundColor: Colors.surfaceAlt,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+  },
+  searchBtn: {
+    backgroundColor: '#4285F4',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    justifyContent: 'center',
+    minWidth: 72,
+    alignItems: 'center',
+  },
+  searchBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: Typography.sm,
   },
   memoryCard: {
     backgroundColor: '#F5F3FF',
