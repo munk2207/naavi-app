@@ -70,6 +70,7 @@ async function enrichWithTravelTime(items: BriefItem[]): Promise<BriefItem[]> {
       detail: item.location
         ? `${item.location} — ${travel.summary}`
         : travel.summary,
+      leaveByMs: travel.leaveByMs,
     };
   }));
 }
@@ -175,6 +176,7 @@ export default function HomeScreen() {
   const [memoTranscript, setMemoTranscript] = useState<string | null>(null);
   const [brief, setBrief] = useState<BriefItem[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [navAlert, setNavAlert] = useState<{ title: string; location: string; startMs: number } | null>(null);
 
   // Load weather immediately (no auth needed)
   useEffect(() => {
@@ -242,6 +244,26 @@ export default function HomeScreen() {
     }).catch(() => {});
   }, [currentUserId]);
 
+  // Navigation alert timer — checks every 30s if it's time to leave
+  useEffect(() => {
+    function checkLeaveTime() {
+      const now = Date.now();
+      for (const item of brief) {
+        if (item.category !== 'calendar' || !item.location || !item.leaveByMs || !item.startISO) continue;
+        const startMs = new Date(item.startISO).getTime();
+        const cutoff = startMs + 60 * 60 * 1000; // show up to 60 min after start
+        if (now >= item.leaveByMs && now <= cutoff) {
+          setNavAlert({ title: item.title, location: item.location, startMs });
+          return;
+        }
+      }
+      setNavAlert(null);
+    }
+    checkLeaveTime();
+    const interval = setInterval(checkLeaveTime, 30_000);
+    return () => clearInterval(interval);
+  }, [brief]);
+
   const { status, history, drafts, createdEvents, savedDocs, driveFiles, error, send } = useOrchestrator('en', brief);
   const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
@@ -295,6 +317,26 @@ export default function HomeScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={90}
       >
+        {/* Navigation alert banner */}
+        {navAlert && (
+          <TouchableOpacity
+            style={[
+              styles.navBanner,
+              Date.now() >= navAlert.startMs ? styles.navBannerLate : styles.navBannerOnTime,
+            ]}
+            onPress={() => {
+              Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(navAlert.location)}`);
+            }}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.navBannerText}>
+              {Date.now() >= navAlert.startMs
+                ? `⚠️ Running late — ${navAlert.title}. Tap to navigate`
+                : `🚗 Time to leave — ${navAlert.title}. Tap to navigate`}
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {/* Settings button */}
         <TouchableOpacity
           style={styles.settingsBtn}
@@ -568,6 +610,24 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  navBanner: {
+    marginHorizontal: 0,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    zIndex: 20,
+  },
+  navBannerOnTime: {
+    backgroundColor: '#1a7f4b',
+  },
+  navBannerLate: {
+    backgroundColor: '#c0392b',
+  },
+  navBannerText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   settingsBtn: {
     position: 'absolute',

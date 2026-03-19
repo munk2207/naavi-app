@@ -67,6 +67,7 @@ export interface BriefItem {
   urgent: boolean;
   startISO?: string;   // for travel time calculation (calendar events)
   location?: string;   // destination for Google Maps
+  leaveByMs?: number;  // epoch ms when Robert should leave
 }
 
 // ─── API key management ───────────────────────────────────────────────────────

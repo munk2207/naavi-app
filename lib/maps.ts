@@ -11,8 +11,9 @@ import { supabase } from './supabase';
 export interface TravelTime {
   durationMinutes: number;
   distanceKm: number;
-  leaveBy: string; // e.g. "9:35 AM"
-  summary: string; // e.g. "🚗 25 min — leave by 9:35 AM"
+  leaveBy: string;   // e.g. "9:35 AM"
+  leaveByMs: number; // epoch ms — for timer comparison
+  summary: string;   // e.g. "🚗 25 min — leave by 9:35 AM"
 }
 
 // ─── Get browser geolocation ──────────────────────────────────────────────────
@@ -66,7 +67,7 @@ export async function fetchTravelTime(
 
     const summary = `🚗 ${durationMinutes} min — leave by ${leaveBy}`;
 
-    return { durationMinutes, distanceKm, leaveBy, summary };
+    return { durationMinutes, distanceKm, leaveBy, leaveByMs, summary };
   } catch {
     return null;
   }
