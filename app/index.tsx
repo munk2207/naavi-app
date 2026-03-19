@@ -102,6 +102,11 @@ const INTEGRATION_CATEGORIES = [
         name: 'Google Drive',
         description: 'Search documents by voice. Save voice notes or text directly as Google Docs. Send Drive files as email attachments — all without opening Drive.',
       },
+      {
+        icon: '🧠',
+        name: 'Knowledge Memory',
+        description: 'Robert can say "remember that…" and Naavi stores it permanently. Facts, preferences, and life context are recalled automatically in future conversations — no need to repeat yourself.',
+      },
     ],
   },
 ];
