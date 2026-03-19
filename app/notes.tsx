@@ -75,6 +75,9 @@ export default function NotesScreen() {
         .limit(100),
     ]);
 
+    if (memRes.error)  console.error('[Notes] knowledge_fragments error:', memRes.error.message);
+    if (driveRes.error) console.error('[Notes] naavi_notes error:', driveRes.error.message);
+
     if (memRes.data)   setMemoryNotes(memRes.data);
     if (driveRes.data) setDriveNotes(driveRes.data);
   }, []);
