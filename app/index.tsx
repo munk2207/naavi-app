@@ -508,24 +508,6 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Integrations info button */}
-        <TouchableOpacity
-          style={styles.infoBtn}
-          onPress={() => setShowIntegrations(true)}
-          accessibilityLabel="View integrations"
-        >
-          <Text style={styles.infoBtnText}>?</Text>
-        </TouchableOpacity>
-
-        {/* Settings button */}
-        <TouchableOpacity
-          style={styles.settingsBtn}
-          onPress={() => router.push('/settings')}
-          accessibilityLabel="Open settings"
-        >
-          <Text style={styles.settingsIcon}>⚙</Text>
-        </TouchableOpacity>
-
         <IntegrationsModal visible={showIntegrations} onClose={() => setShowIntegrations(false)} />
 
         <ScrollView
@@ -534,20 +516,54 @@ export default function HomeScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* Greeting */}
-          <Text style={styles.greeting}>{getGreeting()}</Text>
+          {/* Greeting row with action buttons */}
+          <View style={styles.greetingRow}>
+            <Text style={styles.greeting}>{getGreeting()}</Text>
+            <View style={styles.greetingActions}>
+              <TouchableOpacity
+                style={styles.infoBtn}
+                onPress={() => setShowIntegrations(true)}
+                accessibilityLabel="View integrations"
+              >
+                <Text style={styles.infoBtnText}>?</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.settingsBtn}
+                onPress={() => router.push('/settings')}
+                accessibilityLabel="Open settings"
+              >
+                <Text style={styles.settingsIcon}>⚙</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
-          {/* Morning brief */}
+          {/* Morning brief — grouped by category */}
           {history.length === 0 && (
             <View style={styles.briefSection}>
               <Text style={styles.sectionTitle}>{t('home.briefTitle')}</Text>
-              {brief.map(item => (
-                <BriefCard
-                  key={item.id}
-                  item={item}
-                  onPress={handleBriefItemPress}
-                />
-              ))}
+              {[
+                { key: 'weather',  label: 'Weather' },
+                { key: 'calendar', label: 'Calendar' },
+                { key: 'task',     label: 'Email' },
+                { key: 'social',   label: 'Birthdays' },
+                { key: 'health',   label: 'Health' },
+                { key: 'home',     label: 'Home' },
+              ].map(({ key, label }) => {
+                const items = brief.filter(i => i.category === key);
+                if (items.length === 0) return null;
+                return (
+                  <View key={key} style={styles.briefGroup}>
+                    <Text style={styles.briefGroupLabel}>{label}</Text>
+                    {items.map(item => (
+                      <BriefCard
+                        key={item.id}
+                        item={item}
+                        onPress={handleBriefItemPress}
+                      />
+                    ))}
+                  </View>
+                );
+              })}
             </View>
           )}
 
@@ -811,30 +827,33 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
+  greetingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  greetingActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   infoBtn: {
-    position: 'absolute',
-    top: 12,
-    right: 62,
-    zIndex: 10,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: '#e8f0eb',
     alignItems: 'center',
     justifyContent: 'center',
   },
   infoBtnText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
     color: '#1a5c35',
   },
   settingsBtn: {
-    position: 'absolute',
-    top: 12,
-    right: 16,
-    zIndex: 10,
-    width: Typography.touchTargetIdeal,
-    height: Typography.touchTargetIdeal,
+    width: 38,
+    height: 38,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -854,7 +873,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.xl,
     fontWeight: Typography.bold,
     color: Colors.textPrimary,
-    marginBottom: 20,
+    flex: 1,
   },
   sectionTitle: {
     fontSize: Typography.base,
@@ -863,6 +882,18 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
+  },
+  briefGroup: {
+    marginBottom: 16,
+  },
+  briefGroupLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1a5c35',
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    marginBottom: 6,
+    marginTop: 4,
   },
   briefSection: {
     marginBottom: 16,
