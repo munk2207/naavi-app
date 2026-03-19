@@ -117,6 +117,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const scrollRef = useRef<ScrollView>(null);
   const [inputText, setInputText] = useState('');
+  const [memoTranscript, setMemoTranscript] = useState<string | null>(null);
   const [brief, setBrief] = useState<BriefItem[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
@@ -405,6 +406,13 @@ export default function HomeScreen() {
           ) : null}
         </ScrollView>
 
+        {/* Memo transcript preview */}
+        {memoTranscript ? (
+          <View style={styles.statusRow}>
+            <Text style={styles.memoTranscriptText}>🎙 Heard: "{memoTranscript}"</Text>
+          </View>
+        ) : null}
+
         {/* Memo error */}
         {memoError ? (
           <View style={styles.statusRow}>
@@ -421,7 +429,11 @@ export default function HomeScreen() {
               onPress={() => {
                 if (memoState === 'recording') {
                   stopRecording(async (transcript) => {
-                    if (transcript.trim()) await send(transcript);
+                    if (transcript.trim()) {
+                      setMemoTranscript(transcript);
+                      await send(transcript);
+                      setTimeout(() => setMemoTranscript(null), 5000);
+                    }
                   });
                 } else if (memoState === 'idle') {
                   startRecording();
@@ -661,6 +673,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: Typography.sm,
     fontWeight: Typography.semibold,
+  },
+  memoTranscriptText: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    fontStyle: 'italic',
+    flex: 1,
   },
   draftSendError: {
     marginTop: 6,
