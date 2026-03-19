@@ -39,6 +39,7 @@ import type { BriefItem } from '@/lib/naavi-client';
 import { fetchOttawaWeather } from '@/lib/weather';
 import { sendDriveFileAsEmail } from '@/lib/drive';
 import { lookupContact } from '@/lib/contacts';
+import { saveContact } from '@/lib/supabase';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { fetchImportantEmails, triggerGmailSync, sendEmail } from '@/lib/gmail';
 import { supabase } from '@/lib/supabase';
@@ -78,6 +79,8 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
         const entered = window.prompt(`No email found for ${to}. Enter email address:`);
         if (!entered?.trim()) { setSending(false); return; }
         to = entered.trim();
+        // Save for future lookups
+        await saveContact({ name: String(action.to ?? '').trim(), email: to, phone: '', relationship: 'contact' });
       }
     }
 
