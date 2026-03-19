@@ -12,7 +12,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
 import { sendToNaavi, type NaaviMessage, type NaaviResponse, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
-import { saveContact, saveReminder } from '@/lib/supabase';
+import { saveContact, saveReminder, saveDriveNote } from '@/lib/supabase';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
 import { searchDriveFiles, formatDriveResults, saveToDrive } from '@/lib/drive';
 import { createCalendarEvent } from '@/lib/calendar';
@@ -85,7 +85,9 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             content: String(action.content ?? ''),
           });
           if (result.success) {
-            setSavedDocs(prev => [...prev, { title: String(action.title ?? 'Naavi Note'), webViewLink: result.webViewLink }]);
+            const title = String(action.title ?? 'Naavi Note');
+            setSavedDocs(prev => [...prev, { title, webViewLink: result.webViewLink }]);
+            await saveDriveNote({ title, webViewLink: result.webViewLink });
           } else {
             console.error('[Orchestrator] SAVE_TO_DRIVE failed:', result.error);
           }

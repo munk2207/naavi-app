@@ -31,6 +31,10 @@ export default function RootLayout() {
           name="settings"
           options={{ title: 'Settings', headerShown: true }}
         />
+        <Stack.Screen
+          name="notes"
+          options={{ title: 'My Notes', headerShown: true }}
+        />
       </Stack>
     </SafeAreaProvider>
   );

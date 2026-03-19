@@ -534,6 +534,13 @@ export default function HomeScreen() {
                 <Text style={styles.infoBtnText}>?</Text>
               </TouchableOpacity>
               <TouchableOpacity
+                style={styles.notesBtn}
+                onPress={() => router.push('/notes')}
+                accessibilityLabel="Open notes"
+              >
+                <Text style={styles.notesBtnText}>📋</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
                 style={styles.settingsBtn}
                 onPress={() => router.push('/settings')}
                 accessibilityLabel="Open settings"
@@ -876,6 +883,17 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#1a5c35',
+  },
+  notesBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#EDE9FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notesBtnText: {
+    fontSize: 18,
   },
   settingsBtn: {
     width: 38,

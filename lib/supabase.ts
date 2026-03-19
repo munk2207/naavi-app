@@ -81,3 +81,20 @@ export async function saveReminder(reminder: {
   if (error) console.error('[Supabase] Failed to save reminder:', error.message);
   else console.log('[Supabase] Reminder saved:', reminder.title);
 }
+
+export async function saveDriveNote(note: {
+  title: string;
+  webViewLink?: string;
+}): Promise<void> {
+  if (!supabase) return;
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) return;
+  const { error } = await supabase.from('naavi_notes').insert({
+    user_id: userId,
+    title: note.title,
+    web_view_link: note.webViewLink ?? null,
+  });
+  if (error) console.error('[Supabase] Failed to save drive note:', error.message);
+  else console.log('[Supabase] Drive note saved:', note.title);
+}
