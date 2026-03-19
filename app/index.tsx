@@ -233,10 +233,11 @@ export default function HomeScreen() {
         fetchUpcomingBirthdays(currentUserId),
         fetchImportantEmails(currentUserId),
       ])
-    ).then(([fresh, freshBirthdays, freshEmails]) => {
+    ).then(async ([fresh, freshBirthdays, freshEmails]) => {
+      const freshEnriched = await enrichWithTravelTime(fresh);
       setBrief(prev => {
         const weather = prev.find(i => i.id === 'weather');
-        return [...fresh, ...freshBirthdays, ...freshEmails, ...(weather ? [weather] : [])];
+        return [...freshEnriched, ...freshBirthdays, ...freshEmails, ...(weather ? [weather] : [])];
       });
     }).catch(() => {});
   }, [currentUserId]);
