@@ -272,6 +272,12 @@ export default function HomeScreen() {
   }
 
   function handleBriefItemPress(item: BriefItem) {
+    // Calendar events with a location → open Google Maps navigation
+    if (item.category === 'calendar' && item.location) {
+      const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(item.location)}`;
+      Linking.openURL(url);
+      return;
+    }
     send(`Tell me more about: ${item.title}`);
   }
 
