@@ -59,6 +59,26 @@ export async function sendDriveFileAsEmail(opts: {
   }
 }
 
+// ─── Save a note to Drive as a Google Doc ────────────────────────────────────
+
+export async function saveToDrive(opts: {
+  title: string;
+  content: string;
+}): Promise<{ success: boolean; fileId?: string; webViewLink?: string; error?: string }> {
+  if (!supabase) return { success: false, error: 'Not configured' };
+
+  try {
+    const { data, error } = await supabase.functions.invoke('save-to-drive', {
+      body: opts,
+    });
+    if (error) return { success: false, error: error.message ?? 'Save failed' };
+    if (data?.error) return { success: false, error: String(data.error) };
+    return { success: true, fileId: data?.fileId, webViewLink: data?.webViewLink };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
 // ─── Format Drive results for context injection ────────────────────────────────
 
 export function formatDriveResults(files: DriveFile[], query: string): string {

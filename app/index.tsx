@@ -181,7 +181,7 @@ export default function HomeScreen() {
     }).catch(() => {});
   }, [currentUserId]);
 
-  const { status, history, drafts, createdEvents, driveFiles, error, send } = useOrchestrator('en', brief);
+  const { status, history, drafts, createdEvents, savedDocs, driveFiles, error, send } = useOrchestrator('en', brief);
   const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
 
@@ -322,6 +322,20 @@ export default function HomeScreen() {
               ))}
             </View>
           )}
+
+          {/* Saved to Drive cards */}
+          {savedDocs.map((doc, i) => (
+            <TouchableOpacity
+              key={i}
+              style={styles.savedDocCard}
+              onPress={() => doc.webViewLink ? Linking.openURL(doc.webViewLink) : undefined}
+              accessibilityLabel="Open document in Google Drive"
+            >
+              <Text style={styles.savedDocLabel}>📄 Saved to Google Drive</Text>
+              <Text style={styles.savedDocTitle}>{doc.title}</Text>
+              {doc.webViewLink ? <Text style={styles.eventLink}>Tap to open in Google Docs</Text> : null}
+            </TouchableOpacity>
+          ))}
 
           {/* Calendar event created cards */}
           {createdEvents.map((ev, i) => (
@@ -529,6 +543,28 @@ const styles = StyleSheet.create({
   errorText: {
     color: Colors.error,
     fontStyle: 'normal',
+  },
+  savedDocCard: {
+    marginTop: 12,
+    backgroundColor: '#FFF7ED',
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#F59E0B',
+    padding: 14,
+    gap: 4,
+  },
+  savedDocLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: '#B45309',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  savedDocTitle: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+    marginTop: 2,
   },
   eventCard: {
     marginTop: 12,

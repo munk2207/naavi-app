@@ -14,7 +14,7 @@ import * as Speech from 'expo-speech';
 import { sendToNaavi, type NaaviMessage, type NaaviResponse, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
 import { saveContact, saveReminder } from '@/lib/supabase';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
-import { searchDriveFiles, formatDriveResults } from '@/lib/drive';
+import { searchDriveFiles, formatDriveResults, saveToDrive } from '@/lib/drive';
 import { createCalendarEvent } from '@/lib/calendar';
 
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'error';
@@ -32,6 +32,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const [lastResponse, setLastResponse] = useState<NaaviResponse | null>(null);
   const [drafts, setDrafts] = useState<NaaviAction[]>([]);
   const [createdEvents, setCreatedEvents] = useState<{ summary: string; htmlLink?: string }[]>([]);
+  const [savedDocs, setSavedDocs] = useState<{ title: string; webViewLink?: string }[]>([]);
   const [driveFiles, setDriveFiles] = useState<import('@/lib/drive').DriveFile[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,6 +74,21 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       ]);
 
       setLastResponse(response);
+
+      // Execute SAVE_TO_DRIVE actions
+      for (const action of response.actions) {
+        if (action.type === 'SAVE_TO_DRIVE') {
+          const result = await saveToDrive({
+            title:   String(action.title   ?? 'Naavi Note'),
+            content: String(action.content ?? ''),
+          });
+          if (result.success) {
+            setSavedDocs(prev => [...prev, { title: String(action.title ?? 'Naavi Note'), webViewLink: result.webViewLink }]);
+          } else {
+            console.error('[Orchestrator] SAVE_TO_DRIVE failed:', result.error);
+          }
+        }
+      }
 
       // Execute CREATE_EVENT actions
       for (const action of response.actions) {
@@ -167,12 +183,13 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     setLastResponse(null);
     setDrafts([]);
     setCreatedEvents([]);
+    setSavedDocs([]);
     setDriveFiles([]);
     setError(null);
     setStatus('idle');
   }, []);
 
-  return { status, history, lastResponse, drafts, createdEvents, driveFiles, error, send, clearHistory };
+  return { status, history, lastResponse, drafts, createdEvents, savedDocs, driveFiles, error, send, clearHistory };
 }
 
 // ─── Speech helper ────────────────────────────────────────────────────────────
