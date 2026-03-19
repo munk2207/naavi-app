@@ -79,6 +79,7 @@ export async function fetchImportantEmails(passedUserId?: string): Promise<Brief
 
 export async function sendEmail(opts: {
   to: string;
+  toName?: string;
   subject: string;
   body: string;
 }): Promise<{ success: boolean; error?: string }> {

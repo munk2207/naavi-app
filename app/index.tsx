@@ -84,8 +84,10 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
       }
     }
 
+    const originalName = String(action.to ?? '').trim();
     const result = await sendEmail({
       to,
+      toName: to !== originalName ? originalName : undefined,
       subject: String(action.subject ?? ''),
       body:    String(action.body    ?? ''),
     });
