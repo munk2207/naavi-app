@@ -16,6 +16,7 @@ import { saveContact, saveReminder } from '@/lib/supabase';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
 import { searchDriveFiles, formatDriveResults, saveToDrive } from '@/lib/drive';
 import { createCalendarEvent } from '@/lib/calendar';
+import { ingestNote } from '@/lib/knowledge';
 
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'error';
 
@@ -86,6 +87,18 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             setSavedDocs(prev => [...prev, { title: String(action.title ?? 'Naavi Note'), webViewLink: result.webViewLink }]);
           } else {
             console.error('[Orchestrator] SAVE_TO_DRIVE failed:', result.error);
+          }
+        }
+      }
+
+      // Execute REMEMBER actions — save to knowledge base
+      for (const action of response.actions) {
+        if (action.type === 'REMEMBER') {
+          const text = String(action.text ?? '');
+          if (text) {
+            ingestNote(text, 'stated').then(fragments => {
+              console.log(`[Orchestrator] REMEMBER saved ${fragments.length} fragments`);
+            });
           }
         }
       }

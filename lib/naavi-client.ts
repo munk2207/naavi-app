@@ -48,7 +48,7 @@ export interface NaaviResponse {
 }
 
 export interface NaaviAction {
-  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT' | 'SAVE_TO_DRIVE';
+  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT' | 'SAVE_TO_DRIVE' | 'REMEMBER';
   [key: string]: unknown;
 }
 
@@ -155,6 +155,7 @@ Action formats (copy these exactly):
 - LOG_CONCERN: { "type": "LOG_CONCERN", "category": "health|social|routine", "note": "string", "severity": "low|medium|high" }
 - DRIVE_SEARCH: { "type": "DRIVE_SEARCH", "query": "search term" } — use whenever Robert asks about any file, document, or anything in his Drive
 - SAVE_TO_DRIVE: { "type": "SAVE_TO_DRIVE", "title": "string", "content": "full text to save" } — use when Robert asks to save, note, store, or write anything to Drive. Put all the content in the action, not in speech.
+- REMEMBER: { "type": "REMEMBER", "text": "full text to remember" } — use when Robert says remember, learn, know, keep in mind, or shares personal information he wants Naavi to retain long-term.
 - CREATE_EVENT: { "type": "CREATE_EVENT", "summary": "string", "description": "string", "start": "ISO 8601 datetime", "end": "ISO 8601 datetime", "attendees": ["email1"] } — use whenever Robert schedules a meeting, appointment, or any event. Infer end time as 1 hour after start if not stated. Use America/Toronto timezone. Always include this alongside DRAFT_MESSAGE when the email is about scheduling a meeting.
 
 Example 1 — Robert says "draft an email to Louise saying happy birthday":
@@ -182,6 +183,9 @@ Important: write all email addresses as plain strings — the @ sign does not ne
 
 RULE 6 — SAVE TO DRIVE:
 If Robert uses ANY of these words: save, note, store, write down, keep, record, jot — you MUST include a SAVE_TO_DRIVE action. He does NOT need to mention Drive. "Save a note called X" = SAVE_TO_DRIVE with title X and the content he dictated. Never respond with a question — just save it and confirm.
+
+RULE 7 — REMEMBER:
+If Robert says "remember", "don't forget", "keep in mind", "learn that", or shares personal facts, preferences, or life context he wants retained — you MUST include a REMEMBER action with the full text. This saves to his long-term knowledge base.
 
 RULE 5 — CALENDAR EVENT:
 If Robert mentions scheduling, booking, setting up, or confirming a meeting, call, or appointment — you MUST include a CREATE_EVENT action with the date/time he stated. If he also wants to email someone about it, include both CREATE_EVENT and DRAFT_MESSAGE in the same response.
