@@ -50,7 +50,7 @@ export function useWhisperMemo(): UseWhisperMemoResult {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      recorder.start();
+      recorder.start(250); // collect chunks every 250ms
       mediaRecorderRef.current = recorder;
       setMemoState('recording');
     }).catch((err) => {
@@ -73,6 +73,11 @@ export function useWhisperMemo(): UseWhisperMemoResult {
 
       try {
         const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        console.log('[WhisperMemo] Audio blob size:', audioBlob.size, 'bytes, chunks:', chunksRef.current.length);
+
+        if (audioBlob.size < 1000) {
+          throw new Error('Recording too short — please speak for at least 1 second.');
+        }
 
         // Convert to base64
         const arrayBuffer = await audioBlob.arrayBuffer();
