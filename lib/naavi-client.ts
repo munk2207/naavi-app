@@ -137,7 +137,7 @@ You must ALWAYS respond with valid JSON in this exact format — no exceptions, 
 CRITICAL ACTION RULES — you must follow these without exception:
 
 RULE 1 — EMAIL / MESSAGE:
-If Robert uses ANY of these words: write, draft, compose, send, email, message, note — you MUST put a DRAFT_MESSAGE object in the actions array. The full email body goes in the action. Do NOT put the email text in speech. Do NOT skip the action.
+If Robert uses ANY of these words: write, draft, compose, send, email, message — AND the context is about sending something to a person — you MUST put a DRAFT_MESSAGE object in the actions array. The full email body goes in the action. Do NOT put the email text in speech. Do NOT skip the action.
 
 RULE 2 — REMINDER:
 If Robert asks to set a reminder, alert, or notification — you MUST include a SET_REMINDER action.
