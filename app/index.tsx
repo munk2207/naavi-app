@@ -22,6 +22,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Linking,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -44,6 +45,141 @@ import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken
 import { fetchImportantEmails, triggerGmailSync, sendEmail } from '@/lib/gmail';
 import { fetchTravelTime } from '@/lib/maps';
 import { supabase } from '@/lib/supabase';
+
+// ─── Integrations data ────────────────────────────────────────────────────────
+
+const INTEGRATIONS = [
+  {
+    icon: '🤖',
+    name: 'Naavi AI',
+    description: 'Claude-powered assistant. Robert speaks or types naturally — Naavi understands intent and takes action without any app switching.',
+  },
+  {
+    icon: '📅',
+    name: 'Google Calendar',
+    description: 'Reads upcoming events into the morning brief. Robert can create events by voice ("schedule a meeting with Sarah on Friday at 2pm") — automatically added to Google Calendar.',
+  },
+  {
+    icon: '✉️',
+    name: 'Gmail',
+    description: 'Surfaces important unread emails in the brief. Robert can send emails by voice ("send John a message saying I\'ll be late") — draft appears for review, one tap to send.',
+  },
+  {
+    icon: '👤',
+    name: 'Google Contacts',
+    description: 'Automatically resolves contact names to email addresses. Robert says a name — Naavi finds the email. Unknown contacts are saved for future use.',
+  },
+  {
+    icon: '📁',
+    name: 'Google Drive',
+    description: 'Search documents by voice. Save voice notes or text directly as Google Docs. Send Drive files as email attachments — all without opening Drive.',
+  },
+  {
+    icon: '🎙',
+    name: 'Whisper Voice Memos',
+    description: 'Tap the red button, speak, release. OpenAI Whisper transcribes the audio and Naavi responds. Enables fully hands-free interaction.',
+  },
+  {
+    icon: '🗺️',
+    name: 'Google Maps',
+    description: 'Shows driving time and leave-by time for meetings with a location. A banner automatically appears when it\'s time to leave — tap to open Google Maps navigation.',
+  },
+];
+
+function IntegrationsModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={intStyles.overlay}>
+        <View style={intStyles.sheet}>
+          <View style={intStyles.header}>
+            <Text style={intStyles.title}>Naavi Integrations</Text>
+            <TouchableOpacity onPress={onClose} style={intStyles.closeBtn}>
+              <Text style={intStyles.closeText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {INTEGRATIONS.map(int => (
+              <View key={int.name} style={intStyles.card}>
+                <Text style={intStyles.cardIcon}>{int.icon}</Text>
+                <View style={intStyles.cardBody}>
+                  <Text style={intStyles.cardName}>{int.name}</Text>
+                  <Text style={intStyles.cardDesc}>{int.description}</Text>
+                </View>
+              </View>
+            ))}
+            <View style={{ height: 32 }} />
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const intStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    maxHeight: '88%',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1a3a2a',
+  },
+  closeBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeText: {
+    fontSize: 18,
+    color: '#666',
+  },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#f5f9f7',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#d4e8dd',
+  },
+  cardIcon: {
+    fontSize: 26,
+    marginRight: 14,
+    marginTop: 2,
+  },
+  cardBody: {
+    flex: 1,
+  },
+  cardName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1a3a2a',
+    marginBottom: 4,
+  },
+  cardDesc: {
+    fontSize: 13,
+    color: '#444',
+    lineHeight: 19,
+  },
+});
 
 // ─── Enrich calendar events with travel time ──────────────────────────────────
 
@@ -177,6 +313,7 @@ export default function HomeScreen() {
   const [brief, setBrief] = useState<BriefItem[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [navAlert, setNavAlert] = useState<{ title: string; location: string; startMs: number } | null>(null);
+  const [showIntegrations, setShowIntegrations] = useState(false);
 
   // Load weather immediately (no auth needed)
   useEffect(() => {
@@ -337,6 +474,15 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
+        {/* Integrations info button */}
+        <TouchableOpacity
+          style={styles.infoBtn}
+          onPress={() => setShowIntegrations(true)}
+          accessibilityLabel="View integrations"
+        >
+          <Text style={styles.infoBtnText}>?</Text>
+        </TouchableOpacity>
+
         {/* Settings button */}
         <TouchableOpacity
           style={styles.settingsBtn}
@@ -345,6 +491,8 @@ export default function HomeScreen() {
         >
           <Text style={styles.settingsIcon}>⚙</Text>
         </TouchableOpacity>
+
+        <IntegrationsModal visible={showIntegrations} onClose={() => setShowIntegrations(false)} />
 
         <ScrollView
           ref={scrollRef}
@@ -628,6 +776,23 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  infoBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 62,
+    zIndex: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#e8f0eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoBtnText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1a5c35',
   },
   settingsBtn: {
     position: 'absolute',
