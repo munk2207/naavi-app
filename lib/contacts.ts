@@ -26,12 +26,12 @@ export async function lookupContact(name: string): Promise<Contact | null> {
   try {
     const { data } = await supabase
       .from('contacts')
-      .select('name, email, phone')
+      .select('name, email')
       .ilike('name', `%${nameLower}%`)
       .limit(1);
 
     if (data && data.length > 0 && data[0].email) {
-      return { name: data[0].name, email: data[0].email, phone: data[0].phone ?? null };
+      return { name: data[0].name, email: data[0].email, phone: null };
     }
   } catch { /* continue */ }
 
