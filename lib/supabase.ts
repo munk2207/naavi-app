@@ -51,8 +51,8 @@ export async function callNaaviEdgeFunction(
 export async function saveContact(contact: {
   name: string;
   email: string;
-  phone: string;
-  relationship: string;
+  phone?: string;
+  relationship?: string;
 }): Promise<void> {
   if (!supabase) return;
   const { data: { session } } = await supabase.auth.getSession();
@@ -61,7 +61,12 @@ export async function saveContact(contact: {
     console.error('[Supabase] Cannot save contact — no user session');
     return;
   }
-  const { error } = await supabase.from('contacts').insert({ ...contact, user_id: userId });
+  // Only insert columns that definitely exist in the contacts table
+  const { error } = await supabase.from('contacts').insert({
+    user_id: userId,
+    name: contact.name,
+    email: contact.email,
+  });
   if (error) console.error('[Supabase] Failed to save contact:', error.message);
   else console.log('[Supabase] Contact saved:', contact.name);
 }
