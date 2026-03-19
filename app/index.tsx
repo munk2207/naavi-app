@@ -42,7 +42,37 @@ import { lookupContact } from '@/lib/contacts';
 import { saveContact } from '@/lib/supabase';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { fetchImportantEmails, triggerGmailSync, sendEmail } from '@/lib/gmail';
+import { fetchTravelTime } from '@/lib/maps';
 import { supabase } from '@/lib/supabase';
+
+// ─── Enrich calendar events with travel time ──────────────────────────────────
+
+async function enrichWithTravelTime(items: BriefItem[]): Promise<BriefItem[]> {
+  const now = Date.now();
+  const eightHours = 8 * 60 * 60 * 1000;
+
+  return Promise.all(items.map(async item => {
+    if (
+      item.category !== 'calendar' ||
+      !item.location ||
+      !item.startISO
+    ) return item;
+
+    const startMs = new Date(item.startISO).getTime();
+    // Only fetch travel time for events starting within the next 8 hours
+    if (startMs < now || startMs - now > eightHours) return item;
+
+    const travel = await fetchTravelTime(item.location, item.startISO);
+    if (!travel) return item;
+
+    return {
+      ...item,
+      detail: item.location
+        ? `${item.location} — ${travel.summary}`
+        : travel.summary,
+    };
+  }));
+}
 
 // No hardcoded brief — all items come from real data (calendar, weather)
 
@@ -184,11 +214,15 @@ export default function HomeScreen() {
       fetchUpcomingEvents(7, currentUserId),
       fetchUpcomingBirthdays(currentUserId),
       fetchImportantEmails(currentUserId),
-    ]).then(([calendarItems, birthdayItems, emailItems]) => {
+    ]).then(async ([calendarItems, birthdayItems, emailItems]) => {
       console.log('[Home] calendar:', calendarItems.length, 'birthdays:', birthdayItems.length, 'emails:', emailItems.length);
+
+      // Enrich calendar events that have a location with travel time
+      const enriched = await enrichWithTravelTime(calendarItems);
+
       setBrief(prev => {
         const weather = prev.find(i => i.id === 'weather');
-        return [...calendarItems, ...birthdayItems, ...emailItems, ...(weather ? [weather] : [])];
+        return [...enriched, ...birthdayItems, ...emailItems, ...(weather ? [weather] : [])];
       });
     });
 

@@ -214,6 +214,8 @@ function mapEventToBriefItem(event: {
     title: `${prefix}${event.title} at ${timeLabel}`,
     detail: event.location || event.description || '',
     urgent,
+    startISO: startRaw || undefined,
+    location: event.location || undefined,
   };
 }
 

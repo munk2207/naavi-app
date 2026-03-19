@@ -65,6 +65,8 @@ export interface BriefItem {
   title: string;
   detail?: string;
   urgent: boolean;
+  startISO?: string;   // for travel time calculation (calendar events)
+  location?: string;   // destination for Google Maps
 }
 
 // ─── API key management ───────────────────────────────────────────────────────
