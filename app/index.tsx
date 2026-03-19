@@ -106,9 +106,9 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
       </Text>
       <Text style={styles.draftField}>
         <Text style={styles.draftFieldLabel}>To: </Text>
-        {resolvedEmail ?? String(action.to ?? '')}
+        {String(action.to ?? '')}
         {resolvedEmail && !String(action.to ?? '').includes('@')
-          ? <Text style={styles.contactResolved}> (from Contacts)</Text>
+          ? <Text style={styles.contactResolved}> ({resolvedEmail})</Text>
           : null}
       </Text>
       <Text style={styles.draftField}>
