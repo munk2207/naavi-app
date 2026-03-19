@@ -34,6 +34,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const [drafts, setDrafts] = useState<NaaviAction[]>([]);
   const [createdEvents, setCreatedEvents] = useState<{ summary: string; htmlLink?: string }[]>([]);
   const [savedDocs, setSavedDocs] = useState<{ title: string; webViewLink?: string }[]>([]);
+  const [rememberedItems, setRememberedItems] = useState<{ text: string; count: number }[]>([]);
   const [driveFiles, setDriveFiles] = useState<import('@/lib/drive').DriveFile[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,6 +99,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           if (text) {
             ingestNote(text, 'stated').then(fragments => {
               console.log(`[Orchestrator] REMEMBER saved ${fragments.length} fragments`);
+              setRememberedItems(prev => [...prev, { text, count: fragments.length }]);
             });
           }
         }
@@ -197,12 +199,13 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     setDrafts([]);
     setCreatedEvents([]);
     setSavedDocs([]);
+    setRememberedItems([]);
     setDriveFiles([]);
     setError(null);
     setStatus('idle');
   }, []);
 
-  return { status, history, lastResponse, drafts, createdEvents, savedDocs, driveFiles, error, send, clearHistory };
+  return { status, history, lastResponse, drafts, createdEvents, savedDocs, driveFiles, rememberedItems, error, send, clearHistory };
 }
 
 // ─── Speech helper ────────────────────────────────────────────────────────────

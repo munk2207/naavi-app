@@ -436,7 +436,7 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [brief]);
 
-  const { status, history, drafts, createdEvents, savedDocs, driveFiles, error, send } = useOrchestrator('en', brief);
+  const { status, history, drafts, createdEvents, savedDocs, driveFiles, rememberedItems, error, send } = useOrchestrator('en', brief);
   const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
 
@@ -666,6 +666,17 @@ export default function HomeScreen() {
               <Text style={styles.eventTitle}>{ev.summary}</Text>
               {ev.htmlLink ? <Text style={styles.eventLink}>Already saved — tap to view in Google Calendar</Text> : null}
             </TouchableOpacity>
+          ))}
+
+          {/* Remembered / saved to knowledge base cards */}
+          {rememberedItems.map((item, i) => (
+            <View key={i} style={styles.memoryCard}>
+              <Text style={styles.memoryLabel}>🧠 Saved to memory</Text>
+              <Text style={styles.memoryText}>{item.text}</Text>
+              {item.count > 0 && (
+                <Text style={styles.memoryMeta}>{item.count} fragment{item.count !== 1 ? 's' : ''} stored</Text>
+              )}
+            </View>
           ))}
 
           {/* Add contact card */}
@@ -1013,6 +1024,34 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
+  },
+  memoryCard: {
+    marginTop: 12,
+    backgroundColor: '#F5F3FF',
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#7C3AED',
+    padding: 14,
+    gap: 4,
+  },
+  memoryLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: '#7C3AED',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 4,
+  },
+  memoryText: {
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+    lineHeight: Typography.lineHeightBase,
+  },
+  memoryMeta: {
+    fontSize: Typography.sm,
+    color: '#9333EA',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   draftCard: {
     marginTop: 12,
