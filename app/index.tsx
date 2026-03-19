@@ -348,6 +348,7 @@ export default function HomeScreen() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [navAlert, setNavAlert] = useState<{ title: string; location: string; startMs: number } | null>(null);
   const [showIntegrations, setShowIntegrations] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   // Load weather immediately (no auth needed)
   useEffect(() => {
@@ -551,10 +552,19 @@ export default function HomeScreen() {
               ].map(({ key, label }) => {
                 const items = brief.filter(i => i.category === key);
                 if (items.length === 0) return null;
+                const collapsed = collapsedGroups[key] ?? false;
                 return (
                   <View key={key} style={styles.briefGroup}>
-                    <Text style={styles.briefGroupLabel}>{label}</Text>
-                    {items.map(item => (
+                    <TouchableOpacity
+                      style={styles.briefGroupHeader}
+                      onPress={() => setCollapsedGroups(prev => ({ ...prev, [key]: !collapsed }))}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.briefGroupLabel}>{label}</Text>
+                      <Text style={styles.briefGroupCount}>{items.length}</Text>
+                      <Text style={styles.briefGroupArrow}>{collapsed ? '›' : '⌄'}</Text>
+                    </TouchableOpacity>
+                    {!collapsed && items.map(item => (
                       <BriefCard
                         key={item.id}
                         item={item}
@@ -884,7 +894,15 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   briefGroup: {
-    marginBottom: 16,
+    marginBottom: 12,
+  },
+  briefGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#d4e8dd',
+    marginBottom: 6,
   },
   briefGroupLabel: {
     fontSize: 11,
@@ -892,8 +910,18 @@ const styles = StyleSheet.create({
     color: '#1a5c35',
     textTransform: 'uppercase',
     letterSpacing: 1.2,
-    marginBottom: 6,
-    marginTop: 4,
+    flex: 1,
+  },
+  briefGroupCount: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#888',
+    marginRight: 8,
+  },
+  briefGroupArrow: {
+    fontSize: 18,
+    color: '#1a5c35',
+    lineHeight: 20,
   },
   briefSection: {
     marginBottom: 16,
