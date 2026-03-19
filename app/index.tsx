@@ -562,7 +562,7 @@ export default function HomeScreen() {
                     >
                       <Text style={styles.briefGroupLabel}>{label}</Text>
                       <Text style={styles.briefGroupCount}>{items.length}</Text>
-                      <Text style={styles.briefGroupArrow}>{collapsed ? '›' : '⌄'}</Text>
+                      <Text style={styles.briefGroupArrow}>{collapsed ? '+' : '−'}</Text>
                     </TouchableOpacity>
                     {!collapsed && items.map(item => (
                       <BriefCard
@@ -899,29 +899,32 @@ const styles = StyleSheet.create({
   briefGroupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#d4e8dd',
-    marginBottom: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: '#e8f3ed',
+    borderRadius: 10,
+    marginBottom: 8,
   },
   briefGroupLabel: {
-    fontSize: 11,
+    fontSize: 14,
     fontWeight: '700',
     color: '#1a5c35',
     textTransform: 'uppercase',
-    letterSpacing: 1.2,
+    letterSpacing: 1,
     flex: 1,
   },
   briefGroupCount: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: '600',
-    color: '#888',
-    marginRight: 8,
+    color: '#1a5c35',
+    marginRight: 10,
+    opacity: 0.7,
   },
   briefGroupArrow: {
-    fontSize: 18,
+    fontSize: 22,
+    fontWeight: '400',
     color: '#1a5c35',
-    lineHeight: 20,
+    lineHeight: 24,
   },
   briefSection: {
     marginBottom: 16,
