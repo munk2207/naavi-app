@@ -414,16 +414,21 @@ export default function HomeScreen() {
 
         {/* Input bar */}
         <View style={styles.inputBar}>
-          {/* Whisper memo button */}
+          {/* Whisper memo button — tap to start, tap again to stop */}
           {memoSupported && (
             <TouchableOpacity
               style={[styles.memoBtn, memoState === 'recording' && styles.memoBtnRecording]}
-              onPressIn={startRecording}
-              onPressOut={() => stopRecording(async (transcript) => {
-                if (transcript.trim()) await send(transcript);
-              })}
+              onPress={() => {
+                if (memoState === 'recording') {
+                  stopRecording(async (transcript) => {
+                    if (transcript.trim()) await send(transcript);
+                  });
+                } else if (memoState === 'idle') {
+                  startRecording();
+                }
+              }}
               disabled={memoState === 'transcribing' || status === 'thinking'}
-              accessibilityLabel="Hold to record voice memo"
+              accessibilityLabel="Tap to record voice memo, tap again to stop"
             >
               <Text style={styles.memoBtnText}>
                 {memoState === 'recording' ? '⏹' : memoState === 'transcribing' ? '…' : '🎙'}
