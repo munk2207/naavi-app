@@ -17,6 +17,7 @@ import {
   TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { searchDriveFiles, type DriveFile } from '@/lib/drive';
 import { Colors } from '@/constants/Colors';
@@ -43,6 +44,7 @@ interface DriveNote {
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function NotesScreen() {
+  const router = useRouter();
   const [memoryNotes, setMemoryNotes] = useState<MemoryNote[]>([]);
   const [driveNotes, setDriveNotes] = useState<DriveNote[]>([]);
   const [loading, setLoading] = useState(true);
@@ -123,7 +125,16 @@ export default function NotesScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['bottom']}>
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Text style={styles.backText}>← Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Notes</Text>
+        <View style={{ width: 64 }} />
+      </View>
+
       {/* Tab bar */}
       <View style={styles.tabBar}>
         <TouchableOpacity
@@ -268,6 +279,29 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  backBtn: {
+    width: 64,
+  },
+  backText: {
+    fontSize: Typography.base,
+    color: Colors.primary,
+    fontWeight: '600',
+  },
+  headerTitle: {
+    fontSize: Typography.lg,
+    fontWeight: '700',
+    color: Colors.textPrimary,
   },
   center: {
     flex: 1,
