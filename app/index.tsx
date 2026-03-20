@@ -31,9 +31,11 @@ import { useTranslation } from 'react-i18next';
 import { useOrchestrator } from '@/hooks/useOrchestrator';
 import { useVoice } from '@/hooks/useVoice';
 import { useWhisperMemo } from '@/hooks/useWhisperMemo';
+import { useConversationRecorder } from '@/hooks/useConversationRecorder';
 import { VoiceButton } from '@/components/VoiceButton';
 import { BriefCard } from '@/components/BriefCard';
 import { ConversationBubble } from '@/components/ConversationBubble';
+import { ConversationActionCard } from '@/components/ConversationActionCard';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { BriefItem } from '@/lib/naavi-client';
@@ -444,6 +446,18 @@ export default function HomeScreen() {
   const { status, history, drafts, createdEvents, savedDocs, driveFiles, rememberedItems, error, send } = useOrchestrator('en', brief);
   const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
+  const {
+    convState, convError, elapsedSeconds,
+    speakers, speakerNames, setSpeakerName,
+    conversationTitle, setConversationTitle,
+    startRecording: startConvRecording,
+    stopRecording: stopConvRecording,
+    confirmSpeakers, reset: resetConv,
+    actions: convActions,
+    savedDocLink,
+  } = useConversationRecorder();
+
+  const [showSpeakerModal, setShowSpeakerModal] = useState(false);
 
   function getGreeting(): string {
     const hour = new Date().getHours();
@@ -515,6 +529,59 @@ export default function HomeScreen() {
         )}
 
         <IntegrationsModal visible={showIntegrations} onClose={() => setShowIntegrations(false)} />
+
+        {/* Speaker labeling modal — appears after transcription completes */}
+        <Modal
+          visible={showSpeakerModal || convState === 'labeling'}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowSpeakerModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.speakerModal}>
+              <Text style={styles.speakerModalTitle}>🎙 Conversation Recorded</Text>
+              <Text style={styles.speakerModalSub}>
+                {speakers.length} speaker{speakers.length !== 1 ? 's' : ''} detected. Give this conversation a title and name each speaker.
+              </Text>
+              <View style={styles.speakerRow}>
+                <Text style={styles.speakerLabel}>Title</Text>
+                <TextInput
+                  style={styles.speakerInput}
+                  placeholder="e.g. Dr. Ahmed — Blood Work"
+                  placeholderTextColor={Colors.textMuted}
+                  value={conversationTitle}
+                  onChangeText={setConversationTitle}
+                />
+              </View>
+              {speakers.map((spk) => (
+                <View key={spk} style={styles.speakerRow}>
+                  <Text style={styles.speakerLabel}>Speaker {spk}</Text>
+                  <TextInput
+                    style={styles.speakerInput}
+                    placeholder={spk === speakers[0] ? 'e.g. Dr. Ahmed' : 'e.g. Robert'}
+                    placeholderTextColor={Colors.textMuted}
+                    value={speakerNames[spk] ?? ''}
+                    onChangeText={(v) => setSpeakerName(spk, v)}
+                  />
+                </View>
+              ))}
+              <TouchableOpacity
+                style={styles.speakerConfirmBtn}
+                onPress={async () => {
+                  setShowSpeakerModal(false);
+                  await confirmSpeakers();
+                }}
+              >
+                {convState === 'extracting'
+                  ? <ActivityIndicator color="#fff" />
+                  : <Text style={styles.speakerConfirmText}>Extract Action Items →</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => { setShowSpeakerModal(false); resetConv(); }}>
+                <Text style={styles.speakerCancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
 
         <ScrollView
           ref={scrollRef}
@@ -680,6 +747,30 @@ export default function HomeScreen() {
             </TouchableOpacity>
           ))}
 
+          {/* Conversation action cards */}
+          {convActions.length > 0 && (
+            <View style={{ marginBottom: 8 }}>
+              <Text style={styles.convActionsHeader}>📋 Actions from your conversation</Text>
+              {convActions.map((action, i) => (
+                <ConversationActionCard
+                  key={i}
+                  action={action}
+                  onCalendar={(a) => send(`Create a calendar event: ${a.calendar_title ?? a.title}, ${a.timing}`)}
+                  onEmail={(a) => setInputText(`Draft an email to book: ${a.title}. ${a.email_draft ?? a.description}`)}
+                />
+              ))}
+              {savedDocLink ? (
+                <TouchableOpacity
+                  style={styles.convSavedDoc}
+                  onPress={() => Linking.openURL(savedDocLink)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.convSavedDocText}>📄 Full transcript saved to Google Drive — tap to open</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          )}
+
           {/* Remembered / saved to knowledge base cards */}
           {rememberedItems.map((item, i) => (
             <View key={i} style={styles.memoryCard}>
@@ -759,6 +850,22 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
+        {/* Conversation recorder error / status */}
+        {convError ? (
+          <View style={styles.statusRow}>
+            <Text style={styles.errorText}>{convError}</Text>
+          </View>
+        ) : convState === 'uploading' || convState === 'transcribing' || convState === 'extracting' ? (
+          <View style={styles.statusRow}>
+            <ActivityIndicator size="small" color="#0891B2" />
+            <Text style={styles.statusText}>
+              {convState === 'uploading' ? 'Uploading audio…'
+                : convState === 'transcribing' ? 'Transcribing with speaker detection…'
+                : 'Extracting action items…'}
+            </Text>
+          </View>
+        ) : null}
+
         {/* Input bar */}
         <View style={styles.inputBar}>
           {/* Whisper memo button — tap to start, tap again to stop */}
@@ -783,6 +890,35 @@ export default function HomeScreen() {
             >
               <Text style={styles.memoBtnText}>
                 {memoState === 'recording' ? '⏹' : memoState === 'transcribing' ? '…' : '🎙'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Conversation recorder button — long-form with speaker diarization */}
+          {memoSupported && (
+            <TouchableOpacity
+              style={[styles.convBtn, convState === 'recording' && styles.convBtnRecording]}
+              onPress={() => {
+                if (convState === 'recording') {
+                  stopConvRecording();
+                } else if (convState === 'idle' || convState === 'error') {
+                  resetConv();
+                  startConvRecording();
+                } else if (convState === 'labeling') {
+                  setShowSpeakerModal(true);
+                }
+              }}
+              disabled={['uploading', 'transcribing', 'extracting'].includes(convState)}
+              accessibilityLabel="Tap to record a conversation, tap again to stop"
+            >
+              <Text style={styles.memoBtnText}>
+                {convState === 'recording'
+                  ? `⏹ ${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, '0')}`
+                  : convState === 'uploading' ? '⬆️'
+                  : convState === 'transcribing' ? '📝'
+                  : convState === 'labeling' ? '🏷️'
+                  : convState === 'extracting' ? '🔍'
+                  : '🩺'}
               </Text>
             </TouchableOpacity>
           )}
@@ -1188,6 +1324,97 @@ const styles = StyleSheet.create({
   },
   memoBtnRecording: {
     backgroundColor: '#B91C1C',
+  },
+  convActionsHeader: {
+    fontSize: Typography.sm,
+    fontWeight: '700',
+    color: '#0891B2',
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  convSavedDoc: {
+    backgroundColor: '#E0F2FE',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 4,
+    borderLeftWidth: 3,
+    borderLeftColor: '#0891B2',
+  },
+  convSavedDocText: {
+    fontSize: Typography.sm,
+    color: '#0369A1',
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  speakerModal: {
+    backgroundColor: Colors.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 24,
+    gap: 16,
+  },
+  speakerModalTitle: {
+    fontSize: Typography.lg,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  speakerModalSub: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    lineHeight: 20,
+  },
+  speakerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  speakerLabel: {
+    fontSize: Typography.sm,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+    width: 80,
+  },
+  speakerInput: {
+    flex: 1,
+    backgroundColor: Colors.surfaceAlt,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: Typography.base,
+    color: Colors.textPrimary,
+  },
+  speakerConfirmBtn: {
+    backgroundColor: '#0891B2',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  speakerConfirmText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: Typography.base,
+  },
+  speakerCancelText: {
+    color: Colors.textMuted,
+    fontSize: Typography.sm,
+    textAlign: 'center',
+    paddingVertical: 8,
+  },
+  convBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#0891B2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  convBtnRecording: {
+    backgroundColor: '#0E7490',
   },
   memoBtnText: {
     fontSize: 22,
