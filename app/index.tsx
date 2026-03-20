@@ -32,6 +32,7 @@ import { useOrchestrator } from '@/hooks/useOrchestrator';
 import { useVoice } from '@/hooks/useVoice';
 import { useWhisperMemo } from '@/hooks/useWhisperMemo';
 import { useConversationRecorder } from '@/hooks/useConversationRecorder';
+import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { VoiceButton } from '@/components/VoiceButton';
 import { BriefCard } from '@/components/BriefCard';
 import { ConversationBubble } from '@/components/ConversationBubble';
@@ -496,6 +497,9 @@ export default function HomeScreen() {
   const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
 
+  const { isLive, liveWord, segments: liveSegments, liveError, startLive, stopLive, clearSegments: clearLive } = useLiveTranscript();
+  const liveScrollRef = useRef<ScrollView>(null);
+
   const [showSpeakerModal, setShowSpeakerModal] = useState(false);
 
   function getGreeting(): string {
@@ -577,7 +581,9 @@ export default function HomeScreen() {
               style={styles.recordingPromptBtn}
               onPress={() => {
                 setConversationTitle(recordingPrompt.title);
+                clearLive();
                 startConvRecording();
+                startLive();
                 setRecordingPrompt(prev => prev); // keep for auto-stop
               }}
             >
@@ -927,6 +933,30 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
+        {/* Live transcript panel — visible while recording */}
+        {convState === 'recording' && (liveSegments.length > 0 || liveWord.length > 0 || isLive) && (
+          <View style={styles.livePanel}>
+            <View style={styles.livePanelHeader}>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveLabel}>LIVE</Text>
+              {liveError ? <Text style={styles.liveErrorText}>{liveError}</Text> : null}
+            </View>
+            <ScrollView
+              ref={liveScrollRef}
+              style={styles.livePanelScroll}
+              showsVerticalScrollIndicator={false}
+              onContentSizeChange={() => liveScrollRef.current?.scrollToEnd({ animated: true })}
+            >
+              {liveSegments.slice(-5).map((seg, i) => (
+                <Text key={i} style={styles.liveSegmentText}>{seg.text}</Text>
+              ))}
+              {liveWord ? (
+                <Text style={styles.livePartialText}>{liveWord}</Text>
+              ) : null}
+            </ScrollView>
+          </View>
+        )}
+
         {/* Input bar */}
         <View style={styles.inputBar}>
           {/* Whisper memo button — tap to start, tap again to stop */}
@@ -962,9 +992,12 @@ export default function HomeScreen() {
               onPress={() => {
                 if (convState === 'recording') {
                   stopConvRecording();
+                  stopLive();
                 } else if (convState === 'idle' || convState === 'error') {
                   resetConv();
+                  clearLive();
                   startConvRecording();
+                  startLive();
                 } else if (convState === 'labeling') {
                   setShowSpeakerModal(true);
                 }
@@ -1530,5 +1563,54 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     maxHeight: 120,
     lineHeight: Typography.lineHeightBase,
+  },
+  // ─── Live transcript panel ──────────────────────────────────────────────────
+  livePanel: {
+    backgroundColor: '#0C1A1F',
+    borderTopWidth: 1,
+    borderTopColor: '#0E7490',
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 6,
+    maxHeight: 140,
+  },
+  livePanelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#EF4444',
+  },
+  liveLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#EF4444',
+    letterSpacing: 1.5,
+  },
+  liveErrorText: {
+    fontSize: 11,
+    color: '#F87171',
+    marginLeft: 6,
+    fontStyle: 'italic',
+  },
+  livePanelScroll: {
+    flex: 1,
+  },
+  liveSegmentText: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.75)',
+    lineHeight: 20,
+    marginBottom: 2,
+  },
+  livePartialText: {
+    fontSize: 14,
+    color: '#fff',
+    lineHeight: 21,
+    fontStyle: 'italic',
   },
 });
