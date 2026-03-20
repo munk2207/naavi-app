@@ -188,6 +188,7 @@ function mapEventToBriefItem(event: {
   google_event_id: string;
   title: string;
   start_time: string | null;
+  end_time: string | null;
   location: string | null;
   description: string | null;
 }, dayLabel?: string): BriefItem {
@@ -215,6 +216,7 @@ function mapEventToBriefItem(event: {
     detail: event.location || event.description || '',
     urgent,
     startISO: startRaw || undefined,
+    endISO: event.end_time || undefined,
     location: event.location || undefined,
   };
 }
@@ -233,7 +235,7 @@ export async function fetchTodayEvents(): Promise<BriefItem[]> {
   try {
     const { data: events, error } = await supabase
       .from('calendar_events')
-      .select('google_event_id, title, start_time, location, description')
+      .select('google_event_id, title, start_time, end_time, location, description')
       .eq('user_id', userId)
       .gte('start_time', startOfDay.toISOString())
       .lte('start_time', endOfDay.toISOString())
@@ -261,7 +263,7 @@ export async function fetchUpcomingEvents(days = 7, passedUserId?: string): Prom
   try {
     const { data: events, error } = await supabase
       .from('calendar_events')
-      .select('google_event_id, title, start_time, location, description')
+      .select('google_event_id, title, start_time, end_time, location, description')
       .eq('user_id', userId)
       .gte('start_time', startOfDay.toISOString())
       .lte('start_time', future.toISOString())
@@ -328,7 +330,7 @@ export async function fetchUpcomingBirthdays(passedUserId?: string): Promise<Bri
   try {
     const { data: events, error } = await supabase
       .from('calendar_events')
-      .select('google_event_id, title, start_time, location, description')
+      .select('google_event_id, title, start_time, end_time, location, description')
       .eq('user_id', userId)
       .ilike('title', '%birthday%')
       .gte('start_time', now.toISOString())

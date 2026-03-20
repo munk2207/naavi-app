@@ -66,6 +66,7 @@ export interface BriefItem {
   detail?: string;
   urgent: boolean;
   startISO?: string;   // for travel time calculation (calendar events)
+  endISO?: string;     // event end time — used for auto-stop recording
   location?: string;   // destination for Google Maps
   leaveByMs?: number;  // epoch ms when Robert should leave
 }

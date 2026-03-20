@@ -356,6 +356,7 @@ export default function HomeScreen() {
   const [navAlert, setNavAlert] = useState<{ title: string; location: string; startMs: number } | null>(null);
   const [showIntegrations, setShowIntegrations] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [recordingPrompt, setRecordingPrompt] = useState<{ title: string; endMs: number } | null>(null);
 
   // Load weather immediately (no auth needed)
   useEffect(() => {
@@ -423,6 +424,54 @@ export default function HomeScreen() {
     }).catch(() => {});
   }, [currentUserId]);
 
+  const {
+    convState, convError, elapsedSeconds,
+    speakers, speakerNames, setSpeakerName,
+    conversationTitle, setConversationTitle,
+    startRecording: startConvRecording,
+    stopRecording: stopConvRecording,
+    confirmSpeakers, reset: resetConv,
+    actions: convActions,
+    savedDocLink,
+  } = useConversationRecorder();
+
+  // Recording prompt — checks every 60s for events starting within 10 minutes
+  useEffect(() => {
+    function checkUpcomingEvents() {
+      const now = Date.now();
+
+      // Auto-stop if currently recording and event ended
+      if (convState === 'recording') {
+        if (recordingPrompt && now > recordingPrompt.endMs) {
+          stopConvRecording();
+          setRecordingPrompt(null);
+        }
+        return; // don't show a new prompt while already recording
+      }
+
+      // Find next calendar event starting within 10 minutes
+      for (const item of brief) {
+        if (item.category !== 'calendar' || !item.startISO) continue;
+        const startMs = new Date(item.startISO).getTime();
+        const minutesUntil = (startMs - now) / 60000;
+        if (minutesUntil > 0 && minutesUntil <= 10) {
+          const endMs = item.endISO
+            ? new Date(item.endISO).getTime()
+            : startMs + 60 * 60 * 1000; // default 1hr
+          setRecordingPrompt({ title: item.title, endMs });
+          return;
+        }
+      }
+
+      // Clear prompt if no upcoming event
+      if (convState === 'idle') setRecordingPrompt(null);
+    }
+
+    checkUpcomingEvents();
+    const interval = setInterval(checkUpcomingEvents, 60_000);
+    return () => clearInterval(interval);
+  }, [brief, convState, recordingPrompt]);
+
   // Navigation alert timer — checks every 30s if it's time to leave
   useEffect(() => {
     function checkLeaveTime() {
@@ -446,16 +495,6 @@ export default function HomeScreen() {
   const { status, history, drafts, createdEvents, savedDocs, driveFiles, rememberedItems, error, send } = useOrchestrator('en', brief);
   const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
-  const {
-    convState, convError, elapsedSeconds,
-    speakers, speakerNames, setSpeakerName,
-    conversationTitle, setConversationTitle,
-    startRecording: startConvRecording,
-    stopRecording: stopConvRecording,
-    confirmSpeakers, reset: resetConv,
-    actions: convActions,
-    savedDocLink,
-  } = useConversationRecorder();
 
   const [showSpeakerModal, setShowSpeakerModal] = useState(false);
 
@@ -526,6 +565,28 @@ export default function HomeScreen() {
                 : `🚗 Time to leave — ${navAlert.title}. Tap to navigate`}
             </Text>
           </TouchableOpacity>
+        )}
+
+        {/* Recording prompt banner — event starting within 10 minutes */}
+        {recordingPrompt && convState === 'idle' && (
+          <View style={styles.recordingPromptBanner}>
+            <Text style={styles.recordingPromptText}>
+              🩺 {recordingPrompt.title} — start recording?
+            </Text>
+            <TouchableOpacity
+              style={styles.recordingPromptBtn}
+              onPress={() => {
+                setConversationTitle(recordingPrompt.title);
+                startConvRecording();
+                setRecordingPrompt(prev => prev); // keep for auto-stop
+              }}
+            >
+              <Text style={styles.recordingPromptBtnText}>Start</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setRecordingPrompt(null)}>
+              <Text style={styles.recordingPromptDismiss}>✕</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         <IntegrationsModal visible={showIntegrations} onClose={() => setShowIntegrations(false)} />
@@ -1324,6 +1385,36 @@ const styles = StyleSheet.create({
   },
   memoBtnRecording: {
     backgroundColor: '#B91C1C',
+  },
+  recordingPromptBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0E7490',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 10,
+  },
+  recordingPromptText: {
+    flex: 1,
+    color: '#fff',
+    fontSize: Typography.sm,
+    fontWeight: '600',
+  },
+  recordingPromptBtn: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  recordingPromptBtnText: {
+    color: '#0E7490',
+    fontWeight: '700',
+    fontSize: Typography.sm,
+  },
+  recordingPromptDismiss: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 18,
+    paddingHorizontal: 4,
   },
   convActionsHeader: {
     fontSize: Typography.sm,
