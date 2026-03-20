@@ -934,11 +934,13 @@ export default function HomeScreen() {
         ) : null}
 
         {/* Live transcript panel — visible while recording */}
-        {convState === 'recording' && (liveSegments.length > 0 || liveWord.length > 0 || isLive) && (
+        {convState === 'recording' && (
           <View style={styles.livePanel}>
             <View style={styles.livePanelHeader}>
-              <View style={styles.liveDot} />
-              <Text style={styles.liveLabel}>LIVE</Text>
+              <View style={[styles.liveDot, !isLive && { backgroundColor: '#6B7280' }]} />
+              <Text style={[styles.liveLabel, !isLive && { color: '#6B7280' }]}>
+                {isLive ? 'LIVE' : 'CONNECTING…'}
+              </Text>
               {liveError ? <Text style={styles.liveErrorText}>{liveError}</Text> : null}
             </View>
             <ScrollView
@@ -947,6 +949,9 @@ export default function HomeScreen() {
               showsVerticalScrollIndicator={false}
               onContentSizeChange={() => liveScrollRef.current?.scrollToEnd({ animated: true })}
             >
+              {liveSegments.length === 0 && !liveWord && isLive ? (
+                <Text style={styles.liveSegmentText}>Listening…</Text>
+              ) : null}
               {liveSegments.slice(-5).map((seg, i) => (
                 <Text key={i} style={styles.liveSegmentText}>{seg.text}</Text>
               ))}
