@@ -1,20 +1,16 @@
 /**
  * useLiveTranscript hook
  *
- * Streams audio to AssemblyAI's real-time WebSocket API and returns live
- * transcript words as the conversation is happening.
+ * Uses the browser's built-in Web Speech API (SpeechRecognition) to display
+ * words on screen in real-time while the conversation recorder is running.
  *
- * Flow:
- *   startLive() → fetch token → open WebSocket → capture PCM audio →
- *   receive PartialTranscript / FinalTranscript messages → update UI
+ * No API keys or WebSocket setup needed — Chrome sends audio to Google's
+ * speech engine and returns live interim + final transcripts.
  *
- * Runs in parallel with useConversationRecorder (each opens their own mic).
- * The real-time transcript is for display only — the full recording goes
- * through AssemblyAI batch transcription for speaker diarization.
+ * Supported: Chrome, Edge  |  Not supported: Firefox, Safari
  */
 
 import { useState, useRef, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,12 +21,21 @@ export interface LiveSegment {
 
 export interface UseLiveTranscriptResult {
   isLive: boolean;
-  liveWord: string;           // current partial (not yet final) text
+  liveWord: string;           // current interim (not yet final) text
   segments: LiveSegment[];    // completed final utterances
   liveError: string | null;
-  startLive: () => Promise<void>;
+  startLive: () => void;
   stopLive: () => void;
   clearSegments: () => void;
+}
+
+// ─── Extend Window with vendor-prefixed SpeechRecognition ─────────────────────
+
+declare global {
+  interface Window {
+    SpeechRecognition: typeof SpeechRecognition;
+    webkitSpeechRecognition: typeof SpeechRecognition;
+  }
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -41,37 +46,14 @@ export function useLiveTranscript(): UseLiveTranscriptResult {
   const [segments, setSegments]   = useState<LiveSegment[]>([]);
   const [liveError, setLiveError] = useState<string | null>(null);
 
-  const wsRef        = useRef<WebSocket | null>(null);
-  const audioCtxRef  = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const sourceRef    = useRef<MediaStreamAudioSourceNode | null>(null);
-  const streamRef    = useRef<MediaStream | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   // ── Stop ────────────────────────────────────────────────────────────────────
 
   const stopLive = useCallback(() => {
-    // Disconnect audio graph
-    if (processorRef.current) {
-      try { processorRef.current.disconnect(); } catch {}
-      processorRef.current = null;
-    }
-    if (sourceRef.current) {
-      try { sourceRef.current.disconnect(); } catch {}
-      sourceRef.current = null;
-    }
-    if (audioCtxRef.current) {
-      try { audioCtxRef.current.close(); } catch {}
-      audioCtxRef.current = null;
-    }
-    // Stop mic tracks
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
-    // Close WebSocket
-    if (wsRef.current) {
-      try { wsRef.current.close(); } catch {}
-      wsRef.current = null;
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch {}
+      recognitionRef.current = null;
     }
     setIsLive(false);
     setLiveWord('');
@@ -80,119 +62,82 @@ export function useLiveTranscript(): UseLiveTranscriptResult {
 
   // ── Start ───────────────────────────────────────────────────────────────────
 
-  const startLive = useCallback(async () => {
-    // Guard: browser environment with required APIs
-    if (
-      typeof window === 'undefined' ||
-      typeof navigator === 'undefined' ||
-      !navigator.mediaDevices?.getUserMedia ||
-      typeof AudioContext === 'undefined' ||
-      typeof WebSocket === 'undefined'
-    ) {
-      setLiveError('Live transcript not supported in this environment.');
+  const startLive = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!SR) {
+      setLiveError('Live transcript requires Chrome or Edge');
       return;
     }
 
-    if (!supabase) {
-      setLiveError('Not configured');
-      return;
+    // Stop any existing session first
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch {}
     }
+
+    const recognition = new SR();
+    recognition.continuous     = true;   // keep listening until stopLive()
+    recognition.interimResults = true;   // show partial words
+    recognition.lang           = 'en-US';
+    recognitionRef.current = recognition;
+
+    recognition.onstart = () => {
+      console.log('[LiveTranscript] Started');
+      setIsLive(true);
+      setLiveError(null);
+    };
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let interimText = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          const text = result[0].transcript.trim();
+          if (text) {
+            setSegments(prev => [...prev, { text, isFinal: true }]);
+          }
+        } else {
+          interimText += result[0].transcript;
+        }
+      }
+
+      setLiveWord(interimText);
+    };
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      console.error('[LiveTranscript] Error:', event.error);
+      if (event.error === 'not-allowed') {
+        setLiveError('Microphone access denied');
+      } else if (event.error !== 'aborted' && event.error !== 'no-speech') {
+        setLiveError(`Recognition error: ${event.error}`);
+      }
+    };
+
+    recognition.onend = () => {
+      console.log('[LiveTranscript] onend — isLive:', isLive);
+      setIsLive(false);
+      setLiveWord('');
+      // Auto-restart if we didn't intentionally stop (handles Chrome's ~60s timeout)
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.start();
+          setIsLive(true);
+        } catch {
+          // ignore restart errors
+        }
+      }
+    };
 
     try {
-      // Step 1 — get temporary token from Edge Function
-      console.log('[LiveTranscript] Fetching token...');
-      const { data, error } = await supabase.functions.invoke('get-realtime-token', {});
-      if (error || !data?.token) {
-        throw new Error(error?.message ?? 'Failed to get real-time token');
-      }
-      const token: string = data.token;
-
-      // Step 2 — open microphone (separate stream from the recorder)
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      // Step 3 — open AssemblyAI real-time WebSocket
-      const ws = new WebSocket(
-        `wss://api.assemblyai.com/v2/realtime/ws?sample_rate=16000&token=${token}`
-      );
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log('[LiveTranscript] WebSocket open');
-        setIsLive(true);
-        setLiveError(null);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(typeof event.data === 'string' ? event.data : '{}');
-
-          if (msg.message_type === 'PartialTranscript') {
-            setLiveWord(msg.text ?? '');
-
-          } else if (msg.message_type === 'FinalTranscript' && msg.text?.trim()) {
-            setSegments(prev => [...prev, { text: msg.text, isFinal: true }]);
-            setLiveWord('');
-
-          } else if (msg.message_type === 'SessionBegins') {
-            console.log('[LiveTranscript] Session started, ID:', msg.session_id);
-          }
-        } catch {
-          // ignore malformed messages
-        }
-      };
-
-      ws.onerror = () => {
-        console.error('[LiveTranscript] WebSocket error');
-        setLiveError('Real-time connection error');
-      };
-
-      ws.onclose = (e) => {
-        console.log('[LiveTranscript] WebSocket closed, code:', e.code);
-        setIsLive(false);
-        setLiveWord('');
-      };
-
-      // Step 4 — set up 16kHz audio processing pipeline
-      //   AudioContext resamples from the mic's native rate → 16kHz
-      //   ScriptProcessorNode converts Float32 → Int16 PCM and sends to WS
-      const audioCtx = new AudioContext({ sampleRate: 16000 });
-      audioCtxRef.current = audioCtx;
-
-      const source = audioCtx.createMediaStreamSource(stream);
-      sourceRef.current = source;
-
-      // 4096-sample buffer; mono (1 input + 1 output channel)
-      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
-
-      processor.onaudioprocess = (e) => {
-        if (ws.readyState !== WebSocket.OPEN) return;
-
-        const float32 = e.inputBuffer.getChannelData(0);
-        const int16   = new Int16Array(float32.length);
-
-        for (let i = 0; i < float32.length; i++) {
-          // Clamp to [-1, 1] then scale to Int16 range
-          int16[i] = Math.max(-32768, Math.min(32767, Math.round(float32[i] * 32767)));
-        }
-
-        ws.send(int16.buffer);
-      };
-
-      // Wire up: mic → processor → (silent output)
-      source.connect(processor);
-      processor.connect(audioCtx.destination);
-
-      console.log('[LiveTranscript] Audio pipeline started');
-
+      recognition.start();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to start live transcript';
-      console.error('[LiveTranscript] Error:', msg);
+      const msg = err instanceof Error ? err.message : 'Could not start recognition';
+      console.error('[LiveTranscript] Start error:', msg);
       setLiveError(msg);
-      stopLive();
     }
-  }, [stopLive]);
+  }, []);
 
   // ── Clear ────────────────────────────────────────────────────────────────────
 
