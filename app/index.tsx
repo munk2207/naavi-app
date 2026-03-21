@@ -501,21 +501,31 @@ export default function HomeScreen() {
 
   const [showSpeakerModal, setShowSpeakerModal] = useState(false);
   const [voiceLang, setVoiceLang]               = useState<'en' | 'ar'>('en');
-  // Local state for speaker-naming modal
+  // Local state + refs for speaker-naming modal
+  // Refs are updated on every keystroke — guaranteed latest value at confirm time
   const [localNames, setLocalNames]   = useState<Record<string, string>>({});
   const [localTitle, setLocalTitle]   = useState('');
-  // Refs to read TextInput values directly — bypasses controlled-input issues on web
-  const titleInputRef   = useRef<any>(null);
-  const nameInputRefs   = useRef<Record<string, any>>({});
+  const localNamesRef = useRef<Record<string, string>>({});
+  const localTitleRef = useRef<string>('');
 
-  // Reset local state when transcription finishes
+  function updateLocalName(spk: string, v: string) {
+    localNamesRef.current = { ...localNamesRef.current, [spk]: v };
+    setLocalNames({ ...localNamesRef.current });
+  }
+  function updateLocalTitle(v: string) {
+    localTitleRef.current = v;
+    setLocalTitle(v);
+  }
+
+  // Reset when transcription finishes
   useEffect(() => {
     if (convState === 'labeling') {
       const init: Record<string, string> = {};
       speakers.forEach(s => { init[s] = ''; });
+      localNamesRef.current = { ...init };
+      localTitleRef.current = '';
       setLocalNames(init);
       setLocalTitle('');
-      nameInputRefs.current = {};
     }
   }, [convState, speakers]);
 
@@ -630,12 +640,11 @@ export default function HomeScreen() {
               <View style={styles.speakerRow}>
                 <Text style={styles.speakerLabel}>Title</Text>
                 <TextInput
-                  ref={titleInputRef}
                   style={styles.speakerInput}
                   placeholder="e.g. Dr. Ahmed — Blood Work"
                   placeholderTextColor={Colors.textMuted}
-                  defaultValue={localTitle}
-                  onChangeText={setLocalTitle}
+                  value={localTitle}
+                  onChangeText={updateLocalTitle}
                   autoCorrect={false}
                 />
               </View>
@@ -643,12 +652,11 @@ export default function HomeScreen() {
                 <View key={spk} style={styles.speakerRow}>
                   <Text style={styles.speakerLabel}>Speaker {idx + 1}</Text>
                   <TextInput
-                    ref={(r) => { nameInputRefs.current[spk] = r; }}
                     style={styles.speakerInput}
                     placeholder={idx === 0 ? 'e.g. Dr. Ahmed' : 'e.g. Robert'}
                     placeholderTextColor={Colors.textMuted}
-                    defaultValue={localNames[spk] ?? ''}
-                    onChangeText={(v) => setLocalNames(prev => ({ ...prev, [spk]: v }))}
+                    value={localNames[spk] ?? ''}
+                    onChangeText={(v) => updateLocalName(spk, v)}
                     autoCorrect={false}
                   />
                 </View>
@@ -656,15 +664,10 @@ export default function HomeScreen() {
               <TouchableOpacity
                 style={styles.speakerConfirmBtn}
                 onPress={async () => {
-                  // Read from both state AND native input value (belt + suspenders)
-                  const names: Record<string, string> = {};
-                  speakers.forEach(spk => {
-                    const stateVal = localNames[spk] ?? '';
-                    const nativeVal = nameInputRefs.current[spk]?._lastNativeText ?? nameInputRefs.current[spk]?.props?.value ?? '';
-                    names[spk] = stateVal || nativeVal;
-                  });
-                  const title = localTitle || titleInputRef.current?._lastNativeText || '';
-                  console.log('[SpeakerModal] Confirming — names:', JSON.stringify(names), 'title:', title);
+                  // Read from refs — always the latest typed values
+                  const names = { ...localNamesRef.current };
+                  const title = localTitleRef.current;
+                  console.log('[SpeakerModal] names:', JSON.stringify(names), 'title:', title);
                   setShowSpeakerModal(false);
                   await confirmSpeakers(names, title);
                 }}
