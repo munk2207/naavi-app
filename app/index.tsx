@@ -433,6 +433,7 @@ export default function HomeScreen() {
     stopRecording: stopConvRecording,
     confirmSpeakers, reset: resetConv,
     actions: convActions,
+    utterances: convUtterances,
     savedDocLink,
   } = useConversationRecorder();
 
@@ -836,6 +837,23 @@ export default function HomeScreen() {
                   <Text style={styles.convSavedDocText}>📄 Full transcript saved to Google Drive — tap to open</Text>
                 </TouchableOpacity>
               ) : null}
+            </View>
+          )}
+
+          {/* Conversation transcript — speaker-labeled utterances */}
+          {convUtterances.length > 0 && (
+            <View style={styles.convTranscript}>
+              <Text style={styles.convActionsHeader}>🎙 Conversation Transcript</Text>
+              {convUtterances.map((u, i) => {
+                const name = speakerNames[u.speaker] || `Speaker ${u.speaker}`;
+                const isFirst = speakers[0] === u.speaker;
+                return (
+                  <View key={i} style={[styles.utteranceRow, isFirst ? styles.utteranceLeft : styles.utteranceRight]}>
+                    <Text style={styles.utteranceSpeaker}>{name}</Text>
+                    <Text style={styles.utteranceText}>{u.text}</Text>
+                  </View>
+                );
+              })}
             </View>
           )}
 
@@ -1740,5 +1758,37 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#111827',
     marginTop: 2,
+  },
+  convTranscript: {
+    marginBottom: 12,
+  },
+  utteranceRow: {
+    marginBottom: 8,
+    maxWidth: '85%',
+    padding: 10,
+    borderRadius: 12,
+  },
+  utteranceLeft: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#E0F2FE',
+    borderBottomLeftRadius: 4,
+  },
+  utteranceRight: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#F0F9FF',
+    borderBottomRightRadius: 4,
+  },
+  utteranceSpeaker: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0369A1',
+    marginBottom: 3,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  utteranceText: {
+    fontSize: 15,
+    color: '#111827',
+    lineHeight: 22,
   },
 });
