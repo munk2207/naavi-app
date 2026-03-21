@@ -1008,13 +1008,19 @@ export default function HomeScreen() {
                 if (memoState === 'recording') {
                   stopRecording(async (transcript) => {
                     if (!transcript.trim()) return;
-                    // Detect "record conversation" intent from spoken words
-                    const isConvCmd = /\b(start|begin|record)\b.{0,20}\b(conversation|meeting|appointment|session)\b/i.test(transcript);
+                    // Route by single keyword: "conversation" → recorder, "note" → Naavi AI
+                    const lower = transcript.trim().toLowerCase();
+                    const isConvCmd = /\bconversation\b/i.test(lower);
+                    const isNoteCmd = /\bnote\b/i.test(lower);
                     if (isConvCmd) {
                       resetConv();
                       clearLive();
                       startConvRecording(voiceLang);
                       startLive();
+                    } else if (isNoteCmd) {
+                      setMemoTranscript(transcript);
+                      await send('save a note: ' + transcript.replace(/\bnote\b/i, '').trim());
+                      setTimeout(() => setMemoTranscript(null), 5000);
                     } else {
                       setMemoTranscript(transcript);
                       await send(transcript);
