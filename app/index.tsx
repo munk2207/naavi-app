@@ -426,7 +426,7 @@ export default function HomeScreen() {
   }, [currentUserId]);
 
   const {
-    convState, convError,
+    convState, convError, elapsedSeconds,
     speakers, speakerNames,
     startRecording: startConvRecording,
     stopRecording: stopConvRecording,
@@ -1063,6 +1063,16 @@ export default function HomeScreen() {
                   : '🎙'}
               </Text>
             </TouchableOpacity>
+          )}
+
+          {/* Info badge — shows only during conversation recording, not tappable */}
+          {convState === 'recording' && (
+            <View style={styles.convTimerBadge} pointerEvents="none">
+              <View style={styles.convTimerDot} />
+              <Text style={styles.convTimerText}>
+                {Math.floor(elapsedSeconds / 60)}:{String(elapsedSeconds % 60).padStart(2, '0')}
+              </Text>
+            </View>
           )}
 
           <TextInput
@@ -1823,5 +1833,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#991B1B',
     fontWeight: '600',
+  },
+  convTimerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 5,
+  },
+  convTimerDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#EF4444',
+  },
+  convTimerText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#991B1B',
   },
 });
