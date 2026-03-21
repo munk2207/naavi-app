@@ -1008,18 +1008,23 @@ export default function HomeScreen() {
                 if (memoState === 'recording') {
                   stopRecording(async (transcript) => {
                     if (!transcript.trim()) return;
-                    // Route by single keyword: "conversation" → recorder, "note" → Naavi AI
-                    const lower = transcript.trim().toLowerCase();
-                    const isConvCmd = /\bconversation\b/i.test(lower);
-                    const isNoteCmd = /\bnote\b/i.test(lower);
+                    const lower = transcript.trim().toLowerCase().replace(/[.,!?،؟]/g, '');
+                    console.log('[VoiceRoute] transcript:', JSON.stringify(transcript), '| lower:', lower);
+                    // Route: if transcript is just "conversation" → recorder
+                    //        if transcript is just "note" → ask Naavi to save a note
+                    //        anything else → Naavi AI
+                    const isConvCmd = lower.includes('conversation') || lower.includes('محادثة') || lower.includes('حوار');
+                    const isNoteCmd = lower === 'note' || lower.startsWith('note ') || lower.includes('ملاحظة') || lower.includes('نوت');
+                    console.log('[VoiceRoute] isConvCmd:', isConvCmd, 'isNoteCmd:', isNoteCmd);
                     if (isConvCmd) {
                       resetConv();
                       clearLive();
                       startConvRecording(voiceLang);
                       startLive();
                     } else if (isNoteCmd) {
+                      const noteContent = lower === 'note' ? '' : transcript.replace(/^note[:\s]*/i, '').trim();
                       setMemoTranscript(transcript);
-                      await send('save a note: ' + transcript.replace(/\bnote\b/i, '').trim());
+                      await send(noteContent ? `save a note: ${noteContent}` : 'save a note');
                       setTimeout(() => setMemoTranscript(null), 5000);
                     } else {
                       setMemoTranscript(transcript);
