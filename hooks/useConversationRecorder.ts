@@ -72,7 +72,11 @@ export function useConversationRecorder(): UseConversationRecorderResult {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [speakers, setSpeakers] = useState<string[]>([]);
   const [speakerNames, setSpeakerNames] = useState<Record<string, string>>({});
-  const [conversationTitle, setConversationTitle] = useState('');
+  const [conversationTitle, _setConversationTitle] = useState('');
+  const setConversationTitle = useCallback((title: string) => {
+    conversationTitleRef.current = title;
+    _setConversationTitle(title);
+  }, []);
   const [utterances, setUtterances] = useState<Utterance[]>([]);
   const [actions, setActions] = useState<ConversationAction[]>([]);
   const [savedDocLink, setSavedDocLink] = useState<string | null>(null);
@@ -82,6 +86,10 @@ export function useConversationRecorder(): UseConversationRecorderResult {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const transcriptIdRef = useRef<string | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Refs so confirmSpeakers always reads the latest values regardless of closure timing
+  const speakerNamesRef = useRef<Record<string, string>>({});
+  const conversationTitleRef = useRef<string>('');
+  const utterancesRef = useRef<Utterance[]>([]);
 
   const isSupported =
     typeof window !== 'undefined' &&
@@ -210,12 +218,14 @@ export function useConversationRecorder(): UseConversationRecorderResult {
         const utts: Utterance[] = data.utterances ?? [];
         const spkrs: string[] = data.speakers ?? [];
 
+        utterancesRef.current = utts;
         setUtterances(utts);
         setSpeakers(spkrs);
 
         // Default names: Speaker A, Speaker B, etc.
         const defaultNames: Record<string, string> = {};
         spkrs.forEach((s: string) => { defaultNames[s] = ''; });
+        speakerNamesRef.current = defaultNames;
         setSpeakerNames(defaultNames);
 
         setConvState('labeling');
@@ -235,19 +245,24 @@ export function useConversationRecorder(): UseConversationRecorderResult {
   // ── Speaker name assignment ───────────────────────────────────────────────
 
   const setSpeakerName = useCallback((speaker: string, name: string) => {
-    setSpeakerNames(prev => ({ ...prev, [speaker]: name }));
+    speakerNamesRef.current = { ...speakerNamesRef.current, [speaker]: name };
+    setSpeakerNames(speakerNamesRef.current);
   }, []);
 
   // ── Confirm speakers → extract actions ───────────────────────────────────
 
   const confirmSpeakers = useCallback(async () => {
     if (!supabase) return;
+    // Read latest values from refs — avoids stale closure issues
+    const currentNames = speakerNamesRef.current;
+    const currentTitle = conversationTitleRef.current;
+    const currentUtterances = utterancesRef.current;
     setConvState('extracting');
 
     try {
       // Step 1 — extract action items via Claude
       const { data, error } = await supabase.functions.invoke('extract-actions', {
-        body: { utterances, speaker_names: speakerNames },
+        body: { utterances: currentUtterances, speaker_names: currentNames },
       });
 
       if (error) throw new Error(error.message);
@@ -257,11 +272,11 @@ export function useConversationRecorder(): UseConversationRecorderResult {
 
       // Step 2 — format document content
       const date = new Date().toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
-      const participants = Object.values(speakerNames).filter(Boolean).join(', ') || 'Unknown speakers';
-      const title = conversationTitle.trim() || `Conversation — ${date}`;
+      const participants = Object.values(currentNames).filter(Boolean).join(', ') || 'Unknown speakers';
+      const title = currentTitle.trim() || `Conversation — ${date}`;
 
-      const transcriptLines = utterances.map(u => {
-        const name = speakerNames[u.speaker] || `Speaker ${u.speaker}`;
+      const transcriptLines = currentUtterances.map(u => {
+        const name = currentNames[u.speaker] || `Speaker ${u.speaker}`;
         return `${name}: ${u.text}`;
       }).join('\n');
 
@@ -303,13 +318,13 @@ export function useConversationRecorder(): UseConversationRecorderResult {
       );
 
       setConvState('done');
-      console.log('[ConvRecorder] Extracted', extracted.length, 'actions');
+      console.log('[ConvRecorder] Extracted', extracted.length, 'actions, speakers:', currentNames);
 
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Action extraction failed';
       setError(msg);
     }
-  }, [utterances, speakerNames, conversationTitle]);
+  }, []); // refs are always current — no deps needed
 
   // ── Reset ─────────────────────────────────────────────────────────────────
 
@@ -319,8 +334,11 @@ export function useConversationRecorder(): UseConversationRecorderResult {
     setConvError(null);
     setElapsedSeconds(0);
     setSpeakers([]);
+    speakerNamesRef.current = {};
     setSpeakerNames({});
+    conversationTitleRef.current = '';
     setConversationTitle('');
+    utterancesRef.current = [];
     setUtterances([]);
     setActions([]);
     setSavedDocLink(null);
