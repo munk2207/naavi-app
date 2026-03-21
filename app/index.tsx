@@ -41,9 +41,9 @@ import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { BriefItem } from '@/lib/naavi-client';
 import { fetchOttawaWeather } from '@/lib/weather';
-import { sendDriveFileAsEmail } from '@/lib/drive';
+import { sendDriveFileAsEmail, saveToDrive } from '@/lib/drive';
 import { lookupContact } from '@/lib/contacts';
-import { saveContact } from '@/lib/supabase';
+import { saveContact, saveDriveNote } from '@/lib/supabase';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { fetchImportantEmails, triggerGmailSync, sendEmail } from '@/lib/gmail';
 import { fetchTravelTime } from '@/lib/maps';
@@ -501,6 +501,10 @@ export default function HomeScreen() {
   const liveScrollRef = useRef<ScrollView>(null);
 
   const [showSpeakerModal, setShowSpeakerModal] = useState(false);
+  const [showModeSheet, setShowModeSheet]       = useState(false);
+  const [recordMode, setRecordMode]             = useState<'command' | 'note' | 'conversation' | 'idle'>('idle');
+  const [savedNote, setSavedNote]               = useState<{ title: string; link?: string } | null>(null);
+  const noteModeRef = useRef(false);
 
   function getGreeting(): string {
     const hour = new Date().getHours();
@@ -838,6 +842,19 @@ export default function HomeScreen() {
             </View>
           )}
 
+          {/* Voice note saved card */}
+          {savedNote && (
+            <TouchableOpacity
+              style={styles.savedNoteCard}
+              onPress={() => savedNote.link ? Linking.openURL(savedNote.link) : undefined}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.savedNoteLabel}>📝 Note saved to Drive</Text>
+              <Text style={styles.savedNoteTitle}>{savedNote.title}</Text>
+              {savedNote.link ? <Text style={styles.eventLink}>Tap to open in Google Docs</Text> : null}
+            </TouchableOpacity>
+          )}
+
           {/* Remembered / saved to knowledge base cards */}
           {rememberedItems.map((item, i) => (
             <View key={i} style={styles.memoryCard}>
@@ -962,62 +979,122 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {/* Mode selection sheet */}
+        <Modal visible={showModeSheet} transparent animationType="slide" onRequestClose={() => setShowModeSheet(false)}>
+          <TouchableOpacity style={styles.modeOverlay} activeOpacity={1} onPress={() => setShowModeSheet(false)}>
+            <View style={styles.modeSheet}>
+              <Text style={styles.modeSheetTitle}>What would you like to record?</Text>
+
+              <TouchableOpacity style={styles.modeOption} onPress={() => {
+                setShowModeSheet(false);
+                setRecordMode('command');
+                noteModeRef.current = false;
+                startRecording();
+              }}>
+                <Text style={styles.modeOptionIcon}>🎙</Text>
+                <View style={styles.modeOptionBody}>
+                  <Text style={styles.modeOptionTitle}>Ask Naavi</Text>
+                  <Text style={styles.modeOptionDesc}>Speak a question or command</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.modeOption} onPress={() => {
+                setShowModeSheet(false);
+                setRecordMode('note');
+                noteModeRef.current = true;
+                startRecording();
+              }}>
+                <Text style={styles.modeOptionIcon}>📝</Text>
+                <View style={styles.modeOptionBody}>
+                  <Text style={styles.modeOptionTitle}>Save Note</Text>
+                  <Text style={styles.modeOptionDesc}>Record & save directly to Drive</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.modeOption} onPress={() => {
+                setShowModeSheet(false);
+                setRecordMode('conversation');
+                resetConv();
+                clearLive();
+                startConvRecording();
+                startLive();
+              }}>
+                <Text style={styles.modeOptionIcon}>🩺</Text>
+                <View style={styles.modeOptionBody}>
+                  <Text style={styles.modeOptionTitle}>Record Conversation</Text>
+                  <Text style={styles.modeOptionDesc}>With speaker detection & action items</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
         {/* Input bar */}
         <View style={styles.inputBar}>
-          {/* Whisper memo button — tap to start, tap again to stop */}
+          {/* Unified recording button */}
           {memoSupported && (
             <TouchableOpacity
-              style={[styles.memoBtn, memoState === 'recording' && styles.memoBtnRecording]}
+              style={[
+                styles.unifiedBtn,
+                (memoState === 'recording' || convState === 'recording') && styles.unifiedBtnActive,
+                recordMode === 'note'         && styles.unifiedBtnNote,
+                recordMode === 'conversation' && styles.unifiedBtnConv,
+              ]}
               onPress={() => {
+                // If labeling speakers — open modal
+                if (convState === 'labeling') { setShowSpeakerModal(true); return; }
+                // If currently recording — stop
                 if (memoState === 'recording') {
                   stopRecording(async (transcript) => {
-                    if (transcript.trim()) {
+                    setRecordMode('idle');
+                    if (!transcript.trim()) return;
+                    if (noteModeRef.current) {
+                      // Save as note to Drive
+                      const date = new Date().toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
+                      const title = `Voice Note — ${date}`;
+                      const result = await saveToDrive({ title, content: transcript });
+                      if (result.success) {
+                        await saveDriveNote({ title, webViewLink: result.webViewLink ?? '' });
+                        setSavedNote({ title, link: result.webViewLink });
+                        setTimeout(() => setSavedNote(null), 8000);
+                      }
+                      noteModeRef.current = false;
+                    } else {
                       setMemoTranscript(transcript);
                       await send(transcript);
                       setTimeout(() => setMemoTranscript(null), 5000);
                     }
                   });
-                } else if (memoState === 'idle') {
-                  startRecording();
+                  return;
                 }
-              }}
-              disabled={memoState === 'transcribing' || status === 'thinking'}
-              accessibilityLabel="Tap to record voice memo, tap again to stop"
-            >
-              <Text style={styles.memoBtnText}>
-                {memoState === 'recording' ? '⏹' : memoState === 'transcribing' ? '…' : '🎙'}
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Conversation recorder button — long-form with speaker diarization */}
-          {memoSupported && (
-            <TouchableOpacity
-              style={[styles.convBtn, convState === 'recording' && styles.convBtnRecording]}
-              onPress={() => {
                 if (convState === 'recording') {
                   stopConvRecording();
                   stopLive();
-                } else if (convState === 'idle' || convState === 'error') {
-                  resetConv();
-                  clearLive();
-                  startConvRecording();
-                  startLive();
-                } else if (convState === 'labeling') {
-                  setShowSpeakerModal(true);
+                  setRecordMode('idle');
+                  return;
                 }
+                // If processing — do nothing
+                if (
+                  memoState === 'transcribing' ||
+                  ['uploading', 'transcribing', 'extracting'].includes(convState) ||
+                  status === 'thinking'
+                ) return;
+                // Otherwise — show mode sheet
+                setShowModeSheet(true);
               }}
-              disabled={['uploading', 'transcribing', 'extracting'].includes(convState)}
-              accessibilityLabel="Tap to record a conversation, tap again to stop"
+              accessibilityLabel="Record — tap to choose mode"
             >
-              <Text style={styles.memoBtnText}>
-                {convState === 'recording'
-                  ? `⏹ ${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, '0')}`
-                  : convState === 'uploading' ? '⬆️'
+              <Text style={styles.unifiedBtnText}>
+                {memoState === 'recording'
+                  ? (recordMode === 'note' ? '⏹ 📝' : '⏹')
+                  : memoState === 'transcribing' ? '…'
+                  : convState === 'recording'
+                    ? `⏹ ${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, '0')}`
+                  : convState === 'uploading'   ? '⬆️'
                   : convState === 'transcribing' ? '📝'
-                  : convState === 'labeling' ? '🏷️'
-                  : convState === 'extracting' ? '🔍'
-                  : '🩺'}
+                  : convState === 'labeling'     ? '🏷️'
+                  : convState === 'extracting'   ? '🔍'
+                  : '🎙'}
               </Text>
             </TouchableOpacity>
           )}
@@ -1617,5 +1694,99 @@ const styles = StyleSheet.create({
     color: '#fff',
     lineHeight: 21,
     fontStyle: 'italic',
+  },
+  // ─── Unified record button ──────────────────────────────────────────────────
+  unifiedBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#1a5c35',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unifiedBtnActive: {
+    backgroundColor: '#EF4444',
+  },
+  unifiedBtnNote: {
+    backgroundColor: '#7C3AED',
+  },
+  unifiedBtnConv: {
+    backgroundColor: '#0891B2',
+  },
+  unifiedBtnText: {
+    fontSize: 20,
+    color: '#fff',
+  },
+  // ─── Mode selection sheet ───────────────────────────────────────────────────
+  modeOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  modeSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 32,
+    gap: 4,
+  },
+  modeSheetTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6B7280',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+  },
+  modeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: '#F9FAFB',
+    marginBottom: 8,
+    gap: 14,
+  },
+  modeOptionIcon: {
+    fontSize: 28,
+  },
+  modeOptionBody: {
+    flex: 1,
+  },
+  modeOptionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  modeOptionDesc: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  // ─── Saved note card ────────────────────────────────────────────────────────
+  savedNoteCard: {
+    marginTop: 12,
+    backgroundColor: '#F5F3FF',
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#7C3AED',
+    padding: 14,
+    gap: 4,
+  },
+  savedNoteLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#7C3AED',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  savedNoteTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111827',
+    marginTop: 2,
   },
 });
