@@ -79,7 +79,7 @@ export function useLiveTranscript(): UseLiveTranscriptResult {
     const recognition = new SR();
     recognition.continuous     = true;   // keep listening until stopLive()
     recognition.interimResults = true;   // show partial words
-    recognition.lang           = 'en-US';
+    recognition.lang           = '';     // empty = use browser/OS language setting (auto)
     recognitionRef.current = recognition;
 
     recognition.onstart = () => {
