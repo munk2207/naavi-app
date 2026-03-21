@@ -428,7 +428,7 @@ export default function HomeScreen() {
   const {
     convState, convError, elapsedSeconds,
     speakers, speakerNames, setSpeakerName,
-    conversationTitle, setConversationTitle,
+    setConversationTitle,
     startRecording: startConvRecording,
     stopRecording: stopConvRecording,
     confirmSpeakers, reset: resetConv,
@@ -503,6 +503,19 @@ export default function HomeScreen() {
 
   const [showSpeakerModal, setShowSpeakerModal] = useState(false);
   const [voiceLang, setVoiceLang]               = useState<'en' | 'ar'>('en');
+  // Local state for the speaker-naming modal — avoids React Native Web Modal + hook state issues
+  const [localNames, setLocalNames]   = useState<Record<string, string>>({});
+  const [localTitle, setLocalTitle]   = useState('');
+
+  // Initialise local modal state as soon as transcription finishes
+  useEffect(() => {
+    if (convState === 'labeling') {
+      const init: Record<string, string> = {};
+      speakers.forEach(s => { init[s] = ''; });
+      setLocalNames(init);
+      setLocalTitle('');
+    }
+  }, [convState, speakers]);
 
   function getGreeting(): string {
     const hour = new Date().getHours();
@@ -618,25 +631,28 @@ export default function HomeScreen() {
                   style={styles.speakerInput}
                   placeholder="e.g. Dr. Ahmed — Blood Work"
                   placeholderTextColor={Colors.textMuted}
-                  value={conversationTitle}
-                  onChangeText={setConversationTitle}
+                  value={localTitle}
+                  onChangeText={setLocalTitle}
                 />
               </View>
-              {speakers.map((spk) => (
+              {speakers.map((spk, idx) => (
                 <View key={spk} style={styles.speakerRow}>
-                  <Text style={styles.speakerLabel}>Speaker {spk}</Text>
+                  <Text style={styles.speakerLabel}>Speaker {idx + 1}</Text>
                   <TextInput
                     style={styles.speakerInput}
-                    placeholder={spk === speakers[0] ? 'e.g. Dr. Ahmed' : 'e.g. Robert'}
+                    placeholder={idx === 0 ? 'e.g. Dr. Ahmed' : 'e.g. Robert'}
                     placeholderTextColor={Colors.textMuted}
-                    value={speakerNames[spk] ?? ''}
-                    onChangeText={(v) => setSpeakerName(spk, v)}
+                    value={localNames[spk] ?? ''}
+                    onChangeText={(v) => setLocalNames(prev => ({ ...prev, [spk]: v }))}
                   />
                 </View>
               ))}
               <TouchableOpacity
                 style={styles.speakerConfirmBtn}
                 onPress={async () => {
+                  // Sync local inputs → hook refs before confirming
+                  speakers.forEach(s => setSpeakerName(s, localNames[s] ?? ''));
+                  setConversationTitle(localTitle);
                   setShowSpeakerModal(false);
                   await confirmSpeakers();
                 }}
