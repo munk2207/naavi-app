@@ -507,6 +507,9 @@ export default function HomeScreen() {
   const [localTitle, setLocalTitle]   = useState('');
   const localNamesRef = useRef<Record<string, string>>({});
   const localTitleRef = useRef<string>('');
+  // committedNamesRef — set at the exact moment the user presses confirm.
+  // Used for transcript display: avoids any async state/hook lag.
+  const committedNamesRef = useRef<Record<string, string>>({});
 
   function updateLocalName(spk: string, v: string) {
     localNamesRef.current = { ...localNamesRef.current, [spk]: v };
@@ -524,6 +527,7 @@ export default function HomeScreen() {
       speakers.forEach(s => { init[s] = ''; });
       localNamesRef.current = { ...init };
       localTitleRef.current = '';
+      committedNamesRef.current = {};
       setLocalNames(init);
       setLocalTitle('');
     }
@@ -668,6 +672,8 @@ export default function HomeScreen() {
                   const names = { ...localNamesRef.current };
                   const title = localTitleRef.current;
                   console.log('[SpeakerModal] names:', JSON.stringify(names), 'title:', title);
+                  // Commit names to component ref immediately — used by transcript display
+                  committedNamesRef.current = { ...names };
                   setShowSpeakerModal(false);
                   await confirmSpeakers(names, title);
                 }}
@@ -876,7 +882,7 @@ export default function HomeScreen() {
             <View style={styles.convTranscript}>
               <Text style={styles.convActionsHeader}>🎙 Conversation Transcript</Text>
               {convUtterances.map((u, i) => {
-                const name = confirmedNames[u.speaker] || localNames[u.speaker] || `Speaker ${u.speaker}`;
+                const name = committedNamesRef.current[u.speaker] || confirmedNames[u.speaker] || localNames[u.speaker] || `Speaker ${u.speaker}`;
                 const isFirst = speakers[0] === u.speaker;
                 return (
                   <View key={i} style={[styles.utteranceRow, isFirst ? styles.utteranceLeft : styles.utteranceRight]}>
