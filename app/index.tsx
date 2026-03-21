@@ -1001,71 +1001,54 @@ export default function HomeScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Single mic button — tap to record, tap again to stop */}
+          {/* Naavi mic — speak a question, note, or command */}
           {memoSupported && (
             <TouchableOpacity
-              style={[
-                styles.unifiedBtn,
-                (memoState === 'recording' || convState === 'recording') && styles.unifiedBtnActive,
-              ]}
+              style={[styles.unifiedBtn, memoState === 'recording' && styles.unifiedBtnActive]}
               onPress={() => {
-                if (convState === 'labeling') { setShowSpeakerModal(true); return; }
-
                 if (memoState === 'recording') {
                   stopRecording(async (transcript) => {
                     if (!transcript.trim()) return;
-                    const lower = transcript.trim().toLowerCase().replace(/[.,!?،؟]/g, '');
-                    console.log('[VoiceRoute] transcript:', JSON.stringify(transcript), '| lower:', lower);
-                    // Route: if transcript is just "conversation" → recorder
-                    //        if transcript is just "note" → ask Naavi to save a note
-                    //        anything else → Naavi AI
-                    const isConvCmd = lower.includes('conversation') || lower.includes('محادثة') || lower.includes('حوار');
-                    const isNoteCmd = lower === 'note' || lower.startsWith('note ') || lower.includes('ملاحظة') || lower.includes('نوت');
-                    console.log('[VoiceRoute] isConvCmd:', isConvCmd, 'isNoteCmd:', isNoteCmd);
-                    if (isConvCmd) {
-                      resetConv();
-                      clearLive();
-                      startConvRecording(voiceLang);
-                      startLive();
-                    } else if (isNoteCmd) {
-                      const noteContent = lower === 'note' ? '' : transcript.replace(/^note[:\s]*/i, '').trim();
-                      setMemoTranscript(transcript);
-                      await send(noteContent ? `save a note: ${noteContent}` : 'save a note');
-                      setTimeout(() => setMemoTranscript(null), 5000);
-                    } else {
-                      setMemoTranscript(transcript);
-                      await send(transcript);
-                      setTimeout(() => setMemoTranscript(null), 5000);
-                    }
+                    setMemoTranscript(transcript);
+                    await send(transcript);
+                    setTimeout(() => setMemoTranscript(null), 5000);
                   }, voiceLang);
                   return;
                 }
-
-                if (convState === 'recording') {
-                  stopConvRecording();
-                  stopLive();
-                  return;
-                }
-
-                if (
-                  memoState === 'transcribing' ||
-                  ['uploading', 'transcribing', 'extracting'].includes(convState) ||
-                  status === 'thinking'
-                ) return;
-
+                if (memoState === 'transcribing' || status === 'thinking') return;
                 startRecording();
               }}
               accessibilityLabel="Tap to speak to Naavi"
             >
               <Text style={styles.unifiedBtnText}>
-                {memoState === 'recording' || convState === 'recording' ? '⏹'
-                  : memoState === 'transcribing' || ['uploading', 'transcribing', 'extracting'].includes(convState) ? '…'
-                  : '🎙'}
+                {memoState === 'recording' ? '⏹' : memoState === 'transcribing' ? '…' : '🎙'}
               </Text>
             </TouchableOpacity>
           )}
 
-          {/* Info badge — shows only during conversation recording, not tappable */}
+          {/* Conversation button — tap to start, tap to stop, info badge shows timer */}
+          {memoSupported && (
+            <TouchableOpacity
+              style={[styles.convBtn, convState === 'recording' && styles.convBtnActive]}
+              onPress={() => {
+                if (convState === 'labeling') { setShowSpeakerModal(true); return; }
+                if (convState === 'recording') { stopConvRecording(); stopLive(); return; }
+                if (['uploading', 'transcribing', 'extracting'].includes(convState)) return;
+                resetConv(); clearLive(); startConvRecording(voiceLang); startLive();
+              }}
+              accessibilityLabel="Tap to record a conversation"
+            >
+              {['uploading', 'transcribing', 'extracting'].includes(convState) ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.unifiedBtnText}>
+                  {convState === 'recording' ? '⏹' : convState === 'labeling' ? '🏷️' : '👥'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {/* Timer badge — info only, not tappable */}
           {convState === 'recording' && (
             <View style={styles.convTimerBadge} pointerEvents="none">
               <View style={styles.convTimerDot} />
@@ -1597,6 +1580,9 @@ const styles = StyleSheet.create({
   },
   convBtnRecording: {
     backgroundColor: '#0E7490',
+  },
+  convBtnActive: {
+    backgroundColor: '#EF4444',
   },
   memoBtnText: {
     fontSize: 22,
