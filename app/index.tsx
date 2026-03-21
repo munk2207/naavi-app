@@ -502,17 +502,21 @@ export default function HomeScreen() {
 
   const [showSpeakerModal, setShowSpeakerModal] = useState(false);
   const [voiceLang, setVoiceLang]               = useState<'en' | 'ar'>('en');
-  // Local state for the speaker-naming modal — avoids React Native Web Modal + hook state issues
+  // Local state for speaker-naming modal
   const [localNames, setLocalNames]   = useState<Record<string, string>>({});
   const [localTitle, setLocalTitle]   = useState('');
+  // Refs to read TextInput values directly — bypasses controlled-input issues on web
+  const titleInputRef   = useRef<any>(null);
+  const nameInputRefs   = useRef<Record<string, any>>({});
 
-  // Initialise local modal state as soon as transcription finishes
+  // Reset local state when transcription finishes
   useEffect(() => {
     if (convState === 'labeling') {
       const init: Record<string, string> = {};
       speakers.forEach(s => { init[s] = ''; });
       setLocalNames(init);
       setLocalTitle('');
+      nameInputRefs.current = {};
     }
   }, [convState, speakers]);
 
@@ -627,32 +631,43 @@ export default function HomeScreen() {
               <View style={styles.speakerRow}>
                 <Text style={styles.speakerLabel}>Title</Text>
                 <TextInput
+                  ref={titleInputRef}
                   style={styles.speakerInput}
                   placeholder="e.g. Dr. Ahmed — Blood Work"
                   placeholderTextColor={Colors.textMuted}
-                  value={localTitle}
+                  defaultValue={localTitle}
                   onChangeText={setLocalTitle}
+                  autoCorrect={false}
                 />
               </View>
               {speakers.map((spk, idx) => (
                 <View key={spk} style={styles.speakerRow}>
                   <Text style={styles.speakerLabel}>Speaker {idx + 1}</Text>
                   <TextInput
+                    ref={(r) => { nameInputRefs.current[spk] = r; }}
                     style={styles.speakerInput}
                     placeholder={idx === 0 ? 'e.g. Dr. Ahmed' : 'e.g. Robert'}
                     placeholderTextColor={Colors.textMuted}
-                    value={localNames[spk] ?? ''}
+                    defaultValue={localNames[spk] ?? ''}
                     onChangeText={(v) => setLocalNames(prev => ({ ...prev, [spk]: v }))}
+                    autoCorrect={false}
                   />
                 </View>
               ))}
               <TouchableOpacity
                 style={styles.speakerConfirmBtn}
                 onPress={async () => {
-                  console.log('[SpeakerModal] Confirming — localNames:', JSON.stringify(localNames), 'localTitle:', localTitle);
+                  // Read from both state AND native input value (belt + suspenders)
+                  const names: Record<string, string> = {};
+                  speakers.forEach(spk => {
+                    const stateVal = localNames[spk] ?? '';
+                    const nativeVal = nameInputRefs.current[spk]?._lastNativeText ?? nameInputRefs.current[spk]?.props?.value ?? '';
+                    names[spk] = stateVal || nativeVal;
+                  });
+                  const title = localTitle || titleInputRef.current?._lastNativeText || '';
+                  console.log('[SpeakerModal] Confirming — names:', JSON.stringify(names), 'title:', title);
                   setShowSpeakerModal(false);
-                  // Pass names directly — no ref/state sync needed
-                  await confirmSpeakers(localNames, localTitle);
+                  await confirmSpeakers(names, title);
                 }}
               >
                 {convState === 'extracting'
@@ -859,7 +874,7 @@ export default function HomeScreen() {
             <View style={styles.convTranscript}>
               <Text style={styles.convActionsHeader}>🎙 Conversation Transcript</Text>
               {convUtterances.map((u, i) => {
-                const name = speakerNames[u.speaker] || `Speaker ${u.speaker}`;
+                const name = localNames[u.speaker] || speakerNames[u.speaker] || `Speaker ${u.speaker}`;
                 const isFirst = speakers[0] === u.speaker;
                 return (
                   <View key={i} style={[styles.utteranceRow, isFirst ? styles.utteranceLeft : styles.utteranceRight]}>
