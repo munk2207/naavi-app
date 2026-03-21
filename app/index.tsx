@@ -41,9 +41,9 @@ import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { BriefItem } from '@/lib/naavi-client';
 import { fetchOttawaWeather } from '@/lib/weather';
-import { sendDriveFileAsEmail, saveToDrive } from '@/lib/drive';
+import { sendDriveFileAsEmail } from '@/lib/drive';
 import { lookupContact } from '@/lib/contacts';
-import { saveContact, saveDriveNote } from '@/lib/supabase';
+import { saveContact } from '@/lib/supabase';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { fetchImportantEmails, triggerGmailSync, sendEmail } from '@/lib/gmail';
 import { fetchTravelTime } from '@/lib/maps';
@@ -501,10 +501,7 @@ export default function HomeScreen() {
   const liveScrollRef = useRef<ScrollView>(null);
 
   const [showSpeakerModal, setShowSpeakerModal] = useState(false);
-  const [showModeSheet, setShowModeSheet]       = useState(false);
-  const [recordMode, setRecordMode]             = useState<'command' | 'note' | 'conversation' | 'idle'>('idle');
-  const [savedNote, setSavedNote]               = useState<{ title: string; link?: string } | null>(null);
-  const noteModeRef = useRef(false);
+  const [voiceLang, setVoiceLang]               = useState<'en' | 'ar'>('en');
 
   function getGreeting(): string {
     const hour = new Date().getHours();
@@ -842,19 +839,6 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {/* Voice note saved card */}
-          {savedNote && (
-            <TouchableOpacity
-              style={styles.savedNoteCard}
-              onPress={() => savedNote.link ? Linking.openURL(savedNote.link) : undefined}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.savedNoteLabel}>📝 Note saved to Drive</Text>
-              <Text style={styles.savedNoteTitle}>{savedNote.title}</Text>
-              {savedNote.link ? <Text style={styles.eventLink}>Tap to open in Google Docs</Text> : null}
-            </TouchableOpacity>
-          )}
-
           {/* Remembered / saved to knowledge base cards */}
           {rememberedItems.map((item, i) => (
             <View key={i} style={styles.memoryCard}>
@@ -979,120 +963,71 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Mode selection sheet */}
-        <Modal visible={showModeSheet} transparent animationType="slide" onRequestClose={() => setShowModeSheet(false)}>
-          <TouchableOpacity style={styles.modeOverlay} activeOpacity={1} onPress={() => setShowModeSheet(false)}>
-            <View style={styles.modeSheet}>
-              <Text style={styles.modeSheetTitle}>What would you like to record?</Text>
-
-              <TouchableOpacity style={styles.modeOption} onPress={() => {
-                setShowModeSheet(false);
-                setRecordMode('command');
-                noteModeRef.current = false;
-                startRecording();
-              }}>
-                <Text style={styles.modeOptionIcon}>🎙</Text>
-                <View style={styles.modeOptionBody}>
-                  <Text style={styles.modeOptionTitle}>Ask Naavi</Text>
-                  <Text style={styles.modeOptionDesc}>Speak a question or command</Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.modeOption} onPress={() => {
-                setShowModeSheet(false);
-                setRecordMode('note');
-                noteModeRef.current = true;
-                startRecording();
-              }}>
-                <Text style={styles.modeOptionIcon}>📝</Text>
-                <View style={styles.modeOptionBody}>
-                  <Text style={styles.modeOptionTitle}>Save Note</Text>
-                  <Text style={styles.modeOptionDesc}>Record & save directly to Drive</Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.modeOption} onPress={() => {
-                setShowModeSheet(false);
-                setRecordMode('conversation');
-                resetConv();
-                clearLive();
-                startConvRecording();
-                startLive();
-              }}>
-                <Text style={styles.modeOptionIcon}>🩺</Text>
-                <View style={styles.modeOptionBody}>
-                  <Text style={styles.modeOptionTitle}>Record Conversation</Text>
-                  <Text style={styles.modeOptionDesc}>With speaker detection & action items</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-
         {/* Input bar */}
         <View style={styles.inputBar}>
-          {/* Unified recording button */}
+          {/* Language toggle — EN / AR */}
+          {memoSupported && (
+            <TouchableOpacity
+              style={styles.langBtn}
+              onPress={() => setVoiceLang(l => l === 'en' ? 'ar' : 'en')}
+              accessibilityLabel="Toggle voice language"
+            >
+              <Text style={styles.langBtnText}>{voiceLang === 'en' ? 'EN' : 'AR'}</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Single mic button — tap to record, tap again to stop */}
           {memoSupported && (
             <TouchableOpacity
               style={[
                 styles.unifiedBtn,
                 (memoState === 'recording' || convState === 'recording') && styles.unifiedBtnActive,
-                recordMode === 'note'         && styles.unifiedBtnNote,
-                recordMode === 'conversation' && styles.unifiedBtnConv,
+                convState === 'recording' && styles.unifiedBtnConv,
               ]}
               onPress={() => {
-                // If labeling speakers — open modal
                 if (convState === 'labeling') { setShowSpeakerModal(true); return; }
-                // If currently recording — stop
+
                 if (memoState === 'recording') {
-                  // 'en' for Ask Naavi (command), undefined for Save Note (auto-detect language)
-                  const lang = noteModeRef.current ? undefined : 'en';
                   stopRecording(async (transcript) => {
-                    setRecordMode('idle');
                     if (!transcript.trim()) return;
-                    if (noteModeRef.current) {
-                      // Save as note to Drive
-                      const date = new Date().toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
-                      const title = `Voice Note — ${date}`;
-                      const result = await saveToDrive({ title, content: transcript });
-                      if (result.success) {
-                        await saveDriveNote({ title, webViewLink: result.webViewLink ?? '' });
-                        setSavedNote({ title, link: result.webViewLink });
-                        setTimeout(() => setSavedNote(null), 8000);
-                      }
-                      noteModeRef.current = false;
+                    // Detect "record conversation" intent from spoken words
+                    const isConvCmd = /\b(start|begin|record)\b.{0,20}\b(conversation|meeting|appointment|session)\b/i.test(transcript);
+                    if (isConvCmd) {
+                      resetConv();
+                      clearLive();
+                      startConvRecording();
+                      startLive();
                     } else {
                       setMemoTranscript(transcript);
                       await send(transcript);
                       setTimeout(() => setMemoTranscript(null), 5000);
                     }
-                  }, lang);
+                  }, voiceLang);
                   return;
                 }
+
                 if (convState === 'recording') {
                   stopConvRecording();
                   stopLive();
-                  setRecordMode('idle');
                   return;
                 }
-                // If processing — do nothing
+
                 if (
                   memoState === 'transcribing' ||
                   ['uploading', 'transcribing', 'extracting'].includes(convState) ||
                   status === 'thinking'
                 ) return;
-                // Otherwise — show mode sheet
-                setShowModeSheet(true);
+
+                startRecording();
               }}
-              accessibilityLabel="Record — tap to choose mode"
+              accessibilityLabel="Tap to speak to Naavi"
             >
               <Text style={styles.unifiedBtnText}>
-                {memoState === 'recording'
-                  ? (recordMode === 'note' ? '⏹ 📝' : '⏹')
+                {memoState === 'recording'   ? '⏹'
                   : memoState === 'transcribing' ? '…'
                   : convState === 'recording'
                     ? `⏹ ${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, '0')}`
-                  : convState === 'uploading'   ? '⬆️'
+                  : convState === 'uploading'    ? '⬆️'
                   : convState === 'transcribing' ? '📝'
                   : convState === 'labeling'     ? '🏷️'
                   : convState === 'extracting'   ? '🔍'
@@ -1698,6 +1633,21 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   // ─── Unified record button ──────────────────────────────────────────────────
+  langBtn: {
+    height: 36,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: '#e8f0eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+  },
+  langBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1a5c35',
+    letterSpacing: 0.5,
+  },
   unifiedBtn: {
     width: 52,
     height: 52,
