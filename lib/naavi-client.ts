@@ -34,6 +34,33 @@ async function retrieveKey(key: string): Promise<string | null> {
   return await SecureStore.getItemAsync(key);
 }
 
+// ─── User profile ─────────────────────────────────────────────────────────────
+
+/** Save the user's own name (e.g. "Robert") — used to auto-label conversations */
+export function saveUserName(name: string): void {
+  if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+    localStorage.setItem('naavi_user_name', name.trim());
+  } else {
+    SecureStore.setItemAsync('naavi_user_name', name.trim()).catch(() => {});
+  }
+}
+
+/** Get the saved user name synchronously (web only; returns '' if not set) */
+export function getUserName(): string {
+  if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+    return localStorage.getItem('naavi_user_name') ?? '';
+  }
+  return '';
+}
+
+/** Get the saved user name (async — works on all platforms) */
+export async function getUserNameAsync(): Promise<string> {
+  if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+    return localStorage.getItem('naavi_user_name') ?? '';
+  }
+  return (await SecureStore.getItemAsync('naavi_user_name')) ?? '';
+}
+
 // ─── Types (mirrors src/orchestration/types.ts) ───────────────────────────────
 
 export interface NaaviMessage {

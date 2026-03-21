@@ -28,6 +28,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 
+import { getUserName } from '@/lib/naavi-client';
 import { useOrchestrator } from '@/hooks/useOrchestrator';
 import { useVoice } from '@/hooks/useVoice';
 import { useWhisperMemo } from '@/hooks/useWhisperMemo';
@@ -520,17 +521,34 @@ export default function HomeScreen() {
     setLocalTitle(v);
   }
 
-  // Reset when transcription finishes
+  // When transcription finishes, auto-label or pre-fill using saved user name
   useEffect(() => {
-    if (convState === 'labeling') {
-      const init: Record<string, string> = {};
-      speakers.forEach(s => { init[s] = ''; });
-      localNamesRef.current = { ...init };
-      localTitleRef.current = '';
-      committedNamesRef.current = {};
-      setLocalNames(init);
-      setLocalTitle('');
+    if (convState !== 'labeling') return;
+
+    const savedName = getUserName();
+    const init: Record<string, string> = {};
+    speakers.forEach(s => { init[s] = ''; });
+
+    if (savedName && speakers.length === 1) {
+      // Only the user in the recording — skip the modal entirely
+      const names = { [speakers[0]]: savedName };
+      committedNamesRef.current = names;
+      localNamesRef.current = names;
+      setLocalNames(names);
+      confirmSpeakers(names, '').catch(() => {});
+      return;
     }
+
+    if (savedName && speakers.length >= 2) {
+      // Pre-fill the first speaker as the user; ask for the rest
+      init[speakers[0]] = savedName;
+    }
+
+    localNamesRef.current = { ...init };
+    localTitleRef.current = '';
+    committedNamesRef.current = {};
+    setLocalNames(init);
+    setLocalTitle('');
   }, [convState, speakers]);
 
   function getGreeting(): string {

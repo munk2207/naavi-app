@@ -22,7 +22,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import i18n from '@/lib/i18n';
-import { saveApiKey, getApiKey, hasApiKey } from '@/lib/naavi-client';
+import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserName } from '@/lib/naavi-client';
 import { isCalendarConnected, connectGoogleCalendar, disconnectGoogleCalendar } from '@/lib/calendar';
 import { saveNotionToken, getNotionToken, removeNotionToken, hasNotionToken } from '@/lib/notion';
 import { Colors } from '@/constants/Colors';
@@ -30,6 +30,8 @@ import { Typography } from '@/constants/Typography';
 
 export default function SettingsScreen() {
   const { t } = useTranslation();
+  const [userName, setUserName] = useState('');
+  const [userNameSaved, setUserNameSaved] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [apiKeySet, setApiKeySet] = useState(false);
   const [calendarConnected, setCalendarConnected] = useState(false);
@@ -44,6 +46,8 @@ export default function SettingsScreen() {
     hasApiKey().then(setApiKeySet);
     isCalendarConnected().then(setCalendarConnected);
     hasNotionToken().then(setNotionConnected);
+    const saved = getUserName();
+    if (saved) { setUserName(saved); setUserNameSaved(true); }
   }, []);
 
   async function handleSaveApiKey() {
@@ -89,6 +93,40 @@ export default function SettingsScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+
+        {/* Your Name — used to auto-label conversation transcripts */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Your Name</Text>
+          <Text style={styles.sectionNote}>
+            {userNameSaved
+              ? `✓ Saved as "${userName}". Naavi will auto-label you in every conversation.`
+              : 'Enter your name once — Naavi will recognize you in all conversations automatically.'}
+          </Text>
+          <TextInput
+            style={styles.keyInput}
+            value={userName}
+            onChangeText={setUserName}
+            placeholder="e.g. Robert"
+            placeholderTextColor={Colors.textMuted}
+            autoCapitalize="words"
+            autoCorrect={false}
+            accessibilityLabel="Your name"
+          />
+          <TouchableOpacity
+            style={[styles.saveBtn, !userName.trim() && styles.saveBtnDisabled]}
+            onPress={() => {
+              const name = userName.trim();
+              if (!name) return;
+              saveUserName(name);
+              setUserNameSaved(true);
+            }}
+            disabled={!userName.trim()}
+          >
+            <Text style={styles.saveBtnText}>Save name</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.divider} />
 
         {/* Language */}
         <View style={styles.section}>
