@@ -62,6 +62,7 @@ export interface UseConversationRecorderResult {
   utterances: Utterance[];
   actions: ConversationAction[];
   savedDocLink: string | null;
+  confirmedNames: Record<string, string>; // names as entered by user — for display
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -79,6 +80,7 @@ export function useConversationRecorder(): UseConversationRecorderResult {
   }, []);
   const [utterances, setUtterances] = useState<Utterance[]>([]);
   const [actions, setActions] = useState<ConversationAction[]>([]);
+  const [confirmedNames, setConfirmedNames] = useState<Record<string, string>>({});
   const [savedDocLink, setSavedDocLink] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -257,7 +259,8 @@ export function useConversationRecorder(): UseConversationRecorderResult {
     const currentNames = names;
     const currentTitle = title;
     const currentUtterances = utterancesRef.current;
-    console.log('[ConvRecorder] confirmSpeakers called with names:', JSON.stringify(currentNames), 'title:', currentTitle, 'utterances:', currentUtterances.length);
+    console.log('[ConvRecorder] confirmSpeakers — names:', JSON.stringify(currentNames), 'utterances:', currentUtterances.length);
+    setConfirmedNames(currentNames);
     setConvState('extracting');
 
     try {
@@ -342,6 +345,7 @@ export function useConversationRecorder(): UseConversationRecorderResult {
     utterancesRef.current = [];
     setUtterances([]);
     setActions([]);
+    setConfirmedNames({});
     setSavedDocLink(null);
     transcriptIdRef.current = null;
     chunksRef.current = [];
@@ -365,5 +369,6 @@ export function useConversationRecorder(): UseConversationRecorderResult {
     utterances,
     actions,
     savedDocLink,
+    confirmedNames,
   };
 }

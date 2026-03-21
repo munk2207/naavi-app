@@ -427,7 +427,7 @@ export default function HomeScreen() {
 
   const {
     convState, convError, elapsedSeconds,
-    speakers, speakerNames,
+    speakers, confirmedNames,
     startRecording: startConvRecording,
     stopRecording: stopConvRecording,
     confirmSpeakers, reset: resetConv,
@@ -876,7 +876,7 @@ export default function HomeScreen() {
             <View style={styles.convTranscript}>
               <Text style={styles.convActionsHeader}>🎙 Conversation Transcript</Text>
               {convUtterances.map((u, i) => {
-                const name = localNames[u.speaker] || speakerNames[u.speaker] || `Speaker ${u.speaker}`;
+                const name = confirmedNames[u.speaker] || localNames[u.speaker] || `Speaker ${u.speaker}`;
                 const isFirst = speakers[0] === u.speaker;
                 return (
                   <View key={i} style={[styles.utteranceRow, isFirst ? styles.utteranceLeft : styles.utteranceRight]}>
