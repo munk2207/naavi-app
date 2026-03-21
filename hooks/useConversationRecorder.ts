@@ -33,7 +33,7 @@ export interface Utterance {
 }
 
 export interface ConversationAction {
-  type: 'appointment' | 'prescription' | 'test' | 'follow_up' | 'task';
+  type: 'appointment' | 'meeting' | 'call' | 'email' | 'prescription' | 'test' | 'follow_up' | 'task' | 'reminder';
   title: string;
   description: string;
   timing: string;

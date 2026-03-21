@@ -11,11 +11,15 @@ import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { ConversationAction } from '@/hooks/useConversationRecorder';
 
-const TYPE_CONFIG: Record<ConversationAction['type'], { icon: string; color: string; bg: string }> = {
+const TYPE_CONFIG: Record<string, { icon: string; color: string; bg: string }> = {
   appointment: { icon: '📅', color: '#0369A1', bg: '#E0F2FE' },
+  meeting:     { icon: '🤝', color: '#0369A1', bg: '#E0F2FE' },
+  call:        { icon: '📞', color: '#0891B2', bg: '#ECFEFF' },
+  email:       { icon: '✉️', color: '#4338CA', bg: '#EEF2FF' },
   test:        { icon: '🧪', color: '#7C3AED', bg: '#F5F3FF' },
   prescription:{ icon: '💊', color: '#065F46', bg: '#D1FAE5' },
   follow_up:   { icon: '🔁', color: '#92400E', bg: '#FEF3C7' },
+  reminder:    { icon: '🔔', color: '#B45309', bg: '#FEF3C7' },
   task:        { icon: '✅', color: '#1F2937', bg: '#F3F4F6' },
 };
 
