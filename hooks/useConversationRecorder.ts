@@ -56,7 +56,7 @@ export interface UseConversationRecorderResult {
   // Actions
   startRecording: (language?: string) => void;
   stopRecording: () => void;
-  confirmSpeakers: () => Promise<void>;  // triggers extract-actions + Drive save
+  confirmSpeakers: (names: Record<string, string>, title: string) => Promise<void>;
   reset: () => void;
   // Result
   utterances: Utterance[];
@@ -251,12 +251,13 @@ export function useConversationRecorder(): UseConversationRecorderResult {
 
   // ── Confirm speakers → extract actions ───────────────────────────────────
 
-  const confirmSpeakers = useCallback(async () => {
+  const confirmSpeakers = useCallback(async (names: Record<string, string>, title: string) => {
     if (!supabase) return;
-    // Read latest values from refs — avoids stale closure issues
-    const currentNames = speakerNamesRef.current;
-    const currentTitle = conversationTitleRef.current;
+    // Names and title are passed directly as parameters — no closure or ref issues
+    const currentNames = names;
+    const currentTitle = title;
     const currentUtterances = utterancesRef.current;
+    console.log('[ConvRecorder] confirmSpeakers called with names:', JSON.stringify(currentNames), 'title:', currentTitle, 'utterances:', currentUtterances.length);
     setConvState('extracting');
 
     try {

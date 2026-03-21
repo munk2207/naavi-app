@@ -427,8 +427,7 @@ export default function HomeScreen() {
 
   const {
     convState, convError, elapsedSeconds,
-    speakers, speakerNames, setSpeakerName,
-    setConversationTitle,
+    speakers, speakerNames,
     startRecording: startConvRecording,
     stopRecording: stopConvRecording,
     confirmSpeakers, reset: resetConv,
@@ -595,7 +594,7 @@ export default function HomeScreen() {
             <TouchableOpacity
               style={styles.recordingPromptBtn}
               onPress={() => {
-                setConversationTitle(recordingPrompt.title);
+                setLocalTitle(recordingPrompt.title);
                 clearLive();
                 startConvRecording();
                 startLive();
@@ -650,11 +649,10 @@ export default function HomeScreen() {
               <TouchableOpacity
                 style={styles.speakerConfirmBtn}
                 onPress={async () => {
-                  // Sync local inputs → hook refs before confirming
-                  speakers.forEach(s => setSpeakerName(s, localNames[s] ?? ''));
-                  setConversationTitle(localTitle);
+                  console.log('[SpeakerModal] Confirming — localNames:', JSON.stringify(localNames), 'localTitle:', localTitle);
                   setShowSpeakerModal(false);
-                  await confirmSpeakers();
+                  // Pass names directly — no ref/state sync needed
+                  await confirmSpeakers(localNames, localTitle);
                 }}
               >
                 {convState === 'extracting'
