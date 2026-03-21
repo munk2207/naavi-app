@@ -426,7 +426,7 @@ export default function HomeScreen() {
   }, [currentUserId]);
 
   const {
-    convState, convError, elapsedSeconds,
+    convState, convError,
     speakers, speakerNames,
     startRecording: startConvRecording,
     stopRecording: stopConvRecording,
@@ -497,8 +497,7 @@ export default function HomeScreen() {
   const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
 
-  const { isLive, liveWord, segments: liveSegments, liveError, startLive, stopLive, clearSegments: clearLive } = useLiveTranscript();
-  const liveScrollRef = useRef<ScrollView>(null);
+  const { startLive, stopLive, clearSegments: clearLive } = useLiveTranscript();
 
   const [showSpeakerModal, setShowSpeakerModal] = useState(false);
   const [voiceLang, setVoiceLang]               = useState<'en' | 'ar'>('en');
@@ -981,32 +980,11 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {/* Live transcript panel — visible while recording */}
+        {/* Conversation recording banner — simple, no countdown */}
         {convState === 'recording' && (
-          <View style={styles.livePanel}>
-            <View style={styles.livePanelHeader}>
-              <View style={[styles.liveDot, !isLive && { backgroundColor: '#6B7280' }]} />
-              <Text style={[styles.liveLabel, !isLive && { color: '#6B7280' }]}>
-                {isLive ? 'LIVE' : 'CONNECTING…'}
-              </Text>
-              {liveError ? <Text style={styles.liveErrorText}>{liveError}</Text> : null}
-            </View>
-            <ScrollView
-              ref={liveScrollRef}
-              style={styles.livePanelScroll}
-              showsVerticalScrollIndicator={false}
-              onContentSizeChange={() => liveScrollRef.current?.scrollToEnd({ animated: true })}
-            >
-              {liveSegments.length === 0 && !liveWord && isLive ? (
-                <Text style={styles.liveSegmentText}>Listening…</Text>
-              ) : null}
-              {liveSegments.slice(-5).map((seg, i) => (
-                <Text key={i} style={styles.liveSegmentText}>{seg.text}</Text>
-              ))}
-              {liveWord ? (
-                <Text style={styles.livePartialText}>{liveWord}</Text>
-              ) : null}
-            </ScrollView>
+          <View style={styles.convRecordingBanner}>
+            <View style={styles.convRecordingDot} />
+            <Text style={styles.convRecordingText}>Recording conversation… tap ⏹ to stop</Text>
           </View>
         )}
 
@@ -1029,7 +1007,6 @@ export default function HomeScreen() {
               style={[
                 styles.unifiedBtn,
                 (memoState === 'recording' || convState === 'recording') && styles.unifiedBtnActive,
-                convState === 'recording' && styles.unifiedBtnConv,
               ]}
               onPress={() => {
                 if (convState === 'labeling') { setShowSpeakerModal(true); return; }
@@ -1081,14 +1058,8 @@ export default function HomeScreen() {
               accessibilityLabel="Tap to speak to Naavi"
             >
               <Text style={styles.unifiedBtnText}>
-                {memoState === 'recording'   ? '⏹'
-                  : memoState === 'transcribing' ? '…'
-                  : convState === 'recording'
-                    ? `⏹ ${Math.floor(elapsedSeconds / 60)}:${String(elapsedSeconds % 60).padStart(2, '0')}`
-                  : convState === 'uploading'    ? '⬆️'
-                  : convState === 'transcribing' ? '📝'
-                  : convState === 'labeling'     ? '🏷️'
-                  : convState === 'extracting'   ? '🔍'
+                {memoState === 'recording' || convState === 'recording' ? '⏹'
+                  : memoState === 'transcribing' || ['uploading', 'transcribing', 'extracting'].includes(convState) ? '…'
                   : '🎙'}
               </Text>
             </TouchableOpacity>
@@ -1830,5 +1801,27 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#111827',
     lineHeight: 22,
+  },
+  convRecordingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    borderRadius: 10,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  convRecordingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#EF4444',
+  },
+  convRecordingText: {
+    fontSize: 14,
+    color: '#991B1B',
+    fontWeight: '600',
   },
 });
