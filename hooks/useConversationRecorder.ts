@@ -54,7 +54,7 @@ export interface UseConversationRecorderResult {
   conversationTitle: string;
   setConversationTitle: (title: string) => void;
   // Actions
-  startRecording: () => void;
+  startRecording: (language?: string) => void;
   stopRecording: () => void;
   confirmSpeakers: () => Promise<void>;  // triggers extract-actions + Drive save
   reset: () => void;
@@ -105,9 +105,12 @@ export function useConversationRecorder(): UseConversationRecorderResult {
 
   // ── Start recording ───────────────────────────────────────────────────────
 
-  const startRecording = useCallback(() => {
+  const languageRef = useRef<string | undefined>(undefined);
+
+  const startRecording = useCallback((language?: string) => {
     if (!isSupported) { setError('Audio recording not supported in this browser.'); return; }
 
+    languageRef.current = language;
     setConvError(null);
     chunksRef.current = [];
     setElapsedSeconds(0);
@@ -164,7 +167,7 @@ export function useConversationRecorder(): UseConversationRecorderResult {
         if (!supabase) throw new Error('Supabase not configured');
 
         const { data, error } = await supabase.functions.invoke('upload-conversation', {
-          body: { audio: base64, mimeType: 'audio/webm' },
+          body: { audio: base64, mimeType: 'audio/webm', language: languageRef.current },
         });
 
         if (error || !data?.transcript_id) {

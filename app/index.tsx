@@ -1013,7 +1013,7 @@ export default function HomeScreen() {
                     if (isConvCmd) {
                       resetConv();
                       clearLive();
-                      startConvRecording();
+                      startConvRecording(voiceLang);
                       startLive();
                     } else {
                       setMemoTranscript(transcript);
