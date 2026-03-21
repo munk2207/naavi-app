@@ -1045,6 +1045,8 @@ export default function HomeScreen() {
                 if (convState === 'labeling') { setShowSpeakerModal(true); return; }
                 // If currently recording — stop
                 if (memoState === 'recording') {
+                  // 'en' for Ask Naavi (command), undefined for Save Note (auto-detect language)
+                  const lang = noteModeRef.current ? undefined : 'en';
                   stopRecording(async (transcript) => {
                     setRecordMode('idle');
                     if (!transcript.trim()) return;
@@ -1064,7 +1066,7 @@ export default function HomeScreen() {
                       await send(transcript);
                       setTimeout(() => setMemoTranscript(null), 5000);
                     }
-                  });
+                  }, lang);
                   return;
                 }
                 if (convState === 'recording') {

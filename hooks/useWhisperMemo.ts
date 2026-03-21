@@ -18,7 +18,7 @@ export interface UseWhisperMemoResult {
   memoError: string | null;
   isSupported: boolean;
   startRecording: () => void;
-  stopRecording: (onTranscript: (text: string) => void) => void;
+  stopRecording: (onTranscript: (text: string) => void, language?: string) => void;
 }
 
 export function useWhisperMemo(): UseWhisperMemoResult {
@@ -61,7 +61,7 @@ export function useWhisperMemo(): UseWhisperMemoResult {
     });
   }, [isSupported]);
 
-  const stopRecording = useCallback((onTranscript: (text: string) => void) => {
+  const stopRecording = useCallback((onTranscript: (text: string) => void, language?: string) => {
     const recorder = mediaRecorderRef.current;
     if (!recorder || recorder.state === 'inactive') return;
 
@@ -89,7 +89,7 @@ export function useWhisperMemo(): UseWhisperMemoResult {
         if (!supabase) throw new Error('Supabase not configured');
 
         const { data, error } = await supabase.functions.invoke('transcribe-memo', {
-          body: { audio: base64, mimeType: 'audio/webm' },
+          body: { audio: base64, mimeType: 'audio/webm', language },
         });
 
         if (error || !data?.transcript) {
