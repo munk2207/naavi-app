@@ -17,7 +17,7 @@ import * as Speech from 'expo-speech';
 import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
 import { saveContact, saveReminder, saveDriveNote } from '@/lib/supabase';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
-import { lookupContact } from '@/lib/contacts';
+import { lookupContact, lookupContactByPhone } from '@/lib/contacts';
 import { ingestNote } from '@/lib/knowledge';
 import { registry } from '@/lib/adapters/registry';
 import type { StorageFile, NavigationResult } from '@/lib/types';
@@ -93,6 +93,18 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           enrichedMessage = `${userMessage}\n\n${lines.join('\n')}`;
         } else {
           enrichedMessage = `${userMessage}\n\n## Contact lookup result\nSearched for "${personName}" in contacts, calendar, emails, and notes — no data found.`;
+        }
+      }
+
+      // ── STEP 2: Phone number lookup ────────────────────────────────────────────
+      const phoneMatch = userMessage.match(/\b(\+?1?\s?[\s\-.]?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4})\b/);
+      if (phoneMatch && !personName) {
+        const phone = phoneMatch[1];
+        const contact = await lookupContactByPhone(phone);
+        if (contact) {
+          enrichedMessage = `${userMessage}\n\n## Contact found for ${phone}\nName: ${contact.name}${contact.email ? '\nEmail: ' + contact.email : ''}${contact.phone ? '\nPhone: ' + contact.phone : ''}`;
+        } else {
+          enrichedMessage = `${userMessage}\n\n## Phone lookup result\nSearched for "${phone}" in contacts — no contact found with that number.`;
         }
       }
 

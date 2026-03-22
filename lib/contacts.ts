@@ -17,6 +17,40 @@ export interface Contact {
   phone: string | null;
 }
 
+export async function lookupContactByPhone(phone: string): Promise<Contact | null> {
+  if (!supabase || !phone.trim()) return null;
+
+  // Normalize: strip spaces, dashes, parentheses
+  const digits = phone.replace(/\D/g, '');
+
+  try {
+    const { data } = await supabase
+      .from('contacts')
+      .select('name, email, phone')
+      .or(`phone.ilike.%${digits}%,phone.ilike.%${phone.trim()}%`)
+      .limit(1);
+
+    if (data && data.length > 0) {
+      return { name: data[0].name, email: data[0].email ?? null, phone: data[0].phone ?? null };
+    }
+  } catch { /* continue */ }
+
+  // Also check people table
+  try {
+    const { data } = await supabase
+      .from('people')
+      .select('name, email, phone')
+      .or(`phone.ilike.%${digits}%,phone.ilike.%${phone.trim()}%`)
+      .limit(1);
+
+    if (data && data.length > 0) {
+      return { name: data[0].name, email: data[0].email ?? null, phone: data[0].phone ?? null };
+    }
+  } catch { /* continue */ }
+
+  return null;
+}
+
 export async function lookupContact(name: string): Promise<Contact | null> {
   if (!supabase || !name.trim()) return null;
 
