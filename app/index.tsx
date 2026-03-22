@@ -501,7 +501,7 @@ export default function HomeScreen() {
   const { startLive, stopLive, clearSegments: clearLive } = useLiveTranscript();
 
   const [showSpeakerModal, setShowSpeakerModal] = useState(false);
-  const [voiceLang, setVoiceLang]               = useState<'en' | 'ar'>('en');
+  const voiceLang = 'en';
   // Local state + refs for speaker-naming modal
   // Refs are updated on every keystroke — guaranteed latest value at confirm time
   const [localNames, setLocalNames]   = useState<Record<string, string>>({});
@@ -1017,17 +1017,6 @@ export default function HomeScreen() {
 
         {/* Input bar */}
         <View style={styles.inputBar}>
-          {/* Language toggle — EN / AR */}
-          {memoSupported && (
-            <TouchableOpacity
-              style={styles.langBtn}
-              onPress={() => setVoiceLang(l => l === 'en' ? 'ar' : 'en')}
-              accessibilityLabel="Toggle voice language"
-            >
-              <Text style={styles.langBtnText}>{voiceLang === 'en' ? 'EN' : 'AR'}</Text>
-            </TouchableOpacity>
-          )}
-
           {/* Naavi mic — speak a question, note, or command */}
           {memoSupported && (
             <TouchableOpacity
