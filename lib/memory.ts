@@ -46,8 +46,6 @@ export async function getPersonContext(name: string): Promise<PersonContext | nu
     return null;
   }
 
-  const nameLower = name.toLowerCase();
-
   // Use only calendar_events (reliable) + Notion for now
   // contacts/people/interactions/topics queries are added when RLS is verified
   const sessionRace = await Promise.race([
@@ -292,9 +290,18 @@ export function extractPersonQuery(message: string): string | null {
     /contact\s+(?:info|details?|number|email)\s+(?:for|of)\s+([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
   ];
 
+  const stopwords = new Set([
+    'the', 'a', 'an', 'my', 'me', 'him', 'her', 'them', 'us', 'it',
+    'this', 'that', 'contact', 'person', 'someone', 'anyone', 'everybody',
+    'the contact', 'a contact', 'my contact',
+  ]);
+
   for (const pattern of patterns) {
     const match = message.match(pattern);
-    if (match) return match[1];
+    if (match) {
+      const name = match[1].trim();
+      if (!stopwords.has(name.toLowerCase())) return name;
+    }
   }
 
   return null;

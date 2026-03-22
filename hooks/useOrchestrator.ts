@@ -98,7 +98,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
       // ── STEP 2: Phone number lookup ────────────────────────────────────────────
       const phoneMatch = userMessage.match(/\b(\+?1?\s?[\s\-.]?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4})\b/);
-      if (phoneMatch && !personName) {
+      if (phoneMatch) {
         const phone = phoneMatch[1];
         const contact = await lookupContactByPhone(phone);
         if (contact) {
