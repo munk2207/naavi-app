@@ -48,6 +48,14 @@ export async function lookupContactByPhone(phone: string): Promise<Contact | nul
     }
   } catch { /* continue */ }
 
+  // Fall through to Google People API — searchContacts queries across all fields including phone
+  try {
+    const { data, error } = await supabase.functions.invoke('lookup-contact', {
+      body: { name: phone.trim() },
+    });
+    if (!error && !data?.error && data?.contact) return data.contact;
+  } catch { /* continue */ }
+
   return null;
 }
 
