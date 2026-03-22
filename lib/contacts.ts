@@ -20,41 +20,28 @@ export interface Contact {
 export async function lookupContactByPhone(phone: string): Promise<Contact | null> {
   if (!supabase || !phone.trim()) return null;
 
-  // Normalize: strip spaces, dashes, parentheses
+  // Strip to digits only — e.g. "613-769-7957" → "6137697957"
   const digits = phone.replace(/\D/g, '');
 
-  try {
-    const { data } = await supabase
-      .from('contacts')
-      .select('name, email, phone')
-      .or(`phone.ilike.%${digits}%,phone.ilike.%${phone.trim()}%`)
-      .limit(1);
+  // Try Google People API with multiple formats (dashes, digits, +1 prefix)
+  const queries = [
+    phone.trim(),                        // "613-769-7957"
+    digits,                              // "6137697957"
+    `+1${digits}`,                       // "+16137697957"
+    `+1 ${digits.slice(0,3)} ${digits.slice(3,6)} ${digits.slice(6)}`, // "+1 613 769 7957"
+  ];
 
-    if (data && data.length > 0) {
-      return { name: data[0].name, email: data[0].email ?? null, phone: data[0].phone ?? null };
-    }
-  } catch { /* continue */ }
-
-  // Also check people table
-  try {
-    const { data } = await supabase
-      .from('people')
-      .select('name, email, phone')
-      .or(`phone.ilike.%${digits}%,phone.ilike.%${phone.trim()}%`)
-      .limit(1);
-
-    if (data && data.length > 0) {
-      return { name: data[0].name, email: data[0].email ?? null, phone: data[0].phone ?? null };
-    }
-  } catch { /* continue */ }
-
-  // Fall through to Google People API — searchContacts queries across all fields including phone
-  try {
-    const { data, error } = await supabase.functions.invoke('lookup-contact', {
-      body: { name: phone.trim() },
-    });
-    if (!error && !data?.error && data?.contact) return data.contact;
-  } catch { /* continue */ }
+  for (const query of queries) {
+    try {
+      const { data, error } = await supabase.functions.invoke('lookup-contact', {
+        body: { name: query },
+      });
+      if (!error && !data?.error && data?.contact) {
+        console.log('[contacts] Phone lookup found via Google People API:', data.contact.name);
+        return data.contact;
+      }
+    } catch { /* continue */ }
+  }
 
   return null;
 }
