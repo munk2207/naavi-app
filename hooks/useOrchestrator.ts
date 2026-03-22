@@ -6,41 +6,52 @@
  * - Tracking conversation history
  * - Speaking the response aloud via expo-speech
  * - Returning loading/error state to the UI
+ *
+ * Each turn stores its own cards (travel time, drive files, drafts, etc.)
+ * so the UI can render them interleaved with the conversation.
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
-import { sendToNaavi, type NaaviMessage, type NaaviResponse, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
+import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
 import { saveContact, saveReminder, saveDriveNote } from '@/lib/supabase';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
-import { searchDriveFiles, formatDriveResults, saveToDrive } from '@/lib/drive';
-import { createCalendarEvent } from '@/lib/calendar';
+import { lookupContact } from '@/lib/contacts';
 import { ingestNote } from '@/lib/knowledge';
+import { registry } from '@/lib/adapters/registry';
+import type { StorageFile, NavigationResult } from '@/lib/types';
 
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'error';
 
-export interface OrchestratorState {
-  status: OrchestratorStatus;
-  history: NaaviMessage[];
-  lastResponse: NaaviResponse | null;
-  error: string | null;
+export interface ConversationTurn {
+  userMessage: string;
+  assistantSpeech: string;
+  drafts: NaaviAction[];
+  createdEvents: { summary: string; htmlLink?: string }[];
+  savedDocs: { title: string; webViewLink?: string }[];
+  rememberedItems: { text: string; count: number }[];
+  driveFiles: StorageFile[];
+  navigationResults: NavigationResult[];
 }
 
 export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefItem[] = []) {
   const [status, setStatus] = useState<OrchestratorStatus>('idle');
-  const [history, setHistory] = useState<NaaviMessage[]>([]);
-  const [lastResponse, setLastResponse] = useState<NaaviResponse | null>(null);
-  const [drafts, setDrafts] = useState<NaaviAction[]>([]);
-  const [createdEvents, setCreatedEvents] = useState<{ summary: string; htmlLink?: string }[]>([]);
-  const [savedDocs, setSavedDocs] = useState<{ title: string; webViewLink?: string }[]>([]);
-  const [rememberedItems, setRememberedItems] = useState<{ text: string; count: number }[]>([]);
-  const [driveFiles, setDriveFiles] = useState<import('@/lib/drive').DriveFile[]>([]);
+  const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Always-current ref — send() reads this so it never uses a stale brief
   const briefRef = useRef(briefItems);
   useEffect(() => { briefRef.current = briefItems; }, [briefItems]);
+
+  // Derive history for Claude context from turns
+  const historyRef = useRef<NaaviMessage[]>([]);
+  useEffect(() => {
+    historyRef.current = turns.flatMap(t => [
+      { role: 'user' as const,      content: t.userMessage },
+      { role: 'assistant' as const, content: t.assistantSpeech },
+    ]);
+  }, [turns]);
 
   const send = useCallback(async (userMessage: string) => {
     if (status === 'thinking' || status === 'speaking') return;
@@ -48,177 +59,169 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     setStatus('thinking');
     setError(null);
 
+    // This turn's cards — collected during processing
+    const turnNav: NavigationResult[] = [];
+    const turnDrive: StorageFile[] = [];
+    const turnDrafts: NaaviAction[] = [];
+    const turnEvents: { summary: string; htmlLink?: string }[] = [];
+    const turnDocs: { title: string; webViewLink?: string }[] = [];
+    const turnMemory: { text: string; count: number }[] = [];
+
     try {
-      // Check if Robert is asking about a person — inject their full context
       let enrichedMessage = userMessage;
+
+      // ── STEP 1: Person context lookup (async) ──────────────────────────────────
       const personName = extractPersonQuery(userMessage);
       console.log('[Orchestrator] extractPersonQuery result:', personName);
       if (personName) {
-        const ctx = await getPersonContext(personName);
-        if (ctx) {
-          const contextBlock = formatPersonContext(ctx);
-          console.log('[Orchestrator] Injecting context for', personName, ':\n', contextBlock);
-          enrichedMessage = `${userMessage}\n\n${contextBlock}`;
+        const [ctx, contact] = await Promise.all([
+          getPersonContext(personName),
+          lookupContact(personName),
+        ]);
+
+        const lines: string[] = [];
+        if (ctx) lines.push(formatPersonContext(ctx));
+
+        if (contact && (contact.email || contact.phone)) {
+          lines.push(`## Contact info for ${personName}`);
+          if (contact.email) lines.push(`Email: ${contact.email}`);
+          if (contact.phone) lines.push(`Phone: ${contact.phone}`);
+        }
+
+        console.log('[Orchestrator] contact lookup result:', contact);
+        if (lines.length > 0) {
+          enrichedMessage = `${userMessage}\n\n${lines.join('\n')}`;
         } else {
-          console.log('[Orchestrator] No context found for', personName);
+          enrichedMessage = `${userMessage}\n\n## Contact lookup result\nSearched for "${personName}" in contacts, calendar, emails, and notes — no data found.`;
         }
       }
 
-      const response = await sendToNaavi(enrichedMessage, history, briefRef.current, language);
-
+      const response = await sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language);
       console.log('[Orchestrator] actions:', JSON.stringify(response.actions));
 
-      // Update conversation history
-      setHistory(prev => [
-        ...prev,
-        { role: 'user', content: userMessage },
-        { role: 'assistant', content: response.speech },
-      ]);
+      // ── Execute actions ────────────────────────────────────────────────────────
 
-      setLastResponse(response);
-
-      // Execute SAVE_TO_DRIVE actions
       for (const action of response.actions) {
         if (action.type === 'SAVE_TO_DRIVE') {
-          const result = await saveToDrive({
-            title:   String(action.title   ?? 'Naavi Note'),
-            content: String(action.content ?? ''),
-          });
-          if (result.success) {
-            const title = String(action.title ?? 'Naavi Note');
-            setSavedDocs(prev => [...prev, { title, webViewLink: result.webViewLink }]);
-            await saveDriveNote({ title, webViewLink: result.webViewLink });
-          } else {
-            console.error('[Orchestrator] SAVE_TO_DRIVE failed:', result.error);
+          const title = String(action.title ?? 'Naavi Note');
+          try {
+            const file = await registry.storage.save(title, String(action.content ?? ''), '');
+            turnDocs.push({ title, webViewLink: file.webViewLink });
+            await saveDriveNote({ title, webViewLink: file.webViewLink });
+          } catch (err) {
+            console.error('[Orchestrator] SAVE_TO_DRIVE failed:', err);
           }
         }
-      }
 
-      // Execute REMEMBER actions — save to knowledge base
-      for (const action of response.actions) {
         if (action.type === 'REMEMBER') {
           const text = String(action.text ?? '');
           if (text) {
             ingestNote(text, 'stated').then(fragments => {
-              console.log(`[Orchestrator] REMEMBER saved ${fragments.length} fragments`);
-              setRememberedItems(prev => [...prev, { text, count: fragments.length }]);
+              turnMemory.push({ text, count: fragments.length });
+              setTurns(prev => {
+                const updated = [...prev];
+                const last = updated[updated.length - 1];
+                if (last) updated[updated.length - 1] = { ...last, rememberedItems: [...last.rememberedItems, { text, count: fragments.length }] };
+                return updated;
+              });
             });
           }
         }
-      }
 
-      // Execute CREATE_EVENT actions
-      for (const action of response.actions) {
         if (action.type === 'CREATE_EVENT') {
-          const result = await createCalendarEvent({
-            summary:     String(action.summary     ?? ''),
-            description: String(action.description ?? ''),
-            start:       String(action.start       ?? ''),
-            end:         String(action.end         ?? ''),
-            attendees:   Array.isArray(action.attendees) ? action.attendees.map(String) : [],
-          });
-          if (result.success) {
-            setCreatedEvents(prev => [...prev, { summary: String(action.summary ?? ''), htmlLink: result.htmlLink }]);
-          } else {
-            console.error('[Orchestrator] CREATE_EVENT failed:', result.error);
+          try {
+            const event = await registry.calendar.createEvent({
+              title:       String(action.summary     ?? ''),
+              description: String(action.description ?? ''),
+              startISO:    String(action.start       ?? ''),
+              endISO:      String(action.end         ?? ''),
+              attendees:   Array.isArray(action.attendees)
+                ? action.attendees.map(e => ({ name: '', email: String(e) }))
+                : [],
+            });
+            turnEvents.push({ summary: event.title, htmlLink: event.htmlLink });
+          } catch (err) {
+            console.error('[Orchestrator] CREATE_EVENT failed:', err);
           }
         }
-      }
 
-      // Execute DRIVE_SEARCH actions detected by Claude
-      for (const action of response.actions) {
+        if (action.type === 'FETCH_TRAVEL_TIME') {
+          const destination   = String(action.destination   ?? '').trim();
+          const eventStartISO = String(action.eventStartISO ?? '').trim();
+          if (destination) {
+            try {
+              const result = await registry.maps.fetchTravelTime(destination, eventStartISO);
+              if (result) turnNav.push(result);
+            } catch (err) {
+              console.error('[Orchestrator] FETCH_TRAVEL_TIME failed:', err);
+            }
+          }
+        }
+
         if (action.type === 'DRIVE_SEARCH') {
           const query = String(action.query ?? '').trim();
-          console.log('[Orchestrator] Drive query detected:', query);
           if (query) {
-            const files = await searchDriveFiles(query);
-            if (files.length > 0) setDriveFiles(files);
+            const files = await registry.storage.search(query, '');
+            turnDrive.push(...files);
           }
         }
-      }
 
-      // Accumulate draft and contact actions across the session
-      const newActions = response.actions.filter(
-        a => a.type === 'DRAFT_MESSAGE' || a.type === 'ADD_CONTACT'
-      );
-      if (newActions.length > 0) {
-        setDrafts(prev => [...prev, ...newActions]);
-      }
+        if (action.type === 'DRAFT_MESSAGE' || action.type === 'ADD_CONTACT') {
+          turnDrafts.push(action);
+        }
 
-      // Persist actions to Supabase
-      for (const action of response.actions) {
         if (action.type === 'ADD_CONTACT') {
           const name = String(action.name ?? '');
-          await saveContact({
-            name,
-            email:        String(action.email        ?? ''),
-            phone:        String(action.phone        ?? ''),
-            relationship: String(action.relationship ?? ''),
-          });
-          // Also save to people table for richer memory
-          await savePerson({
-            name,
-            email:        String(action.email        ?? ''),
-            phone:        String(action.phone        ?? ''),
-            relationship: String(action.relationship ?? ''),
-          });
+          await saveContact({ name, email: String(action.email ?? ''), phone: String(action.phone ?? ''), relationship: String(action.relationship ?? '') });
+          await savePerson({ name, email: String(action.email ?? ''), phone: String(action.phone ?? ''), relationship: String(action.relationship ?? '') });
         } else if (action.type === 'SET_REMINDER') {
-          await saveReminder({
-            title:    String(action.title    ?? ''),
-            datetime: String(action.datetime ?? ''),
-            source:   String(action.source   ?? ''),
-          });
+          await saveReminder({ title: String(action.title ?? ''), datetime: String(action.datetime ?? ''), source: String(action.source ?? '') });
         } else if (action.type === 'LOG_CONCERN') {
-          await saveTopic({
-            subject:  String(action.category ?? 'general'),
-            note:     String(action.note     ?? ''),
-            category: String(action.severity ?? 'low'),
-          });
+          await saveTopic({ subject: String(action.category ?? 'general'), note: String(action.note ?? ''), category: String(action.severity ?? 'low') });
         } else if (action.type === 'UPDATE_PROFILE') {
-          await saveTopic({
-            subject:  String(action.key      ?? 'preference'),
-            note:     String(action.value    ?? ''),
-            category: 'preference',
-          });
+          await saveTopic({ subject: String(action.key ?? 'preference'), note: String(action.value ?? ''), category: 'preference' });
         }
       }
+
+      // ── Append turn with all its cards ────────────────────────────────────────
+      setTurns(prev => [...prev, {
+        userMessage,
+        assistantSpeech: response.speech,
+        drafts:           turnDrafts,
+        createdEvents:    turnEvents,
+        savedDocs:        turnDocs,
+        rememberedItems:  turnMemory,
+        driveFiles:       turnDrive,
+        navigationResults: turnNav,
+      }]);
 
       // Speak the response aloud
       setStatus('speaking');
       await speakResponse(response.speech, language);
-
       setStatus('idle');
+
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       setError(message);
       setStatus('error');
     }
-  }, [status, history, language]);
+  }, [status, language]);
 
   const clearHistory = useCallback(() => {
-    setHistory([]);
-    setLastResponse(null);
-    setDrafts([]);
-    setCreatedEvents([]);
-    setSavedDocs([]);
-    setRememberedItems([]);
-    setDriveFiles([]);
+    setTurns([]);
     setError(null);
     setStatus('idle');
   }, []);
 
-  return { status, history, lastResponse, drafts, createdEvents, savedDocs, driveFiles, rememberedItems, error, send, clearHistory };
+  return { status, turns, error, send, clearHistory };
 }
 
 // ─── Speech helper ────────────────────────────────────────────────────────────
 
 async function speakResponse(text: string, language: 'en' | 'fr'): Promise<void> {
-  // On web — use the Web Speech API directly to access higher quality voices
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.speechSynthesis) {
     return speakWeb(text, language);
   }
-
-  // On mobile — use expo-speech
   await Speech.stop();
   return new Promise((resolve) => {
     Speech.speak(text, {
@@ -234,44 +237,27 @@ async function speakResponse(text: string, language: 'en' | 'fr'): Promise<void>
 function speakWeb(text: string, language: 'en' | 'fr'): Promise<void> {
   return new Promise((resolve) => {
     window.speechSynthesis.cancel();
-
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 0.9;
     utterance.pitch = 1.0;
     utterance.onend = () => resolve();
     utterance.onerror = () => resolve();
 
-    // Pick the best available voice — prefer natural/neural voices
     const voices = window.speechSynthesis.getVoices();
     const langCode = language === 'fr' ? 'fr' : 'en';
-
     const preferred = [
-      // Microsoft natural voices (Edge)
-      'Microsoft Aria Online (Natural)',
-      'Microsoft Jenny Online (Natural)',
-      'Microsoft Natasha Online (Natural)',
-      // Google voices (Chrome)
-      'Google UK English Female',
-      'Google US English',
-      'Google français',
+      'Microsoft Aria Online (Natural)', 'Microsoft Jenny Online (Natural)',
+      'Microsoft Natasha Online (Natural)', 'Google UK English Female',
+      'Google US English', 'Google français',
     ];
-
     let selectedVoice: SpeechSynthesisVoice | null = null;
-
-    // Try preferred voices first
     for (const name of preferred) {
       const match = voices.find(v => v.name === name);
       if (match) { selectedVoice = match; break; }
     }
-
-    // Fall back to any voice matching the language
-    if (!selectedVoice) {
-      selectedVoice = voices.find(v => v.lang.startsWith(langCode)) ?? null;
-    }
-
+    if (!selectedVoice) selectedVoice = voices.find(v => v.lang.startsWith(langCode)) ?? null;
     if (selectedVoice) utterance.voice = selectedVoice;
     utterance.lang = language === 'fr' ? 'fr-CA' : 'en-CA';
-
     window.speechSynthesis.speak(utterance);
   });
 }

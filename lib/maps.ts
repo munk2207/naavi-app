@@ -55,17 +55,25 @@ export async function fetchTravelTime(
 
     const { durationMinutes, distanceKm } = data;
 
-    // Calculate leave-by time: event start minus travel time minus 5 min buffer
+    const now = Date.now();
     const eventStart = new Date(eventStartISO);
-    const leaveByMs = eventStart.getTime() - (durationMinutes + 5) * 60 * 1000;
-    const leaveByDate = new Date(leaveByMs);
-    const leaveBy = leaveByDate.toLocaleTimeString('en-CA', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
+    const eventIsUpcoming = eventStart.getTime() > now + 10 * 60 * 1000; // at least 10 min away
 
-    const summary = `🚗 ${durationMinutes} min — leave by ${leaveBy}`;
+    let leaveByMs: number;
+    let leaveBy: string;
+
+    if (eventIsUpcoming) {
+      // Leave in time to arrive 5 min before event
+      leaveByMs = eventStart.getTime() - (durationMinutes + 5) * 60 * 1000;
+      leaveBy = new Date(leaveByMs).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true });
+    } else {
+      // No specific event — leave now, show arrival time
+      leaveByMs = now;
+      const arriveAt = new Date(now + durationMinutes * 60 * 1000);
+      leaveBy = `now → arrive ${arriveAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+    }
+
+    const summary = `🚗 ${durationMinutes} min — leave ${leaveBy}`;
 
     return { durationMinutes, distanceKm, leaveBy, leaveByMs, summary };
   } catch {

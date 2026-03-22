@@ -2,10 +2,10 @@
  * Settings screen
  *
  * Robert controls his preferences here:
- * - Language (English / French)
+ * - His name (used to auto-label conversation transcripts)
  * - Anthropic API key (entered once, stored securely)
- * - Connected tools status
- * - Response detail preference
+ * - Provider selection (calendar, email, storage, maps)
+ * - Connected services status
  */
 
 import React, { useState, useEffect } from 'react';
@@ -17,30 +17,93 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
-  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useTranslation } from 'react-i18next';
-import i18n from '@/lib/i18n';
 import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserName } from '@/lib/naavi-client';
 import { isCalendarConnected, connectGoogleCalendar, disconnectGoogleCalendar } from '@/lib/calendar';
 import { saveNotionToken, getNotionToken, removeNotionToken, hasNotionToken } from '@/lib/notion';
+import { registry } from '@/lib/adapters/registry';
+import type { UserProfile } from '@/lib/types';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 
-export default function SettingsScreen() {
-  const { t } = useTranslation();
-  const [userName, setUserName] = useState('');
-  const [userNameSaved, setUserNameSaved] = useState(false);
-  const [apiKey, setApiKey] = useState('');
-  const [apiKeySet, setApiKeySet] = useState(false);
-  const [calendarConnected, setCalendarConnected] = useState(false);
-  const [calendarLoading, setCalendarLoading] = useState(false);
-  const [notionToken, setNotionToken] = useState('');
-  const [notionConnected, setNotionConnected] = useState(false);
-  const [language, setLanguage] = useState<'en' | 'fr'>(
-    (i18n.language as 'en' | 'fr') ?? 'en'
+// ─── Provider options ─────────────────────────────────────────────────────────
+
+const CALENDAR_PROVIDERS: Array<{ value: UserProfile['defaultCalendarProvider']; label: string; phase?: string }> = [
+  { value: 'google',  label: 'Google Calendar' },
+  { value: 'outlook', label: 'Outlook',         phase: 'Phase 8' },
+  { value: 'apple',   label: 'Apple Calendar',  phase: 'Phase 8' },
+];
+
+const EMAIL_PROVIDERS: Array<{ value: UserProfile['defaultEmailProvider']; label: string; phase?: string }> = [
+  { value: 'gmail',   label: 'Gmail' },
+  { value: 'outlook', label: 'Outlook',         phase: 'Phase 8' },
+];
+
+const STORAGE_PROVIDERS: Array<{ value: UserProfile['defaultStorageProvider']; label: string; phase?: string }> = [
+  { value: 'gdrive',   label: 'Google Drive' },
+  { value: 'onedrive', label: 'OneDrive',    phase: 'Phase 8' },
+  { value: 'dropbox',  label: 'Dropbox',     phase: 'Phase 8' },
+];
+
+const MAPS_PROVIDERS: Array<{ value: UserProfile['defaultMapsProvider']; label: string; phase?: string }> = [
+  { value: 'google_maps', label: 'Google Maps' },
+  { value: 'apple_maps',  label: 'Apple Maps', phase: 'Phase 8' },
+  { value: 'waze',        label: 'Waze',        phase: 'Phase 8' },
+];
+
+// ─── Provider chip component ──────────────────────────────────────────────────
+
+function ProviderChip({
+  label,
+  active,
+  phase,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  phase?: string;
+  onPress?: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.chip, active && styles.chipActive, !!phase && styles.chipDisabled]}
+      onPress={!phase ? onPress : undefined}
+      disabled={!!phase}
+      accessibilityRole="radio"
+      accessibilityState={{ selected: active, disabled: !!phase }}
+    >
+      <Text style={[styles.chipText, active && styles.chipTextActive]}>
+        {label}
+      </Text>
+      {phase && <Text style={styles.chipPhase}>{phase}</Text>}
+    </TouchableOpacity>
   );
+}
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
+
+export default function SettingsScreen() {
+  const [userName, setUserName]           = useState('');
+  const [userNameSaved, setUserNameSaved] = useState(false);
+  const [apiKey, setApiKey]               = useState('');
+  const [apiKeySet, setApiKeySet]         = useState(false);
+  const [calendarConnected, setCalendarConnected] = useState(false);
+  const [calendarLoading, setCalendarLoading]     = useState(false);
+  const [notionToken, setNotionToken]             = useState('');
+  const [notionConnected, setNotionConnected]     = useState(false);
+
+  // Provider selections — all default to Google for Phase 7
+  const [calendarProvider, setCalendarProvider] =
+    useState<UserProfile['defaultCalendarProvider']>('google');
+  const [emailProvider, setEmailProvider] =
+    useState<UserProfile['defaultEmailProvider']>('gmail');
+  const [storageProvider, setStorageProvider] =
+    useState<UserProfile['defaultStorageProvider']>('gdrive');
+  const [mapsProvider, setMapsProvider] =
+    useState<UserProfile['defaultMapsProvider']>('google_maps');
+
+  // ── Load saved state ────────────────────────────────────────────────────────
 
   useEffect(() => {
     hasApiKey().then(setApiKeySet);
@@ -49,6 +112,19 @@ export default function SettingsScreen() {
     const saved = getUserName();
     if (saved) { setUserName(saved); setUserNameSaved(true); }
   }, []);
+
+  // Keep registry in sync whenever provider selections change
+  useEffect(() => {
+    registry.setProfile({
+      defaultCalendarProvider: calendarProvider,
+      defaultEmailProvider:    emailProvider,
+      defaultStorageProvider:  storageProvider,
+      defaultMapsProvider:     mapsProvider,
+      language:                'en',
+    });
+  }, [calendarProvider, emailProvider, storageProvider, mapsProvider]);
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
 
   async function handleSaveApiKey() {
     const key = apiKey.trim();
@@ -80,11 +156,7 @@ export default function SettingsScreen() {
     Alert.alert('Disconnected', 'Notion token removed.');
   }
 
-  function handleLanguageToggle(value: boolean) {
-    const newLang = value ? 'fr' : 'en';
-    setLanguage(newLang);
-    i18n.changeLanguage(newLang);
-  }
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -94,12 +166,12 @@ export default function SettingsScreen() {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* Your Name — used to auto-label conversation transcripts */}
+        {/* Your Name */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Your Name</Text>
           <Text style={styles.sectionNote}>
             {userNameSaved
-              ? `✓ Saved as "${userName}". Naavi will auto-label you in every conversation.`
+              ? `Saved as "${userName}". Naavi will auto-label you in every conversation.`
               : 'Enter your name once — Naavi will recognize you in all conversations automatically.'}
           </Text>
           <TextInput
@@ -128,20 +200,150 @@ export default function SettingsScreen() {
 
         <View style={styles.divider} />
 
-        {/* Language */}
+        {/* Providers */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t('settings.language')}</Text>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>English</Text>
-            <Switch
-              value={language === 'fr'}
-              onValueChange={handleLanguageToggle}
-              trackColor={{ false: Colors.border, true: Colors.primaryMid }}
-              thumbColor={Colors.surface}
-              accessibilityLabel="Toggle language"
-            />
-            <Text style={styles.rowLabel}>Français</Text>
+          <Text style={styles.sectionTitle}>Providers</Text>
+          <Text style={styles.sectionNote}>
+            Naavi routes through whichever provider you select. Additional providers unlock in Phase 8.
+          </Text>
+
+          <ProviderRow label="Calendar">
+            {CALENDAR_PROVIDERS.map(p => (
+              <ProviderChip
+                key={p.value}
+                label={p.label}
+                active={calendarProvider === p.value}
+                phase={p.phase}
+                onPress={() => setCalendarProvider(p.value)}
+              />
+            ))}
+          </ProviderRow>
+
+          <ProviderRow label="Email">
+            {EMAIL_PROVIDERS.map(p => (
+              <ProviderChip
+                key={p.value}
+                label={p.label}
+                active={emailProvider === p.value}
+                phase={p.phase}
+                onPress={() => setEmailProvider(p.value)}
+              />
+            ))}
+          </ProviderRow>
+
+          <ProviderRow label="Storage">
+            {STORAGE_PROVIDERS.map(p => (
+              <ProviderChip
+                key={p.value}
+                label={p.label}
+                active={storageProvider === p.value}
+                phase={p.phase}
+                onPress={() => setStorageProvider(p.value)}
+              />
+            ))}
+          </ProviderRow>
+
+          <ProviderRow label="Maps">
+            {MAPS_PROVIDERS.map(p => (
+              <ProviderChip
+                key={p.value}
+                label={p.label}
+                active={mapsProvider === p.value}
+                phase={p.phase}
+                onPress={() => setMapsProvider(p.value)}
+              />
+            ))}
+          </ProviderRow>
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* Connected services */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Connected Services</Text>
+
+          {/* Calendar */}
+          <View style={styles.toolRow}>
+            <View>
+              <Text style={styles.toolLabel}>Calendar</Text>
+              <Text style={styles.toolStatus}>
+                {calendarConnected ? 'Connected — real events in brief' : 'Not connected'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.connectBtn, calendarConnected && styles.connectBtnActive]}
+              disabled={calendarLoading}
+              onPress={async () => {
+                if (calendarLoading) return;
+                setCalendarLoading(true);
+                try {
+                  if (calendarConnected) {
+                    await disconnectGoogleCalendar();
+                    setCalendarConnected(false);
+                  } else {
+                    await connectGoogleCalendar();
+                    setCalendarConnected(true);
+                  }
+                } finally {
+                  setCalendarLoading(false);
+                }
+              }}
+            >
+              <Text style={styles.connectBtnText}>
+                {calendarLoading ? '...' : calendarConnected ? 'Disconnect' : 'Connect'}
+              </Text>
+            </TouchableOpacity>
           </View>
+
+          {/* Notion */}
+          <View style={styles.toolRow}>
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={styles.toolLabel}>Notion</Text>
+              <Text style={styles.toolStatus}>
+                {notionConnected ? 'Connected — pages searched for context' : 'Paste your integration token below'}
+              </Text>
+            </View>
+            {notionConnected && (
+              <TouchableOpacity
+                style={[styles.connectBtn, styles.connectBtnActive]}
+                onPress={handleDisconnectNotion}
+              >
+                <Text style={styles.connectBtnText}>Disconnect</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          {!notionConnected && (
+            <View style={{ marginBottom: 8 }}>
+              <TextInput
+                style={styles.keyInput}
+                value={notionToken}
+                onChangeText={setNotionToken}
+                placeholder="secret_..."
+                placeholderTextColor={Colors.textMuted}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={[styles.saveBtn, !notionToken.trim() && styles.saveBtnDisabled]}
+                onPress={handleSaveNotionToken}
+                disabled={!notionToken.trim()}
+              >
+                <Text style={styles.saveBtnText}>Connect Notion</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Coming soon */}
+          {[
+            { label: 'Health Wearables' },
+            { label: 'Smart Home' },
+          ].map(tool => (
+            <View key={tool.label} style={styles.toolRow}>
+              <Text style={styles.toolLabel}>{tool.label}</Text>
+              <Text style={styles.comingSoon}>Phase 8</Text>
+            </View>
+          ))}
         </View>
 
         <View style={styles.divider} />
@@ -151,7 +353,7 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>Anthropic API Key</Text>
           <Text style={styles.sectionNote}>
             {apiKeySet
-              ? '✓ Key is saved. Enter a new one below to replace it.'
+              ? 'Key is saved. Enter a new one below to replace it.'
               : 'Enter your API key to enable Naavi. Get one at console.anthropic.com.'}
           </Text>
           <TextInput
@@ -177,94 +379,6 @@ export default function SettingsScreen() {
 
         <View style={styles.divider} />
 
-        {/* Connected tools */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t('settings.connected')}</Text>
-
-          {/* Google Calendar */}
-          <View style={styles.toolRow}>
-            <View>
-              <Text style={styles.toolLabel}>Google Calendar</Text>
-              <Text style={styles.toolStatus}>
-                {calendarConnected ? '✓ Connected — real events in brief' : 'Not connected'}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.connectBtn, calendarConnected && styles.connectBtnActive]}
-              disabled={calendarLoading}
-              onPress={async () => {
-                if (calendarLoading) return;
-                setCalendarLoading(true);
-                try {
-                  if (calendarConnected) {
-                    await disconnectGoogleCalendar();
-                  } else {
-                    await connectGoogleCalendar();
-                  }
-                } finally {
-                  if (calendarConnected) setCalendarConnected(false);
-                  setCalendarLoading(false);
-                }
-              }}
-            >
-              <Text style={styles.connectBtnText}>
-                {calendarLoading ? '...' : calendarConnected ? 'Disconnect' : 'Connect'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Notion */}
-          <View style={styles.toolRow}>
-            <View style={{ flex: 1, marginRight: 12 }}>
-              <Text style={styles.toolLabel}>Notion</Text>
-              <Text style={styles.toolStatus}>
-                {notionConnected ? '✓ Connected — pages searched for contacts' : 'Paste your integration token below'}
-              </Text>
-            </View>
-            {notionConnected ? (
-              <TouchableOpacity
-                style={[styles.connectBtn, styles.connectBtnActive]}
-                onPress={handleDisconnectNotion}
-              >
-                <Text style={styles.connectBtnText}>Disconnect</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-          {!notionConnected && (
-            <View style={{ marginBottom: 8 }}>
-              <TextInput
-                style={styles.keyInput}
-                value={notionToken}
-                onChangeText={setNotionToken}
-                placeholder="secret_..."
-                placeholderTextColor={Colors.textMuted}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <TouchableOpacity
-                style={[styles.saveBtn, !notionToken.trim() && styles.saveBtnDisabled]}
-                onPress={handleSaveNotionToken}
-                disabled={!notionToken.trim()}
-              >
-                <Text style={styles.saveBtnText}>Connect Notion</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {[
-            { label: t('settings.health'),    status: 'coming' },
-            { label: t('settings.smartHome'), status: 'coming' },
-          ].map(tool => (
-            <View key={tool.label} style={styles.toolRow}>
-              <Text style={styles.toolLabel}>{tool.label}</Text>
-              <Text style={styles.comingSoon}>Phase 8</Text>
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.divider} />
-
         {/* Version */}
         <Text style={styles.version}>Naavi — Phase 7 build</Text>
 
@@ -272,6 +386,19 @@ export default function SettingsScreen() {
     </SafeAreaView>
   );
 }
+
+// ─── ProviderRow wrapper ──────────────────────────────────────────────────────
+
+function ProviderRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.providerRow}>
+      <Text style={styles.providerRowLabel}>{label}</Text>
+      <View style={styles.chipRow}>{children}</View>
+    </View>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   safe: {
@@ -302,16 +429,6 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginBottom: 14,
     lineHeight: 22,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    minHeight: Typography.touchTargetIdeal,
-  },
-  rowLabel: {
-    fontSize: Typography.base,
-    color: Colors.textPrimary,
   },
   keyInput: {
     backgroundColor: Colors.surface,
@@ -345,6 +462,52 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.divider,
     marginVertical: 24,
   },
+  // ── Provider section
+  providerRow: {
+    marginBottom: 16,
+  },
+  providerRowLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.textSecondary,
+    marginBottom: 8,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 20,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    backgroundColor: Colors.surface,
+  },
+  chipActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary,
+  },
+  chipDisabled: {
+    opacity: 0.45,
+  },
+  chipText: {
+    fontSize: Typography.sm,
+    color: Colors.textPrimary,
+  },
+  chipTextActive: {
+    color: Colors.textOnDark,
+    fontWeight: Typography.semibold,
+  },
+  chipPhase: {
+    fontSize: 10,
+    color: Colors.textMuted,
+  },
+  // ── Connected tools
   toolRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -352,20 +515,21 @@ const styles = StyleSheet.create({
     minHeight: Typography.touchTargetIdeal,
     borderBottomWidth: 1,
     borderBottomColor: Colors.divider,
+    paddingVertical: 8,
   },
   toolLabel: {
     fontSize: Typography.base,
     color: Colors.textPrimary,
   },
-  comingSoon: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
-    fontStyle: 'italic',
-  },
   toolStatus: {
     fontSize: Typography.sm,
     color: Colors.textMuted,
     marginTop: 2,
+  },
+  comingSoon: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
+    fontStyle: 'italic',
   },
   connectBtn: {
     backgroundColor: Colors.primary,

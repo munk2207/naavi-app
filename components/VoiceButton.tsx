@@ -29,7 +29,7 @@ interface Props {
 
 export function VoiceButton({ status, onPress, disabled }: Props) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const isActive = status === 'thinking' || status === 'speaking';
+  const isActive = status === 'thinking'; // only block during thinking — allow tap to stop listening
 
   // Pulse animation when thinking or speaking
   useEffect(() => {

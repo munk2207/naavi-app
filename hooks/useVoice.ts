@@ -62,19 +62,27 @@ export function useVoice(language: 'en' | 'fr' = 'en'): UseVoiceResult {
       const recognition = new SpeechRecognitionClass();
 
       recognition.lang = language === 'fr' ? 'fr-CA' : 'en-CA';
-      recognition.continuous = false;
+      recognition.continuous = true;
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
+
+      const finalParts: string[] = [];
 
       recognition.onstart = () => {
         setVoiceState('listening');
       };
 
       recognition.onresult = (event: SpeechRecognitionEvent) => {
-        const transcript = event.results[0][0].transcript.trim();
-        if (transcript) {
-          onResult(transcript);
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            finalParts.push(event.results[i][0].transcript.trim());
+          }
         }
+      };
+
+      recognition.onend = () => {
+        const transcript = finalParts.join(' ').trim();
+        if (transcript) onResult(transcript);
         setVoiceState('idle');
       };
 
@@ -89,10 +97,6 @@ export function useVoice(language: 'en' | 'fr' = 'en'): UseVoiceResult {
         }
         setVoiceState('error');
         setTimeout(() => { setVoiceState('idle'); setVoiceError(null); }, 3000);
-      };
-
-      recognition.onend = () => {
-        setVoiceState('idle');
       };
 
       recognitionRef.current = recognition;

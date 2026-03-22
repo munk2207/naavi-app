@@ -274,17 +274,73 @@ export function extractPersonQuery(message: string): string | null {
     /what (?:do you know|do you have|have you got|can you tell me) (?:on|about|for) ([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
     // "pull up John" / "look up John" (not "find everything")
     /(?:pull up|look up|check on) ([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
-    // "John's profile" / "John's history"
-    /([A-Z][a-z]+(?: [A-Z][a-z.]+)?)'s (?:profile|history|notes?|info|contact|details?)/i,
+    // "John's profile" / "John's history" / "John's email" / "John's phone" / "John's number"
+    /([A-Z][a-z]+(?: [A-Z][a-z.]+)?)'s (?:profile|history|notes?|info|contact|details?|email|phone|number|address)/i,
     // "anything on John" / "anything about John"
     /anything (?:on|about) ([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
     // "who is John" / "who's John"
     /who(?:'s| is) ([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
+    // "find John" / "find John in contacts" / "find John's contact"
+    /\bfind\b(?:\s+me)?\s+([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
+    // "search contacts for John" / "search for John" / "search my contacts for John"
+    /search(?:\s+(?:my\s+)?contacts?)?\s+for\s+([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
+    // "what is John's phone/email/number"
+    /what(?:'s| is)\s+([A-Z][a-z]+(?: [A-Z][a-z.]+)?)'s\s+(?:phone|email|number|address|contact)/i,
+    // "get me John's contact" / "get John's email"
+    /get(?:\s+me)?\s+([A-Z][a-z]+(?: [A-Z][a-z.]+)?)'s\s+(?:phone|email|number|contact|info)/i,
+    // "contact info for John" / "contact details for John"
+    /contact\s+(?:info|details?|number|email)\s+(?:for|of)\s+([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
   ];
 
   for (const pattern of patterns) {
     const match = message.match(pattern);
     if (match) return match[1];
+  }
+
+  return null;
+}
+
+// ─── Travel query extraction ──────────────────────────────────────────────────
+
+/**
+ * Detects if Robert is asking about travel time and extracts the destination.
+ * Returns the destination string, or null if no travel intent found.
+ */
+export function extractTravelQuery(message: string): string | null {
+  const lower = message.toLowerCase();
+
+  // Must contain a travel-intent keyword
+  const travelKeywords = [
+    'how long', 'travel time', 'drive time', 'driving time',
+    'travel distance', 'distance to', 'how far', 'directions to',
+    'drive to', 'driving to', 'get to', 'going to', 'how much time',
+    'when should i leave', 'what time should i leave', 'time to get',
+    'time to drive', 'time to reach', 'google map', 'google maps',
+    'open map', 'navigate to', 'add to map', 'show on map',
+    'display on map', 'start navigation', 'route to', 'way to', 'far is',
+  ];
+  const hasTravelIntent = travelKeywords.some(k => lower.includes(k));
+  if (!hasTravelIntent) return null;
+
+  // Extract destination — everything after the last "to" that precedes a place name
+  const patterns = [
+    /\bto\s+((?:[A-Z][a-zA-Z\s,]+|[0-9]+[^?]+))(?:\?|$)/,   // "to Parliament Hill" / "to 100 Queen St"
+    /\bfor\s+((?:[A-Z][a-zA-Z\s,]+))(?:\?|$)/i,              // "leave for X"
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match) {
+      const dest = match[1].trim().replace(/[?.!]+$/, '');
+      if (dest.length > 2) return dest;
+    }
+  }
+
+  // Fallback: grab everything after the last "to "
+  const lastTo = message.lastIndexOf(' to ');
+  if (lastTo !== -1) {
+    const dest = message.slice(lastTo + 4).trim().replace(/[?.!]+$/, '');
+    if (dest.length > 2) return dest;
   }
 
   return null;

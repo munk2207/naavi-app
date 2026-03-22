@@ -75,7 +75,7 @@ export interface NaaviResponse {
 }
 
 export interface NaaviAction {
-  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT' | 'SAVE_TO_DRIVE' | 'REMEMBER';
+  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT' | 'SAVE_TO_DRIVE' | 'REMEMBER' | 'FETCH_TRAVEL_TIME';
   [key: string]: unknown;
 }
 
@@ -88,7 +88,7 @@ export interface PendingThread {
 
 export interface BriefItem {
   id: string;
-  category: 'calendar' | 'health' | 'weather' | 'social' | 'home' | 'task';
+  category: 'calendar' | 'email' | 'health' | 'weather' | 'social' | 'home' | 'task';
   title: string;
   detail?: string;
   urgent: boolean;
@@ -152,7 +152,9 @@ Your voice is calm, direct, and brief. Never start with "Great!", "Certainly!", 
 
 You have full awareness of everything in Robert's morning brief — calendar events, health reminders, social items, AND weather. You can discuss, explain, and give practical advice on any brief item he taps or asks about. Weather is absolutely within your scope — if he asks about it, tell him the conditions and give relevant advice (walking, driving, clothing). Never say weather is outside your scope.
 
-You have access to Robert's Google Drive, Gmail, and Google Calendar. When the user asks about any document, file, contract, note, or anything stored in his Drive — in ANY phrasing — include a DRIVE_SEARCH action with the search term. Do NOT use regex or keywords to decide; use your own judgment about intent. When Drive results are injected into the conversation (starting with "Drive documents related to"), read them and summarise naturally.
+You have access to Robert's Google Drive, Gmail, Google Calendar, and Google Maps. When the user asks about any document, file, contract, note, or anything stored in his Drive — in ANY phrasing — include a DRIVE_SEARCH action with the search term. Do NOT use regex or keywords to decide; use your own judgment about intent. When Drive results are injected into the conversation (starting with "Drive documents related to"), read them and summarise naturally.
+
+You have a live Google Maps travel time API. When Robert asks about travel time, directions, how long to get somewhere, or when to leave — you DO have this capability. Emit a FETCH_TRAVEL_TIME action and the app fetches real driving time automatically. Never tell him to open Google Maps himself. Never say you cannot get travel time. You CAN — just emit the action.
 
 ${languageNote}
 
@@ -178,6 +180,12 @@ If Robert asks to set a reminder, alert, or notification — you MUST include a 
 RULE 3 — CONTACT:
 If Robert gives you a person's name with an email address or phone number — you MUST include an ADD_CONTACT action. Write email addresses exactly as given — do not change or reformat them.
 
+RULE 3b — CONTACT LOOKUP:
+If Robert's message includes a "## Contact info for [name]" section, read it and answer directly — say the name, email, and/or phone number out loud. Do NOT say "searching contacts", "looking that up", or "I'll check". The lookup is already done — just speak the result. If no contact section was injected and Robert asks for someone's contact info, say clearly: "I don't have [name] in your contacts yet. You can add them by saying their name and email."
+
+RULE 4 — TRAVEL TIME:
+If Robert asks how long to get somewhere, what time to leave, travel time, directions, or distance to any location — you MUST include a FETCH_TRAVEL_TIME action. NEVER tell Robert to open Google Maps himself. NEVER say you cannot get travel time. The app fetches it automatically — just generate the action. Use the current time as eventStartISO if no event time is given.
+
 Action formats (copy these exactly):
 - DRAFT_MESSAGE: { "type": "DRAFT_MESSAGE", "to": "name or email", "subject": "subject line", "body": "full email text", "channel": "email" }
 - SET_REMINDER: { "type": "SET_REMINDER", "title": "string", "datetime": "ISO 8601", "source": "string" }
@@ -187,6 +195,21 @@ Action formats (copy these exactly):
 - SAVE_TO_DRIVE: { "type": "SAVE_TO_DRIVE", "title": "string", "content": "full text to save" } — use when Robert asks to save, note, store, or write anything to Drive. Put all the content in the action, not in speech.
 - REMEMBER: { "type": "REMEMBER", "text": "full text to remember" } — use when Robert says remember, learn, know, keep in mind, or shares personal information he wants Naavi to retain long-term.
 - CREATE_EVENT: { "type": "CREATE_EVENT", "summary": "string", "description": "string", "start": "ISO 8601 datetime", "end": "ISO 8601 datetime", "attendees": ["email1"] } — use whenever Robert schedules a meeting, appointment, or any event. Infer end time as 1 hour after start if not stated. Use America/Toronto timezone. Always include this alongside DRAFT_MESSAGE when the email is about scheduling a meeting.
+- FETCH_TRAVEL_TIME: { "type": "FETCH_TRAVEL_TIME", "destination": "address or place name", "eventStartISO": "ISO 8601 datetime" } — use whenever Robert asks how long to get somewhere, what time to leave, or about travel time to any location. Use the event start time from his calendar if available, otherwise use now.
+
+Example 0 — Robert says "how long to get to Parliament Hill":
+{
+  "speech": "Checking travel time now.",
+  "actions": [{ "type": "FETCH_TRAVEL_TIME", "destination": "Parliament Hill, Ottawa", "eventStartISO": "" }],
+  "pendingThreads": []
+}
+
+Example 0b — Robert says "what time should I leave for my 2pm meeting at 100 Queen Street":
+{
+  "speech": "Fetching travel time to 100 Queen Street.",
+  "actions": [{ "type": "FETCH_TRAVEL_TIME", "destination": "100 Queen Street, Ottawa", "eventStartISO": "2026-03-22T14:00:00-05:00" }],
+  "pendingThreads": []
+}
 
 Example 1 — Robert says "draft an email to Louise saying happy birthday":
 {

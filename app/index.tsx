@@ -41,13 +41,24 @@ import { ConversationActionCard } from '@/components/ConversationActionCard';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { BriefItem } from '@/lib/naavi-client';
+import type { Email } from '@/lib/types';
+
+function emailToBriefItem(email: Email): BriefItem {
+  return {
+    id: email.id,
+    category: 'email',
+    title: email.subject,
+    urgent: email.isImportant,
+    detail: email.summary || `From: ${email.from.name || email.from.email}`,
+    startISO: email.receivedAt,
+  };
+}
 import { fetchOttawaWeather } from '@/lib/weather';
 import { sendDriveFileAsEmail } from '@/lib/drive';
 import { lookupContact } from '@/lib/contacts';
 import { saveContact } from '@/lib/supabase';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
-import { fetchImportantEmails, triggerGmailSync, sendEmail } from '@/lib/gmail';
-import { fetchTravelTime } from '@/lib/maps';
+import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
 
 // ─── Integrations data ────────────────────────────────────────────────────────
@@ -241,7 +252,7 @@ async function enrichWithTravelTime(items: BriefItem[]): Promise<BriefItem[]> {
     // Only fetch travel time for events starting within the next 8 hours
     if (startMs < now || startMs - now > eightHours) return item;
 
-    const travel = await fetchTravelTime(item.location, item.startISO);
+    const travel = await registry.maps.fetchTravelTime(item.location, item.startISO);
     if (!travel) return item;
 
     return {
@@ -295,9 +306,8 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
     }
 
     const originalName = String(action.to ?? '').trim();
-    const result = await sendEmail({
-      to,
-      toName: to !== originalName ? originalName : undefined,
+    const result = await registry.email.send({
+      to:      [{ name: to !== originalName ? originalName : '', email: to }],
       subject: String(action.subject ?? ''),
       body:    String(action.body    ?? ''),
     });
@@ -397,7 +407,7 @@ export default function HomeScreen() {
     Promise.all([
       fetchUpcomingEvents(7, currentUserId),
       fetchUpcomingBirthdays(currentUserId),
-      fetchImportantEmails(currentUserId),
+      registry.email.fetchImportant(currentUserId),
     ]).then(async ([calendarItems, birthdayItems, emailItems]) => {
       console.log('[Home] calendar:', calendarItems.length, 'birthdays:', birthdayItems.length, 'emails:', emailItems.length);
 
@@ -406,22 +416,22 @@ export default function HomeScreen() {
 
       setBrief(prev => {
         const weather = prev.find(i => i.id === 'weather');
-        return [...enriched, ...birthdayItems, ...emailItems, ...(weather ? [weather] : [])];
+        return [...enriched, ...birthdayItems, ...emailItems.map(emailToBriefItem), ...(weather ? [weather] : [])];
       });
     });
 
     // Background sync — refresh after Google Calendar + Gmail are polled
-    Promise.all([triggerCalendarSync(), triggerGmailSync()]).then(() =>
+    Promise.all([triggerCalendarSync(), registry.email.sync(currentUserId)]).then(() =>
       Promise.all([
         fetchUpcomingEvents(7, currentUserId),
         fetchUpcomingBirthdays(currentUserId),
-        fetchImportantEmails(currentUserId),
+        registry.email.fetchImportant(currentUserId),
       ])
     ).then(async ([fresh, freshBirthdays, freshEmails]) => {
       const freshEnriched = await enrichWithTravelTime(fresh);
       setBrief(prev => {
         const weather = prev.find(i => i.id === 'weather');
-        return [...freshEnriched, ...freshBirthdays, ...freshEmails, ...(weather ? [weather] : [])];
+        return [...freshEnriched, ...freshBirthdays, ...freshEmails.map(emailToBriefItem), ...(weather ? [weather] : [])];
       });
     }).catch(() => {});
   }, [currentUserId]);
@@ -494,9 +504,10 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [brief]);
 
-  const { status, history, drafts, createdEvents, savedDocs, driveFiles, rememberedItems, error, send } = useOrchestrator('en', brief);
-  const { voiceState, voiceError, startListening, isSupported } = useVoice('en');
+  const { status, turns, error, send } = useOrchestrator('en', brief);
+  const { voiceState, voiceError, startListening, stopListening, isSupported } = useVoice('en');
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
+  const memoStartedAtRef = useRef<number>(0);
 
   const { startLive, stopLive, clearSegments: clearLive } = useLiveTranscript();
 
@@ -568,7 +579,10 @@ export default function HomeScreen() {
   }
 
   function handleVoicePress() {
-    if (voiceState === 'listening') return;
+    if (voiceState === 'listening') {
+      stopListening();
+      return;
+    }
     startListening(async (transcript) => {
       setInputText('');
       await send(transcript);
@@ -742,7 +756,7 @@ export default function HomeScreen() {
           </View>
 
           {/* Morning brief — grouped by category */}
-          {history.length === 0 && (
+          {turns.length === 0 && (
             <View style={styles.briefSection}>
               <Text style={styles.sectionTitle}>{t('home.briefTitle')}</Text>
               {[
@@ -780,95 +794,101 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {/* Conversation history */}
-          {history.length > 0 && (
-            <View style={styles.conversationSection}>
-              {history.map((turn, index) => (
-                <ConversationBubble
-                  key={index}
-                  role={turn.role}
-                  content={turn.content}
-                />
+          {/* Conversation turns — each turn shows bubbles then its own cards */}
+          {turns.map((turn, ti) => (
+            <View key={ti}>
+              <ConversationBubble role="user" content={turn.userMessage} />
+              <ConversationBubble role="assistant" content={turn.assistantSpeech} />
+
+              {/* Draft emails */}
+              {turn.drafts.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => (
+                <DraftCard key={i} action={action} />
               ))}
-            </View>
-          )}
 
-          {/* Draft message card */}
-          {drafts.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => (
-            <DraftCard key={i} action={action} />
-          ))}
+              {/* Contact saved */}
+              {turn.drafts.filter(a => a.type === 'ADD_CONTACT').map((action, i) => (
+                <View key={i} style={styles.contactCard}>
+                  <Text style={styles.contactLabel}>+ Contact saved</Text>
+                  {action.name ? <Text style={styles.draftField}><Text style={styles.draftFieldLabel}>Name: </Text>{String(action.name)}</Text> : null}
+                  {action.email ? <Text style={styles.draftField}><Text style={styles.draftFieldLabel}>Email: </Text>{String(action.email)}</Text> : null}
+                  {action.phone ? <Text style={styles.draftField}><Text style={styles.draftFieldLabel}>Phone: </Text>{String(action.phone)}</Text> : null}
+                  {action.relationship ? <Text style={styles.draftField}><Text style={styles.draftFieldLabel}>Relationship: </Text>{String(action.relationship)}</Text> : null}
+                </View>
+              ))}
 
-          {/* Drive file cards */}
-          {driveFiles.length > 0 && (
-            <View style={styles.driveSection}>
-              <Text style={styles.draftLabel}>📄 Drive documents</Text>
-              {driveFiles.map((file, i) => (
-                <View key={i} style={[styles.driveCard, file.parentFolderName ? styles.driveCardIndented : null]}>
+              {/* Travel time */}
+              {turn.navigationResults.map((nav, i) => (
+                <View key={i} style={styles.navCard}>
+                  <Text style={styles.navLabel}>🗺️ Travel time</Text>
+                  <Text style={styles.navDestination}>{nav.destination}</Text>
+                  <Text style={styles.navDetail}>{nav.durationMinutes} min · {nav.distanceKm.toFixed(1)} km</Text>
+                  <Text style={styles.navLeaveBy}>
+                    Leave by {new Date(nav.leaveByMs).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
                   <TouchableOpacity
-                    onPress={() => Linking.openURL(file.webViewLink)}
-                    accessibilityLabel={`Open ${file.name} in Google Drive`}
+                    style={styles.navOpenBtn}
+                    onPress={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(nav.destination)}&travelmode=driving`, '_blank')}
                   >
-                    <Text style={styles.driveFileName}>{file.name}</Text>
-                    <Text style={styles.driveFileMeta}>
-                      {friendlyMimeType(file.mimeType)} · modified {new Date(file.modifiedTime).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      {file.parentFolderName ? ` · in "${file.parentFolderName}"` : ''}
-                    </Text>
+                    <Text style={styles.navOpenBtnText}>Open in Google Maps →</Text>
                   </TouchableOpacity>
-                  {file.mimeType !== 'application/vnd.google-apps.folder' && <TouchableOpacity
-                    style={styles.driveSendBtn}
-                    onPress={async () => {
-                      const to = typeof window !== 'undefined'
-                        ? window.prompt(`Send "${file.name}" to (enter email address):`)
-                        : null;
-                      if (!to?.trim()) return;
-                      const result = await sendDriveFileAsEmail({
-                        fileId: file.id,
-                        fileName: file.name,
-                        mimeType: file.mimeType,
-                        to: to.trim(),
-                      });
-                      if (typeof window !== 'undefined') {
-                        window.alert(result.success
-                          ? `"${file.name}" sent to ${to.trim()}.`
-                          : `Failed: ${result.error ?? 'Could not send the file.'}`
-                        );
-                      }
-                    }}
-                    accessibilityLabel={`Send ${file.name} as email attachment`}
-                  >
-                    <Text style={styles.driveSendBtnText}>✉ Send</Text>
-                  </TouchableOpacity>}
+                </View>
+              ))}
+
+              {/* Drive files */}
+              {turn.driveFiles.length > 0 && (
+                <View style={styles.driveSection}>
+                  <Text style={styles.draftLabel}>📄 Drive documents</Text>
+                  {turn.driveFiles.map((file, i) => (
+                    <View key={i} style={[styles.driveCard, file.parentFolderName ? styles.driveCardIndented : null]}>
+                      <TouchableOpacity onPress={() => Linking.openURL(file.webViewLink)} accessibilityLabel={`Open ${file.name} in Google Drive`}>
+                        <Text style={styles.driveFileName}>{file.name}</Text>
+                        <Text style={styles.driveFileMeta}>
+                          {friendlyMimeType(file.mimeType)} · modified {new Date(file.modifiedAt).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}
+                          {file.parentFolderName ? ` · in "${file.parentFolderName}"` : ''}
+                        </Text>
+                      </TouchableOpacity>
+                      {file.mimeType !== 'application/vnd.google-apps.folder' && (
+                        <TouchableOpacity style={styles.driveSendBtn} onPress={async () => {
+                          const to = typeof window !== 'undefined' ? window.prompt(`Send "${file.name}" to (enter email address):`) : null;
+                          if (!to?.trim()) return;
+                          const result = await sendDriveFileAsEmail({ fileId: file.id, fileName: file.name, mimeType: file.mimeType, to: to.trim() });
+                          if (typeof window !== 'undefined') window.alert(result.success ? `"${file.name}" sent to ${to.trim()}.` : `Failed: ${result.error ?? 'Could not send the file.'}`);
+                        }} accessibilityLabel={`Send ${file.name} as email attachment`}>
+                          <Text style={styles.driveSendBtnText}>✉ Send</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Saved to Drive */}
+              {turn.savedDocs.map((doc, i) => (
+                <TouchableOpacity key={i} style={styles.savedDocCard} onPress={() => doc.webViewLink ? Linking.openURL(doc.webViewLink) : undefined} accessibilityLabel="Open document in Google Drive">
+                  <Text style={styles.savedDocLabel}>📄 Saved to Google Drive</Text>
+                  <Text style={styles.savedDocTitle}>{doc.title}</Text>
+                  {doc.webViewLink ? <Text style={styles.eventLink}>Tap to open in Google Docs</Text> : null}
+                </TouchableOpacity>
+              ))}
+
+              {/* Calendar events created */}
+              {turn.createdEvents.map((ev, i) => (
+                <TouchableOpacity key={i} style={styles.eventCard} onPress={() => ev.htmlLink ? Linking.openURL(ev.htmlLink) : undefined} accessibilityLabel="Open event in Google Calendar">
+                  <Text style={styles.eventLabel}>📅 Event added to calendar</Text>
+                  <Text style={styles.eventTitle}>{ev.summary}</Text>
+                  {ev.htmlLink ? <Text style={styles.eventLink}>Tap to view in Google Calendar</Text> : null}
+                </TouchableOpacity>
+              ))}
+
+              {/* Memory saved */}
+              {turn.rememberedItems.map((item, i) => (
+                <View key={i} style={styles.memoryCard}>
+                  <Text style={styles.memoryLabel}>🧠 Saved to memory</Text>
+                  <Text style={styles.memoryText}>{item.text}</Text>
+                  {item.count > 0 && <Text style={styles.memoryMeta}>{item.count} fragment{item.count !== 1 ? 's' : ''} stored</Text>}
                 </View>
               ))}
             </View>
-          )}
-
-          {/* Saved to Drive cards */}
-          {savedDocs.map((doc, i) => (
-            <TouchableOpacity
-              key={i}
-              style={styles.savedDocCard}
-              onPress={() => doc.webViewLink ? Linking.openURL(doc.webViewLink) : undefined}
-              accessibilityLabel="Open document in Google Drive"
-            >
-              <Text style={styles.savedDocLabel}>📄 Saved to Google Drive</Text>
-              <Text style={styles.savedDocTitle}>{doc.title}</Text>
-              {doc.webViewLink ? <Text style={styles.eventLink}>Tap to open in Google Docs</Text> : null}
-            </TouchableOpacity>
-          ))}
-
-          {/* Calendar event created cards */}
-          {createdEvents.map((ev, i) => (
-            <TouchableOpacity
-              key={i}
-              style={styles.eventCard}
-              onPress={() => ev.htmlLink ? Linking.openURL(ev.htmlLink) : undefined}
-              accessibilityLabel="Open event in Google Calendar"
-            >
-              <Text style={styles.eventLabel}>📅 Event added to calendar</Text>
-              <Text style={styles.eventTitle}>{ev.summary}</Text>
-              {ev.htmlLink ? <Text style={styles.eventLink}>Already saved — tap to view in Google Calendar</Text> : null}
-            </TouchableOpacity>
           ))}
 
           {/* Conversation action cards */}
@@ -911,48 +931,6 @@ export default function HomeScreen() {
               })}
             </View>
           )}
-
-          {/* Remembered / saved to knowledge base cards */}
-          {rememberedItems.map((item, i) => (
-            <View key={i} style={styles.memoryCard}>
-              <Text style={styles.memoryLabel}>🧠 Saved to memory</Text>
-              <Text style={styles.memoryText}>{item.text}</Text>
-              {item.count > 0 && (
-                <Text style={styles.memoryMeta}>{item.count} fragment{item.count !== 1 ? 's' : ''} stored</Text>
-              )}
-            </View>
-          ))}
-
-          {/* Add contact card */}
-          {drafts.filter(a => a.type === 'ADD_CONTACT').map((action, i) => (
-            <View key={i} style={styles.contactCard}>
-              <Text style={styles.contactLabel}>+ Contact saved</Text>
-              {action.name ? (
-                <Text style={styles.draftField}>
-                  <Text style={styles.draftFieldLabel}>Name: </Text>
-                  {String(action.name)}
-                </Text>
-              ) : null}
-              {action.email ? (
-                <Text style={styles.draftField}>
-                  <Text style={styles.draftFieldLabel}>Email: </Text>
-                  {String(action.email)}
-                </Text>
-              ) : null}
-              {action.phone ? (
-                <Text style={styles.draftField}>
-                  <Text style={styles.draftFieldLabel}>Phone: </Text>
-                  {String(action.phone)}
-                </Text>
-              ) : null}
-              {action.relationship ? (
-                <Text style={styles.draftField}>
-                  <Text style={styles.draftFieldLabel}>Relationship: </Text>
-                  {String(action.relationship)}
-                </Text>
-              ) : null}
-            </View>
-          ))}
 
           {/* Voice error message */}
           {voiceError ? (
@@ -1023,6 +1001,8 @@ export default function HomeScreen() {
               style={[styles.unifiedBtn, memoState === 'recording' && styles.unifiedBtnActive]}
               onPress={() => {
                 if (memoState === 'recording') {
+                  // Ignore stop taps within 1500ms of starting — prevents double-fire on web
+                  if (Date.now() - memoStartedAtRef.current < 1500) return;
                   stopRecording(async (transcript) => {
                     if (!transcript.trim()) return;
                     setMemoTranscript(transcript);
@@ -1032,6 +1012,7 @@ export default function HomeScreen() {
                   return;
                 }
                 if (memoState === 'transcribing' || status === 'thinking') return;
+                memoStartedAtRef.current = Date.now();
                 startRecording();
               }}
               accessibilityLabel="Tap to speak to Naavi"
@@ -1855,5 +1836,50 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#991B1B',
+  },
+  navCard: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+  },
+  navLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#1D4ED8',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  navDestination: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1E3A5F',
+    marginBottom: 4,
+  },
+  navDetail: {
+    fontSize: 13,
+    color: '#374151',
+    marginBottom: 2,
+  },
+  navLeaveBy: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1D4ED8',
+    marginBottom: 8,
+  },
+  navOpenBtn: {
+    backgroundColor: '#1D4ED8',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignSelf: 'flex-start',
+  },
+  navOpenBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

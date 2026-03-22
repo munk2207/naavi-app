@@ -14,6 +14,7 @@ import type { BriefItem } from '@/lib/naavi-client';
 
 const CATEGORY_ICONS: Record<BriefItem['category'], string> = {
   calendar: '📅',
+  email:    '✉️',
   health:   '🏥',
   weather:  '🌤',
   social:   '👤',
