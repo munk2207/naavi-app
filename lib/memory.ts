@@ -288,6 +288,10 @@ export function extractPersonQuery(message: string): string | null {
     /get(?:\s+me)?\s+([A-Z][a-z]+(?: [A-Z][a-z.]+)?)'s\s+(?:phone|email|number|contact|info)/i,
     // "contact info for John" / "contact details for John"
     /contact\s+(?:info|details?|number|email)\s+(?:for|of)\s+([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
+    // "find the contact with name John" / "contact named John" / "contact with name John"
+    /contact\s+(?:with\s+name|named)\s+([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
+    // "find [Name]" but not "find the contact" (stopwords handle generic words)
+    /\bname\s+(?:is\s+)?([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
   ];
 
   const stopwords = new Set([

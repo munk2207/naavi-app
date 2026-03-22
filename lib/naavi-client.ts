@@ -322,12 +322,38 @@ function buildFallback(rawText: string): NaaviResponse {
   return { speech, actions: [], pendingThreads: [] };
 }
 
+function extractJsonBlocks(text: string): string[] {
+  // Return all top-level {...} blocks found in text, last-first
+  const blocks: string[] = [];
+  let depth = 0, start = -1;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '{') { if (depth === 0) start = i; depth++; }
+    else if (text[i] === '}') { depth--; if (depth === 0 && start !== -1) blocks.push(text.slice(start, i + 1)); }
+  }
+  return blocks.reverse(); // last block first — Claude's self-correction is most recent
+}
+
 function parseResponse(rawText: string): NaaviResponse {
   // Strip markdown code blocks if present
   const cleaned = rawText
     .replace(/```json\s*/g, '')
     .replace(/```\s*/g, '')
     .trim();
+
+  // Try each JSON block last-first (handles Claude self-corrections)
+  for (const block of extractJsonBlocks(cleaned)) {
+    try {
+      const json = JSON.parse(block);
+      if (typeof json.speech === 'string') {
+        const actions = Array.isArray(json.actions) ? json.actions : [];
+        return {
+          speech: fixSentLanguage(json.speech, actions),
+          actions,
+          pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
+        };
+      }
+    } catch { /* try next block */ }
+  }
 
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
