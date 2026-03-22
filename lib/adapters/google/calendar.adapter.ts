@@ -32,7 +32,6 @@ function briefItemToCalendarEvent(item: BriefItem): CalendarEvent {
     description:     item.detail,
     provider:        'google',
     providerEventId: item.id,
-    htmlLink:        item.actionUrl,
   };
 }
 
@@ -64,25 +63,24 @@ export class GoogleCalendarAdapter implements CalendarAdapter {
     const result = await googleCreateEvent({
       summary:     event.title ?? '',
       description: event.description,
-      location:    event.location,
       start:       event.startISO ?? '',
       end:         event.endISO   ?? '',
       attendees:   event.attendees?.map(a => a.email),
     });
     return {
-      id:              `evt_${result.id ?? Date.now()}`,
-      title:           result.summary ?? event.title ?? '',
+      id:              `evt_${result.eventId ?? Date.now()}`,
+      title:           event.title ?? '',
       startISO:        event.startISO ?? '',
       endISO:          event.endISO   ?? '',
       isAllDay:        false,
       location:        event.location,
       provider:        'google',
-      providerEventId: result.id ?? '',
+      providerEventId: result.eventId ?? '',
       htmlLink:        result.htmlLink,
     };
   }
 
-  async sync(userId: string): Promise<void> {
+  async sync(_userId: string): Promise<void> {
     await triggerCalendarSync();
   }
 }

@@ -53,15 +53,15 @@ function rawToStorageFile(raw: any): StorageFile {
 
 export class GoogleStorageAdapter implements StorageAdapter {
 
-  async search(query: string, userId: string): Promise<StorageFile[]> {
+  async search(query: string, _userId: string): Promise<StorageFile[]> {
     const raw = await googleSearch(query);
     return raw.map(rawToStorageFile);
   }
 
-  async save(title: string, content: string, userId: string): Promise<StorageFile> {
-    const result = await googleSave(title, content, userId);
+  async save(title: string, content: string, _userId: string): Promise<StorageFile> {
+    const result = await googleSave({ title, content });
     return {
-      id:            result.id          ?? `gdrive_${Date.now()}`,
+      id:            result.fileId      ?? `gdrive_${Date.now()}`,
       name:          title,
       mimeType:      'application/vnd.google-apps.document',
       mimeTypeLabel: 'Google Doc',

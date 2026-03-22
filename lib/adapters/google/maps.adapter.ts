@@ -23,8 +23,8 @@ export class GoogleMapsAdapter implements MapsAdapter {
 
     return {
       destination,
-      durationMinutes: Math.round(raw.durationSeconds / 60),
-      distanceKm:      Math.round((raw.distanceMeters / 1000) * 10) / 10,
+      durationMinutes: raw.durationMinutes,
+      distanceKm:      raw.distanceKm,
       leaveByMs:       raw.leaveByMs,
       summary:         raw.summary,
       provider:        'google_maps',
