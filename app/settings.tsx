@@ -22,6 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserName } from '@/lib/naavi-client';
 import { isCalendarConnected, connectGoogleCalendar, disconnectGoogleCalendar } from '@/lib/calendar';
 import { saveNotionToken, getNotionToken, removeNotionToken, hasNotionToken } from '@/lib/notion';
+import { isEpicConnected, connectEpic, disconnectEpic } from '@/lib/epic';
 import { registry } from '@/lib/adapters/registry';
 import type { UserProfile } from '@/lib/types';
 import { Colors } from '@/constants/Colors';
@@ -92,6 +93,8 @@ export default function SettingsScreen() {
   const [calendarLoading, setCalendarLoading]     = useState(false);
   const [notionToken, setNotionToken]             = useState('');
   const [notionConnected, setNotionConnected]     = useState(false);
+  const [epicConnected, setEpicConnected]         = useState(false);
+  const [epicLoading, setEpicLoading]             = useState(false);
 
   // Provider selections — all default to Google for Phase 7
   const [calendarProvider, setCalendarProvider] =
@@ -109,6 +112,7 @@ export default function SettingsScreen() {
     hasApiKey().then(setApiKeySet);
     isCalendarConnected().then(setCalendarConnected);
     hasNotionToken().then(setNotionConnected);
+    isEpicConnected().then(setEpicConnected);
     const saved = getUserName();
     if (saved) { setUserName(saved); setUserNameSaved(true); }
   }, []);
@@ -333,6 +337,41 @@ export default function SettingsScreen() {
               </TouchableOpacity>
             </View>
           )}
+
+          {/* MyChart (Epic FHIR) */}
+          <View style={styles.toolRow}>
+            <View>
+              <Text style={styles.toolLabel}>MyChart (Health Records)</Text>
+              <Text style={styles.toolStatus}>
+                {epicConnected
+                  ? 'Connected — medications, appointments & vitals in brief'
+                  : 'Connect your Epic MyChart to share health records with Naavi'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.connectBtn, epicConnected && styles.connectBtnActive]}
+              disabled={epicLoading}
+              onPress={async () => {
+                if (epicLoading) return;
+                setEpicLoading(true);
+                try {
+                  if (epicConnected) {
+                    disconnectEpic();
+                    setEpicConnected(false);
+                  } else {
+                    await connectEpic();
+                    // page will redirect to Epic; status updates on return via isEpicConnected
+                  }
+                } finally {
+                  setEpicLoading(false);
+                }
+              }}
+            >
+              <Text style={styles.connectBtnText}>
+                {epicLoading ? '...' : epicConnected ? 'Disconnect' : 'Connect'}
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           {/* Coming soon */}
           {[
