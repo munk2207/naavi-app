@@ -256,7 +256,10 @@ export async function saveTopic(topic: {
  * "What's the status with Dr. Patel?"
  * "Give me everything on Sarah"
  */
-export function extractPersonQuery(message: string): string | null {
+export function extractPersonQuery(rawMessage: string): string | null {
+  // Join spaced-out letters: "w a e l" → "wael", "J o h n" → "John"
+  const message = rawMessage.replace(/\b([a-zA-Z])\s(?=[a-zA-Z]\s|[a-zA-Z]\b)/g, '$1').replace(/\b([a-zA-Z])\s([a-zA-Z])\b/g, '$1$2');
+
   const patterns = [
     // "what do you have on John" / "what's on John" / "what do you have about John"
     /what(?:'s| is| do you have) (?:on|about) ([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
@@ -288,8 +291,8 @@ export function extractPersonQuery(message: string): string | null {
     /get(?:\s+me)?\s+([A-Z][a-z]+(?: [A-Z][a-z.]+)?)'s\s+(?:phone|email|number|contact|info)/i,
     // "contact info for John" / "contact details for John"
     /contact\s+(?:info|details?|number|email)\s+(?:for|of)\s+([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
-    // "find the contact Robert" / "find contact with Robert" / "find contact named Robert"
-    /\bfind\b(?:\s+(?:the|a|my))?\s+contact\s+(?:(?:with\s+(?:name\s+)?|named\s+))?([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
+    // "find the contact Robert" / "find contact first name Wael" / "find contact named Robert"
+    /\bfind\b(?:\s+(?:the|a|my))?\s+contact\s+(?:(?:with\s+)?(?:first|last)?\s*name\s+|named\s+)?([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
     // "contact with name John" / "contact named John"
     /contact\s+(?:with\s+name|named)\s+([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
     // "name is John" / "his name is John"
@@ -300,7 +303,8 @@ export function extractPersonQuery(message: string): string | null {
     'the', 'a', 'an', 'my', 'me', 'him', 'her', 'them', 'us', 'it',
     'this', 'that', 'contact', 'person', 'someone', 'anyone', 'everybody',
     'the contact', 'a contact', 'my contact', 'contact with', 'contact for',
-    'contact named', 'the person', 'a person',
+    'contact named', 'the person', 'a person', 'first name', 'last name',
+    'first', 'last',
   ]);
 
   for (const pattern of patterns) {
