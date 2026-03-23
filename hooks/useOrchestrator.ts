@@ -252,30 +252,61 @@ async function speakResponse(text: string, language: 'en' | 'fr'): Promise<void>
   });
 }
 
+// Preferred voices in order — first match wins across all browsers/OS
+const PREFERRED_VOICES_EN = [
+  'Microsoft Aria Online (Natural)',   // Edge / Windows — best quality
+  'Microsoft Jenny Online (Natural)',  // Edge / Windows
+  'Google UK English Female',          // Chrome
+  'Google US English',                 // Chrome fallback
+  'Samantha',                          // Safari / macOS
+  'Karen',                             // Safari / macOS AU
+];
+const PREFERRED_VOICES_FR = [
+  'Microsoft Denise Online (Natural)', // Edge / Windows
+  'Google français',                   // Chrome
+  'Amelie',                            // Safari / macOS
+];
+
+function getPreferredVoice(language: 'en' | 'fr'): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices();
+  const list = language === 'fr' ? PREFERRED_VOICES_FR : PREFERRED_VOICES_EN;
+  for (const name of list) {
+    const match = voices.find(v => v.name === name);
+    if (match) return match;
+  }
+  // Last resort: any voice matching the language
+  const langCode = language === 'fr' ? 'fr' : 'en';
+  return voices.find(v => v.lang.startsWith(langCode)) ?? null;
+}
+
 function speakWeb(text: string, language: 'en' | 'fr'): Promise<void> {
   return new Promise((resolve) => {
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.9;
+    utterance.rate = 0.88;
     utterance.pitch = 1.0;
+    utterance.lang = language === 'fr' ? 'fr-CA' : 'en-CA';
     utterance.onend = () => resolve();
     utterance.onerror = () => resolve();
 
+    const applyVoiceAndSpeak = () => {
+      const voice = getPreferredVoice(language);
+      if (voice) {
+        utterance.voice = voice;
+        console.log('[Speech] Using voice:', voice.name);
+      }
+      window.speechSynthesis.speak(utterance);
+    };
+
+    // Voices may not be loaded yet on first call — wait for them
     const voices = window.speechSynthesis.getVoices();
-    const langCode = language === 'fr' ? 'fr' : 'en';
-    const preferred = [
-      'Microsoft Aria Online (Natural)', 'Microsoft Jenny Online (Natural)',
-      'Microsoft Natasha Online (Natural)', 'Google UK English Female',
-      'Google US English', 'Google français',
-    ];
-    let selectedVoice: SpeechSynthesisVoice | null = null;
-    for (const name of preferred) {
-      const match = voices.find(v => v.name === name);
-      if (match) { selectedVoice = match; break; }
+    if (voices.length > 0) {
+      applyVoiceAndSpeak();
+    } else {
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.onvoiceschanged = null;
+        applyVoiceAndSpeak();
+      };
     }
-    if (!selectedVoice) selectedVoice = voices.find(v => v.lang.startsWith(langCode)) ?? null;
-    if (selectedVoice) utterance.voice = selectedVoice;
-    utterance.lang = language === 'fr' ? 'fr-CA' : 'en-CA';
-    window.speechSynthesis.speak(utterance);
   });
 }
