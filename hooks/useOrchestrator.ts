@@ -184,6 +184,64 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           }
         }
 
+        if (action.type === 'SCHEDULE_MEDICATION') {
+          const medName       = String(action.name ?? 'Medication');
+          const doseNote      = String(action.dose_instruction ?? '');
+          const times         = Array.isArray(action.times) ? action.times as string[] : ['08:00', '20:00'];
+          const onDays        = Number(action.on_days  ?? 5);
+          const offDays       = Number(action.off_days ?? 3);
+          const durationDays  = Number(action.duration_days ?? 30);
+          const startDate     = String(action.start_date ?? new Date().toISOString().split('T')[0]);
+
+          // Calculate all active dose dates
+          const events: { title: string; start: string; end: string }[] = [];
+          let dayOffset = 0;
+          let cycleDay  = 0; // position within the current on+off cycle
+
+          while (dayOffset < durationDays) {
+            const isOnDay = cycleDay < onDays;
+            if (isOnDay) {
+              const base = new Date(`${startDate}T00:00:00`);
+              base.setDate(base.getDate() + dayOffset);
+              const dateStr = base.toISOString().split('T')[0];
+
+              for (const time of times) {
+                const [h, m] = time.split(':').map(Number);
+                const start = new Date(`${dateStr}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`);
+                const end   = new Date(start.getTime() + 30 * 60 * 1000); // 30 min block
+                events.push({
+                  title: `💊 ${medName}`,
+                  start: start.toISOString(),
+                  end:   end.toISOString(),
+                });
+              }
+            }
+            cycleDay = (cycleDay + 1) % (onDays + offDays);
+            dayOffset++;
+          }
+
+          console.log(`[Orchestrator] SCHEDULE_MEDICATION: creating ${events.length} events for ${medName}`);
+
+          // Create all events (batched sequentially to avoid rate limits)
+          let created = 0;
+          for (const ev of events) {
+            try {
+              const result = await registry.calendar.createEvent({
+                title:       ev.title,
+                description: doseNote,
+                startISO:    ev.start,
+                endISO:      ev.end,
+                attendees:   [],
+              });
+              turnEvents.push({ summary: result.title, htmlLink: result.htmlLink });
+              created++;
+            } catch (err) {
+              console.error('[Orchestrator] SCHEDULE_MEDICATION event failed:', err);
+            }
+          }
+          console.log(`[Orchestrator] SCHEDULE_MEDICATION: created ${created}/${events.length} events`);
+        }
+
         if (action.type === 'DRAFT_MESSAGE' || action.type === 'ADD_CONTACT') {
           turnDrafts.push(action);
         }

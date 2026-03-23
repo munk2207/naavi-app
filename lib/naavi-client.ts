@@ -75,7 +75,7 @@ export interface NaaviResponse {
 }
 
 export interface NaaviAction {
-  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT' | 'SAVE_TO_DRIVE' | 'REMEMBER' | 'FETCH_TRAVEL_TIME';
+  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT' | 'SAVE_TO_DRIVE' | 'REMEMBER' | 'FETCH_TRAVEL_TIME' | 'SCHEDULE_MEDICATION';
   [key: string]: unknown;
 }
 
@@ -196,6 +196,17 @@ Action formats (copy these exactly):
 - REMEMBER: { "type": "REMEMBER", "text": "full text to remember" } — use when Robert says remember, learn, know, keep in mind, or shares personal information he wants Naavi to retain long-term.
 - CREATE_EVENT: { "type": "CREATE_EVENT", "summary": "string", "description": "string", "start": "ISO 8601 datetime", "end": "ISO 8601 datetime", "attendees": ["email1"] } — use whenever Robert schedules a meeting, appointment, or any event. Infer end time as 1 hour after start if not stated. Use America/Toronto timezone. Always include this alongside DRAFT_MESSAGE when the email is about scheduling a meeting.
 - FETCH_TRAVEL_TIME: { "type": "FETCH_TRAVEL_TIME", "destination": "address or place name", "eventStartISO": "ISO 8601 datetime" } — use whenever Robert asks how long to get somewhere, what time to leave, or about travel time to any location. Use the event start time from his calendar if available, otherwise use now.
+- SCHEDULE_MEDICATION: { "type": "SCHEDULE_MEDICATION", "name": "medication name", "dose_instruction": "e.g. Take with food", "times": ["08:00", "20:00"], "on_days": 5, "off_days": 3, "start_date": "YYYY-MM-DD", "duration_days": 30 } — use whenever Robert describes a medication schedule with a repeating on/off pattern. The app calculates all individual dates and creates calendar events automatically. "times" is an array of HH:MM times (24h) for each daily dose. "on_days" = days to take the medication per cycle, "off_days" = days to pause per cycle, "duration_days" = total days to repeat the full pattern.
+
+RULE 5 — MEDICATION SCHEDULE:
+If Robert describes a medication with a repeating on/off cycle (e.g. "5 days on, 3 days off"), you MUST emit a SCHEDULE_MEDICATION action. Extract: medication name, dose times (ask if not stated — default morning 8am and evening 8pm), on_days, off_days, start_date, and duration_days. Never create individual CREATE_EVENT actions for medications — always use SCHEDULE_MEDICATION.
+
+Example 4 — Robert says "the doctor told me to take Metformin twice a day, 5 days on 3 days off, starting tomorrow for one month":
+{
+  "speech": "Got it — I'll set up your Metformin schedule: twice daily for 5 days, then 3 days off, repeating for 30 days starting tomorrow.",
+  "actions": [{ "type": "SCHEDULE_MEDICATION", "name": "Metformin", "dose_instruction": "Take as directed", "times": ["08:00", "20:00"], "on_days": 5, "off_days": 3, "start_date": "TOMORROW_ISO", "duration_days": 30 }],
+  "pendingThreads": []
+}
 
 Example 0 — Robert says "how long to get to Parliament Hill":
 {
