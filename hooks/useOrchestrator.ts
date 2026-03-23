@@ -97,10 +97,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       }
 
       // ── STEP 2: Phone number lookup ────────────────────────────────────────────
-      const phoneMatch = userMessage.match(/\b(\+?1?\s?[\s\-.]?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4})\b/);
+      // Extract digits from message; if 10 consecutive or spaced digits found, treat as phone
+      const digitsOnly = userMessage.replace(/[\s\-().+]/g, '');
+      const phoneDigitsMatch = digitsOnly.match(/1?(\d{10})/);
+      const phoneMatch = userMessage.match(/\b(\+?1?[\s\-.]?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4})\b/) ||
+                         (phoneDigitsMatch ? [null, phoneDigitsMatch[1]] : null);
       if (phoneMatch) {
         const phone = phoneMatch[1];
+        console.log('[Orchestrator] Phone number detected, looking up:', phone);
         const contact = await lookupContactByPhone(phone);
+        console.log('[Orchestrator] Phone lookup result:', contact);
         if (contact) {
           enrichedMessage = `${userMessage}\n\n## Contact found for ${phone}\nName: ${contact.name}${contact.email ? '\nEmail: ' + contact.email : ''}${contact.phone ? '\nPhone: ' + contact.phone : ''}`;
         } else {
