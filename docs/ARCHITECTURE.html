@@ -5,76 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Naavi — Technical Architecture Document</title>
   <style>
-    /* Repeating page header via thead trick */
-    table.page-wrap {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    table.page-wrap thead td {
-      padding: 12px 0 12px;
-      border-bottom: 2px solid #1a1a1a;
-      font-size: 9pt;
-      color: #333;
-      margin-bottom: 24px;
-    }
-    table.page-wrap tbody td {
-      padding-top: 24px;
-      vertical-align: top;
-    }
-    .page-header-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .page-header-name {
-      font-weight: 700;
-      font-size: 10pt;
-      letter-spacing: 2px;
-      color: #1a1a1a;
-    }
-    .page-header-meta {
-      display: flex;
-      gap: 20px;
-      color: #555;
-      font-size: 9pt;
-    }
-
-    body {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      font-size: 11pt;
-      line-height: 1.6;
-      color: #1a1a1a;
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 56px 48px 40px;
-    }
-    .cover {
-      text-align: center;
-      padding: 48px 0 36px;
-      border-bottom: 3px solid #1a5c35;
-      margin-bottom: 40px;
-    }
-    .cover-logo {
-      font-size: 42pt;
-      font-weight: 800;
-      letter-spacing: 6px;
-      color: #1a5c35;
-      margin: 0;
-    }
-    .cover-subtitle {
-      font-size: 16pt;
-      font-weight: 400;
-      color: #444;
-      margin: 8px 0 24px;
-      letter-spacing: 1px;
-    }
-    .cover-meta {
-      display: flex;
-      justify-content: center;
-      gap: 40px;
-      font-size: 10pt;
-      color: #555;
-    }
+    table.page-wrap { width: 100%; border-collapse: collapse; }
+    table.page-wrap thead td { padding: 12px 0 12px; border-bottom: 2px solid #1a1a1a; font-size: 9pt; color: #333; margin-bottom: 24px; }
+    table.page-wrap tbody td { padding-top: 24px; vertical-align: top; }
+    .page-header-row { display: flex; justify-content: space-between; align-items: center; }
+    .page-header-name { font-weight: 700; font-size: 10pt; letter-spacing: 2px; color: #1a1a1a; }
+    .page-header-meta { display: flex; gap: 20px; color: #555; font-size: 9pt; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11pt; line-height: 1.6; color: #1a1a1a; max-width: 960px; margin: 0 auto; padding: 56px 48px 40px; }
+    .cover { text-align: center; padding: 48px 0 36px; border-bottom: 3px solid #1a5c35; margin-bottom: 40px; }
+    .cover-logo { font-size: 42pt; font-weight: 800; letter-spacing: 6px; color: #1a5c35; margin: 0; }
+    .cover-subtitle { font-size: 16pt; font-weight: 400; color: #444; margin: 8px 0 24px; letter-spacing: 1px; }
+    .cover-meta { display: flex; justify-content: center; gap: 40px; font-size: 10pt; color: #555; }
     .cover-meta span strong { color: #1a1a1a; }
     h1 { font-size: 18pt; color: #1a5c35; border-bottom: 2px solid #d4e8dd; padding-bottom: 6px; margin-top: 40px; }
     h2 { font-size: 14pt; color: #1a3a2a; margin-top: 32px; }
@@ -82,26 +23,8 @@
     p { margin: 8px 0 12px; }
     ul, ol { margin: 8px 0 12px; padding-left: 24px; }
     li { margin-bottom: 4px; }
-    pre {
-      background: #f4f7f5;
-      border: 1px solid #d4e8dd;
-      border-left: 4px solid #1a5c35;
-      border-radius: 6px;
-      padding: 14px 16px;
-      font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 8.5pt;
-      line-height: 1.5;
-      overflow-x: auto;
-      white-space: pre;
-    }
-    code {
-      font-family: 'Consolas', 'Courier New', monospace;
-      font-size: 9pt;
-      background: #f0f5f2;
-      padding: 1px 5px;
-      border-radius: 3px;
-      color: #1a5c35;
-    }
+    pre { background: #f4f7f5; border: 1px solid #d4e8dd; border-left: 4px solid #1a5c35; border-radius: 6px; padding: 14px 16px; font-family: 'Consolas', 'Courier New', monospace; font-size: 8.5pt; line-height: 1.5; overflow-x: auto; white-space: pre; }
+    code { font-family: 'Consolas', 'Courier New', monospace; font-size: 9pt; background: #f0f5f2; padding: 1px 5px; border-radius: 3px; color: #1a5c35; }
     pre code { background: none; padding: 0; color: inherit; font-size: inherit; }
     table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 9.5pt; }
     th { background: #1a5c35; color: #fff; padding: 8px 12px; text-align: left; font-weight: 600; }
@@ -113,12 +36,7 @@
     .footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #d4e8dd; font-size: 9pt; color: #888; text-align: center; }
     .checklist li { list-style: none; margin-left: -24px; }
     .checklist li::before { content: "✓ "; color: #1a5c35; font-weight: 700; }
-    @media print {
-      body { padding: 20px 32px; }
-      pre { font-size: 7.5pt; }
-      h1 { page-break-before: always; }
-      .cover { page-break-after: always; }
-    }
+    @media print { body { padding: 20px 32px; } pre { font-size: 7.5pt; } h1 { page-break-before: always; } .cover { page-break-after: always; } }
   </style>
 </head>
 <body>
@@ -130,8 +48,8 @@
         <div class="page-header-row">
           <span class="page-header-name">NAAVI</span>
           <div class="page-header-meta">
-            <span><strong>Version:</strong> 2.0</span>
-            <span><strong>Date:</strong> March 19, 2026</span>
+            <span><strong>Version:</strong> 2.1</span>
+            <span><strong>Date:</strong> March 23, 2026</span>
             <span><strong>Status:</strong> Phase 8 — Live</span>
             <span><strong>Prepared for:</strong> CTO Review</span>
           </div>
@@ -147,8 +65,8 @@
   <p class="cover-logo">NAAVI</p>
   <p class="cover-subtitle">Technical Architecture Document</p>
   <div class="cover-meta">
-    <span><strong>Version:</strong> 2.0</span>
-    <span><strong>Date:</strong> March 19, 2026</span>
+    <span><strong>Version:</strong> 2.1</span>
+    <span><strong>Date:</strong> March 23, 2026</span>
     <span><strong>Status:</strong> Phase 8 — Live &amp; Fully Integrated</span>
     <span><strong>Prepared for:</strong> CTO Review</span>
   </div>
@@ -168,19 +86,21 @@
 |  |              Naavi App  (Expo / React Native Web)              |  |
 |  |                                                                |  |
 |  |  Morning Brief    Conversation    Action Cards    Notes        |  |
-|  |  (grouped,        (bubbles)       (Draft/Event/   (Memory +    |  |
-|  |  collapsible)                      Contact/Drive)  Drive tab)  |  |
-|  |                                                                |  |
+|  |  (grouped,        (per-turn        (per-turn:      (Memory +   |  |
+|  |  collapsible)     bubbles)         Draft/Event/    Drive tab)  |  |
+|  |                                   Contact/Drive/              |  |
+|  |                                   Medication)                 |  |
 |  |  Voice Input                                                   |  |
 |  |  +----------------+  +--------------------------------------+  |  |
 |  |  | Whisper (mic)  |  | Web Speech API (green button)        |  |  |
-|  |  | clip-&gt;Whisper  |  | real-time browser STT                |  |  |
+|  |  | clip->Whisper  |  | continuous real-time browser STT     |  |  |
 |  |  +-------+--------+  +--------------+------------------------+  |  |
 |  |          +---------------------+                               |  |
 |  |                                v                               |  |
 |  |                    useOrchestrator.ts                          |  |
+|  |                    (per-turn card state)                       |  |
 |  |                                v                               |  |
-|  |               naavi-client.ts &lt;-- buildSystemPrompt()         |  |
+|  |               naavi-client.ts <-- buildSystemPrompt()         |  |
 |  +----------------------------+-----------------------------------+  |
 +-------------------------------|--------------------------------------+
                                 |
@@ -213,13 +133,13 @@
   <tr><td>AI model</td><td>Claude Sonnet 4.6</td><td>claude-sonnet-4-6</td><td>Orchestration + fragment extraction</td></tr>
   <tr><td>AI SDK</td><td>@anthropic-ai/sdk</td><td>^0.79.0</td><td>Used in naavi-chat Edge Function</td></tr>
   <tr><td>Voice input (clip)</td><td>OpenAI Whisper</td><td>whisper-1</td><td>Via transcribe-memo Edge Function</td></tr>
-  <tr><td>Voice input (live)</td><td>Web Speech API</td><td>Browser native</td><td>Chrome/Android real-time STT</td></tr>
-  <tr><td>Voice output</td><td>Web Speech Synthesis</td><td>Browser native</td><td>Prefers Microsoft/Google neural voices</td></tr>
+  <tr><td>Voice input (live)</td><td>Web Speech API</td><td>Browser native</td><td>Continuous mode — Chrome/Edge/Android real-time STT</td></tr>
+  <tr><td>Voice output</td><td>Web Speech Synthesis</td><td>Browser native</td><td>Waits for onvoiceschanged; prefers Microsoft Aria Online (Natural)</td></tr>
   <tr><td>Vector embeddings</td><td>OpenAI text-embedding-3-small</td><td>1536 dimensions</td><td>Knowledge fragment semantic search</td></tr>
   <tr><td>Vector storage</td><td>pgvector (Postgres extension)</td><td>—</td><td>Cosine similarity via RPC</td></tr>
   <tr><td>Backend</td><td>Supabase</td><td>—</td><td>Auth, Postgres, Edge Functions (Deno)</td></tr>
   <tr><td>Auth</td><td>Supabase Google OAuth</td><td>—</td><td>Captures Google refresh token at sign-in</td></tr>
-  <tr><td>Hosting</td><td>Vercel</td><td>—</td><td>Auto-deploys from GitHub push (~90s)</td></tr>
+  <tr><td>Hosting</td><td>Vercel</td><td>—</td><td>Auto-deploys from GitHub push; Root Directory = mobile (~90s)</td></tr>
   <tr><td>Source control</td><td>GitHub</td><td>—</td><td>github.com/munk2207/naavi-app</td></tr>
   <tr><td>i18n</td><td>i18next + react-i18next</td><td>^23.0.0</td><td>English / Canadian French</td></tr>
 </table>
@@ -227,24 +147,24 @@
 <h1>4. Repository and Folder Structure</h1>
 <pre>
 Naavi/
-+-- mobile/                          &lt;-- THE LIVE APP
++-- mobile/                          &lt;-- THE LIVE APP (Vercel root directory)
 |   +-- app/
-|   |   +-- index.tsx                &lt;-- Main screen (brief, conversation, cards)
+|   |   +-- index.tsx                &lt;-- Main screen (brief, conversation, per-turn cards)
 |   |   +-- notes.tsx                &lt;-- Notes repository (Memory + Drive tabs)
 |   |   +-- settings.tsx             &lt;-- Auth, language settings
 |   |   +-- _layout.tsx              &lt;-- Navigation shell
 |   +-- hooks/
-|   |   +-- useOrchestrator.ts       &lt;-- Conversation loop + action executor
-|   |   +-- useVoice.ts              &lt;-- Web Speech API integration
+|   |   +-- useOrchestrator.ts       &lt;-- Conversation loop + action executor + per-turn state
+|   |   +-- useVoice.ts              &lt;-- Web Speech API (continuous mode)
 |   |   +-- useWhisperMemo.ts        &lt;-- Whisper clip recording + transcription
 |   +-- lib/
-|       +-- naavi-client.ts          &lt;-- System prompt builder + Claude call
+|       +-- naavi-client.ts          &lt;-- System prompt builder + Claude call + 4-pass parser
 |       +-- supabase.ts              &lt;-- Supabase client + DB helpers
 |       +-- calendar.ts              &lt;-- Google Calendar fetch + BriefItem mapping
 |       +-- gmail.ts                 &lt;-- Gmail fetch + send
 |       +-- drive.ts                 &lt;-- Drive search + save + email attachment
-|       +-- contacts.ts              &lt;-- 3-tier contact resolution
-|       +-- memory.ts                &lt;-- People table + person context injection
+|       +-- contacts.ts              &lt;-- 4-tier contact resolution (name + phone)
+|       +-- memory.ts                &lt;-- People table + person/phone context injection
 |       +-- knowledge.ts             &lt;-- Knowledge fragment ingest + search
 |       +-- maps.ts                  &lt;-- Travel time fetch + leave-by calculation
 |       +-- weather.ts               &lt;-- Ottawa weather fetch
@@ -261,7 +181,7 @@ Naavi/
 |       +-- send-drive-file/         &lt;-- Sends Drive file as email attachment
 |       +-- send-email/              &lt;-- Gmail send via OAuth
 |       +-- create-calendar-event/   &lt;-- Creates Google Calendar event
-|       +-- lookup-contact/          &lt;-- Google People API contact search
+|       +-- lookup-contact/          &lt;-- Google People API contact search (name or phone)
 |       +-- store-google-token/      &lt;-- Stores Google refresh token at sign-in
 |       +-- get-travel-time/         &lt;-- Google Maps Distance Matrix API
 |       +-- ingest-note/             &lt;-- Claude extraction + OpenAI embeddings
@@ -279,7 +199,7 @@ Naavi/
   <tr><td>google_tokens</td><td>user_id, access_token, refresh_token, expiry_date</td><td>Server-side Google OAuth token storage</td></tr>
   <tr><td>calendar_events</td><td>user_id, google_event_id, summary, start_time, end_time, location</td><td>Synced Google Calendar events</td></tr>
   <tr><td>gmail_messages</td><td>user_id, from_email, from_name, subject, snippet, is_important</td><td>Synced Gmail messages + sender cache for contact resolution</td></tr>
-  <tr><td>contacts</td><td>user_id, name, email</td><td>Contacts saved by Naavi</td></tr>
+  <tr><td>contacts</td><td>user_id, name, email</td><td>Contacts saved by Naavi (name + email only)</td></tr>
   <tr><td>people</td><td>user_id, name, email, phone, relationship, notes</td><td>Rich people table for context injection</td></tr>
   <tr><td>topics</td><td>user_id, subject, note, category</td><td>Preferences, concerns, profile updates</td></tr>
   <tr><td>reminders</td><td>user_id, title, datetime, source</td><td>Reminders set by Naavi</td></tr>
@@ -293,92 +213,118 @@ Naavi/
 1. Robert taps microphone
 
 2a. Whisper path:
-    useWhisperMemo -&gt; records MediaRecorder clip -&gt; base64 encodes
-    -&gt; transcribe-memo Edge Function -&gt; OpenAI Whisper API
-    -&gt; transcript text
+    useWhisperMemo -> records MediaRecorder clip -> base64 encodes
+    -> transcribe-memo Edge Function -> OpenAI Whisper API
+    -> transcript text
 
 2b. Web Speech path:
-    useVoice -&gt; SpeechRecognition API (browser-native)
-    -&gt; transcript text
+    useVoice (continuous=true) -> SpeechRecognition API (browser-native)
+    -> accumulates finalParts[] -> delivers on onend
+    -> transcript text
 
 3. useOrchestrator.send(transcript)
+   Per-turn card arrays initialised: turnNav[], turnDrive[], turnDrafts[],
+   turnEvents[], turnDocs[], turnMemory[]
 
 4. Person context injection (lib/memory.ts):
-   extractPersonQuery() checks if Robert is asking about a person
-   if yes -&gt; getPersonContext() queries people + topics tables
-   -&gt; formatPersonContext() appends context block to message
+   extractPersonQuery() — regex with stopwords filter, spaced-letter normalisation
+   if person name found -> getPersonContext() queries calendar + Notion + Gmail + Drive
+   -> formatPersonContext() appends context block to message
 
-5. naavi-client.ts -&gt; sendToNaavi():
-   -&gt; callNaaviEdgeFunction()
-   -&gt; POST to naavi-chat Edge Function {system, messages, max_tokens:2048}
-   -&gt; Edge Function holds ANTHROPIC_API_KEY server-side
-   -&gt; calls claude-sonnet-4-6
+4b. Phone number lookup (lib/contacts.ts):
+   Digits extracted from message — if 10-digit number detected:
+   -> lookupContactByPhone() tries 4 formats via Google People API
+   -> if found: contact name/email/phone injected into message
+   -> if not found: "no contact found" injected so Claude answers accurately
+
+5. naavi-client.ts -> sendToNaavi():
+   -> callNaaviEdgeFunction()
+   -> POST to naavi-chat Edge Function {system, messages, max_tokens:2048}
+   -> Edge Function holds ANTHROPIC_API_KEY server-side
+   -> calls claude-sonnet-4-6
 
 6. Claude returns raw text
 
-7. parseResponse() - 3-pass parser:
-   Pass 1: standard JSON.parse after stripping markdown fences
+7. parseResponse() - 4-pass parser:
+   extractJsonBlocks(): finds all top-level {...} blocks, returns last-first
+     (handles Claude self-corrections — most recent block is tried first)
+   Pass 1: JSON.parse each block in order
    Pass 2: fix literal newlines inside string values
    Pass 3: strip control characters, fix trailing commas, quote unquoted keys
    Fallback: regex-extract speech value as last resort
-   fixSentLanguage(): corrects "I sent" -&gt; "Draft is ready" when DRAFT_MESSAGE present
+   fixSentLanguage(): corrects "I sent" -> "Draft is ready" when DRAFT_MESSAGE present
 
 8. useOrchestrator executes actions:
-   SAVE_TO_DRIVE   -&gt; saveToDrive() + saveDriveNote() to naavi_notes
-   REMEMBER        -&gt; ingestNote() -&gt; ingest-note Edge Function
-                      -&gt; Claude extracts fragments -&gt; OpenAI embeds -&gt; knowledge_fragments
-   CREATE_EVENT    -&gt; create-calendar-event Edge Function -&gt; Google Calendar
-   DRIVE_SEARCH    -&gt; search-google-drive Edge Function
-   DRAFT_MESSAGE   -&gt; accumulated in drafts[] state
-   ADD_CONTACT     -&gt; saveContact() + savePerson() -&gt; Supabase
-   SET_REMINDER    -&gt; saveReminder() -&gt; Supabase
-   LOG_CONCERN     -&gt; saveTopic() -&gt; Supabase
-   UPDATE_PROFILE  -&gt; saveTopic() -&gt; Supabase
+   SAVE_TO_DRIVE       -> save-to-drive Edge Function + saveDriveNote() to naavi_notes
+   REMEMBER            -> ingestNote() -> ingest-note Edge Function
+                          -> Claude extracts fragments -> OpenAI embeds -> knowledge_fragments
+   CREATE_EVENT        -> create-calendar-event Edge Function -> Google Calendar
+   FETCH_TRAVEL_TIME   -> get-travel-time Edge Function -> Google Maps Distance Matrix
+                          -> turnNav[] card with destination + durationMinutes + leaveByMs
+   DRIVE_SEARCH        -> search-google-drive Edge Function -> turnDrive[] file cards
+   DRAFT_MESSAGE       -> accumulated in turnDrafts[]
+   ADD_CONTACT         -> saveContact() + savePerson() -> Supabase
+   SET_REMINDER        -> saveReminder() -> Supabase
+   LOG_CONCERN         -> saveTopic() -> Supabase
+   UPDATE_PROFILE      -> saveTopic() -> Supabase
+   SCHEDULE_MEDICATION -> calculate all active dose dates from on_days/off_days/duration
+                          -> CREATE_EVENT for each dose (batched sequentially)
+                          -> 💊 emoji events on Google Calendar
 
-9. speakResponse() - voice output
-   Web: Web Speech Synthesis (Microsoft Aria Natural preferred)
-   Native: expo-speech. Rate: 0.9
+9. setTurns() appends ConversationTurn with all card arrays for this turn
 
-10. index.tsx re-renders with conversation bubbles + action cards
+10. speakResponse() - voice output
+    Web: Web Speech Synthesis
+         getVoices() — waits for onvoiceschanged if voices not yet loaded
+         Priority: Microsoft Aria Online (Natural) > Google UK English Female
+                   > Google US English > Samantha (Safari) > any en-CA
+         Rate: 0.88
+    Native: expo-speech. Rate: 0.85
+
+11. index.tsx renders turns[]:
+    For each turn: user bubble -> assistant bubble -> action cards
+    Cards are scoped to their turn — no bleed between conversations
 </pre>
 
 <h1>7. Morning Brief Pipeline</h1>
 <pre>
 App mount
-  -&gt; fetchOttawaWeather() (immediate, no auth)
-  -&gt; supabase.auth.getSession() -&gt; currentUserId
-  -&gt; Promise.all([
+  -> fetchOttawaWeather() (immediate, no auth)
+  -> supabase.auth.getSession() -> currentUserId
+  -> Promise.all([
        fetchUpcomingEvents(7, userId),   -- calendar_events table
        fetchUpcomingBirthdays(userId),   -- calendar_events (birthday type)
        fetchImportantEmails(userId),     -- gmail_messages (is_important = true)
      ])
-  -&gt; enrichWithTravelTime(calendarItems)
+  -> enrichWithTravelTime(calendarItems)
        For each event with location + startISO within 8 hours:
-       -&gt; get-travel-time Edge Function
-       -&gt; Google Maps Distance Matrix API (server-side)
-       -&gt; returns { durationMinutes, distanceKm, leaveByMs, summary }
-  -&gt; setBrief() -- grouped, collapsible categories
+       -> get-travel-time Edge Function
+       -> Google Maps Distance Matrix API (server-side)
+       -> returns { durationMinutes, distanceKm, leaveByMs, summary }
+  -> setBrief() -- grouped, collapsible categories
 
 Background sync (parallel):
-  -&gt; sync-google-calendar + sync-gmail Edge Functions
-  -&gt; re-fetch + re-enrich -&gt; setBrief() updated silently
+  -> sync-google-calendar + sync-gmail Edge Functions
+  -> re-fetch + re-enrich -> setBrief() updated silently
 
 Leave-time alert timer (setInterval 30s):
-  now &gt;= leaveByMs AND now &lt;= startMs + 60min:
-  -&gt; green banner "Time to leave" or red banner "Running late"
-  -&gt; tap -&gt; opens Google Maps navigation
+  now >= leaveByMs AND now <= startMs + 60min:
+  -> green banner "Time to leave" or red banner "Running late"
+  -> tap -> opens Google Maps navigation
 </pre>
 
 <h1>8. Action System</h1>
 <table>
-  <tr><th>Action</th><th>Trigger Phrases</th><th>Execution</th><th>UI Card</th></tr>
-  <tr><td><code>DRAFT_MESSAGE</code></td><td>write / draft / compose / send / email</td><td>drafts[] state</td><td>Blue — To/Subject/Body + Send button</td></tr>
+  <tr><th>Action</th><th>Trigger</th><th>Execution</th><th>UI Card</th></tr>
+  <tr><td><code>DRAFT_MESSAGE</code></td><td>write / draft / compose / send / email</td><td>turnDrafts[] state</td><td>Blue — To/Subject/Body + Send button</td></tr>
   <tr><td><code>ADD_CONTACT</code></td><td>Name + email or phone given</td><td>saveContact() + savePerson()</td><td>Green — contact details</td></tr>
   <tr><td><code>SET_REMINDER</code></td><td>set reminder / alert / notification</td><td>saveReminder() → Supabase</td><td>Stored — no card yet</td></tr>
   <tr><td><code>CREATE_EVENT</code></td><td>schedule / book / meeting / appointment</td><td>create-calendar-event Edge Function</td><td>Green — tap to open in Google Calendar</td></tr>
+  <tr><td><code>FETCH_TRAVEL_TIME</code></td><td>travel time / how long to get / when to leave / directions</td><td>get-travel-time Edge Function → Google Maps</td><td>Teal — destination + duration + leave-by + Open in Maps button</td></tr>
   <tr><td><code>DRIVE_SEARCH</code></td><td>ask about any file / document</td><td>search-google-drive Edge Function</td><td>Blue file cards with tap-to-open</td></tr>
   <tr><td><code>SAVE_TO_DRIVE</code></td><td>save / note / store / write down / keep</td><td>save-to-drive + saveDriveNote()</td><td>Amber — tap to open in Google Docs</td></tr>
   <tr><td><code>REMEMBER</code></td><td>remember / don't forget / keep in mind / note that</td><td>ingest-note Edge Function → knowledge_fragments</td><td>Purple — "Saved to memory — N fragments"</td></tr>
+  <tr><td><code>SCHEDULE_MEDICATION</code></td><td>medication schedule with on/off cycle (e.g. 5 days on 3 days off)</td><td>Orchestrator calculates all dose dates → CREATE_EVENT per dose</td><td>Green events in Google Calendar (💊 emoji prefix)</td></tr>
   <tr><td><code>LOG_CONCERN</code></td><td>health / social / routine concern</td><td>saveTopic() → Supabase</td><td>Stored — no card yet</td></tr>
   <tr><td><code>UPDATE_PROFILE</code></td><td>preference or profile change</td><td>saveTopic() → Supabase</td><td>Stored — no card yet</td></tr>
 </table>
@@ -388,62 +334,96 @@ Leave-time alert timer (setInterval 30s):
 <h3>Write Path (REMEMBER action)</h3>
 <pre>
 Robert: "Remember that I prefer aisle seats on flights"
-  -&gt; Naavi returns REMEMBER action: { "text": "Robert prefers aisle seats on flights" }
-  -&gt; ingestNote(text, 'stated') -&gt; ingest-note Edge Function
+  -> Naavi returns REMEMBER action: { "text": "Robert prefers aisle seats on flights" }
+  -> ingestNote(text, 'stated') -> ingest-note Edge Function
      1. Claude claude-sonnet-4-6 with classifier prompt
-        -&gt; extracts: [{ type, content, classification, confidence }]
+        -> extracts: [{ type, content, classification, confidence }]
         Types: life_story | important_date | preference | relationship | place | routine | concern
         Classifications: PUBLIC | PERSONAL | SENSITIVE | MEDICAL | FINANCIAL
      2. OpenAI text-embedding-3-small (1536 dimensions) per fragment
      3. INSERT into knowledge_fragments with user_id + embedding vector
-  -&gt; UI: purple card "Saved to memory -- N fragments stored"
+  -> UI: purple card "Saved to memory -- N fragments stored"
 </pre>
 <h3>Read Path (Person Context Injection)</h3>
 <pre>
 Robert: "Tell me about my meeting with Sarah"
-  -&gt; extractPersonQuery() -&gt; "Sarah"
-  -&gt; getPersonContext() queries people + topics tables
-  -&gt; formatPersonContext() injects into message:
+  -> extractPersonQuery() -- regex with stopwords + spaced-letter normalisation
+  -> getPersonContext() queries calendar + Notion + Gmail + Drive
+  -> formatPersonContext() injects into message:
      "## What Naavi knows about Sarah
       - Relationship: colleague
       - Email: sarah@example.com
-      - Topics: project budget (2026-03-15)"
-  -&gt; enrichedMessage sent to Claude
+      - Upcoming meetings: (1)
+      - Past meetings: (3 in last 6 months)
+      - Recent emails: (2)"
+  -> enrichedMessage sent to Claude
 </pre>
 
-<h1>10. Contact Resolution (3-Tier)</h1>
+<h1>10. Contact Resolution (4-Tier)</h1>
 <pre>
 Robert: "Send an email to Heaggan"
 
+By Name:
 Tier 1: SELECT name, email FROM contacts
          WHERE user_id = ? AND name ILIKE '%heaggan%'
-  -&gt; (not found)
+  -> (not found)
 
 Tier 2: SELECT from_email FROM gmail_messages
          WHERE user_id = ? AND from_name ILIKE '%heaggan%' LIMIT 1
-  -&gt; (not found)
+  -> (not found)
 
 Tier 3: Google People API -- people.searchContacts?query=heaggan
          Requires: contacts.readonly scope + People API enabled in GCP
-  -&gt; (not found)
+  -> found: { name, email, phone }
 
-Fallback: browser prompt() -&gt; user enters email manually
-          -&gt; saveContact() stores for future lookups
+By Phone Number:
+When a 10-digit number is detected in Robert's message:
+  -> lookupContactByPhone() tries 4 formats via Google People API:
+     "613-769-7957", "6137697957", "+16137697957", "+1 613 769 7957"
+  -> searchContacts queries across names, emails, AND phone numbers
+  -> result injected into Claude's context before generating response
+
+Spaced-letter input:
+  "find contact name w a e l" -> normalised to "wael" before pattern matching
 </pre>
 
-<h1>11. Voice System</h1>
+<h1>11. Medication Scheduling</h1>
+<pre>
+Robert: "The doctor told me to take Metformin twice a day,
+         5 days on 3 days off, starting tomorrow for one month"
+
+1. Claude emits SCHEDULE_MEDICATION action:
+   { type, name, dose_instruction, times: ["08:00","20:00"],
+     on_days: 5, off_days: 3, start_date, duration_days: 30 }
+
+2. Orchestrator calculates all active dose dates:
+   Cycle: days 1-5 active, days 6-8 pause, days 9-13 active, ...
+   30 days / 8-day cycle = ~19 active days x 2 doses = ~38 events
+
+3. Creates individual Google Calendar events:
+   Title: "💊 Metformin"
+   Duration: 30 min blocks at each dose time
+   Batched sequentially to avoid rate limits
+
+4. All events visible in Google Calendar immediately
+</pre>
+<div class="callout callout-warning"><strong>Phase B (planned):</strong> medications Supabase table + daily cron + push notifications. Option A (current) creates individual calendar events. Simple and works today — upgrade path is clear when push notifications are added.</div>
+
+<h1>12. Voice System</h1>
 <table>
   <tr><th></th><th>Whisper (red button, left)</th><th>Web Speech API (green button, right)</th></tr>
   <tr><td>Technology</td><td>OpenAI Whisper via Edge Function</td><td>Browser SpeechRecognition API</td></tr>
-  <tr><td>Flow</td><td>Record clip → base64 → POST → Whisper → transcript</td><td>Browser listens → real-time transcript</td></tr>
+  <tr><td>Mode</td><td>Clip recording</td><td>Continuous (accumulates finalParts[])</td></tr>
+  <tr><td>Flow</td><td>Record clip → base64 → POST → Whisper → transcript</td><td>Browser listens continuously → delivers on onend</td></tr>
   <tr><td>Latency</td><td>~1–3s after recording stops</td><td>Near-instant</td></tr>
   <tr><td>Quality</td><td>Higher accuracy, handles accents</td><td>Varies by browser/accent</td></tr>
   <tr><td>Cost</td><td>OpenAI API call per use</td><td>Free (browser-native)</td></tr>
   <tr><td>Availability</td><td>All browsers</td><td>Chrome / Edge / Android only</td></tr>
+  <tr><td>Guard</td><td>1500ms minimum recording to prevent double-fire</td><td>Only blocked during 'thinking' state (not 'speaking')</td></tr>
 </table>
-<p><strong>Output voice priority:</strong> Microsoft Aria Natural → Jenny Natural → Natasha Natural → Google UK English Female → Google US English → any matching language. Rate: 0.9. Language: en-CA or fr-CA.</p>
+<p><strong>Output voice priority:</strong> Waits for <code>onvoiceschanged</code> before selecting (fixes empty getVoices() on first load). Priority: Microsoft Aria Online (Natural) → Google UK English Female → Google US English → Samantha (macOS) → any en-CA. Rate: 0.88. Language: en-CA or fr-CA.</p>
 
-<h1>12. Security Model</h1>
+<h1>13. Security Model</h1>
 <h3>API Keys — Server-Side Only</h3>
 <ul>
   <li><code>ANTHROPIC_API_KEY</code> — Supabase Edge Function secret</li>
@@ -465,25 +445,27 @@ Fallback: browser prompt() -&gt; user enters email manually
 </ul>
 <div class="callout callout-warning"><strong>Known issue resolved:</strong> JWT key rotation (HS256 → ECC) caused 401s at the Supabase gateway. Fix: disable gateway-level JWT verification and handle auth inside each Edge Function via RLS. This is now the standard pattern for all functions.</div>
 
-<h1>13. Deployment Pipeline</h1>
+<h1>14. Deployment Pipeline</h1>
 <pre>
 Edit file locally
-  -&gt; git add [files] &amp;&amp; git commit -m "..." &amp;&amp; git push origin main
-  -&gt; GitHub (munk2207/naavi-app) receives push
-  -&gt; Vercel webhook: npx expo export --platform web -&gt; dist/
-  -&gt; Live at https://naavi-app.vercel.app (~90 seconds total)
+  -> git add [files] &amp;&amp; git commit -m "..." &amp;&amp; git push origin main
+  -> GitHub (munk2207/naavi-app) receives push
+  -> Vercel webhook: Root Directory = mobile
+     -> npx expo export --platform web -> dist/
+  -> Live at https://naavi-app.vercel.app (~90 seconds total)
 
 Edge Functions:
-  -&gt; npx supabase functions deploy [function-name] --no-verify-jwt
+  -> npx supabase functions deploy [function-name] --no-verify-jwt
 </pre>
 
-<h1>14. Current Capabilities (Phase 8 — Live)</h1>
+<h1>15. Current Capabilities (Phase 8 — Live)</h1>
 <h3>Core Conversation</h3>
 <ul class="checklist">
   <li>Full conversation via text or voice (two input modes)</li>
   <li>Claude sees full conversation history + today's brief on every turn</li>
-  <li>3-pass JSON parser with regex fallback</li>
+  <li>4-pass JSON parser with extractJsonBlocks (handles Claude self-corrections)</li>
   <li>English / Canadian French bilingual</li>
+  <li>Per-turn card state — action cards scoped to their conversation turn</li>
 </ul>
 <h3>Morning Brief</h3>
 <ul class="checklist">
@@ -499,16 +481,25 @@ Edge Functions:
   <li>Draft email → one-tap send via Gmail</li>
   <li>Save contact → persisted to Supabase</li>
   <li>Create calendar event → Google Calendar</li>
+  <li>Fetch travel time → Google Maps Distance Matrix (FETCH_TRAVEL_TIME action)</li>
   <li>Search Google Drive → file cards with tap-to-open</li>
   <li>Save note to Drive → Google Doc created</li>
   <li>Remember → semantic memory stored with embeddings</li>
-  <li>Tap calendar event → opens Google Maps navigation</li>
+  <li>Schedule medication (on/off cycle) → calendar events auto-created</li>
 </ul>
-<h3>Notes Repository</h3>
+<h3>Contact Lookup</h3>
 <ul class="checklist">
-  <li>Memory tab — all REMEMBER fragments, typed and classified</li>
-  <li>Drive Notes tab — all SAVE_TO_DRIVE docs + Drive search for older files</li>
-  <li>Pull-to-refresh</li>
+  <li>By name: 3-tier (Supabase contacts → Gmail cache → Google People API)</li>
+  <li>By phone number: Google People API with 4 format variants</li>
+  <li>Spaced-letter input normalised (w a e l → wael)</li>
+  <li>Stopwords filter prevents false matches ("the contact", "first name", etc.)</li>
+</ul>
+<h3>Voice</h3>
+<ul class="checklist">
+  <li>Continuous Web Speech API mode — full sentences captured</li>
+  <li>Standardised output voice: Microsoft Aria Online (Natural) preferred</li>
+  <li>Voice loaded via onvoiceschanged — no more robotic fallback on first use</li>
+  <li>VoiceButton clickable during speaking state</li>
 </ul>
 <h3>Infrastructure</h3>
 <ul class="checklist">
@@ -517,9 +508,10 @@ Edge Functions:
   <li>Background calendar + Gmail sync</li>
   <li>pgvector semantic search (1536-dimension embeddings)</li>
   <li>14 Edge Functions in production</li>
+  <li>GitHub auto-deploy via Vercel (Root Directory = mobile)</li>
 </ul>
 
-<h1>15. Known Issues &amp; Engineering Debt</h1>
+<h1>16. Known Issues &amp; Engineering Debt</h1>
 <table>
   <tr><th>Issue</th><th>Root Cause</th><th>Status</th></tr>
   <tr><td>ingest-note returned empty fragments</td><td>Claude wraps JSON in ```json fences — parser choked</td><td>Fixed: strip fences before parse</td></tr>
@@ -527,24 +519,27 @@ Edge Functions:
   <tr><td>Contact lookup refusal</td><td>Claude said "I don't have access to contacts"</td><td>Fixed: explicit rule forbidding this response</td></tr>
   <tr><td>saveContact silently failing</td><td>Missing user_id in INSERT — RLS blocked silently</td><td>Fixed: fetch session, include user_id</td></tr>
   <tr><td>JWT 401 on Edge Functions</td><td>Supabase rotated HS256 to ECC — gateway rejected tokens</td><td>Fixed: verify_jwt = false, auth via RLS</td></tr>
-  <tr><td>Draft card showing resolved email</td><td>UI showed resolvedEmail instead of action.to name</td><td>Fixed</td></tr>
-  <tr><td>Travel time not enriching after background sync</td><td>Sync overwrote brief without re-calling enrichWithTravelTime</td><td>Fixed: enrich in both load paths</td></tr>
-  <tr><td>People API 500</td><td>People API not enabled in GCP + JWT issue</td><td>Fixed</td></tr>
-  <tr><td>Old Drive notes missing</td><td>naavi_notes table is new — pre-existing docs were session-only</td><td>Partial: Drive search tab available as workaround</td></tr>
+  <tr><td>Travel time "leave by" showing past time</td><td>No check for whether event is upcoming vs general query</td><td>Fixed: show "leave now → arrive by X" for general queries</td></tr>
+  <tr><td>Google Maps opening twice</td><td>Called from both index.tsx and orchestrator</td><td>Fixed: removed from orchestrator; Maps opens via card button only</td></tr>
+  <tr><td>VoiceButton locked during speaking</td><td>isActive included 'speaking' state</td><td>Fixed: isActive only blocks during 'thinking'</td></tr>
+  <tr><td>Travel card persisting across turns</td><td>Flat shared state arrays — replaced with per-turn ConversationTurn</td><td>Fixed: each turn has its own card arrays</td></tr>
+  <tr><td>Phone lookup returning "no contact found"</td><td>Regex matched "the contact" / "first name" as person names; phone not searched</td><td>Fixed: stopwords filter + phone lookup via Google People API</td></tr>
+  <tr><td>Claude self-correction causing parse failure</td><td>Parser sliced first{} to last} — mixing two JSON objects</td><td>Fixed: extractJsonBlocks() tries each block last-first</td></tr>
+  <tr><td>Robotic voice on first load</td><td>getVoices() returns empty array synchronously</td><td>Fixed: wait for onvoiceschanged event before selecting voice</td></tr>
   <tr><td>knowledge_fragments SELECT blocked</td><td>RLS SELECT policy missing</td><td>Fixed: added SELECT policy</td></tr>
 </table>
 
-<h1>16. Recommendations &amp; Roadmap</h1>
+<h1>17. Recommendations &amp; Roadmap</h1>
 <h2>Immediate (Next Sprint)</h2>
 <p><strong>1. Automatic knowledge retrieval at conversation start</strong><br>
 The <code>search-knowledge</code> Edge Function exists but is not wired into the morning brief. Recommended: at app load, run <code>searchKnowledge("today morning context")</code> and inject the top 5 relevant fragments into the system prompt. Naavi would then recall Robert's preferences automatically without being asked.</p>
 <p><strong>2. Confirmation cards for SET_REMINDER, LOG_CONCERN, UPDATE_PROFILE</strong><br>
 These actions are stored but show no visual feedback. Robert has no confirmation that his reminder or concern was saved. Low-effort, high-trust improvement.</p>
-<p><strong>3. Drive notes backfill</strong><br>
-A one-shot migration Edge Function should query Drive for recent Google Docs on first load (if naavi_notes is empty) and backfill the table, recovering pre-existing notes.</p>
+<p><strong>3. Medication scheduling — Phase B upgrade</strong><br>
+Current implementation (Option A) creates individual calendar events. Phase B: medications Supabase table + daily cron + push notifications. Enables cancel/modify ("stop taking Metformin") and reminders that work when the app is closed.</p>
 
 <h2>Medium-Term</h2>
-<p><strong>4. Push notifications</strong> — Web Push API + Supabase pg_cron triggered at leaveByMs. Currently the leave-time banner only shows when the app is open.</p>
+<p><strong>4. Push notifications</strong> — Web Push API + Supabase pg_cron triggered at leaveByMs and medication dose times. Currently the leave-time banner and medication reminders only work when the app is open.</p>
 <p><strong>5. Native mobile app (EAS Build)</strong> — Expo EAS Build produces an installable .ipa / .apk with no code changes. Gives Robert a home-screen icon and background push notifications on iOS.</p>
 <p><strong>6. Single voice button with automatic fallback</strong> — Two buttons cause UX confusion. Consolidate: try Web Speech API first, fall back to Whisper if unsupported or silent for 3 seconds.</p>
 <p><strong>7. Health integrations</strong> — Withings (scale + blood pressure) REST API. MyChart FHIR R4. Would make the health brief category genuinely useful.</p>
@@ -554,18 +549,18 @@ A one-shot migration Edge Function should query Drive for recent Google Docs on 
 <p><strong>9. Conversation persistence across sessions</strong> — The history state resets on tab close. Persist conversation turns in Supabase; load last N turns at app start. Enables "as we discussed yesterday…" continuity.</p>
 <p><strong>10. Multi-user / caregiver mode</strong> — Extend Supabase RLS with a caregivers table and shared read policies. No data model restructuring required. A family member or home care worker could have a read-only view of Robert's brief and concerns.</p>
 
-<h1>17. Files a CTO Should Read First</h1>
+<h1>18. Files a CTO Should Read First</h1>
 <ol>
-  <li><strong>mobile/lib/naavi-client.ts</strong> — system prompt and Claude integration. All action rules live here.</li>
-  <li><strong>mobile/hooks/useOrchestrator.ts</strong> — conversation loop and action executor. The entire runtime flow.</li>
-  <li><strong>mobile/app/index.tsx</strong> — the screen Robert sees. Brief pipeline, leave-time logic, action card rendering.</li>
+  <li><strong>mobile/lib/naavi-client.ts</strong> — system prompt and Claude integration. All action rules and examples live here.</li>
+  <li><strong>mobile/hooks/useOrchestrator.ts</strong> — conversation loop, action executor, per-turn state, medication scheduler, phone lookup.</li>
+  <li><strong>mobile/app/index.tsx</strong> — the screen Robert sees. Brief pipeline, leave-time logic, per-turn card rendering.</li>
   <li><strong>supabase/functions/ingest-note/index.ts</strong> — knowledge ingestion. Claude + OpenAI + pgvector composed together.</li>
-  <li><strong>mobile/lib/contacts.ts</strong> — 3-tier contact resolution. Example of the graceful degradation pattern used throughout.</li>
+  <li><strong>mobile/lib/contacts.ts</strong> — 4-tier contact resolution (name + phone). Example of the graceful degradation pattern used throughout.</li>
   <li><strong>supabase/functions/naavi-chat/index.ts</strong> — API proxy. The Phase 8 security model: API key server-side, RLS auth.</li>
 </ol>
 
 <div class="footer">
-  Document reflects the live deployed state as of March 19, 2026.<br>
+  Document reflects the live deployed state as of March 23, 2026.<br>
   All architecture decisions, known issues, and recommendations are derived from the actual implementation.<br>
   <strong>Naavi Technology &mdash; Confidential</strong>
 </div>
