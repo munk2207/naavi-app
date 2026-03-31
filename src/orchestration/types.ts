@@ -56,13 +56,28 @@ export interface LogConcernAction {
   severity: 'low' | 'medium' | 'high';
 }
 
+/**
+ * Set an email watch rule — alert Robert by SMS when an email arrives
+ * from a specific person or with a specific word in the subject.
+ * At least one of fromName, fromEmail, or subjectKeyword must be provided.
+ */
+export interface SetEmailAlertAction {
+  type: 'SET_EMAIL_ALERT';
+  fromName?: string;        // Sender name to watch for, e.g. "John Smith"
+  fromEmail?: string;       // Exact sender email, e.g. "john@acme.com"
+  subjectKeyword?: string;  // Word or phrase in subject, e.g. "invoice"
+  phoneNumber: string;      // Robert's cell phone number to SMS
+  label: string;            // Human label, e.g. "Emails from John Smith"
+}
+
 export type NaaviAction =
   | SpeakAction
   | SetReminderAction
   | UpdateProfileAction
   | DraftMessageAction
   | FetchDetailAction
-  | LogConcernAction;
+  | LogConcernAction
+  | SetEmailAlertAction;
 
 // ─── The structured response Claude returns ──────────────────────────────────
 
