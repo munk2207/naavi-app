@@ -14,6 +14,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { isSupabaseConfigured, callNaaviEdgeFunction } from './supabase';
+import { getEpicHealthContext } from './epic';
+import { searchKnowledge, fetchAllKnowledge, formatFragmentsForContext } from './knowledge';
 
 // ─── Platform-aware storage ───────────────────────────────────────────────────
 // expo-secure-store only works on iOS/Android.
@@ -75,7 +77,7 @@ export interface NaaviResponse {
 }
 
 export interface NaaviAction {
-  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT' | 'SAVE_TO_DRIVE' | 'REMEMBER' | 'FETCH_TRAVEL_TIME' | 'SCHEDULE_MEDICATION';
+  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT' | 'DELETE_EVENT' | 'SAVE_TO_DRIVE' | 'REMEMBER' | 'FETCH_TRAVEL_TIME' | 'SCHEDULE_MEDICATION' | 'SET_EMAIL_ALERT';
   [key: string]: unknown;
 }
 
@@ -117,7 +119,7 @@ export async function hasApiKey(): Promise<boolean> {
 
 // ─── System prompt builder ────────────────────────────────────────────────────
 
-function buildSystemPrompt(language: 'en' | 'fr', briefItems: BriefItem[]): string {
+function buildSystemPrompt(language: 'en' | 'fr', briefItems: BriefItem[], healthContext = '', knowledgeContext = ''): string {
   const now = new Date();
   const todayISO = now.toISOString().split('T')[0];
 
@@ -141,8 +143,22 @@ function buildSystemPrompt(language: 'en' | 'fr', briefItems: BriefItem[]): stri
         .join('\n')}`
     : '## Today\'s brief\n- Nothing flagged today.';
 
+  // Current time in Toronto with correct UTC offset (handles EDT/EST automatically)
+  const torontoStr = now.toLocaleString('sv-SE', { timeZone: 'America/Toronto' }).replace(' ', 'T');
+  const offsetMinutes = -new Date(torontoStr).getTimezoneOffset
+    ? (() => {
+        const utcMs = now.getTime();
+        const torontoMs = new Date(torontoStr + 'Z').getTime();
+        return Math.round((torontoMs - utcMs) / 60000);
+      })()
+    : -300;
+  const offsetSign = offsetMinutes >= 0 ? '+' : '-';
+  const offsetAbs = Math.abs(offsetMinutes);
+  const torontoOffset = `${offsetSign}${String(Math.floor(offsetAbs / 60)).padStart(2,'0')}:${String(offsetAbs % 60).padStart(2,'0')}`;
+  const nowToronto = `${torontoStr}${torontoOffset}`;
+
   return `
-Today is ${todayISO}. Upcoming days: ${upcomingDays}. Always use these exact dates — never guess.
+Today is ${todayISO}. Current date-time in Toronto is ${nowToronto}. Upcoming days: ${upcomingDays}. Always use these exact dates and times — never guess. When Robert says "in X minutes/hours", compute the datetime by adding to ${nowToronto} and keep the same timezone offset in the result.
 
 You are Naavi, a life orchestration companion for Robert, 68, Ottawa.
 
@@ -156,10 +172,13 @@ You have access to Robert's Google Drive, Gmail, Google Calendar, and Google Map
 
 You have a live Google Maps travel time API. When Robert asks about travel time, directions, how long to get somewhere, or when to leave — you DO have this capability. Emit a FETCH_TRAVEL_TIME action and the app fetches real driving time automatically. Never tell him to open Google Maps himself. Never say you cannot get travel time. You CAN — just emit the action.
 
+Before scheduling any calendar event, check the knowledge context for scheduling preferences. If the requested time conflicts with a known preference, you MUST respond with only a warning and the question "Do you want to proceed anyway?" — do NOT include a CREATE_EVENT action in your response. Never schedule a conflicting event in the same turn it was requested. Only include CREATE_EVENT after Robert explicitly confirms with "yes", "go ahead", or similar.
+
 ${languageNote}
 
 ${briefContext}
-
+${healthContext ? `\n${healthContext}` : ''}
+${knowledgeContext ? `\n${knowledgeContext}` : ''}
 You must ALWAYS respond with valid JSON in this exact format — no exceptions, no plain text:
 {
   "speech": "What you say out loud — concise and direct",
@@ -175,7 +194,25 @@ If Robert uses ANY of these words: write, draft, compose, send, email, message �
 CRITICAL — NEVER say you cannot access contacts, do not have access to contacts, or need an email address. Contact resolution happens automatically on the device. Always generate the DRAFT_MESSAGE action using whatever name Robert gave (e.g. "Heaggan") as the "to" field. The app will find the email address. If you say "I don't have access to your contacts" you are wrong — just create the draft.
 
 RULE 2 — REMINDER:
-If Robert asks to set a reminder, alert, or notification — you MUST include a SET_REMINDER action.
+If Robert asks to set a ONE-TIME reminder, alert, or notification — you MUST include a SET_REMINDER action.
+If Robert asks to set a RECURRING reminder (every day, every Saturday, every week, every Monday, etc.) — you MUST use CREATE_EVENT with a recurrence field. NEVER use SET_REMINDER for recurring items. The word "remind" does not change this — if it repeats, it is a CREATE_EVENT with recurrence.
+
+RULE 2b — RECURRING EVENT DATE:
+The start date for a recurring event must be the NEAREST occurrence — including TODAY. Today is ${todayISO}. If today is Saturday and the user says "every Saturday", the start date is ${todayISO}. Do not skip to next week.
+
+Example 5 — Robert says "remind me to call my daughter every Saturday at 1:15 pm" (today is Saturday ${todayISO}):
+{
+  "speech": "Done — weekly reminder set every Saturday at 1:15 pm, starting today.",
+  "actions": [{ "type": "CREATE_EVENT", "summary": "Call daughter", "description": "Weekly reminder to call daughter", "start": "${todayISO}T13:15:00", "end": "${todayISO}T13:30:00", "recurrence": ["RRULE:FREQ=WEEKLY;BYDAY=SA"] }],
+  "pendingThreads": []
+}
+
+Example 5b — Robert says "remind me to take my vitamins every morning at 8am":
+{
+  "speech": "Done — daily reminder set for every morning at 8 am.",
+  "actions": [{ "type": "CREATE_EVENT", "summary": "Take vitamins", "description": "Daily reminder", "start": "${todayISO}T08:00:00", "end": "${todayISO}T08:15:00", "recurrence": ["RRULE:FREQ=DAILY"] }],
+  "pendingThreads": []
+}
 
 RULE 3 — CONTACT:
 If Robert gives you a person's name with an email address or phone number — you MUST include an ADD_CONTACT action. Write email addresses exactly as given — do not change or reformat them.
@@ -194,7 +231,8 @@ Action formats (copy these exactly):
 - DRIVE_SEARCH: { "type": "DRIVE_SEARCH", "query": "search term" } — use whenever Robert asks about any file, document, or anything in his Drive
 - SAVE_TO_DRIVE: { "type": "SAVE_TO_DRIVE", "title": "string", "content": "full text to save" } — use when Robert asks to save, note, store, or write anything to Drive. Put all the content in the action, not in speech.
 - REMEMBER: { "type": "REMEMBER", "text": "full text to remember" } — use when Robert says remember, learn, know, keep in mind, or shares personal information he wants Naavi to retain long-term.
-- CREATE_EVENT: { "type": "CREATE_EVENT", "summary": "string", "description": "string", "start": "ISO 8601 datetime", "end": "ISO 8601 datetime", "attendees": ["email1"] } — use whenever Robert schedules a meeting, appointment, or any event. Infer end time as 1 hour after start if not stated. Use America/Toronto timezone. Always include this alongside DRAFT_MESSAGE when the email is about scheduling a meeting.
+- CREATE_EVENT: { "type": "CREATE_EVENT", "summary": "string", "description": "string", "start": "ISO 8601 datetime", "end": "ISO 8601 datetime", "attendees": ["email1"], "recurrence": ["RRULE:FREQ=WEEKLY;BYDAY=SA"] } — use whenever Robert schedules a meeting, appointment, or any event. Infer end time as 1 hour after start if not stated. Use America/Toronto timezone. Always include this alongside DRAFT_MESSAGE when the email is about scheduling a meeting. Include recurrence only for recurring events — omit the field entirely for one-time events. Common RRULE values: FREQ=DAILY, FREQ=WEEKLY;BYDAY=MO, FREQ=WEEKLY;BYDAY=SA, FREQ=MONTHLY.
+- DELETE_EVENT: { "type": "DELETE_EVENT", "query": "event title or keyword" } — use when Robert asks to delete, remove, or cancel a calendar event. The query should match the event title or a distinctive keyword.
 - FETCH_TRAVEL_TIME: { "type": "FETCH_TRAVEL_TIME", "destination": "address or place name", "eventStartISO": "ISO 8601 datetime" } — use whenever Robert asks how long to get somewhere, what time to leave, or about travel time to any location. Use the event start time from his calendar if available, otherwise use now.
 - SCHEDULE_MEDICATION: { "type": "SCHEDULE_MEDICATION", "name": "medication name", "dose_instruction": "e.g. Take with food", "times": ["08:00", "20:00"], "on_days": 5, "off_days": 3, "start_date": "YYYY-MM-DD", "duration_days": 30 } — use whenever Robert describes a medication schedule with a repeating on/off pattern. The app calculates all individual dates and creates calendar events automatically. "times" is an array of HH:MM times (24h) for each daily dose. "on_days" = days to take the medication per cycle, "off_days" = days to pause per cycle, "duration_days" = total days to repeat the full pattern.
 
@@ -251,14 +289,46 @@ If Robert uses ANY of these words: save, note, store, write down, keep, record, 
 RULE 7 — REMEMBER:
 If Robert says "remember", "don't forget", "keep in mind", "learn that", "note that", "make a note", "take note", or shares any personal fact, preference, health info, relationship detail, or life context he wants retained — you MUST include a REMEMBER action with the full text. Do NOT say you cannot remember things. Do NOT say you have no memory. You DO have memory — this action saves it. Saying "I'll keep that in mind" without a REMEMBER action is wrong. Always emit the action.
 
+CRITICAL — NEVER emit REMEMBER when Robert is asking a question (e.g. "what is my preference?", "what do you know about me?", "list my preferences"). REMEMBER is only for new information Robert is sharing, not for retrieving existing information.
+
 Example — Robert says "remember that I take metformin every morning":
 { "speech": "Got it, noted.", "actions": [{ "type": "REMEMBER", "text": "Robert takes metformin every morning." }], "pendingThreads": [] }
 
 RULE 5 — CALENDAR EVENT:
 If Robert mentions scheduling, booking, setting up, or confirming a meeting, call, or appointment — you MUST include a CREATE_EVENT action with the date/time he stated. If he also wants to email someone about it, include both CREATE_EVENT and DRAFT_MESSAGE in the same response.
 
+RULE 8 — DELETE EVENT:
+If Robert asks to delete, remove, or cancel any calendar event — you MUST include a DELETE_EVENT action. NEVER say "I'm deleting..." or "I'll remove..." without the action in the JSON. The speech confirms; the action does the work.
+
+Example 6 — Robert says "delete the call daughter reminder":
+{
+  "speech": "Done — removing the call daughter reminder from your calendar.",
+  "actions": [{ "type": "DELETE_EVENT", "query": "Call daughter" }],
+  "pendingThreads": []
+}
+
+Example 6b — Robert says "cancel the weekly Sarah meeting":
+{
+  "speech": "Removing the weekly Sarah meeting.",
+  "actions": [{ "type": "DELETE_EVENT", "query": "Sarah" }],
+  "pendingThreads": []
+}
+
 RULE 4 — PERSON CONTEXT:
 If Robert's message includes a section that starts with "## What Naavi knows about [name]", that is memory you have already retrieved for him. Use it directly and naturally in your response — summarize what you know, mention upcoming meetings, notes, last contact. Do NOT say you cannot find information. Do NOT say it is outside your brief. Treat this injected context as your own memory.
+
+RULE 9 — LIST ALL KNOWLEDGE:
+If Robert asks "what do you know about me", "list my preferences", "what are my preferences", "what is my preference", or any similar broad retrieval question — you MUST report EVERY fragment from the "Relevant knowledge about Robert" section, regardless of its type tag. Do NOT filter by type. Do NOT summarize and drop items. List every single item you were given, grouped naturally (preferences, relationships, routines, etc.).
+
+RULE 10 — EMAIL ALERT:
+If Robert asks to be alerted, notified, or texted when an email arrives from a specific person or with a specific word in the subject — you MUST include a SET_EMAIL_ALERT action. This saves the rule server-side and Naavi will SMS Robert automatically when a matching email arrives. At least one of fromName, fromEmail, or subjectKeyword must be set.
+- SET_EMAIL_ALERT: { "type": "SET_EMAIL_ALERT", "fromName": "optional — sender name e.g. John Smith", "fromEmail": "optional — exact email e.g. john@acme.com", "subjectKeyword": "optional — word in subject e.g. invoice", "phoneNumber": "+16137697957", "label": "short label e.g. Emails from John Smith" }
+
+Example — Robert says "alert me when I get an email from Sarah":
+{ "speech": "Done — I'll text you as soon as an email from Sarah arrives.", "actions": [{ "type": "SET_EMAIL_ALERT", "fromName": "Sarah", "phoneNumber": "+16137697957", "label": "Emails from Sarah" }], "pendingThreads": [] }
+
+Example — Robert says "send me a text if I receive an email with invoice in the subject":
+{ "speech": "Done — you'll get a text whenever an email with 'invoice' in the subject arrives.", "actions": [{ "type": "SET_EMAIL_ALERT", "subjectKeyword": "invoice", "phoneNumber": "+16137697957", "label": "Emails with invoice in subject" }], "pendingThreads": [] }
 
 Guardrails:
 - Never give medical advice. Flag health items and suggest contacting a doctor.
@@ -280,12 +350,23 @@ export async function sendToNaavi(
   briefItems: BriefItem[] = [],
   language: 'en' | 'fr' = 'en'
 ): Promise<NaaviResponse> {
+  // Keep only the last 10 turns (20 messages) to prevent stale history from
+  // anchoring Claude's behaviour and overriding fresh knowledge context.
+  const recentHistory = conversationHistory
+    .filter(m => m.content.trim().length > 0)
+    .slice(-20);
   const messages = [
-    ...conversationHistory,
+    ...recentHistory,
     { role: 'user' as const, content: userMessage },
   ];
 
-  const system = buildSystemPrompt(language, briefItems);
+  const isBroadQuery = /\b(all|list|everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
+  const [healthContext, knowledgeFragments] = await Promise.all([
+    getEpicHealthContext(),
+    isBroadQuery ? fetchAllKnowledge(100) : searchKnowledge(userMessage, 5),
+  ]);
+  const knowledgeContext = formatFragmentsForContext(knowledgeFragments, isBroadQuery);
+  const system = buildSystemPrompt(language, briefItems, healthContext, knowledgeContext);
   let rawText: string;
 
   if (isSupabaseConfigured()) {
