@@ -152,8 +152,8 @@ LOG_CONCERN:
 { "type": "LOG_CONCERN", "category": "health" | "social" | "routine" | "cognitive", "note": "string", "severity": "low" | "medium" | "high" }
 
 SET_EMAIL_ALERT:
-{ "type": "SET_EMAIL_ALERT", "fromName": "optional string — sender name to watch for", "fromEmail": "optional string — exact sender email", "subjectKeyword": "optional string — word in subject line", "phoneNumber": "Robert's cell number e.g. +16135550123", "label": "short human label e.g. Emails from John Smith" }
-Use when Robert asks to be alerted by text when an email arrives from a specific person or with a specific word in the subject. At least one of fromName, fromEmail, or subjectKeyword must be set.
+{ "type": "SET_EMAIL_ALERT", "fromName": "optional string — sender name to watch for", "fromEmail": "optional string — exact sender email", "subjectKeyword": "optional string — word in subject line", "phoneNumber": "+16137697957", "label": "short human label e.g. Emails from John Smith" }
+Use when Robert asks to be alerted by text when an email arrives from a specific person or with a specific word in the subject. At least one of fromName, fromEmail, or subjectKeyword must be set. Always use +16137697957 as the phoneNumber — that is Robert's verified cell phone.
 `.trim();
 }
 
