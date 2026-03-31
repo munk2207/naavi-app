@@ -15,7 +15,8 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
 import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
-import { saveContact, saveReminder, saveDriveNote } from '@/lib/supabase';
+import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
+import { sendPushNotification } from '@/lib/push';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
 import { lookupContact, lookupContactByPhone } from '@/lib/contacts';
 import { ingestNote } from '@/lib/knowledge';
@@ -29,6 +30,7 @@ export interface ConversationTurn {
   assistantSpeech: string;
   drafts: NaaviAction[];
   createdEvents: { summary: string; htmlLink?: string }[];
+  deletedEvents: { count: number; titles: string[] }[];
   savedDocs: { title: string; webViewLink?: string }[];
   rememberedItems: { text: string; count: number }[];
   driveFiles: StorageFile[];
@@ -64,6 +66,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     const turnDrive: StorageFile[] = [];
     const turnDrafts: NaaviAction[] = [];
     const turnEvents: { summary: string; htmlLink?: string }[] = [];
+    const turnDeleted: { count: number; titles: string[] }[] = [];
     const turnDocs: { title: string; webViewLink?: string }[] = [];
     const turnMemory: { text: string; count: number }[] = [];
 
@@ -156,6 +159,9 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               attendees:   Array.isArray(action.attendees)
                 ? action.attendees.map(e => ({ name: '', email: String(e) }))
                 : [],
+              recurrence:  Array.isArray(action.recurrence)
+                ? action.recurrence.map(String)
+                : undefined,
             });
             turnEvents.push({ summary: event.title, htmlLink: event.htmlLink });
           } catch (err) {
@@ -181,6 +187,18 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           if (query) {
             const files = await registry.storage.search(query, '');
             turnDrive.push(...files);
+          }
+        }
+
+        if (action.type === 'DELETE_EVENT') {
+          const query = String(action.query ?? '').trim();
+          if (query) {
+            try {
+              const result = await registry.calendar.deleteEvent(query);
+              if (result.deleted > 0) turnDeleted.push({ count: result.deleted, titles: result.titles });
+            } catch (err) {
+              console.error('[Orchestrator] DELETE_EVENT failed:', err);
+            }
           }
         }
 
@@ -251,25 +269,71 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           await saveContact({ name, email: String(action.email ?? ''), phone: String(action.phone ?? ''), relationship: String(action.relationship ?? '') });
           await savePerson({ name, email: String(action.email ?? ''), phone: String(action.phone ?? ''), relationship: String(action.relationship ?? '') });
         } else if (action.type === 'SET_REMINDER') {
-          await saveReminder({ title: String(action.title ?? ''), datetime: String(action.datetime ?? ''), source: String(action.source ?? '') });
+          const reminderTitle = String(action.title ?? '');
+          const reminderDatetime = String(action.datetime ?? '');
+          await saveReminder({ title: reminderTitle, datetime: reminderDatetime, source: String(action.source ?? '') });
+          // Create a Google Calendar event so Robert gets a native notification
+          if (reminderDatetime) {
+            try {
+              const start = reminderDatetime;
+              const end = new Date(new Date(start).getTime() + 15 * 60000).toISOString();
+              const event = await registry.calendar.createEvent({
+                title:       reminderTitle || 'Reminder',
+                description: reminderTitle,
+                startISO:    start,
+                endISO:      end,
+                attendees:   [],
+              });
+              turnEvents.push({ summary: event.title, htmlLink: event.htmlLink });
+            } catch (err) {
+              console.error('[Orchestrator] SET_REMINDER calendar event failed:', err);
+            }
+            // Schedule a Web Push notification at the reminder time
+            const delayMs = new Date(reminderDatetime).getTime() - Date.now();
+            if (delayMs > 0 && delayMs < 24 * 60 * 60 * 1000) {
+              // Only schedule if within 24 hours
+              setTimeout(() => {
+                sendPushNotification(reminderTitle, 'Time for your reminder', '/').catch(() => {});
+              }, delayMs);
+            }
+          }
         } else if (action.type === 'LOG_CONCERN') {
           await saveTopic({ subject: String(action.category ?? 'general'), note: String(action.note ?? ''), category: String(action.severity ?? 'low') });
         } else if (action.type === 'UPDATE_PROFILE') {
           await saveTopic({ subject: String(action.key ?? 'preference'), note: String(action.value ?? ''), category: 'preference' });
+        } else if (action.type === 'SET_EMAIL_ALERT') {
+          if (supabase) {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+              const { error } = await supabase.from('email_watch_rules').insert({
+                user_id:         session.user.id,
+                from_name:       action.fromName       ? String(action.fromName)       : null,
+                from_email:      action.fromEmail      ? String(action.fromEmail)      : null,
+                subject_keyword: action.subjectKeyword ? String(action.subjectKeyword) : null,
+                phone_number:    String(action.phoneNumber ?? '+16137697957'),
+                label:           String(action.label ?? 'Email alert'),
+              });
+              if (error) console.error('[Orchestrator] SET_EMAIL_ALERT failed:', error.message);
+              else console.log('[Orchestrator] SET_EMAIL_ALERT saved:', action.label);
+            }
+          }
         }
       }
 
       // ── Append turn with all its cards ────────────────────────────────────────
-      setTurns(prev => [...prev, {
+      const newTurn = {
         userMessage,
         assistantSpeech: response.speech,
         drafts:           turnDrafts,
         createdEvents:    turnEvents,
+        deletedEvents:    turnDeleted,
         savedDocs:        turnDocs,
         rememberedItems:  turnMemory,
         driveFiles:       turnDrive,
         navigationResults: turnNav,
-      }]);
+      };
+      setTurns(prev => [...prev, newTurn]);
+      saveConversationTurn(newTurn).catch(() => {});
 
       // Speak the response aloud
       setStatus('speaking');
@@ -289,7 +353,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     setStatus('idle');
   }, []);
 
-  return { status, turns, error, send, clearHistory };
+  const loadHistory = useCallback((savedTurns: ConversationTurn[]) => {
+    setTurns(savedTurns);
+  }, []);
+
+  return { status, turns, error, send, clearHistory, loadHistory };
 }
 
 // ─── Speech helper ────────────────────────────────────────────────────────────
