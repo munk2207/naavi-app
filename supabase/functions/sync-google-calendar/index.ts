@@ -94,6 +94,8 @@ serve(async (req) => {
       timeMax.setDate(timeMax.getDate() + 30);
 
       let count = 0;
+      const liveEventIds: string[] = [];
+
       for (const cal of calendars) {
         const res = await fetch(
           `${CALENDAR_EVENTS_API}/${encodeURIComponent(cal.id)}/events` +
@@ -112,6 +114,7 @@ serve(async (req) => {
         const events = data.items ?? [];
 
         for (const event of events) {
+          liveEventIds.push(event.id);
           const { error } = await adminClient
             .from('calendar_events')
             .upsert({
@@ -128,6 +131,18 @@ serve(async (req) => {
 
           if (!error) count++;
         }
+      }
+
+      // Remove events deleted from Google Calendar within the sync window
+      if (liveEventIds.length > 0) {
+        await adminClient
+          .from('calendar_events')
+          .delete()
+          .eq('user_id', user_id)
+          .gte('start_time', timeMin.toISOString())
+          .lte('start_time', timeMax.toISOString())
+          .not('google_event_id', 'in', `(${liveEventIds.map(id => `"${id}"`).join(',')})`);
+        console.log(`[sync-calendar] Pruned deleted events for user ${user_id}`);
       }
 
       results.push({ user_id, events: count });

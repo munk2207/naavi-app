@@ -10,6 +10,15 @@ verify_jwt = false
 [functions.create-calendar-event]
 verify_jwt = false
 
+[functions.delete-calendar-event]
+verify_jwt = false
+
+[functions.save-push-subscription]
+verify_jwt = false
+
+[functions.send-push-notification]
+verify_jwt = false
+
 [functions.transcribe-memo]
 verify_jwt = false
 

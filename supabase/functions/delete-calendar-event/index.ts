@@ -1,18 +1,15 @@
 /**
- * create-calendar-event Edge Function
+ * delete-calendar-event Edge Function
  *
- * Creates an event in Robert's primary Google Calendar.
- * Called when Claude detects a scheduling intent and returns a CREATE_EVENT action.
- *
- * Auth: RLS-based (same pattern as send-email / send-drive-file).
- * verify_jwt = false in config.toml.
+ * Searches Google Calendar for events matching a query string and deletes them.
+ * For recurring events, deletes all future instances (thisAndFollowingEvents).
  */
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const GOOGLE_TOKEN_URL  = 'https://oauth2.googleapis.com/token';
-const CALENDAR_API      = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const CALENDAR_BASE    = 'https://www.googleapis.com/calendar/v3/calendars/primary';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -46,10 +43,10 @@ serve(async (req) => {
   }
 
   const body = await req.json();
-  const { summary, description, start, end, attendees, recurrence } = body;
+  const { query } = body;
 
-  if (!summary || !start || !end) {
-    return new Response(JSON.stringify({ error: 'Missing summary, start, or end' }), {
+  if (!query) {
+    return new Response(JSON.stringify({ error: 'Missing query' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
@@ -75,51 +72,59 @@ serve(async (req) => {
   try {
     const accessToken = await getNewAccessToken(tokenRow.refresh_token);
 
-    const event: Record<string, unknown> = {
-      summary,
-      description: description ?? '',
-      start: { dateTime: start, timeZone: 'America/Toronto' },
-      end:   { dateTime: end,   timeZone: 'America/Toronto' },
-    };
+    // Search for events matching the query (look back 1 day, forward 1 year)
+    const now = new Date();
+    const timeMin = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const timeMax = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
 
-    // Only include attendees that look like email addresses
-    const validAttendees = (Array.isArray(attendees) ? attendees : [])
-      .filter((a: string) => typeof a === 'string' && a.includes('@'));
-    if (validAttendees.length > 0) {
-      event.attendees = validAttendees.map((email: string) => ({ email }));
-    }
+    const searchUrl = `${CALENDAR_BASE}/events?q=${encodeURIComponent(query)}&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=false&maxResults=25`;
 
-    // Recurring event support (e.g. ["RRULE:FREQ=WEEKLY;BYDAY=SA"])
-    if (Array.isArray(recurrence) && recurrence.length > 0) {
-      event.recurrence = recurrence;
-    }
-
-    const createRes = await fetch(CALENDAR_API, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(event),
+    const searchRes = await fetch(searchUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
 
-    if (!createRes.ok) {
-      const err = await createRes.text();
-      return new Response(JSON.stringify({ error: `Calendar API failed: ${err}` }), {
+    if (!searchRes.ok) {
+      const err = await searchRes.text();
+      return new Response(JSON.stringify({ error: `Calendar search failed: ${err}` }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    const created = await createRes.json();
-    console.log(`[create-calendar-event] Created "${summary}" — ${created.id}`);
+    const searchData = await searchRes.json();
+    const events = searchData.items ?? [];
 
-    return new Response(JSON.stringify({ success: true, eventId: created.id, htmlLink: created.htmlLink }), {
+    if (events.length === 0) {
+      return new Response(JSON.stringify({ success: true, deleted: 0, message: 'No matching events found' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    let deleted = 0;
+    const titles: string[] = [];
+
+    for (const event of events) {
+      const deleteUrl = `${CALENDAR_BASE}/events/${event.id}`;
+      const delRes = await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (delRes.ok || delRes.status === 204 || delRes.status === 410) {
+        deleted++;
+        titles.push(event.summary ?? event.id);
+        console.log(`[delete-calendar-event] Deleted "${event.summary}" (${event.id})`);
+      } else {
+        const err = await delRes.text();
+        console.error(`[delete-calendar-event] Failed to delete ${event.id}: ${err}`);
+      }
+    }
+
+    return new Response(JSON.stringify({ success: true, deleted, titles }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('[create-calendar-event] Error:', msg);
+    console.error('[delete-calendar-event] Error:', msg);
     return new Response(JSON.stringify({ error: msg }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

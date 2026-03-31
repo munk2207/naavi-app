@@ -24,7 +24,7 @@ const corsHeaders = {
 
 const EPIC_TOKEN_URL = 'https://fhir.epic.com/interconnect-fhir-oauth/oauth2/token';
 const EPIC_FHIR_BASE = 'https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4';
-const EPIC_CLIENT_ID = '0895a031-228f-41e5-a687-b52e6434dd9e';
+const EPIC_CLIENT_ID = 'f2b6e09c-0569-4ecf-8e81-027432281052';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -65,12 +65,27 @@ serve(async (req) => {
           continue;
         }
 
-        await Promise.all([
+        // Verify token works — read the Patient resource directly
+        try {
+          const patient = await fhirGet(`Patient/${patientId}`, accessToken);
+          console.log('[sync-epic-data] Patient read OK:', patient?.id, patient?.name?.[0]?.text);
+        } catch (err) {
+          console.error('[sync-epic-data] Patient read failed:', err);
+          results.push({ user_id: row.user_id, status: 'error', error: `Token validation failed: ${err}` });
+          continue;
+        }
+
+        // Run each resource sync independently — one 403 doesn't block the others
+        const [medResult, apptResult, obsResult, condResult] = await Promise.allSettled([
           syncMedications(adminClient, row.user_id, patientId, accessToken),
           syncAppointments(adminClient, row.user_id, patientId, accessToken),
           syncObservations(adminClient, row.user_id, patientId, accessToken),
           syncConditions(adminClient, row.user_id, patientId, accessToken),
         ]);
+        if (medResult.status  === 'rejected') console.error('[sync] medications failed:', medResult.reason);
+        if (apptResult.status === 'rejected') console.error('[sync] appointments failed:', apptResult.reason);
+        if (obsResult.status  === 'rejected') console.error('[sync] observations failed:', obsResult.reason);
+        if (condResult.status === 'rejected') console.error('[sync] conditions failed:', condResult.reason);
 
         results.push({ user_id: row.user_id, status: 'ok' });
       } catch (userErr) {
@@ -147,14 +162,18 @@ async function getValidAccessToken(
 // ─── FHIR fetch helper ────────────────────────────────────────────────────────
 
 async function fhirGet(path: string, accessToken: string): Promise<any> {
-  const res = await fetch(`${EPIC_FHIR_BASE}/${path}`, {
+  const url = `${EPIC_FHIR_BASE}/${path}`;
+  console.log(`[fhirGet] GET ${url}`);
+  const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      Accept:        'application/fhir+json',
+      Accept:        'application/json',
     },
   });
   if (!res.ok) {
-    throw new Error(`FHIR ${path} → ${res.status}: ${await res.text()}`);
+    const body = await res.text();
+    console.error(`[fhirGet] ${res.status} on ${path} — body: ${body.slice(0, 500)}`);
+    throw new Error(`FHIR ${path} → ${res.status}`);
   }
   return res.json();
 }
@@ -167,7 +186,7 @@ async function syncMedications(
   patientId: string,
   token: string
 ): Promise<void> {
-  const bundle = await fhirGet(`MedicationRequest?patient=${patientId}&status=active`, token);
+  const bundle = await fhirGet(`MedicationRequest?patient=${patientId}`, token);
   const entries = bundle.entry ?? [];
 
   for (const entry of entries) {
@@ -205,11 +224,7 @@ async function syncAppointments(
   patientId: string,
   token: string
 ): Promise<void> {
-  const today  = new Date().toISOString().split('T')[0];
-  const bundle = await fhirGet(
-    `Appointment?patient=${patientId}&date=ge${today}&status=booked,arrived,fulfilled`,
-    token
-  );
+  const bundle = await fhirGet(`Appointment?patient=${patientId}`, token);
   const entries = bundle.entry ?? [];
 
   for (const entry of entries) {
@@ -245,10 +260,17 @@ async function syncObservations(
   token: string
 ): Promise<void> {
   // Fetch recent vitals and labs
-  const bundle = await fhirGet(
-    `Observation?patient=${patientId}&category=vital-signs,laboratory&_sort=-date&_count=50`,
-    token
-  );
+  // Epic requires category parameter for Observation queries
+  // Fetch vitals and labs separately, merge results
+  const [vitalsBundle, labsBundle] = await Promise.allSettled([
+    fhirGet(`Observation?patient=${patientId}&category=vital-signs`, token),
+    fhirGet(`Observation?patient=${patientId}&category=laboratory`, token),
+  ]);
+  const entries1 = vitalsBundle.status === 'fulfilled' ? (vitalsBundle.value.entry ?? []) : [];
+  const entries2 = labsBundle.status  === 'fulfilled' ? (labsBundle.value.entry  ?? []) : [];
+  const allEntries = [...entries1, ...entries2];
+  // shadow `entries` used below
+  const bundle = { entry: allEntries };
   const entries = bundle.entry ?? [];
 
   for (const entry of entries) {
@@ -285,10 +307,7 @@ async function syncConditions(
   patientId: string,
   token: string
 ): Promise<void> {
-  const bundle = await fhirGet(
-    `Condition?patient=${patientId}&clinical-status=active,recurrence`,
-    token
-  );
+  const bundle = await fhirGet(`Condition?patient=${patientId}`, token);
   const entries = bundle.entry ?? [];
 
   for (const entry of entries) {
