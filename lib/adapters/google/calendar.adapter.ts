@@ -12,6 +12,7 @@ import {
   fetchUpcomingEvents as googleFetchEvents,
   fetchUpcomingBirthdays as googleFetchBirthdays,
   createCalendarEvent as googleCreateEvent,
+  deleteCalendarEvent as googleDeleteEvent,
   triggerCalendarSync,
 } from '../../../lib/calendar';
 
@@ -66,6 +67,7 @@ export class GoogleCalendarAdapter implements CalendarAdapter {
       start:       event.startISO ?? '',
       end:         event.endISO   ?? '',
       attendees:   event.attendees?.map(a => a.email),
+      recurrence:  event.recurrence,
     });
     return {
       id:              `evt_${result.eventId ?? Date.now()}`,
@@ -78,6 +80,10 @@ export class GoogleCalendarAdapter implements CalendarAdapter {
       providerEventId: result.eventId ?? '',
       htmlLink:        result.htmlLink,
     };
+  }
+
+  async deleteEvent(query: string): Promise<{ deleted: number; titles: string[] }> {
+    return googleDeleteEvent(query);
   }
 
   async sync(_userId: string): Promise<void> {

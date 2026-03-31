@@ -35,7 +35,7 @@ export interface CalendarEvent {
   location?: string;                  // "501 Smyth Rd, Ottawa, ON K1H 8L6"
   description?: string;               // "Bring blood work results."
   attendees?: { name: string; email: string }[];
-  recurrence?: string;                // "RRULE:FREQ=WEEKLY;BYDAY=MO"
+  recurrence?: string[];               // e.g. ["RRULE:FREQ=WEEKLY;BYDAY=SA"]
   // Provider metadata
   provider: ProviderCalendar;
   providerEventId: string;            // Opaque — do not parse

@@ -34,14 +34,14 @@ export default function EpicCallbackPage() {
         if (err) {
           setError(true);
           setMessage(`MyChart connection denied: ${err}`);
-          setTimeout(() => router.replace('/(tabs)/settings'), 3000);
+          setTimeout(() => router.replace('/settings'), 3000);
           return;
         }
 
         if (!code || !state) {
           setError(true);
           setMessage('Invalid callback — missing code or state.');
-          setTimeout(() => router.replace('/(tabs)/settings'), 3000);
+          setTimeout(() => router.replace('/settings'), 3000);
           return;
         }
 
@@ -49,17 +49,17 @@ export default function EpicCallbackPage() {
 
         if (success) {
           setMessage('MyChart connected! Redirecting...');
-          setTimeout(() => router.replace('/(tabs)/settings'), 1500);
+          setTimeout(() => router.replace('/'), 1500);
         } else {
           setError(true);
           setMessage('Connection failed — please try again from Settings.');
-          setTimeout(() => router.replace('/(tabs)/settings'), 3000);
+          setTimeout(() => router.replace('/'), 3000);
         }
       } catch (e) {
         console.error('[EpicCallback] Error:', e);
         setError(true);
         setMessage('Unexpected error — please try again.');
-        setTimeout(() => router.replace('/(tabs)/settings'), 3000);
+        setTimeout(() => router.replace('/settings'), 3000);
       }
     }
 

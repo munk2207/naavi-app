@@ -27,6 +27,8 @@ export interface CalendarAdapter {
   fetchBirthdays(userId: string): Promise<CalendarEvent[]>;
   /** Create a new calendar event */
   createEvent(event: Partial<CalendarEvent>): Promise<CalendarEvent>;
+  /** Delete calendar events matching a search query */
+  deleteEvent(query: string): Promise<{ deleted: number; titles: string[] }>;
   /** Sync latest data from provider into local cache */
   sync(userId: string): Promise<void>;
 }

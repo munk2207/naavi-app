@@ -58,10 +58,34 @@ export async function searchKnowledge(
   }
 }
 
+// ─── Fetch ALL knowledge fragments (no semantic filter) ──────────────────────
+
+export async function fetchAllKnowledge(limit = 100): Promise<KnowledgeFragment[]> {
+  if (!supabase) return [];
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user?.id) return [];
+    const { data, error } = await supabase
+      .from('knowledge_fragments')
+      .select('id, type, content, classification, source, confidence')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error || !data) return [];
+    return data as KnowledgeFragment[];
+  } catch (err) {
+    console.error('[Knowledge] fetchAll failed:', err);
+    return [];
+  }
+}
+
 // ─── Format fragments for Claude context ─────────────────────────────────────
 
-export function formatFragmentsForContext(fragments: KnowledgeFragment[]): string {
+export function formatFragmentsForContext(fragments: KnowledgeFragment[], isFullDump = false): string {
   if (fragments.length === 0) return '';
-  const lines = fragments.map(f => `- [${f.type}] ${f.content}`);
+  const lines = fragments.map(f => `- ${f.content}`);
+  if (isFullDump) {
+    return `Everything Naavi knows about Robert (${fragments.length} items — report ALL of them):\n${lines.join('\n')}`;
+  }
   return `Relevant knowledge about Robert:\n${lines.join('\n')}`;
 }

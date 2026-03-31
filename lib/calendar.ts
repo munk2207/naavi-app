@@ -303,6 +303,7 @@ export async function createCalendarEvent(opts: {
   start: string;   // ISO 8601 datetime e.g. "2026-03-20T14:00:00"
   end: string;     // ISO 8601 datetime
   attendees?: string[]; // email addresses
+  recurrence?: string[]; // e.g. ["RRULE:FREQ=WEEKLY;BYDAY=SA"]
 }): Promise<{ success: boolean; eventId?: string; htmlLink?: string; error?: string }> {
   if (!supabase) return { success: false, error: 'Not configured' };
 
@@ -314,6 +315,25 @@ export async function createCalendarEvent(opts: {
     return { success: true, eventId: data?.eventId, htmlLink: data?.htmlLink };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+// ─── Delete calendar events by search query ───────────────────────────────────
+
+export async function deleteCalendarEvent(query: string): Promise<{ deleted: number; titles: string[] }> {
+  if (!supabase) return { deleted: 0, titles: [] };
+  try {
+    const { data, error } = await supabase.functions.invoke('delete-calendar-event', {
+      body: { query },
+    });
+    if (error) {
+      console.error('[Calendar] deleteCalendarEvent error:', error.message);
+      return { deleted: 0, titles: [] };
+    }
+    return { deleted: data?.deleted ?? 0, titles: data?.titles ?? [] };
+  } catch (err) {
+    console.error('[Calendar] deleteCalendarEvent exception:', err);
+    return { deleted: 0, titles: [] };
   }
 }
 
