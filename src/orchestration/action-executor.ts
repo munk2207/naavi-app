@@ -20,6 +20,7 @@ import type {
   DraftMessageAction,
   FetchDetailAction,
   LogConcernAction,
+  SetEmailAlertAction,
   ClaudeResponse,
 } from './types';
 
@@ -102,6 +103,10 @@ async function executeSingleAction(action: NaaviAction): Promise<ExecutionResult
 
       case 'LOG_CONCERN':
         await logConcern(action);
+        return { success: true, action };
+
+      case 'SET_EMAIL_ALERT':
+        await setEmailAlert(action);
         return { success: true, action };
 
       default:
@@ -230,4 +235,49 @@ async function logConcern(action: LogConcernAction): Promise<void> {
     // TODO (Phase 7): Escalate high-severity concerns to a daily digest
     console.warn('[ActionExecutor] HIGH SEVERITY concern logged — will surface in next brief');
   }
+}
+
+/**
+ * Saves an email watch rule to Supabase so check-email-alerts can match
+ * incoming emails and SMS Robert when a rule fires.
+ *
+ * Calls the naavi-chat Edge Function's Supabase client indirectly — in the
+ * mobile app this will call the Supabase JS client directly with the user's
+ * auth session.
+ */
+async function setEmailAlert(action: SetEmailAlertAction): Promise<void> {
+  // The Supabase URL and anon key are injected at build time via env vars.
+  // In the Expo app: import Constants from 'expo-constants' and read from
+  // Constants.expoConfig.extra.supabaseUrl / supabaseAnonKey.
+  const supabaseUrl  = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+  const supabaseKey  = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.warn('[ActionExecutor] SET_EMAIL_ALERT: Supabase env vars not set — rule not saved');
+    return;
+  }
+
+  const res = await fetch(`${supabaseUrl}/rest/v1/email_watch_rules`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`,
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify({
+      from_name:       action.fromName       ?? null,
+      from_email:      action.fromEmail      ?? null,
+      subject_keyword: action.subjectKeyword ?? null,
+      phone_number:    action.phoneNumber,
+      label:           action.label,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Failed to save email watch rule: ${res.status} ${text}`);
+  }
+
+  console.log('[ActionExecutor] SET_EMAIL_ALERT saved:', action.label);
 }

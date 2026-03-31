@@ -153,6 +153,18 @@ serve(async (req) => {
       results.push({ user_id, messages: count });
       console.log(`[sync-gmail] Synced ${count} messages for user ${user_id}`);
 
+      // Trigger email alert check immediately after new messages arrive
+      if (count > 0) {
+        fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/check-email-alerts`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+          },
+          body: JSON.stringify({ user_id }),
+        }).catch(err => console.error('[sync-gmail] Alert check trigger failed:', err));
+      }
+
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       results.push({ user_id, messages: 0, error: msg });

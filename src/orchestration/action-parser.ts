@@ -159,10 +159,35 @@ function validateAction(raw: unknown): NaaviAction | null {
         severity: isValidSeverity(raw.severity) ? raw.severity : 'low',
       };
 
+    case 'SET_EMAIL_ALERT': {
+      const hasFromName      = typeof raw.fromName === 'string' && raw.fromName.trim().length > 0;
+      const hasFromEmail     = typeof raw.fromEmail === 'string' && raw.fromEmail.trim().length > 0;
+      const hasSubjectKw     = typeof raw.subjectKeyword === 'string' && raw.subjectKeyword.trim().length > 0;
+      if (!hasFromName && !hasFromEmail && !hasSubjectKw) return null;
+      if (typeof raw.phoneNumber !== 'string' || !raw.phoneNumber.trim()) return null;
+      return {
+        type: 'SET_EMAIL_ALERT',
+        fromName:        hasFromName  ? (raw.fromName as string).trim()       : undefined,
+        fromEmail:       hasFromEmail ? (raw.fromEmail as string).trim()      : undefined,
+        subjectKeyword:  hasSubjectKw ? (raw.subjectKeyword as string).trim() : undefined,
+        phoneNumber:     (raw.phoneNumber as string).trim(),
+        label:           typeof raw.label === 'string' && raw.label.trim()
+                           ? raw.label.trim()
+                           : buildAlertLabel(raw),
+      };
+    }
+
     default:
       console.warn('[ActionParser] Unknown action type:', raw.type);
       return null;
   }
+}
+
+function buildAlertLabel(raw: Record<string, unknown>): string {
+  if (typeof raw.fromName === 'string' && raw.fromName.trim()) return `Emails from ${raw.fromName.trim()}`;
+  if (typeof raw.fromEmail === 'string' && raw.fromEmail.trim()) return `Emails from ${raw.fromEmail.trim()}`;
+  if (typeof raw.subjectKeyword === 'string' && raw.subjectKeyword.trim()) return `Emails with "${raw.subjectKeyword.trim()}" in subject`;
+  return 'Email alert';
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
