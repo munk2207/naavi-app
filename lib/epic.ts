@@ -13,21 +13,24 @@ import { supabase } from './supabase';
 
 // ─── Epic OAuth endpoints (sandbox) ──────────────────────────────────────────
 
-const EPIC_CLIENT_ID   = '0895a031-228f-41e5-a687-b52e6434dd9e';
+const EPIC_CLIENT_ID   = 'f2b6e09c-0569-4ecf-8e81-027432281052';
 const EPIC_AUTH_URL    = 'https://fhir.epic.com/interconnect-fhir-oauth/oauth2/authorize';
-const EPIC_TOKEN_URL   = 'https://fhir.epic.com/interconnect-fhir-oauth/oauth2/token';
-const EPIC_FHIR_BASE   = 'https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4';
 const REDIRECT_URI     = 'https://naavi-app.vercel.app/auth/epic/callback';
 
+// SMART v2 scope format (r=read, s=search) — matches app's SMART v2 registration on Epic
 const EPIC_SCOPES = [
-  'launch/patient',
   'openid',
   'fhirUser',
-  'patient/Patient.read',
-  'patient/MedicationRequest.read',
-  'patient/Appointment.read',
-  'patient/Observation.read',
-  'patient/Condition.read',
+  'patient/Patient.r',
+  'patient/Patient.s',
+  'patient/MedicationRequest.r',
+  'patient/MedicationRequest.s',
+  'patient/Appointment.r',
+  'patient/Appointment.s',
+  'patient/Observation.r',
+  'patient/Observation.s',
+  'patient/Condition.r',
+  'patient/Condition.s',
 ].join(' ');
 
 // ─── Connection status ────────────────────────────────────────────────────────
@@ -100,7 +103,7 @@ export async function connectEpic(): Promise<void> {
     state,
     code_challenge:        challenge,
     code_challenge_method: 'S256',
-    aud:                   EPIC_FHIR_BASE,
+    prompt:                'login',
   });
 
   window.location.href = `${EPIC_AUTH_URL}?${params.toString()}`;
@@ -117,50 +120,21 @@ export async function handleEpicCallback(code: string, returnedState: string): P
   const expectedState = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('naavi_epic_state')    : null;
 
   if (!verifier || !expectedState || returnedState !== expectedState) {
-    console.error('[Epic] PKCE state mismatch');
+    console.error('[Epic] PKCE state mismatch', { verifier: !!verifier, expectedState, returnedState });
     return false;
   }
 
-  // Exchange code for tokens
-  const body = new URLSearchParams({
-    grant_type:    'authorization_code',
-    code,
-    redirect_uri:  REDIRECT_URI,
-    client_id:     EPIC_CLIENT_ID,
-    code_verifier: verifier,
+  // Exchange code for tokens via Edge Function (avoids browser CSP restrictions)
+  const { data, error } = await supabase!.functions.invoke('exchange-epic-code', {
+    body: { code, code_verifier: verifier },
   });
 
-  const tokenRes = await fetch(EPIC_TOKEN_URL, {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body:    body.toString(),
-  });
-
-  if (!tokenRes.ok) {
-    console.error('[Epic] Token exchange failed:', await tokenRes.text());
+  if (error || !data?.ok) {
+    console.error('[Epic] exchange-epic-code failed:', error ?? data?.error);
     return false;
   }
 
-  const tokens = await tokenRes.json();
-
-  // Store tokens server-side via Edge Function
-  const { data: { session } } = await supabase!.auth.getSession();
-  if (!session) return false;
-
-  const { error } = await supabase!.functions.invoke('store-epic-token', {
-    body: {
-      access_token:  tokens.access_token,
-      refresh_token: tokens.refresh_token ?? null,
-      expires_in:    tokens.expires_in    ?? 3600,
-      patient_id:    tokens.patient       ?? null,
-      scope:         tokens.scope         ?? '',
-    },
-  });
-
-  if (error) {
-    console.error('[Epic] store-epic-token failed:', error);
-    return false;
-  }
+  console.log('[Epic] Connected — patient:', data.patient_id);
 
   // Clean up PKCE state
   if (typeof sessionStorage !== 'undefined') {
@@ -171,4 +145,56 @@ export async function handleEpicCallback(code: string, returnedState: string): P
 
   markEpicConnected();
   return true;
+}
+
+// ─── Health context for Naavi conversations ───────────────────────────────────
+
+export async function getEpicHealthContext(): Promise<string> {
+  if (!supabase) return '';
+  try {
+    const [medsRes, apptsRes, condsRes] = await Promise.all([
+      supabase
+        .from('epic_medications')
+        .select('name, dosage, status')
+        .eq('status', 'active')
+        .order('name'),
+      supabase
+        .from('epic_appointments')
+        .select('title, start_iso, location')
+        .order('start_iso', { ascending: false })
+        .limit(5),
+      supabase
+        .from('epic_conditions')
+        .select('name, status')
+        .order('name'),
+    ]);
+
+    const lines: string[] = [];
+
+    if (medsRes.data && medsRes.data.length > 0) {
+      lines.push('## Robert\'s medications (from MyChart)');
+      medsRes.data.forEach(m => {
+        lines.push(`- ${m.name}${m.dosage ? ` — ${m.dosage}` : ''}`);
+      });
+    }
+
+    if (apptsRes.data && apptsRes.data.length > 0) {
+      lines.push('## Upcoming medical appointments (from MyChart)');
+      apptsRes.data.forEach(a => {
+        const date = a.start_iso ? new Date(a.start_iso).toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+        lines.push(`- ${a.title}${date ? ` on ${date}` : ''}${a.location ? ` at ${a.location}` : ''}`);
+      });
+    }
+
+    if (condsRes.data && condsRes.data.length > 0) {
+      lines.push('## Robert\'s medical conditions (from MyChart)');
+      condsRes.data.forEach(c => {
+        lines.push(`- ${c.name}${c.status && c.status !== 'active' ? ` (${c.status})` : ''}`);
+      });
+    }
+
+    return lines.length > 0 ? lines.join('\n') : '';
+  } catch {
+    return '';
+  }
 }

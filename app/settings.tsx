@@ -23,6 +23,7 @@ import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserName } from '@/l
 import { isCalendarConnected, connectGoogleCalendar, disconnectGoogleCalendar } from '@/lib/calendar';
 import { saveNotionToken, getNotionToken, removeNotionToken, hasNotionToken } from '@/lib/notion';
 import { isEpicConnected, connectEpic, disconnectEpic } from '@/lib/epic';
+import { registerPushNotifications } from '@/lib/push';
 import { registry } from '@/lib/adapters/registry';
 import type { UserProfile } from '@/lib/types';
 import { Colors } from '@/constants/Colors';
@@ -95,6 +96,8 @@ export default function SettingsScreen() {
   const [notionConnected, setNotionConnected]     = useState(false);
   const [epicConnected, setEpicConnected]         = useState(false);
   const [epicLoading, setEpicLoading]             = useState(false);
+  const [pushEnabled, setPushEnabled]             = useState(false);
+  const [pushLoading, setPushLoading]             = useState(false);
 
   // Provider selections — all default to Google for Phase 7
   const [calendarProvider, setCalendarProvider] =
@@ -115,6 +118,9 @@ export default function SettingsScreen() {
     isEpicConnected().then(setEpicConnected);
     const saved = getUserName();
     if (saved) { setUserName(saved); setUserNameSaved(true); }
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      setPushEnabled(Notification.permission === 'granted');
+    }
   }, []);
 
   // Keep registry in sync whenever provider selections change
@@ -371,6 +377,33 @@ export default function SettingsScreen() {
                 {epicLoading ? '...' : epicConnected ? 'Disconnect' : 'Connect'}
               </Text>
             </TouchableOpacity>
+          </View>
+
+          {/* Push Notifications */}
+          <View style={styles.toolRow}>
+            <View>
+              <Text style={styles.toolLabel}>Push Notifications</Text>
+              <Text style={styles.toolStatus}>
+                {pushEnabled ? 'Enabled — Naavi will alert you for reminders' : 'Get alerts for reminders and leave-by warnings'}
+              </Text>
+            </View>
+            {!pushEnabled && (
+              <TouchableOpacity
+                style={styles.connectBtn}
+                disabled={pushLoading}
+                onPress={async () => {
+                  setPushLoading(true);
+                  const ok = await registerPushNotifications();
+                  setPushEnabled(ok);
+                  setPushLoading(false);
+                }}
+              >
+                <Text style={styles.connectBtnText}>{pushLoading ? '...' : 'Enable'}</Text>
+              </TouchableOpacity>
+            )}
+            {pushEnabled && (
+              <Text style={[styles.connectBtnText, { color: Colors.primary }]}>✓ On</Text>
+            )}
           </View>
 
           {/* Coming soon */}

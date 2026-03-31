@@ -56,7 +56,7 @@ function emailToBriefItem(email: Email): BriefItem {
 import { fetchOttawaWeather } from '@/lib/weather';
 import { sendDriveFileAsEmail } from '@/lib/drive';
 import { lookupContact } from '@/lib/contacts';
-import { saveContact } from '@/lib/supabase';
+import { saveContact, loadTodayConversation } from '@/lib/supabase';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
@@ -361,6 +361,8 @@ export default function HomeScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const scrollRef = useRef<ScrollView>(null);
+  const runSyncRef = useRef<(() => void) | null>(null);
+  const avoidHighwaysRef = useRef(false);
   const [inputText, setInputText] = useState('');
   const [memoTranscript, setMemoTranscript] = useState<string | null>(null);
   const [brief, setBrief] = useState<BriefItem[]>([]);
@@ -396,6 +398,26 @@ export default function HomeScreen() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Load today's conversation history on mount
+  useEffect(() => {
+    if (!currentUserId) return;
+    loadTodayConversation().then(saved => {
+      if (saved.length > 0) loadHistory(saved as any);
+    });
+  }, [currentUserId]);
+
+  // Load driving preferences from knowledge fragments
+  useEffect(() => {
+    if (!supabase || !currentUserId) return;
+    supabase.from('knowledge_fragments')
+      .select('content')
+      .ilike('content', '%highway%')
+      .limit(5)
+      .then(({ data }) => {
+        if (data && data.length > 0) avoidHighwaysRef.current = true;
+      });
+  }, [currentUserId]);
+
   // Load calendar data whenever user ID becomes available
   useEffect(() => {
     if (!currentUserId) return;
@@ -420,20 +442,26 @@ export default function HomeScreen() {
       });
     });
 
-    // Background sync — refresh after Google Calendar + Gmail are polled
-    Promise.all([triggerCalendarSync(), registry.email.sync(currentUserId)]).then(() =>
-      Promise.all([
-        fetchUpcomingEvents(7, currentUserId),
-        fetchUpcomingBirthdays(currentUserId),
-        registry.email.fetchImportant(currentUserId),
-      ])
-    ).then(async ([fresh, freshBirthdays, freshEmails]) => {
-      const freshEnriched = await enrichWithTravelTime(fresh);
-      setBrief(prev => {
-        const weather = prev.find(i => i.id === 'weather');
-        return [...freshEnriched, ...freshBirthdays, ...freshEmails.map(emailToBriefItem), ...(weather ? [weather] : [])];
-      });
-    }).catch(() => {});
+    const runSync = () =>
+      Promise.all([triggerCalendarSync(), registry.email.sync(currentUserId)]).then(() =>
+        Promise.all([
+          fetchUpcomingEvents(7, currentUserId),
+          fetchUpcomingBirthdays(currentUserId),
+          registry.email.fetchImportant(currentUserId),
+        ])
+      ).then(async ([fresh, freshBirthdays, freshEmails]) => {
+        const freshEnriched = await enrichWithTravelTime(fresh);
+        setBrief(prev => {
+          const weather = prev.find(i => i.id === 'weather');
+          return [...freshEnriched, ...freshBirthdays, ...freshEmails.map(emailToBriefItem), ...(weather ? [weather] : [])];
+        });
+      }).catch(() => {});
+
+    // Background sync on load, then every minute while page is open
+    runSyncRef.current = runSync;
+    runSync();
+    const syncInterval = setInterval(runSync, 60 * 1000);
+    return () => clearInterval(syncInterval);
   }, [currentUserId]);
 
   const {
@@ -504,7 +532,7 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [brief]);
 
-  const { status, turns, error, send } = useOrchestrator('en', brief);
+  const { status, turns, error, send, loadHistory } = useOrchestrator('en', brief);
   const { voiceState, voiceError, startListening, stopListening, isSupported } = useVoice('en');
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
   const memoStartedAtRef = useRef<number>(0);
@@ -573,6 +601,8 @@ export default function HomeScreen() {
     const text = inputText.trim();
     if (!text || status === 'thinking' || status === 'speaking') return;
     setInputText('');
+    // Fire calendar sync in background so next response has fresh data
+    if (currentUserId) runSyncRef.current?.();
     await send(text);
     // Scroll to bottom after response
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
@@ -827,7 +857,13 @@ export default function HomeScreen() {
                   </Text>
                   <TouchableOpacity
                     style={styles.navOpenBtn}
-                    onPress={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(nav.destination)}&travelmode=driving`, '_blank')}
+                    onPress={() => {
+                      const avoid = avoidHighwaysRef.current ? '&avoid=highways' : '';
+                      const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(nav.destination)}&travelmode=driving${avoid}`;
+                      const a = document.createElement('a');
+                      a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+                      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                    }}
                   >
                     <Text style={styles.navOpenBtnText}>Open in Google Maps →</Text>
                   </TouchableOpacity>
@@ -873,7 +909,7 @@ export default function HomeScreen() {
 
               {/* Calendar events created */}
               {turn.createdEvents.map((ev, i) => (
-                <TouchableOpacity key={i} style={styles.eventCard} onPress={() => ev.htmlLink ? Linking.openURL(ev.htmlLink) : undefined} accessibilityLabel="Open event in Google Calendar">
+                <TouchableOpacity key={i} style={styles.eventCard} onPress={() => { if (ev.htmlLink) { const a = document.createElement('a'); a.href = ev.htmlLink; a.target = '_blank'; a.rel = 'noopener noreferrer'; document.body.appendChild(a); a.click(); document.body.removeChild(a); } }} accessibilityLabel="Open event in Google Calendar">
                   <Text style={styles.eventLabel}>📅 Event added to calendar</Text>
                   <Text style={styles.eventTitle}>{ev.summary}</Text>
                   {ev.htmlLink ? <Text style={styles.eventLink}>Tap to view in Google Calendar</Text> : null}

@@ -82,6 +82,55 @@ export async function saveReminder(reminder: {
   else console.log('[Supabase] Reminder saved:', reminder.title);
 }
 
+// ─── Conversation persistence ──────────────────────────────────────────────────
+
+export async function saveConversationTurn(turn: object): Promise<void> {
+  if (!supabase) return;
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) return;
+
+  const today = new Date().toISOString().split('T')[0];
+
+  // Try to update today's existing session first
+  const { data: existing } = await supabase
+    .from('conversations')
+    .select('id, turns')
+    .eq('user_id', userId)
+    .eq('session_date', today)
+    .maybeSingle();
+
+  if (existing) {
+    const turns = Array.isArray(existing.turns) ? existing.turns : [];
+    turns.push(turn);
+    await supabase
+      .from('conversations')
+      .update({ turns, updated_at: new Date().toISOString() })
+      .eq('id', existing.id);
+  } else {
+    await supabase
+      .from('conversations')
+      .insert({ user_id: userId, session_date: today, turns: [turn] });
+  }
+}
+
+export async function loadTodayConversation(): Promise<object[]> {
+  if (!supabase) return [];
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) return [];
+
+  const today = new Date().toISOString().split('T')[0];
+  const { data } = await supabase
+    .from('conversations')
+    .select('turns')
+    .eq('user_id', userId)
+    .eq('session_date', today)
+    .maybeSingle();
+
+  return Array.isArray(data?.turns) ? data.turns : [];
+}
+
 export async function saveDriveNote(note: {
   title: string;
   webViewLink?: string;
