@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Naavi — Normalized Internal Data Model</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+      color: #1a2e1a;
+      background: #f7faf8;
+    }
+
+    /* ── Cover ── */
+    .cover {
+      background: linear-gradient(135deg, #0f3d20 0%, #1a5c35 60%, #1e7a45 100%);
+      color: #fff;
+      padding: 72px 60px 60px;
+      min-height: 220px;
+    }
+    .cover-logo { font-size: 13px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; opacity: 0.6; margin-bottom: 20px; }
+    .cover h1 { font-size: 36px; font-weight: 800; line-height: 1.2; margin-bottom: 24px; letter-spacing: -0.5px; }
+    .cover-meta { display: flex; gap: 32px; flex-wrap: wrap; }
+    .cover-meta-item { display: flex; flex-direction: column; gap: 2px; }
+    .cover-meta-label { font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; opacity: 0.55; }
+    .cover-meta-value { font-size: 14px; font-weight: 600; opacity: 0.9; }
+    .status-badge { display: inline-block; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 20px; padding: 3px 12px; font-size: 12px; font-weight: 700; }
+
+    /* ── Layout ── */
+    .container { max-width: 1000px; margin: 0 auto; padding: 48px 40px 80px; }
+
+    /* ── TOC ── */
+    .toc { background: #fff; border: 1px solid #d4e8dd; border-radius: 14px; padding: 28px 32px; margin-bottom: 48px; }
+    .toc h2 { font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: #1a5c35; margin-bottom: 16px; }
+    .toc ol { padding-left: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 32px; }
+    .toc a { color: #1a5c35; text-decoration: none; font-size: 14px; font-weight: 500; }
+    .toc a:hover { text-decoration: underline; }
+
+    /* ── Sections ── */
+    section { margin-bottom: 56px; }
+    h2.section-title { font-size: 22px; font-weight: 800; color: #0f3d20; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid #d4e8dd; }
+    h3 { font-size: 16px; font-weight: 700; color: #1a5c35; margin: 24px 0 10px; }
+    p { color: #2d4a3a; margin-bottom: 14px; }
+    strong { color: #0f3d20; }
+
+    /* ── Architecture diagram ── */
+    .arch-diagram { background: #0f1f14; border-radius: 12px; padding: 28px 32px; margin: 20px 0; font-family: 'Courier New', monospace; font-size: 14px; color: #7ee8a2; line-height: 2; }
+    .arch-diagram .highlight { color: #fff; font-weight: 700; background: rgba(30,122,69,0.4); padding: 0 6px; border-radius: 4px; }
+    .arch-arrow { color: #4ade80; display: block; text-align: center; font-size: 18px; line-height: 1.4; }
+    .arch-layer { display: block; text-align: center; }
+
+    /* ── Decision box ── */
+    .decision-box { background: #fffbeb; border: 1px solid #fcd34d; border-left: 4px solid #f59e0b; border-radius: 10px; padding: 20px 24px; margin: 20px 0; }
+    .decision-box p { color: #78350f; margin: 0; font-size: 14px; }
+    .decision-box strong { color: #78350f; }
+
+    /* ── Entity cards ── */
+    .entity-card { background: #fff; border: 1px solid #d4e8dd; border-radius: 14px; overflow: hidden; margin-bottom: 40px; }
+    .entity-header { background: linear-gradient(90deg, #1a5c35, #1e7a45); color: #fff; padding: 18px 24px; display: flex; align-items: center; gap: 14px; }
+    .entity-number { width: 32px; height: 32px; background: rgba(255,255,255,0.2); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; flex-shrink: 0; }
+    .entity-title { font-size: 18px; font-weight: 800; letter-spacing: -0.3px; }
+    .entity-subtitle { font-size: 13px; opacity: 0.75; margin-top: 2px; }
+    .entity-body { padding: 24px; }
+
+    /* ── Tables ── */
+    table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0 20px; }
+    thead tr { background: #e8f3ed; }
+    thead th { text-align: left; padding: 10px 14px; font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: #1a5c35; }
+    tbody tr { border-bottom: 1px solid #e8f3ed; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #f7faf8; }
+    td { padding: 9px 14px; vertical-align: top; color: #2d4a3a; }
+    code { font-family: 'Courier New', monospace; font-size: 12px; background: #e8f3ed; color: #0f3d20; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+    .example-val { font-family: 'Courier New', monospace; font-size: 11.5px; color: #0369a1; background: #eff6ff; padding: 2px 6px; border-radius: 4px; display: inline-block; word-break: break-all; white-space: normal; }
+
+    /* ── Badges ── */
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .badge-core { background: #dcfce7; color: #166534; }
+    .badge-optional { background: #e0f2fe; color: #0369a1; }
+    .badge-provider { background: #f3e8ff; color: #7e22ce; }
+
+    /* ── Adapter ops ── */
+    .adapter-ops { background: #f7faf8; border: 1px solid #d4e8dd; border-radius: 10px; padding: 16px 20px; margin-top: 4px; }
+    .adapter-ops h4 { font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: #1a5c35; margin-bottom: 10px; }
+    .adapter-ops ul { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+    .adapter-ops li { font-family: 'Courier New', monospace; font-size: 13px; color: #0f3d20; background: #fff; border: 1px solid #d4e8dd; border-radius: 6px; padding: 6px 12px; }
+
+    /* ── Callout ── */
+    .callout { background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 4px solid #16a34a; border-radius: 10px; padding: 16px 20px; margin: 16px 0; font-size: 14px; color: #14532d; }
+
+    /* ── Implementation table ── */
+    .impl-table thead tr { background: #e0f2fe; }
+    .impl-table thead th { color: #0369a1; }
+    .phase-badge { display: inline-block; padding: 3px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+    .phase-1 { background: #dcfce7; color: #166534; }
+    .phase-2 { background: #dbeafe; color: #1d4ed8; }
+    .phase-3 { background: #fef9c3; color: #854d0e; }
+    .phase-4 { background: #f3e8ff; color: #7e22ce; }
+
+    /* ── Summary ── */
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-top: 20px; }
+    .summary-card { background: #fff; border: 1px solid #d4e8dd; border-radius: 12px; padding: 16px 18px; display: flex; align-items: flex-start; gap: 14px; }
+    .summary-dot { width: 10px; height: 10px; border-radius: 50%; background: #1a5c35; margin-top: 5px; flex-shrink: 0; }
+    .summary-entity { font-weight: 700; font-size: 14px; color: #0f3d20; }
+    .summary-desc { font-size: 13px; color: #4a6a55; margin-top: 2px; }
+
+    /* ── Non-API section ── */
+    .noapi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 24px 0; }
+    .noapi-card { background: #fff; border: 1px solid #d4e8dd; border-radius: 12px; padding: 18px 20px; }
+    .noapi-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .noapi-icon { font-size: 24px; }
+    .noapi-title { font-size: 15px; font-weight: 800; color: #0f3d20; }
+    .noapi-subtitle { font-size: 12px; color: #6b9e7a; margin-top: 1px; }
+    .noapi-desc { font-size: 13px; color: #2d4a3a; line-height: 1.6; margin-bottom: 10px; }
+    .noapi-examples { display: flex; flex-wrap: wrap; gap: 6px; }
+    .noapi-example { font-size: 11px; background: #e8f3ed; color: #1a5c35; padding: 2px 10px; border-radius: 20px; font-weight: 600; }
+    .adapter-type-table thead tr { background: #fdf4ff; }
+    .adapter-type-table thead th { color: #7e22ce; }
+    .principle-box { background: #0f1f14; border-radius: 12px; padding: 24px 28px; margin: 20px 0; color: #7ee8a2; font-family: 'Courier New', monospace; font-size: 13.5px; line-height: 2; }
+    .principle-box .dim { opacity: 0.5; }
+    .principle-box .bright { color: #fff; font-weight: 700; }
+    .principle-box .accent { color: #4ade80; }
+
+    /* ── Footer ── */
+    footer { text-align: center; padding: 32px; font-size: 12px; color: #6b9e7a; border-top: 1px solid #d4e8dd; margin-top: 40px; }
+
+    @media print {
+      body { background: #fff; font-size: 12px; }
+      .cover { padding: 48px 40px; }
+      .entity-card { break-inside: avoid; }
+      table { font-size: 11px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Cover -->
+<div class="cover">
+  <div class="cover-logo">Naavi — Architecture</div>
+  <h1>Normalized Internal<br>Data Model</h1>
+  <div class="cover-meta">
+    <div class="cover-meta-item"><span class="cover-meta-label">Version</span><span class="cover-meta-value">1.0</span></div>
+    <div class="cover-meta-item"><span class="cover-meta-label">Date</span><span class="cover-meta-value">2026-03-22</span></div>
+    <div class="cover-meta-item"><span class="cover-meta-label">Status</span><span class="cover-meta-value"><span class="status-badge">Draft — For Review</span></span></div>
+    <div class="cover-meta-item"><span class="cover-meta-label">Author</span><span class="cover-meta-value">Naavi Architecture Review</span></div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- TOC -->
+  <div class="toc">
+    <h2>Table of Contents</h2>
+    <ol>
+      <li><a href="#purpose">Purpose</a></li>
+      <li><a href="#decision">Open Decision</a></li>
+      <li><a href="#e1">Entity 1 — CalendarEvent</a></li>
+      <li><a href="#e2">Entity 2 — Email</a></li>
+      <li><a href="#e3">Entity 3 — Contact</a></li>
+      <li><a href="#e4">Entity 4 — StorageFile</a></li>
+      <li><a href="#e5">Entity 5 — NavigationResult</a></li>
+      <li><a href="#e6">Entity 6 — Note</a></li>
+      <li><a href="#e7">Entity 7 — Conversation</a></li>
+      <li><a href="#e8">Entity 8 — UserProfile</a></li>
+      <li><a href="#e9">Entity 9 — BriefItem</a></li>
+      <li><a href="#impl">Implementation Sequence</a></li>
+      <li><a href="#noapi">Non-API Provider Integration</a></li>
+      <li><a href="#vocab">Controlled Vocabulary &amp; Value Definitions</a></li>
+      <li><a href="#summary">Summary</a></li>
+    </ol>
+  </div>
+
+  <!-- Purpose -->
+  <section id="purpose">
+    <h2 class="section-title">Purpose</h2>
+    <p>This document defines the normalized internal data model for Naavi. The goal is to establish provider-agnostic data interfaces that sit between the Naavi intelligence layer and any external service provider (Google, Microsoft, Apple, Dropbox, etc.).</p>
+    <h3>Why This Matters</h3>
+    <p>Today Naavi's integration layer is tightly coupled to Google services. Every function call in the codebase references a specific provider. This creates a structural problem: adding a second client who uses Outlook, iCloud, or OneDrive requires rewriting large portions of the application.</p>
+    <p>The normalized model solves this by making Naavi own the data concepts. Providers become interchangeable adapters underneath.</p>
+    <h3>Architecture Principle</h3>
+    <div class="arch-diagram">
+      <span class="arch-layer">User (Robert / Future Clients)</span>
+      <span class="arch-arrow">↓</span>
+      <span class="arch-layer">Naavi Orchestration (AI Layer)</span>
+      <span class="arch-arrow">↓</span>
+      <span class="arch-layer"><span class="highlight">Normalized Internal Data Model — this document</span></span>
+      <span class="arch-arrow">↓</span>
+      <span class="arch-layer">Provider Adapters — Google, Microsoft, Apple, Notion, etc.</span>
+      <span class="arch-arrow">↓</span>
+      <span class="arch-layer">External APIs</span>
+    </div>
+    <p>The UI and AI layers never talk to a provider directly. They only speak Naavi's normalized language. When a new provider is added, only a new adapter file is written — nothing else changes.</p>
+  </section>
+
+  <!-- Open Decision -->
+  <section id="decision">
+    <h2 class="section-title">Open Decision — Before Implementation Begins</h2>
+    <p>Every adapter call routes through the user's provider preference. The following must be decided before writing any interface:</p>
+    <div class="decision-box">
+      <p><strong>Should one user be able to have Google Calendar + Outlook Calendar active simultaneously (multi-provider per category)?</strong><br>Or one active provider per category at a time (single-provider per category)?</p>
+    </div>
+    <table>
+      <thead><tr><th>Option</th><th>Field Type</th><th>Complexity</th><th>Covers</th></tr></thead>
+      <tbody>
+        <tr><td>Single active provider</td><td><code>string</code></td><td>Lower</td><td>95% of use cases</td></tr>
+        <tr><td>Multiple simultaneous</td><td><code>string[]</code></td><td>Higher</td><td>Power users, migrations</td></tr>
+      </tbody>
+    </table>
+    <div class="callout"><strong>Recommendation:</strong> Start with single active provider per category. The field can be migrated to an array later without breaking the interface contract.</div>
+  </section>
+
+  <!-- Entities heading -->
+  <section>
+    <h2 class="section-title">Entities</h2>
+
+    <!-- Entity 1 -->
+    <div class="entity-card" id="e1">
+      <div class="entity-header">
+        <div class="entity-number">1</div>
+        <div><div class="entity-title">CalendarEvent</div><div class="entity-subtitle">Represents a scheduled event from any calendar provider</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Example Value</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>id</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"evt_7f3a1c9b-4d2e-..."</span></td><td>Naavi-generated UUID</td></tr>
+            <tr><td><code>title</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Cardiology appointment with Dr. Ahmed"</span></td><td>Plain text, as written in calendar</td></tr>
+            <tr><td><code>startISO</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"2026-03-22T14:00:00-05:00"</span></td><td>ISO 8601 with timezone offset</td></tr>
+            <tr><td><code>endISO</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"2026-03-22T15:00:00-05:00"</span></td><td>ISO 8601 with timezone offset</td></tr>
+            <tr><td><code>isAllDay</code></td><td><code>boolean</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">false</span></td><td>All-day vs timed event</td></tr>
+            <tr><td><code>location</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"501 Smyth Rd, Ottawa, ON K1H 8L6"</span></td><td>Full street address or meeting link</td></tr>
+            <tr><td><code>description</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"Bring blood work results. Parking in Lot P."</span></td><td>Plain text event notes</td></tr>
+            <tr><td><code>attendees[].name</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"Dr. Ahmed Al-Rashid"</span></td><td>Full name of attendee</td></tr>
+            <tr><td><code>attendees[].email</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"ahmed@ottawahospital.on.ca"</span></td><td>Valid email address</td></tr>
+            <tr><td><code>recurrence</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"RRULE:FREQ=WEEKLY;BYDAY=MO"</span></td><td>RRULE standard format</td></tr>
+            <tr><td><code>provider</code></td><td><code>'google'|'outlook'|'apple'</code></td><td><span class="badge badge-provider">Provider metadata</span></td><td><span class="example-val">"google"</span></td><td>Source provider identifier</td></tr>
+            <tr><td><code>providerEventId</code></td><td><code>string</code></td><td><span class="badge badge-provider">Provider metadata</span></td><td><span class="example-val">"_6d5p6cb36d5o6e316..."</span></td><td>Opaque ID from provider — do not parse</td></tr>
+            <tr><td><code>htmlLink</code></td><td><code>string</code></td><td><span class="badge badge-provider">Provider metadata</span></td><td><span class="example-val">"https://www.google.com/calendar/event?eid=..."</span></td><td>Full URL to view event in provider UI</td></tr>
+          </tbody>
+        </table>
+        <div class="adapter-ops">
+          <h4>Adapter Operations Required</h4>
+          <ul>
+            <li>fetchEvents(userId, days) → CalendarEvent[]</li>
+            <li>createEvent(event) → CalendarEvent</li>
+            <li>updateEvent(id, changes) → CalendarEvent</li>
+            <li>deleteEvent(id) → void</li>
+            <li>sync(userId) → void</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Entity 2 -->
+    <div class="entity-card" id="e2">
+      <div class="entity-header">
+        <div class="entity-number">2</div>
+        <div><div class="entity-title">Email</div><div class="entity-subtitle">Represents an email message from any mail provider</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Example Value</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>id</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"email_18f3a1c9b-..."</span></td><td>Naavi-generated UUID</td></tr>
+            <tr><td><code>from.name</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Dr. Ahmed Al-Rashid"</span></td><td>Full name of sender</td></tr>
+            <tr><td><code>from.email</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"ahmed@ottawahospital.on.ca"</span></td><td>Valid email address</td></tr>
+            <tr><td><code>to[].name</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Robert"</span></td><td>Full name of recipient</td></tr>
+            <tr><td><code>to[].email</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"robert@example.com"</span></td><td>Valid email address</td></tr>
+            <tr><td><code>subject</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Your appointment on March 25th"</span></td><td>Plain text subject line</td></tr>
+            <tr><td><code>bodyText</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Hi Robert, confirming your appointment at 2pm..."</span></td><td>Plain text only — no HTML tags</td></tr>
+            <tr><td><code>summary</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Dr. Ahmed confirming March 25th at 2pm. Arrive 15 min early."</span></td><td>AI-generated 1–2 sentence digest</td></tr>
+            <tr><td><code>isImportant</code></td><td><code>boolean</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">true</span></td><td>High priority flag</td></tr>
+            <tr><td><code>isRead</code></td><td><code>boolean</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">false</span></td><td>Read/unread status</td></tr>
+            <tr><td><code>receivedAt</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"2026-03-21T09:30:00-05:00"</span></td><td>ISO 8601 with timezone offset</td></tr>
+            <tr><td><code>threadId</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"17e8f3a1c9b24d5"</span></td><td>Opaque thread ID from provider — do not parse</td></tr>
+            <tr><td><code>attachments[].name</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"Lab Results March 2026.pdf"</span></td><td>File name with extension</td></tr>
+            <tr><td><code>attachments[].mimeType</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"application/pdf"</span></td><td>Standard MIME type</td></tr>
+            <tr><td><code>provider</code></td><td><code>'gmail'|'outlook'</code></td><td><span class="badge badge-provider">Provider metadata</span></td><td><span class="example-val">"gmail"</span></td><td>Source provider identifier</td></tr>
+          </tbody>
+        </table>
+        <div class="adapter-ops">
+          <h4>Adapter Operations Required</h4>
+          <ul>
+            <li>fetchImportant(userId) → Email[]</li>
+            <li>send(draft) → &#123; success: boolean; error?: string &#125;</li>
+            <li>sync(userId) → void</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Entity 3 -->
+    <div class="entity-card" id="e3">
+      <div class="entity-header">
+        <div class="entity-number">3</div>
+        <div><div class="entity-title">Contact</div><div class="entity-subtitle">Represents a person in any contacts system</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Example Value</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>id</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"contact_abc123-..."</span></td><td>Naavi-generated UUID</td></tr>
+            <tr><td><code>name</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Dr. Ahmed Al-Rashid"</span></td><td>Full name as typed or imported</td></tr>
+            <tr><td><code>email</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"ahmed@ottawahospital.on.ca"</span></td><td>Valid email address</td></tr>
+            <tr><td><code>phone</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"+1-613-555-0123"</span></td><td>E.164 international format</td></tr>
+            <tr><td><code>relationship</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"cardiologist"</span></td><td>Free text lowercase: "colleague", "family", "doctor"</td></tr>
+            <tr><td><code>photoUrl</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"https://lh3.googleusercontent.com/contacts/..."</span></td><td>Absolute HTTPS URL to profile image</td></tr>
+            <tr><td><code>provider</code></td><td><code>'google'|'outlook'|'apple'</code></td><td><span class="badge badge-provider">Provider metadata</span></td><td><span class="example-val">"google"</span></td><td>Source provider identifier</td></tr>
+            <tr><td><code>providerContactId</code></td><td><code>string</code></td><td><span class="badge badge-provider">Provider metadata</span></td><td><span class="example-val">"people/c123456789"</span></td><td>Google People API format — opaque, do not parse</td></tr>
+          </tbody>
+        </table>
+        <div class="adapter-ops">
+          <h4>Adapter Operations Required</h4>
+          <ul>
+            <li>lookup(name) → Contact | null</li>
+            <li>save(contact) → Contact</li>
+            <li>search(query) → Contact[]</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Entity 4 -->
+    <div class="entity-card" id="e4">
+      <div class="entity-header">
+        <div class="entity-number">4</div>
+        <div><div class="entity-title">StorageFile</div><div class="entity-subtitle">Represents a file or document in any cloud storage system</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Example Value</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>id</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74Og"</span></td><td>Opaque provider file ID — do not parse</td></tr>
+            <tr><td><code>name</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Q1 2026 Meeting Notes.docx"</span></td><td>File name with extension</td></tr>
+            <tr><td><code>mimeType</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"application/vnd.google-apps.document"</span></td><td>Standard MIME type string</td></tr>
+            <tr><td><code>mimeTypeLabel</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Google Doc"</span></td><td>Human-friendly label: "PDF", "Image", "Folder"</td></tr>
+            <tr><td><code>webViewLink</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"https://docs.google.com/document/d/1Bxi.../edit"</span></td><td>Full HTTPS URL to open in browser</td></tr>
+            <tr><td><code>modifiedAt</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"2026-03-20T16:45:00Z"</span></td><td>ISO 8601 UTC</td></tr>
+            <tr><td><code>parentFolderId</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"1abc_folderID_xyz"</span></td><td>Opaque provider folder ID</td></tr>
+            <tr><td><code>parentFolderName</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"Work Documents"</span></td><td>Human-readable folder name</td></tr>
+            <tr><td><code>provider</code></td><td><code>'gdrive'|'onedrive'|'dropbox'</code></td><td><span class="badge badge-provider">Provider metadata</span></td><td><span class="example-val">"gdrive"</span></td><td>Source provider identifier</td></tr>
+          </tbody>
+        </table>
+        <div class="adapter-ops">
+          <h4>Adapter Operations Required</h4>
+          <ul>
+            <li>search(query, userId) → StorageFile[]</li>
+            <li>save(title, content, userId) → StorageFile</li>
+            <li>sendAsEmailAttachment(fileId, to) → &#123; success: boolean; error?: string &#125;</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Entity 5 -->
+    <div class="entity-card" id="e5">
+      <div class="entity-header">
+        <div class="entity-number">5</div>
+        <div><div class="entity-title">NavigationResult</div><div class="entity-subtitle">Represents a travel time calculation from any maps provider</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Example Value</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>destination</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"501 Smyth Rd, Ottawa, ON K1H 8L6"</span></td><td>Full street address — include postal code for accuracy</td></tr>
+            <tr><td><code>durationMinutes</code></td><td><code>number</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">23</span></td><td>Integer — travel time in minutes</td></tr>
+            <tr><td><code>distanceKm</code></td><td><code>number</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">12.4</span></td><td>Float, one decimal place</td></tr>
+            <tr><td><code>leaveByMs</code></td><td><code>number</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">1742670000000</span></td><td>Unix timestamp in milliseconds</td></tr>
+            <tr><td><code>summary</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"23 min via Highway 417 — leave by 1:37 PM"</span></td><td>Human-readable sentence for display</td></tr>
+            <tr><td><code>origin</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"150 Elgin St, Ottawa, ON"</span></td><td>Full address or saved label e.g. "Home"</td></tr>
+            <tr><td><code>provider</code></td><td><code>'google_maps'|'apple_maps'|'waze'</code></td><td><span class="badge badge-provider">Provider metadata</span></td><td><span class="example-val">"google_maps"</span></td><td>Source provider identifier</td></tr>
+          </tbody>
+        </table>
+        <div class="adapter-ops">
+          <h4>Adapter Operations Required</h4>
+          <ul>
+            <li>fetchTravelTime(destination, eventStartISO) → NavigationResult | null</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Entity 6 -->
+    <div class="entity-card" id="e6">
+      <div class="entity-header">
+        <div class="entity-number">6</div>
+        <div><div class="entity-title">Note</div><div class="entity-subtitle">Represents a voice or text note saved by the user</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Example Value</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>id</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"note_9a3f1c-..."</span></td><td>Naavi-generated UUID</td></tr>
+            <tr><td><code>title</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Call with Dr. Chen about medication"</span></td><td>Short plain text — auto-generated from first sentence or user-set</td></tr>
+            <tr><td><code>content</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Need to follow up with Dr. Chen about new dosage after March results."</span></td><td>Full plain text transcript or typed note</td></tr>
+            <tr><td><code>createdAt</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"2026-03-22T08:15:00-05:00"</span></td><td>ISO 8601 with timezone offset</td></tr>
+            <tr><td><code>userId</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"788fe85c-b6be-4506-87e8-a8736ec8e1d1"</span></td><td>Supabase UUID of the owner</td></tr>
+            <tr><td><code>audioUrl</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"https://bucket.supabase.co/storage/v1/object/public/memos/abc.m4a"</span></td><td>Full HTTPS URL to audio file in storage</td></tr>
+            <tr><td><code>tags[]</code></td><td><code>string[]</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">["medical", "follow-up", "Dr. Chen"]</span></td><td>Lowercase plain text tags</td></tr>
+          </tbody>
+        </table>
+        <div class="adapter-ops">
+          <h4>Adapter Operations Required</h4>
+          <ul>
+            <li>save(note) → Note</li>
+            <li>fetchAll(userId) → Note[]</li>
+            <li>delete(id) → void</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Entity 7 -->
+    <div class="entity-card" id="e7">
+      <div class="entity-header">
+        <div class="entity-number">7</div>
+        <div><div class="entity-title">Conversation</div><div class="entity-subtitle">Represents a recorded multi-speaker conversation with extracted action items</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Example Value</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>id</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"conv_3d9f2a-..."</span></td><td>Naavi-generated UUID</td></tr>
+            <tr><td><code>title</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Dr. Ahmed — Blood Work Review"</span></td><td>User-assigned plain text title</td></tr>
+            <tr><td><code>recordedAt</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"2026-03-22T14:05:00-05:00"</span></td><td>ISO 8601 with timezone offset</td></tr>
+            <tr><td><code>userId</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"788fe85c-b6be-4506-87e8-a8736ec8e1d1"</span></td><td>Supabase UUID of the owner</td></tr>
+            <tr><td><code>speakers[]</code></td><td><code>string[]</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">["A", "B"]</span></td><td>Single uppercase letters assigned by AssemblyAI</td></tr>
+            <tr><td><code>confirmedNames</code></td><td><code>Record&lt;string,string&gt;</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">{"A": "Robert", "B": "Dr. Ahmed"}</span></td><td>Map of speaker letter → confirmed real name</td></tr>
+            <tr><td><code>transcriptDocLink</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"https://docs.google.com/document/d/1xyz.../edit"</span></td><td>Full HTTPS URL to saved Google Doc transcript</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Utterance (sub-type)</h3>
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Example Value</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>speaker</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"A"</span></td><td>Single uppercase letter matching speakers[]</td></tr>
+            <tr><td><code>text</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"The blood work came back and everything looks normal."</span></td><td>Plain text of what was said</td></tr>
+            <tr><td><code>startMs</code></td><td><code>number</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">1250</span></td><td>Milliseconds from recording start</td></tr>
+            <tr><td><code>endMs</code></td><td><code>number</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">4870</span></td><td>Milliseconds from recording start</td></tr>
+          </tbody>
+        </table>
+
+        <h3>ConversationAction (sub-type)</h3>
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Example Value</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>type</code></td><td><code>'meeting'|'email'|'task'|'reminder'</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"meeting"</span></td><td>Action category — fixed enum</td></tr>
+            <tr><td><code>title</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Follow-up blood work in 3 months"</span></td><td>Short plain text action title</td></tr>
+            <tr><td><code>description</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Schedule next blood work appointment for June 2026"</span></td><td>Full plain text description</td></tr>
+            <tr><td><code>assignee</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"Robert"</span></td><td>Name of the responsible person</td></tr>
+            <tr><td><code>timing</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"in 3 months"</span></td><td>Natural language: "next week", "as soon as possible"</td></tr>
+            <tr><td><code>calendarTitle</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"Blood Work — Dr. Ahmed Follow-up"</span></td><td>Suggested calendar event title</td></tr>
+            <tr><td><code>emailDraft</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"Dear Dr. Ahmed, I would like to schedule a follow-up..."</span></td><td>Suggested email body in plain text</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Entity 8 -->
+    <div class="entity-card" id="e8">
+      <div class="entity-header">
+        <div class="entity-number">8</div>
+        <div><div class="entity-title">UserProfile</div><div class="entity-subtitle">Per-user provider routing table and preferences — the most strategically important entity</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Example Value</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>userId</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"788fe85c-b6be-4506-87e8-a8736ec8e1d1"</span></td><td>Supabase UUID — primary key</td></tr>
+            <tr><td><code>displayName</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Robert"</span></td><td>First name or preferred name — used for auto-labeling in conversations</td></tr>
+            <tr><td><code>defaultCalendarProvider</code></td><td><code>'google'|'outlook'|'apple'</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"google"</span></td><td>Routes all calendar adapter calls</td></tr>
+            <tr><td><code>defaultEmailProvider</code></td><td><code>'gmail'|'outlook'</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"gmail"</span></td><td>Routes all email adapter calls</td></tr>
+            <tr><td><code>defaultStorageProvider</code></td><td><code>'gdrive'|'onedrive'|'dropbox'</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"gdrive"</span></td><td>Routes all file/storage adapter calls</td></tr>
+            <tr><td><code>defaultMapsProvider</code></td><td><code>'google_maps'|'apple_maps'</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"google_maps"</span></td><td>Routes all navigation adapter calls</td></tr>
+            <tr><td><code>timezone</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"America/Toronto"</span></td><td>IANA timezone identifier — full list at iana.org/time-zones</td></tr>
+            <tr><td><code>language</code></td><td><code>'en'</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"en"</span></td><td>Preferred language for voice and UI — English only; extend via BCP-47 tag when new language is added</td></tr>
+            <tr><td><code>homeAddress</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"150 Elgin St, Ottawa, ON K2P 1L4"</span></td><td>Full street address — used as origin for travel time</td></tr>
+            <tr><td><code>workAddress</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"50 O'Connor St, Ottawa, ON K1P 6L2"</span></td><td>Full street address — alternative origin</td></tr>
+          </tbody>
+        </table>
+        <div class="callout">
+          <strong>Routing key:</strong> When the orchestration layer calls <code>calendar.fetchEvents()</code>, it reads <code>UserProfile.defaultCalendarProvider</code> to decide which adapter to invoke. Changing a user's provider is a single field update — no code changes required.
+        </div>
+      </div>
+    </div>
+
+    <!-- Entity 9 -->
+    <div class="entity-card" id="e9">
+      <div class="entity-header">
+        <div class="entity-number">9</div>
+        <div><div class="entity-title">BriefItem</div><div class="entity-subtitle">Naavi-owned morning brief item — normalized output of all sources, no provider owns this</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Example Value</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><code>id</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"brief_cal_abc123"</span></td><td>Naavi UUID or derived from source ID</td></tr>
+            <tr><td><code>category</code></td><td><code>'calendar'|'email'|'social'|'weather'|'health'|'home'</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"calendar"</span></td><td>Display grouping — fixed enum</td></tr>
+            <tr><td><code>title</code></td><td><code>string</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"Cardiology — Dr. Ahmed"</span></td><td>Short plain text — optimised for scanning, not full detail</td></tr>
+            <tr><td><code>priority</code></td><td><code>'high'|'medium'|'low'</code></td><td><span class="badge badge-core">Core</span></td><td><span class="example-val">"high"</span></td><td>Determines display ordering within category</td></tr>
+            <tr><td><code>detail</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"501 Smyth Rd · 23 min drive · leave by 1:37 PM"</span></td><td>Supporting sentence — plain text, no HTML</td></tr>
+            <tr><td><code>startISO</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"2026-03-22T14:00:00-05:00"</span></td><td>ISO 8601 with timezone offset — for calendar items</td></tr>
+            <tr><td><code>endISO</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"2026-03-22T15:00:00-05:00"</span></td><td>ISO 8601 with timezone offset — for calendar items</td></tr>
+            <tr><td><code>location</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"501 Smyth Rd, Ottawa, ON"</span></td><td>Full street address — used to trigger navigation</td></tr>
+            <tr><td><code>leaveByMs</code></td><td><code>number</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">1742670000000</span></td><td>Unix timestamp in milliseconds — triggers leave-now alert</td></tr>
+            <tr><td><code>actionUrl</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"https://www.google.com/calendar/event?eid=..."</span></td><td>Full HTTPS URL to open source item in provider UI</td></tr>
+            <tr><td><code>sourceProvider</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"google"</span></td><td>Provider name lowercase: "google", "outlook", "open-meteo"</td></tr>
+            <tr><td><code>sourceId</code></td><td><code>string</code></td><td><span class="badge badge-optional">Optional</span></td><td><span class="example-val">"gmail_msg_17e8f3a1"</span></td><td>Original item ID in source system — for deduplication</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- Implementation Sequence -->
+  <section id="impl">
+    <h2 class="section-title">Implementation Sequence</h2>
+    <p>Once this document is approved, the recommended build sequence is:</p>
+    <table class="impl-table">
+      <thead><tr><th>Phase</th><th>Task</th><th>Effort</th></tr></thead>
+      <tbody>
+        <tr><td><span class="phase-badge phase-1">Phase 1</span></td><td>Write TypeScript interfaces for all 9 entities — no implementation changes to existing code</td><td>1 day</td></tr>
+        <tr><td><span class="phase-badge phase-2">Phase 2</span></td><td>Wrap existing Google libs behind adapter classes implementing those interfaces</td><td>3–5 days</td></tr>
+        <tr><td><span class="phase-badge phase-3">Phase 3</span></td><td>Update UI and orchestration layer to import adapters, not Google libs directly</td><td>2–3 days</td></tr>
+        <tr><td><span class="phase-badge phase-4">Phase 4</span></td><td>Add new provider adapters as new clients require them</td><td>Per provider</td></tr>
+      </tbody>
+    </table>
+    <div class="callout">Phase 1 and 2 produce <strong>zero visible change</strong> to the user. The app behaves identically. The value is entirely in the structural clean-up that makes Phase 4 fast and safe.</div>
+  </section>
+
+  <!-- Non-API Providers -->
+  <section id="noapi">
+    <h2 class="section-title">Non-API Provider Integration</h2>
+    <p>Not every system Naavi may need to connect to will have a public API. This is common in healthcare, government, enterprise, and legacy environments. The Provider Adapter Pattern specifically supports this — the adapter interface only cares about the <strong>output</strong>, not how the data was retrieved.</p>
+
+    <div class="principle-box">
+      <span class="dim">// From Naavi's perspective, both of these look identical:</span><br>
+      <span class="bright">GoogleCalendarAdapter</span><span class="accent">.fetchEvents()</span> → <span class="bright">CalendarEvent[]</span> &nbsp;<span class="dim">// REST API</span><br>
+      <span class="bright">HospitalCalendarAdapter</span><span class="accent">.fetchEvents()</span> → <span class="bright">CalendarEvent[]</span> &nbsp;<span class="dim">// Browser automation</span><br>
+      <span class="bright">ICSFileAdapter</span><span class="accent">.fetchEvents()</span> → <span class="bright">CalendarEvent[]</span> &nbsp;<span class="dim">// File parsing</span><br><br>
+      <span class="dim">// The rest of the system never knows the difference.</span>
+    </div>
+
+    <h3>Integration Methods</h3>
+    <div class="noapi-grid">
+
+      <div class="noapi-card">
+        <div class="noapi-card-header">
+          <span class="noapi-icon">📡</span>
+          <div><div class="noapi-title">Protocol Adapters</div><div class="noapi-subtitle">No vendor API required</div></div>
+        </div>
+        <div class="noapi-desc">Standard open protocols supported by most enterprise and healthcare systems. The broadest coverage with the least fragility — no login scraping, no brittle selectors.</div>
+        <div class="noapi-examples">
+          <span class="noapi-example">CalDAV — any calendar</span>
+          <span class="noapi-example">CardDAV — any contacts</span>
+          <span class="noapi-example">IMAP / SMTP — any email</span>
+          <span class="noapi-example">WebDAV — any file storage</span>
+        </div>
+      </div>
+
+      <div class="noapi-card">
+        <div class="noapi-card-header">
+          <span class="noapi-icon">📁</span>
+          <div><div class="noapi-title">File-Based Adapters</div><div class="noapi-subtitle">Export → watch → import</div></div>
+        </div>
+        <div class="noapi-desc">Many systems can export data to standard file formats. Naavi watches a folder or email inbox and imports automatically when a new file appears.</div>
+        <div class="noapi-examples">
+          <span class="noapi-example">ICS calendar files</span>
+          <span class="noapi-example">CSV contacts</span>
+          <span class="noapi-example">PST email archives</span>
+          <span class="noapi-example">PDF reports + OCR</span>
+        </div>
+      </div>
+
+      <div class="noapi-card">
+        <div class="noapi-card-header">
+          <span class="noapi-icon">🌐</span>
+          <div><div class="noapi-title">Browser Automation</div><div class="noapi-subtitle">Puppeteer / Playwright</div></div>
+        </div>
+        <div class="noapi-desc">A headless browser logs into a web application and extracts data programmatically. Works on any web interface regardless of whether a public API exists.</div>
+        <div class="noapi-examples">
+          <span class="noapi-example">Hospital patient portals</span>
+          <span class="noapi-example">Government systems</span>
+          <span class="noapi-example">Insurance portals</span>
+          <span class="noapi-example">Internal intranets</span>
+        </div>
+      </div>
+
+      <div class="noapi-card">
+        <div class="noapi-card-header">
+          <span class="noapi-icon">🖥️</span>
+          <div><div class="noapi-title">Local Desktop Agent</div><div class="noapi-subtitle">Small background app on device</div></div>
+        </div>
+        <div class="noapi-desc">A lightweight background application installed on the user's machine reads from local desktop apps and syncs to Naavi via a secure local API. No cloud dependency.</div>
+        <div class="noapi-examples">
+          <span class="noapi-example">Outlook desktop</span>
+          <span class="noapi-example">Apple Mail / Calendar</span>
+          <span class="noapi-example">Local EHR software</span>
+          <span class="noapi-example">QuickBooks desktop</span>
+        </div>
+      </div>
+
+      <div class="noapi-card">
+        <div class="noapi-card-header">
+          <span class="noapi-icon">📨</span>
+          <div><div class="noapi-title">Webhook / Email Parsing</div><div class="noapi-subtitle">Parse inbound notifications</div></div>
+        </div>
+        <div class="noapi-desc">Many legacy systems send email or webhook notifications for events. Naavi receives these and parses the structured content — no outbound API call needed at all.</div>
+        <div class="noapi-examples">
+          <span class="noapi-example">Lab result emails</span>
+          <span class="noapi-example">ERP alert emails</span>
+          <span class="noapi-example">Booking confirmations</span>
+          <span class="noapi-example">System webhooks</span>
+        </div>
+      </div>
+
+      <div class="noapi-card">
+        <div class="noapi-card-header">
+          <span class="noapi-icon">🤖</span>
+          <div><div class="noapi-title">RPA Bridge</div><div class="noapi-subtitle">Robotic Process Automation</div></div>
+        </div>
+        <div class="noapi-desc">Tools like Microsoft Power Automate or UiPath act as a bridge between Naavi and completely closed enterprise systems. The RPA tool handles the proprietary interaction, Naavi receives normalized data.</div>
+        <div class="noapi-examples">
+          <span class="noapi-example">Power Automate</span>
+          <span class="noapi-example">UiPath</span>
+          <span class="noapi-example">Zapier webhooks</span>
+          <span class="noapi-example">Make (Integromat)</span>
+        </div>
+      </div>
+
+    </div>
+
+    <h3>UserProfile — Additional Field for Non-API Adapters</h3>
+    <p>One field should be added to <code>UserProfile</code> to track how each provider's adapter retrieves data. This is for observability and debugging — not visible to the user.</p>
+    <table class="adapter-type-table">
+      <thead><tr><th>Field</th><th>Type</th><th>Required</th><th>Example Value</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>calendarAdapterType</code></td>
+          <td><code>'api' | 'protocol' | 'file' | 'automation' | 'agent' | 'rpa'</code></td>
+          <td><span class="badge badge-optional">Optional</span></td>
+          <td><span class="example-val">"protocol"</span></td>
+          <td>How the calendar adapter retrieves data — defaults to "api"</td>
+        </tr>
+        <tr>
+          <td><code>emailAdapterType</code></td>
+          <td><code>'api' | 'protocol' | 'file' | 'automation' | 'agent' | 'rpa'</code></td>
+          <td><span class="badge badge-optional">Optional</span></td>
+          <td><span class="example-val">"api"</span></td>
+          <td>How the email adapter retrieves data — defaults to "api"</td>
+        </tr>
+        <tr>
+          <td><code>storageAdapterType</code></td>
+          <td><code>'api' | 'protocol' | 'file' | 'automation' | 'agent' | 'rpa'</code></td>
+          <td><span class="badge badge-optional">Optional</span></td>
+          <td><span class="example-val">"file"</span></td>
+          <td>How the storage adapter retrieves data — defaults to "api"</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Key Architectural Principle</h3>
+    <div class="callout">
+      <strong>The adapter interface is the firewall.</strong> Browser automation code, file watchers, RPA bridges, and OCR pipelines all live entirely inside the adapter. They never leak into the UI, the AI orchestration layer, or any other entity. Adding a non-API provider is always one new adapter file — nothing else in the system changes.
+    </div>
+
+    <h3>Practical Coverage Assessment</h3>
+    <table>
+      <thead><tr><th>Provider Type</th><th>Best Integration Method</th><th>Feasibility</th></tr></thead>
+      <tbody>
+        <tr><td>Google / Microsoft 365</td><td>REST API adapter</td><td>✅ Available now</td></tr>
+        <tr><td>Apple Calendar / Mail</td><td>CalDAV / IMAP protocol adapter</td><td>✅ Standard protocols</td></tr>
+        <tr><td>Hospital EHR systems</td><td>HL7 FHIR API (if available) or email parsing</td><td>✅ Most modern hospitals support FHIR</td></tr>
+        <tr><td>Government systems</td><td>Browser automation or file export</td><td>⚠️ Feasible — requires maintenance</td></tr>
+        <tr><td>Legacy enterprise (SAP, Oracle)</td><td>RPA bridge or local agent</td><td>⚠️ Feasible — requires RPA tool</td></tr>
+        <tr><td>Completely proprietary / offline</td><td>Screen capture + OCR</td><td>⚠️ Last resort — fragile</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Controlled Vocabulary -->
+  <section id="vocab">
+    <h2 class="section-title">Controlled Vocabulary &amp; Value Definitions</h2>
+    <p>These are the values Naavi owns and defines. They do not come from any provider — they are Naavi's internal language. Every adapter must map its provider-specific data into these values. The rules below define exactly when each value applies.</p>
+
+    <!-- ID Format -->
+    <div class="entity-card">
+      <div class="entity-header">
+        <div class="entity-number" style="background:rgba(255,255,255,0.2)">ID</div>
+        <div><div class="entity-title">ID Format Standard</div><div class="entity-subtitle">All Naavi-generated identifiers follow this pattern</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Entity</th><th>Prefix</th><th>Format</th><th>Example</th></tr></thead>
+          <tbody>
+            <tr><td>CalendarEvent</td><td><code>evt_</code></td><td><code>evt_</code> + UUID v4</td><td><span class="example-val">evt_7f3a1c9b-4d2e-4a1f-b3c8-9e0d1f2a3b4c</span></td></tr>
+            <tr><td>Email</td><td><code>email_</code></td><td><code>email_</code> + UUID v4</td><td><span class="example-val">email_2a4f8c1d-3b5e-...</span></td></tr>
+            <tr><td>Contact</td><td><code>contact_</code></td><td><code>contact_</code> + UUID v4</td><td><span class="example-val">contact_9e1d2f3a-...</span></td></tr>
+            <tr><td>Note</td><td><code>note_</code></td><td><code>note_</code> + UUID v4</td><td><span class="example-val">note_5b7c3d1e-...</span></td></tr>
+            <tr><td>Conversation</td><td><code>conv_</code></td><td><code>conv_</code> + UUID v4</td><td><span class="example-val">conv_3d9f2a1b-...</span></td></tr>
+            <tr><td>BriefItem (from provider)</td><td><code>brief_</code></td><td><code>brief_</code> + entity prefix + provider ID</td><td><span class="example-val">brief_evt_google_abc123</span></td></tr>
+            <tr><td>BriefItem (Naavi-generated)</td><td><code>brief_</code></td><td><code>brief_</code> + UUID v4</td><td><span class="example-val">brief_4a1f8c2d-...</span></td></tr>
+            <tr><td>StorageFile</td><td>—</td><td>Use provider's own ID directly — do not wrap</td><td><span class="example-val">"1BxiMVs0XRA5nFMdKvBd..."</span></td></tr>
+          </tbody>
+        </table>
+        <div class="callout"><strong>Rule:</strong> Naavi never reuses or exposes provider IDs as its own IDs, except for StorageFile where the provider ID is the canonical reference. All other entities get a Naavi-owned UUID so provider migrations do not break references.</div>
+      </div>
+    </div>
+
+    <!-- Date/Time Format -->
+    <div class="entity-card">
+      <div class="entity-header">
+        <div class="entity-number" style="background:rgba(255,255,255,0.2)">DT</div>
+        <div><div class="entity-title">Date &amp; Time Format Standard</div><div class="entity-subtitle">All datetime strings follow ISO 8601</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Context</th><th>Format</th><th>Example</th><th>Rule</th></tr></thead>
+          <tbody>
+            <tr><td>User-facing events (calendar, brief)</td><td>ISO 8601 with timezone offset</td><td><span class="example-val">"2026-03-22T14:00:00-05:00"</span></td><td>Always include the user's local offset — never UTC for display times</td></tr>
+            <tr><td>Storage / system timestamps (createdAt, modifiedAt)</td><td>ISO 8601 UTC with Z suffix</td><td><span class="example-val">"2026-03-22T19:00:00Z"</span></td><td>Always store in UTC — convert to local only at display time</td></tr>
+            <tr><td>Unix millisecond timestamps (leaveByMs, startMs, endMs)</td><td>Integer milliseconds since Unix epoch</td><td><span class="example-val">1742670000000</span></td><td>Used where millisecond precision is needed for timers and alerts</td></tr>
+            <tr><td>Timezone identifier (UserProfile.timezone)</td><td>IANA timezone database name</td><td><span class="example-val">"America/Toronto"</span></td><td>Never use abbreviations like EST or GMT+5 — they are ambiguous</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- BriefItem Category -->
+    <div class="entity-card">
+      <div class="entity-header">
+        <div class="entity-number" style="background:rgba(255,255,255,0.2)">01</div>
+        <div><div class="entity-title">BriefItem — category</div><div class="entity-subtitle">What grouping a brief item appears under in the morning brief</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Value</th><th>Assigned When</th><th>Source Examples</th></tr></thead>
+          <tbody>
+            <tr><td><code>"calendar"</code></td><td>Item originates from a calendar event (meeting, appointment, call)</td><td>Google Calendar, Outlook Calendar, CalDAV</td></tr>
+            <tr><td><code>"email"</code></td><td>Item is an important unread email surfaced by the AI importance filter</td><td>Gmail, Outlook Mail, IMAP</td></tr>
+            <tr><td><code>"social"</code></td><td>Item is a birthday, anniversary, or relationship-related reminder</td><td>Google Contacts birthdays, user-defined reminders</td></tr>
+            <tr><td><code>"weather"</code></td><td>Item is a daily weather summary or severe weather alert</td><td>Open-Meteo, Weather API, Environment Canada</td></tr>
+            <tr><td><code>"health"</code></td><td>Item relates to a medical appointment, medication reminder, or lab result</td><td>Calendar events tagged medical, EHR systems, lab email parsing</td></tr>
+            <tr><td><code>"home"</code></td><td>Item relates to home, property, deliveries, or household tasks</td><td>User-defined, smart home integrations, delivery tracking</td></tr>
+          </tbody>
+        </table>
+        <div class="callout"><strong>Assignment rule:</strong> Category is assigned by the adapter or the AI orchestration layer — never by the provider. A calendar event titled "Dr. Ahmed" gets <code>category: "health"</code>, not <code>"calendar"</code>, if the AI detects it is a medical appointment. The adapter makes a best-effort assignment; the AI layer may override it.</div>
+      </div>
+    </div>
+
+    <!-- BriefItem Priority -->
+    <div class="entity-card">
+      <div class="entity-header">
+        <div class="entity-number" style="background:rgba(255,255,255,0.2)">02</div>
+        <div><div class="entity-title">BriefItem — priority</div><div class="entity-subtitle">Determines display order within each category group</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Value</th><th>Assigned When</th><th>Display Behaviour</th></tr></thead>
+          <tbody>
+            <tr><td><code>"high"</code></td><td>
+              Event starts within 4 hours<br>
+              Email marked urgent or from a known important contact<br>
+              Medical appointment today<br>
+              Leave-now alert is active<br>
+              Birthday is today
+            </td><td>Shown first, always visible — never collapsed by default</td></tr>
+            <tr><td><code>"medium"</code></td><td>
+              Event starts within 24 hours<br>
+              Unread important email received today<br>
+              Birthday is within 3 days<br>
+              Travel time calculated for an event today
+            </td><td>Shown second, visible by default</td></tr>
+            <tr><td><code>"low"</code></td><td>
+              Event starts in more than 24 hours<br>
+              Email is informational (newsletter, receipt, notification)<br>
+              Weather is normal — no alerts<br>
+              Birthday is more than 3 days away
+            </td><td>Shown last, collapsed by default — user taps to expand</td></tr>
+          </tbody>
+        </table>
+        <div class="callout"><strong>Rule:</strong> Priority is always calculated by Naavi at the time the brief is assembled — never stored permanently. It is recalculated each time the brief refreshes so that a <code>"medium"</code> event at 8am becomes <code>"high"</code> by noon.</div>
+      </div>
+    </div>
+
+    <!-- ConversationAction type -->
+    <div class="entity-card">
+      <div class="entity-header">
+        <div class="entity-number" style="background:rgba(255,255,255,0.2)">03</div>
+        <div><div class="entity-title">ConversationAction — type</div><div class="entity-subtitle">What kind of follow-up action was extracted from a conversation</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Value</th><th>Assigned When</th><th>Follow-up Action in Naavi</th></tr></thead>
+          <tbody>
+            <tr><td><code>"meeting"</code></td><td>Conversation mentions scheduling, booking, or confirming a future meeting or appointment</td><td>Shows "Add to Calendar" button — prefills event title and timing</td></tr>
+            <tr><td><code>"email"</code></td><td>Conversation mentions sending a message, following up by email, or drafting a communication</td><td>Shows "Draft Email" button — prefills recipient, subject, and body draft</td></tr>
+            <tr><td><code>"task"</code></td><td>Conversation mentions doing something that is not a meeting or email (e.g. "order the medication", "review the report")</td><td>Shows as a checklist item — can be saved to task manager in future</td></tr>
+            <tr><td><code>"reminder"</code></td><td>Conversation mentions remembering something at a future time without a specific meeting or email action (e.g. "remind me in 3 months")</td><td>Shows timing and can be added as a calendar reminder</td></tr>
+          </tbody>
+        </table>
+        <div class="callout"><strong>Rule:</strong> Type is assigned by the AI extraction layer, not the user. If a single conversation sentence implies both a meeting and an email (e.g. "book the appointment and send him a confirmation"), two separate ConversationAction records are created — one <code>"meeting"</code>, one <code>"email"</code>.</div>
+      </div>
+    </div>
+
+    <!-- Provider values -->
+    <div class="entity-card">
+      <div class="entity-header">
+        <div class="entity-number" style="background:rgba(255,255,255,0.2)">04</div>
+        <div><div class="entity-title">Provider Identifier Values</div><div class="entity-subtitle">The complete set of valid provider strings across all entities</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Category</th><th>Value</th><th>Provider</th><th>Integration Method</th></tr></thead>
+          <tbody>
+            <tr><td rowspan="3"><strong>Calendar</strong></td><td><code>"google"</code></td><td>Google Calendar</td><td>REST API</td></tr>
+            <tr><td><code>"outlook"</code></td><td>Microsoft Outlook / Office 365</td><td>Microsoft Graph API</td></tr>
+            <tr><td><code>"apple"</code></td><td>Apple Calendar (iCal)</td><td>CalDAV protocol</td></tr>
+            <tr><td rowspan="2"><strong>Email</strong></td><td><code>"gmail"</code></td><td>Google Gmail</td><td>Gmail REST API</td></tr>
+            <tr><td><code>"outlook"</code></td><td>Microsoft Outlook / Exchange</td><td>Microsoft Graph API or IMAP</td></tr>
+            <tr><td rowspan="3"><strong>Storage</strong></td><td><code>"gdrive"</code></td><td>Google Drive</td><td>Drive REST API</td></tr>
+            <tr><td><code>"onedrive"</code></td><td>Microsoft OneDrive</td><td>Microsoft Graph API</td></tr>
+            <tr><td><code>"dropbox"</code></td><td>Dropbox</td><td>Dropbox REST API</td></tr>
+            <tr><td rowspan="3"><strong>Maps</strong></td><td><code>"google_maps"</code></td><td>Google Maps</td><td>Directions API</td></tr>
+            <tr><td><code>"apple_maps"</code></td><td>Apple Maps</td><td>MapKit / REST API</td></tr>
+            <tr><td><code>"waze"</code></td><td>Waze</td><td>Waze API (where available)</td></tr>
+            <tr><td rowspan="3"><strong>Contacts</strong></td><td><code>"google"</code></td><td>Google Contacts</td><td>People API</td></tr>
+            <tr><td><code>"outlook"</code></td><td>Microsoft Outlook Contacts</td><td>Microsoft Graph API</td></tr>
+            <tr><td><code>"apple"</code></td><td>Apple Contacts</td><td>CardDAV protocol</td></tr>
+          </tbody>
+        </table>
+        <div class="callout"><strong>Rule:</strong> Provider values are always lowercase, no spaces, no hyphens except for multi-word map providers. New providers are added to this table before any adapter code is written — the string must be agreed here first so it is consistent across all entities and all adapters.</div>
+      </div>
+    </div>
+
+    <!-- Adapter Type -->
+    <div class="entity-card">
+      <div class="entity-header">
+        <div class="entity-number" style="background:rgba(255,255,255,0.2)">05</div>
+        <div><div class="entity-title">Adapter Type Values</div><div class="entity-subtitle">How each adapter retrieves data — transparent to the rest of the system</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Value</th><th>Meaning</th><th>Maintenance Risk</th><th>When to Use</th></tr></thead>
+          <tbody>
+            <tr><td><code>"api"</code></td><td>Provider has a public REST or GraphQL API with official credentials</td><td>Low — provider manages versioning</td><td>Default. Google, Microsoft, Dropbox</td></tr>
+            <tr><td><code>"protocol"</code></td><td>Uses an open standard protocol (CalDAV, CardDAV, IMAP, SMTP, WebDAV)</td><td>Very low — protocols are stable for decades</td><td>Apple Calendar, Apple Contacts, any IMAP email</td></tr>
+            <tr><td><code>"file"</code></td><td>Reads from exported files (ICS, CSV, PST, PDF) placed in a watched folder</td><td>Low — file format rarely changes</td><td>Offline systems, legacy exports, manual data entry</td></tr>
+            <tr><td><code>"automation"</code></td><td>Headless browser logs into a web UI and extracts data</td><td>High — breaks when UI changes</td><td>Last resort for web-only systems with no API or protocol</td></tr>
+            <tr><td><code>"agent"</code></td><td>Local background app installed on user's device reads from desktop applications</td><td>Medium — OS and app updates may break it</td><td>Outlook desktop, Apple Mail, local EHR software</td></tr>
+            <tr><td><code>"rpa"</code></td><td>Microsoft Power Automate, UiPath, or Zapier acts as a bridge</td><td>Medium — depends on RPA tool stability</td><td>Closed enterprise systems, government portals</td></tr>
+          </tbody>
+        </table>
+        <div class="callout"><strong>Rule:</strong> Always choose the method highest up this list that is available for a given provider. <code>"api"</code> beats <code>"protocol"</code> beats <code>"file"</code> and so on. <code>"automation"</code> should only be used when no other method exists — it is the most fragile.</div>
+      </div>
+    </div>
+
+    <!-- Language -->
+    <div class="entity-card">
+      <div class="entity-header">
+        <div class="entity-number" style="background:rgba(255,255,255,0.2)">06</div>
+        <div><div class="entity-title">Language Values</div><div class="entity-subtitle">Controls voice recognition language and UI text direction</div></div>
+      </div>
+      <div class="entity-body">
+        <table>
+          <thead><tr><th>Value</th><th>Language</th><th>Voice Engine Behaviour</th><th>UI Behaviour</th></tr></thead>
+          <tbody>
+            <tr><td><code>"en"</code></td><td>English</td><td>Whisper uses <code>language_code: "en"</code> — explicit language code prevents misdetection of accented speech</td><td>Left-to-right text, English placeholders and labels</td></tr>
+          </tbody>
+        </table>
+        <div class="callout"><strong>Current support:</strong> English only. <strong>Expansion rule:</strong> New languages are added as BCP-47 language tags (e.g. <code>"fr"</code> for French, <code>"ar"</code> for Arabic, <code>"es"</code> for Spanish). The language field drives both voice transcription and UI localisation simultaneously — they are never set independently. Add a new row to this table before implementing any new language.</div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- Summary -->
+  <section id="summary">
+    <h2 class="section-title">Summary</h2>
+    <div class="summary-grid">
+      <div class="summary-card"><div class="summary-dot"></div><div><div class="summary-entity">CalendarEvent</div><div class="summary-desc">Provider-agnostic calendar event</div></div></div>
+      <div class="summary-card"><div class="summary-dot"></div><div><div class="summary-entity">Email</div><div class="summary-desc">Provider-agnostic email message</div></div></div>
+      <div class="summary-card"><div class="summary-dot"></div><div><div class="summary-entity">Contact</div><div class="summary-desc">Provider-agnostic contact record</div></div></div>
+      <div class="summary-card"><div class="summary-dot"></div><div><div class="summary-entity">StorageFile</div><div class="summary-desc">Provider-agnostic file/document</div></div></div>
+      <div class="summary-card"><div class="summary-dot"></div><div><div class="summary-entity">NavigationResult</div><div class="summary-desc">Provider-agnostic travel time result</div></div></div>
+      <div class="summary-card"><div class="summary-dot"></div><div><div class="summary-entity">Note</div><div class="summary-desc">Naavi-owned voice/text note</div></div></div>
+      <div class="summary-card"><div class="summary-dot"></div><div><div class="summary-entity">Conversation</div><div class="summary-desc">Naavi-owned recorded conversation with actions</div></div></div>
+      <div class="summary-card"><div class="summary-dot"></div><div><div class="summary-entity">UserProfile</div><div class="summary-desc">Per-user provider routing table and preferences</div></div></div>
+      <div class="summary-card"><div class="summary-dot"></div><div><div class="summary-entity">BriefItem</div><div class="summary-desc">Naavi-owned morning brief item — output of all sources</div></div></div>
+    </div>
+    <div class="callout" style="margin-top:24px;">
+      <strong>UserProfile is the most strategically important entity.</strong> It is what allows Naavi to serve different clients with different providers without any code change — just a different profile record.
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  Naavi Architecture Review &nbsp;·&nbsp; Version 1.0 &nbsp;·&nbsp; 2026-03-22 &nbsp;·&nbsp; Draft — For Review and Implementation
+</footer>
+
+</body>
+</html>
