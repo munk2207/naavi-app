@@ -118,22 +118,17 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       }
 
       // ── STEP 3: Email alert intercept (bypass Claude — it refuses this) ──────────
-      // Detect: "alert/notify/text me when I receive/get an email from X / with Y in subject"
       const emailAlertMatch = /\b(alert|notify|text|sms|let me know|send me)\b.{0,60}\bemail\b/i.test(userMessage);
       if (emailAlertMatch) {
-        // Parse subject keyword
         const subjectMatch = userMessage.match(/\b(?:subject|title|word|contains?)\b.{0,20}?\b([a-z0-9_\-]+)\b/i);
         const subjectKeyword = subjectMatch ? subjectMatch[1] : null;
-        // Parse sender name
         const fromMatch = userMessage.match(/\bfrom\b\s+([A-Za-z][A-Za-z\s]{1,30}?)(?:\s*$|\s+(?:or|and|with|about|when|if|that))/i);
         const fromName = fromMatch ? fromMatch[1].trim() : null;
 
         if ((subjectKeyword || fromName) && supabase) {
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user) {
-            const label = fromName
-              ? `Emails from ${fromName}`
-              : `Emails with "${subjectKeyword}" in subject`;
+            const label = fromName ? `Emails from ${fromName}` : `Emails with "${subjectKeyword}" in subject`;
             await supabase.from('email_watch_rules').insert({
               user_id:         session.user.id,
               from_name:       fromName ?? null,
@@ -151,10 +146,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           ? `an email with "${subjectKeyword}" in the subject`
           : 'a matching email';
         const speech = `Done — I'll text you at +1 613 769 7957 as soon as ${confirmLabel} arrives.`;
-
         const newTurn = {
-          userMessage,
-          assistantSpeech: speech,
+          userMessage, assistantSpeech: speech,
           drafts: [], createdEvents: [], deletedEvents: [],
           savedDocs: [], rememberedItems: [], driveFiles: [], navigationResults: [],
         };
