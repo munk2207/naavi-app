@@ -136,7 +136,9 @@ serve(async (req) => {
         if (existing) continue; // already alerted
 
         // Build SMS — one clean message per alert
-        const sender = msg.sender_name || msg.sender_email;
+        // Use the rule's from_name (what Robert said) so he knows which alert fired.
+        // Fall back to actual sender name/email if no rule name.
+        const sender = rule.from_name || msg.sender_name || msg.sender_email;
         const subject = msg.subject || '(no subject)';
         const gmailLink = `https://naavi-app.vercel.app/email?id=${msg.gmail_message_id}`;
 
