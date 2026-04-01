@@ -1105,7 +1105,7 @@ export default function HomeScreen() {
             disabled={!inputText.trim() || status === 'thinking' || status === 'speaking'}
             accessibilityLabel="Send message"
           >
-            <Text style={styles.sendBtnText}>↑</Text>
+            <Text style={styles.sendBtnText}>➤</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -1697,10 +1697,10 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   sendBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#1a5c35',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#F59E0B',
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 8,
@@ -1709,10 +1709,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#ccc',
   },
   sendBtnText: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: '700',
-    lineHeight: 26,
+    fontSize: 24,
+    lineHeight: 28,
   },
   unifiedBtn: {
     width: 52,
