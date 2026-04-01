@@ -822,8 +822,8 @@ export default function HomeScreen() {
           {/* Conversation turns — each turn shows bubbles then its own cards */}
           {turns.map((turn, ti) => (
             <View key={ti}>
-              <ConversationBubble role="user" content={turn.userMessage} />
-              <ConversationBubble role="assistant" content={turn.assistantSpeech} />
+              <ConversationBubble role="user" content={turn.userMessage} timestamp={turn.timestamp} />
+              <ConversationBubble role="assistant" content={turn.assistantSpeech} timestamp={turn.timestamp} />
 
               {/* Draft emails */}
               {turn.drafts.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => (

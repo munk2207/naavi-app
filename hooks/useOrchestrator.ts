@@ -35,6 +35,7 @@ export interface ConversationTurn {
   rememberedItems: { text: string; count: number }[];
   driveFiles: StorageFile[];
   navigationResults: NavigationResult[];
+  timestamp?: string;
 }
 
 export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefItem[] = []) {
@@ -150,6 +151,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           userMessage, assistantSpeech: speech,
           drafts: [], createdEvents: [], deletedEvents: [],
           savedDocs: [], rememberedItems: [], driveFiles: [], navigationResults: [],
+          timestamp: new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
         };
         setTurns(prev => [...prev, newTurn]);
         saveConversationTurn(newTurn).catch(() => {});
@@ -374,6 +376,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         rememberedItems:  turnMemory,
         driveFiles:       turnDrive,
         navigationResults: turnNav,
+        timestamp: new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
       };
       setTurns(prev => [...prev, newTurn]);
       saveConversationTurn(newTurn).catch(() => {});
