@@ -22,7 +22,7 @@ export function ConversationBubble({ role, content, timestamp }: Props) {
   return (
     <View style={[styles.container, isNaavi ? styles.naaviContainer : styles.robertContainer]}>
       {isNaavi && (
-        <Text style={styles.label}>Naavi</Text>
+        <Text style={styles.label}>MyNaavi</Text>
       )}
       <View style={[styles.bubble, isNaavi ? styles.naaviBubble : styles.robertBubble]}>
         <Text style={[styles.text, isNaavi ? styles.naaviText : styles.robertText]}>

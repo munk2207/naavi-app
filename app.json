@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Naavi",
+    "name": "MyNaavi",
     "slug": "naavi",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,9 +9,9 @@
       "supportsTablet": false,
       "bundleIdentifier": "ca.naavi.app",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Naavi uses the microphone so Robert can speak to it.",
-        "NSSpeechRecognitionUsageDescription": "Naavi listens to Robert's voice to understand his requests.",
-        "NSHealthShareUsageDescription": "Naavi reads health data to include it in Robert's daily brief."
+        "NSMicrophoneUsageDescription": "MyNaavi uses the microphone so Robert can speak to it.",
+        "NSSpeechRecognitionUsageDescription": "MyNaavi listens to Robert's voice to understand his requests.",
+        "NSHealthShareUsageDescription": "MyNaavi reads health data to include it in Robert's daily brief."
       }
     },
     "android": {

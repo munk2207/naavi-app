@@ -138,18 +138,19 @@ serve(async (req) => {
 
         // Build SMS text
         const smsBody = [
-          `Naavi: New email matching "${rule.label}"`,
+          `MyNaavi: New email matching "${rule.label}"`,
           `From: ${msg.sender_name || msg.sender_email}`,
           `Subject: ${msg.subject || '(no subject)'}`,
           msg.snippet ? `"${msg.snippet.slice(0, 80)}"` : '',
         ].filter(Boolean).join('\n');
 
-        // Send SMS
+        // Send SMS — use NAAVI_ANON_KEY (SUPABASE_SERVICE_ROLE_KEY was rotated)
+        const interFnKey = Deno.env.get('NAAVI_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY')!;
         const smsRes = await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!}`,
+            Authorization: `Bearer ${interFnKey}`,
           },
           body: JSON.stringify({ to: rule.phone_number, body: smsBody }),
         });
