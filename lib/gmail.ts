@@ -40,8 +40,8 @@ export async function fetchImportantEmails(passedUserId?: string): Promise<Brief
   }
   if (!userId) return [];
 
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
 
   try {
     const { data: messages, error } = await supabase
@@ -49,7 +49,7 @@ export async function fetchImportantEmails(passedUserId?: string): Promise<Brief
       .select('gmail_message_id, subject, sender_name, sender_email, snippet, received_at, is_important, labels')
       .eq('user_id', userId)
       .eq('is_unread', true)
-      .gte('received_at', sevenDaysAgo.toISOString())
+      .gte('received_at', startOfToday.toISOString())
       .order('received_at', { ascending: false })
       .limit(5);
 
