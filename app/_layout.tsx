@@ -25,7 +25,7 @@ export default function RootLayout() {
       >
         <Stack.Screen
           name="index"
-          options={{ title: 'Naavi', headerShown: true }}
+          options={{ title: 'MyNaavi', headerShown: true }}
         />
         <Stack.Screen
           name="settings"

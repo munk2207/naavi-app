@@ -69,13 +69,13 @@ const INTEGRATION_CATEGORIES = [
     items: [
       {
         icon: '🤖',
-        name: 'Naavi AI',
-        description: 'Claude-powered assistant. Robert speaks or types naturally — Naavi understands intent and takes action without any app switching.',
+        name: 'MyNaavi AI',
+        description: 'Claude-powered assistant. Robert speaks or types naturally — MyNaavi understands intent and takes action without any app switching.',
       },
       {
         icon: '🎙',
         name: 'Whisper Voice',
-        description: 'Tap the red button, speak, release. OpenAI Whisper transcribes the audio and Naavi responds. Enables fully hands-free interaction.',
+        description: 'Tap the red button, speak, release. OpenAI Whisper transcribes the audio and MyNaavi responds. Enables fully hands-free interaction.',
       },
     ],
   },
@@ -90,7 +90,7 @@ const INTEGRATION_CATEGORIES = [
       {
         icon: '👤',
         name: 'Google Contacts',
-        description: 'Automatically resolves contact names to email addresses. Robert says a name — Naavi finds the email. Unknown contacts are saved for future use.',
+        description: 'Automatically resolves contact names to email addresses. Robert says a name — MyNaavi finds the email. Unknown contacts are saved for future use.',
       },
     ],
   },
@@ -120,7 +120,7 @@ const INTEGRATION_CATEGORIES = [
       {
         icon: '🧠',
         name: 'Knowledge Memory',
-        description: 'Robert can say "remember that…" and Naavi stores it permanently. Facts, preferences, and life context are recalled automatically in future conversations — no need to repeat yourself.',
+        description: 'Robert can say "remember that…" and MyNaavi stores it permanently. Facts, preferences, and life context are recalled automatically in future conversations — no need to repeat yourself.',
       },
     ],
   },
@@ -132,7 +132,7 @@ function IntegrationsModal({ visible, onClose }: { visible: boolean; onClose: ()
       <View style={intStyles.overlay}>
         <View style={intStyles.sheet}>
           <View style={intStyles.header}>
-            <Text style={intStyles.title}>Naavi Integrations</Text>
+            <Text style={intStyles.title}>MyNaavi Integrations</Text>
             <TouchableOpacity onPress={onClose} style={intStyles.closeBtn}>
               <Text style={intStyles.closeText}>✕</Text>
             </TouchableOpacity>
@@ -1051,7 +1051,7 @@ export default function HomeScreen() {
                 memoStartedAtRef.current = Date.now();
                 startRecording();
               }}
-              accessibilityLabel="Tap to speak to Naavi"
+              accessibilityLabel="Tap to speak to MyNaavi"
             >
               <Text style={styles.unifiedBtnText}>
                 {memoState === 'recording' ? '⏹' : memoState === 'transcribing' ? '…' : '🎙'}
