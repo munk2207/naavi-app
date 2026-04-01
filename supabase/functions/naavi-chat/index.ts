@@ -280,10 +280,18 @@ Deno.serve(async (req) => {
         const contacts = await lookupContactsByName(supabase, userId, fromName);
 
         if (contacts.length === 1) {
-          // Single match — use exact email but keep original name for speech
-          fromEmail = contacts[0].email;
-          // fromName stays as the user said it (e.g. "aggan2207") for the confirmation
-          console.log('[naavi-chat] Contact resolved:', contacts[0].name, fromEmail);
+          const c = contacts[0];
+          // Only accept the resolved email if the contact name or email actually contains
+          // the search term — prevents false positives from Google's fuzzy matching
+          const isGenuineMatch =
+            c.name.toLowerCase().includes(fromName.toLowerCase()) ||
+            c.email.toLowerCase().includes(fromName.toLowerCase());
+          if (isGenuineMatch) {
+            fromEmail = c.email;
+            console.log('[naavi-chat] Contact resolved:', c.name, fromEmail);
+          } else {
+            console.log('[naavi-chat] Contact fuzzy match rejected:', c.name, c.email, '— saving name-only rule');
+          }
 
         } else if (contacts.length > 1) {
           // Multiple matches — ask Robert to pick
