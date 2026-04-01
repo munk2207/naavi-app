@@ -44,7 +44,7 @@ function speechResponse(speech: string, extra: Record<string, unknown> = {}) {
 // ── Email alert detection ─────────────────────────────────────────────────────
 
 function detectEmailAlert(msg: string): { fromName: string | null; subjectKeyword: string | null } | null {
-  const isAlert = /\b(alert|notify|text|sms|let me know|send me)\b.{0,80}\bemail\b/i.test(msg);
+  const isAlert = /\b(alert|notify|text|sms|let me know|send me)\b.{0,80}\bemail/i.test(msg);
   if (!isAlert) return null;
 
   const subjectMatch =
