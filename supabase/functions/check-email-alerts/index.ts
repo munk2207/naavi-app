@@ -138,7 +138,7 @@ serve(async (req) => {
         // Build SMS — one clean message per alert
         const sender = msg.sender_name || msg.sender_email;
         const subject = msg.subject || '(no subject)';
-        const gmailLink = `https://naavi-web-eman.vercel.app/email?id=${msg.gmail_message_id}`;
+        const gmailLink = `https://naavi-app.vercel.app/email?id=${msg.gmail_message_id}`;
 
         // Timestamp in Eastern Time (Robert's timezone)
         const alertTime = new Date().toLocaleString('en-CA', {
