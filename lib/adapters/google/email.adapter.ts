@@ -10,6 +10,7 @@ import {
   fetchEmailsFromPerson as gmailFetchFromPerson,
   sendEmail as gmailSend,
   triggerGmailSync,
+  type GmailMessageRow,
 } from '../../../lib/gmail';
 
 import type { EmailAdapter } from '../interfaces';
@@ -17,10 +18,9 @@ import type { Email, EmailDraft } from '../../types';
 
 // ─── Mapping ──────────────────────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function rawToEmail(raw: any): Email {
+function rawToEmail(raw: GmailMessageRow): Email {
   return {
-    id:          `email_${raw.id ?? raw.message_id ?? Date.now()}`,
+    id:          `email_${raw.gmail_message_id ?? Date.now()}`,
     from: {
       name:  raw.sender_name  ?? raw.from_name  ?? '',
       email: raw.sender_email ?? raw.from_email ?? '',
@@ -44,8 +44,8 @@ function rawToEmail(raw: any): Email {
 export class GoogleEmailAdapter implements EmailAdapter {
 
   async fetchImportant(userId: string): Promise<Email[]> {
-    const raw = await gmailFetchImportant(userId);
-    return raw.map(rawToEmail);
+    const rows = await gmailFetchImportant(userId);
+    return rows.map(rawToEmail);
   }
 
   async fetchFromPerson(name: string, userId: string): Promise<Email[]> {
