@@ -27,11 +27,15 @@ export async function callNaaviEdgeFunction(
 ): Promise<string> {
   const url = `${SUPABASE_URL}/functions/v1/naavi-chat`;
 
+  // Use the user's JWT if logged in, otherwise fall back to anon key
+  const session = supabase ? (await supabase.auth.getSession()).data.session : null;
+  const authToken = session?.access_token ?? SUPABASE_ANON_KEY;
+
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'Authorization': `Bearer ${authToken}`,
     },
     body: JSON.stringify({ system, messages, max_tokens: 2048 }),
   });
