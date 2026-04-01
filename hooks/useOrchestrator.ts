@@ -367,11 +367,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 // "aggan2207" → "aggan 2 2 0 7"   |   "test123" → "test 1 2 3"
 
 function sanitiseForSpeech(text: string): string {
-  return text
-    .replace(/([A-Za-z])(\d+)/g, (_, letter, digits) =>
-      `${letter} ${digits.split('').join(' ')}`)
-    .replace(/(\d+)([A-Za-z])/g, (_, digits, letter) =>
-      `${digits.split('').join(' ')} ${letter}`);
+  // Spell out mixed letter+digit tokens character by character
+  // so usernames like "aggan2207" are read as "a g g a n 2 2 0 7" not as a word
+  return text.replace(/\b([A-Za-z]+\d+[A-Za-z0-9]*|[A-Za-z0-9]*\d+[A-Za-z]+[A-Za-z0-9]*)\b/g,
+    match => match.split('').join(' ')
+  );
 }
 
 // ─── Speech helper ────────────────────────────────────────────────────────────
