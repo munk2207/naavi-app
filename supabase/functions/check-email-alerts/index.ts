@@ -139,7 +139,16 @@ serve(async (req) => {
         const sender = msg.sender_name || msg.sender_email;
         const subject = msg.subject || '(no subject)';
         const gmailLink = `https://naavi-web-eman.vercel.app/email?id=${msg.gmail_message_id}`;
-        const smsBody = `📧 New email from ${sender}\n"${subject}"\n${gmailLink}`;
+
+        // Timestamp in Eastern Time (Robert's timezone)
+        const alertTime = new Date().toLocaleString('en-CA', {
+          timeZone: 'America/Toronto',
+          month: 'short', day: 'numeric',
+          hour: 'numeric', minute: '2-digit',
+          hour12: true,
+        });
+
+        const smsBody = `📧 New email from ${sender}\n"${subject}"\n🕐 ${alertTime}\n${gmailLink}`;
 
         // Send SMS — use NAAVI_ANON_KEY (SUPABASE_SERVICE_ROLE_KEY was rotated)
         const interFnKey = Deno.env.get('NAAVI_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY')!;
