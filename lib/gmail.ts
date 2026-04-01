@@ -7,10 +7,21 @@
  */
 
 import { supabase } from './supabase';
-import type { BriefItem } from './naavi-client';
 
 const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL      ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+
+export interface GmailMessageRow {
+  gmail_message_id: string;
+  subject: string;
+  sender_name: string;
+  sender_email: string;
+  snippet: string;
+  received_at: string;
+  is_important: boolean;
+  labels: string[];
+  is_unread: boolean;
+}
 
 // ─── Trigger sync ─────────────────────────────────────────────────────────────
 
@@ -30,7 +41,7 @@ export async function triggerGmailSync(): Promise<void> {
 
 // ─── Fetch important unread emails for the brief ──────────────────────────────
 
-export async function fetchImportantEmails(passedUserId?: string): Promise<BriefItem[]> {
+export async function fetchImportantEmails(passedUserId?: string): Promise<GmailMessageRow[]> {
   if (!supabase) return [];
 
   let userId = passedUserId;
@@ -46,28 +57,14 @@ export async function fetchImportantEmails(passedUserId?: string): Promise<Brief
   try {
     const { data: messages, error } = await supabase
       .from('gmail_messages')
-      .select('gmail_message_id, subject, sender_name, sender_email, snippet, received_at, is_important, labels')
+      .select('gmail_message_id, subject, sender_name, sender_email, snippet, received_at, is_important, labels, is_unread')
       .eq('user_id', userId)
       .gte('received_at', startOfToday.toISOString())
       .order('received_at', { ascending: false })
       .limit(10);
 
     if (error || !messages || messages.length === 0) return [];
-
-    return messages.map(msg => {
-      const sender = msg.sender_name || msg.sender_email || 'Unknown';
-      const urgent = msg.is_important || (msg.labels ?? []).includes('CATEGORY_PRIMARY');
-      const received = new Date(msg.received_at ?? '');
-      const timeLabel = received.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
-
-      return {
-        id: `gmail-${msg.gmail_message_id}`,
-        category: 'task' as const,
-        title: `✉ ${sender} — ${msg.subject || '(no subject)'}`,
-        detail: msg.snippet || '',
-        urgent,
-      };
-    });
+    return messages as GmailMessageRow[];
   } catch (err) {
     console.error('[Gmail] Fetch failed:', err);
     return [];
