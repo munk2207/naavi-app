@@ -95,11 +95,18 @@ serve(async (req) => {
     try {
       // Only check emails that arrived AFTER this rule was created
       // This prevents alerting on emails that existed before Robert set the rule
+      // Only check emails received after the rule was created AND within the last 24 hours.
+      // The 24-hour cap prevents historical emails (including deleted ones still in DB) from triggering alerts.
+      const cutoff = new Date(Math.max(
+        new Date(rule.created_at).getTime(),
+        Date.now() - 24 * 60 * 60 * 1000
+      )).toISOString();
+
       const { data: messages, error: msgError } = await adminClient
         .from('gmail_messages')
         .select('gmail_message_id, subject, sender_name, sender_email, snippet, received_at')
         .eq('user_id', rule.user_id)
-        .gte('received_at', rule.created_at)
+        .gte('received_at', cutoff)
         .order('received_at', { ascending: false })
         .limit(50);
 
