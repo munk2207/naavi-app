@@ -403,9 +403,25 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   return { status, turns, error, send, clearHistory, loadHistory };
 }
 
+// ─── Speech sanitiser ─────────────────────────────────────────────────────────
+// Prevents TTS from reading mixed alphanumeric strings as large numbers.
+// "aggan2207" → "aggan 2 2 0 7"   |   "test123" → "test 1 2 3"
+// Leaves standalone numbers (years, counts) and phone numbers untouched.
+
+function sanitiseForSpeech(text: string): string {
+  return text
+    // Digits immediately after letters: space them out digit by digit
+    .replace(/([A-Za-z])(\d+)/g, (_, letter, digits) =>
+      `${letter} ${digits.split('').join(' ')}`)
+    // Digits immediately before letters: same
+    .replace(/(\d+)([A-Za-z])/g, (_, digits, letter) =>
+      `${digits.split('').join(' ')} ${letter}`);
+}
+
 // ─── Speech helper ────────────────────────────────────────────────────────────
 
 async function speakResponse(text: string, language: 'en' | 'fr'): Promise<void> {
+  text = sanitiseForSpeech(text);
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.speechSynthesis) {
     return speakWeb(text, language);
   }
