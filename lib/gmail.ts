@@ -48,10 +48,9 @@ export async function fetchImportantEmails(passedUserId?: string): Promise<Brief
       .from('gmail_messages')
       .select('gmail_message_id, subject, sender_name, sender_email, snippet, received_at, is_important, labels')
       .eq('user_id', userId)
-      .eq('is_unread', true)
       .gte('received_at', startOfToday.toISOString())
       .order('received_at', { ascending: false })
-      .limit(5);
+      .limit(10);
 
     if (error || !messages || messages.length === 0) return [];
 
