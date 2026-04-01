@@ -171,7 +171,7 @@ export default function NotesScreen() {
             <>
               {memoryNotes.length === 0 ? (
                 <Text style={styles.empty}>
-                  No memory notes yet.{'\n'}Say "remember that…" to Naavi to save something here.
+                  No memory notes yet.{'\n'}Say "remember that…" to MyNaavi to save something here.
                 </Text>
               ) : (
                 memoryNotes.map(note => (

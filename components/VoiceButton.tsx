@@ -62,9 +62,9 @@ export function VoiceButton({ status, onPress, disabled }: Props) {
   }[status];
 
   const accessibilityLabel = {
-    idle:       'Speak to Naavi',
-    thinking:   'Naavi is thinking',
-    speaking:   'Naavi is speaking',
+    idle:       'Speak to MyNaavi',
+    thinking:   'MyNaavi is thinking',
+    speaking:   'MyNaavi is speaking',
     error:      'Error — tap to retry',
   }[status];
 

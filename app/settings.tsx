@@ -181,8 +181,8 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>Your Name</Text>
           <Text style={styles.sectionNote}>
             {userNameSaved
-              ? `Saved as "${userName}". Naavi will auto-label you in every conversation.`
-              : 'Enter your name once — Naavi will recognize you in all conversations automatically.'}
+              ? `Saved as "${userName}". MyNaavi will auto-label you in every conversation.`
+              : 'Enter your name once — MyNaavi will recognize you in all conversations automatically.'}
           </Text>
           <TextInput
             style={styles.keyInput}
@@ -214,7 +214,7 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Providers</Text>
           <Text style={styles.sectionNote}>
-            Naavi routes through whichever provider you select. Additional providers unlock in Phase 8.
+            MyNaavi routes through whichever provider you select. Additional providers unlock in Phase 8.
           </Text>
 
           <ProviderRow label="Calendar">
@@ -351,7 +351,7 @@ export default function SettingsScreen() {
               <Text style={styles.toolStatus}>
                 {epicConnected
                   ? 'Connected — medications, appointments & vitals in brief'
-                  : 'Connect your Epic MyChart to share health records with Naavi'}
+                  : 'Connect your Epic MyChart to share health records with MyNaavi'}
               </Text>
             </View>
             <TouchableOpacity
@@ -384,7 +384,7 @@ export default function SettingsScreen() {
             <View>
               <Text style={styles.toolLabel}>Push Notifications</Text>
               <Text style={styles.toolStatus}>
-                {pushEnabled ? 'Enabled — Naavi will alert you for reminders' : 'Get alerts for reminders and leave-by warnings'}
+                {pushEnabled ? 'Enabled — MyNaavi will alert you for reminders' : 'Get alerts for reminders and leave-by warnings'}
               </Text>
             </View>
             {!pushEnabled && (
@@ -426,7 +426,7 @@ export default function SettingsScreen() {
           <Text style={styles.sectionNote}>
             {apiKeySet
               ? 'Key is saved. Enter a new one below to replace it.'
-              : 'Enter your API key to enable Naavi. Get one at console.anthropic.com.'}
+              : 'Enter your API key to enable MyNaavi. Get one at console.anthropic.com.'}
           </Text>
           <TextInput
             style={styles.keyInput}
@@ -452,7 +452,7 @@ export default function SettingsScreen() {
         <View style={styles.divider} />
 
         {/* Version */}
-        <Text style={styles.version}>Naavi — Phase 7 build</Text>
+        <Text style={styles.version}>MyNaavi — Phase 7 build</Text>
 
       </ScrollView>
     </SafeAreaView>
