@@ -33,6 +33,7 @@ interface WatchRule {
   subject_keyword: string | null;
   phone_number: string;
   label: string;
+  created_at: string;
 }
 
 interface GmailMessage {
@@ -66,7 +67,7 @@ serve(async (req) => {
   // Load active rules
   let rulesQuery = adminClient
     .from('email_watch_rules')
-    .select('id, user_id, from_name, from_email, subject_keyword, phone_number, label')
+    .select('id, user_id, from_name, from_email, subject_keyword, phone_number, label, created_at')
     .eq('is_active', true);
 
   if (targetUserId) rulesQuery = rulesQuery.eq('user_id', targetUserId);
@@ -92,15 +93,13 @@ serve(async (req) => {
 
   for (const rule of rules as WatchRule[]) {
     try {
-      // Build OR filter for this rule's match criteria
-      // We fetch recent emails (last 2 hours) to limit the scan window
-      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-
+      // Only check emails that arrived AFTER this rule was created
+      // This prevents alerting on emails that existed before Robert set the rule
       const { data: messages, error: msgError } = await adminClient
         .from('gmail_messages')
         .select('gmail_message_id, subject, sender_name, sender_email, snippet, received_at')
         .eq('user_id', rule.user_id)
-        .gte('received_at', twoHoursAgo)
+        .gte('received_at', rule.created_at)
         .order('received_at', { ascending: false })
         .limit(50);
 
@@ -136,13 +135,11 @@ serve(async (req) => {
 
         if (existing) continue; // already alerted
 
-        // Build SMS text
-        const smsBody = [
-          `MyNaavi: New email matching "${rule.label}"`,
-          `From: ${msg.sender_name || msg.sender_email}`,
-          `Subject: ${msg.subject || '(no subject)'}`,
-          msg.snippet ? `"${msg.snippet.slice(0, 80)}"` : '',
-        ].filter(Boolean).join('\n');
+        // Build SMS — one clean message per alert
+        const sender = msg.sender_name || msg.sender_email;
+        const subject = msg.subject || '(no subject)';
+        const gmailLink = `https://naavi-web-eman.vercel.app/email?id=${msg.gmail_message_id}`;
+        const smsBody = `📧 New email from ${sender}\n"${subject}"\n${gmailLink}`;
 
         // Send SMS — use NAAVI_ANON_KEY (SUPABASE_SERVICE_ROLE_KEY was rotated)
         const interFnKey = Deno.env.get('NAAVI_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY')!;
