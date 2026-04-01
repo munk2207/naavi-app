@@ -16,7 +16,7 @@ const resources = {
   en: {
     translation: {
       // App shell
-      appName: 'Naavi',
+      appName: 'MyNaavi',
       tagline: 'Your life, orchestrated.',
 
       // Home screen
@@ -27,7 +27,7 @@ const resources = {
         briefTitle: "Today's brief",
         noBriefItems: 'Nothing urgent today.',
         loadingBrief: 'Preparing your brief…',
-        inputPlaceholder: 'Type or speak to Naavi…',
+        inputPlaceholder: 'Type or speak to MyNaavi…',
         send: 'Send',
         holdToSpeak: 'Hold to speak',
         listening: 'Listening…',
@@ -81,7 +81,7 @@ const resources = {
 
   fr: {
     translation: {
-      appName: 'Naavi',
+      appName: 'MyNaavi',
       tagline: 'Ta vie, orchestrée.',
 
       home: {
@@ -91,7 +91,7 @@ const resources = {
         briefTitle: "Le résumé d'aujourd'hui",
         noBriefItems: "Rien d'urgent aujourd'hui.",
         loadingBrief: 'Préparation de ton résumé…',
-        inputPlaceholder: 'Écris ou parle à Naavi…',
+        inputPlaceholder: 'Écris ou parle à MyNaavi…',
         send: 'Envoyer',
         holdToSpeak: 'Appuie pour parler',
         listening: "Je t'écoute\u2026",
