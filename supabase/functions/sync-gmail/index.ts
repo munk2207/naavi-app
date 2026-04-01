@@ -81,9 +81,10 @@ serve(async (req) => {
     try {
       const accessToken = await getNewAccessToken(refresh_token);
 
-      // Fetch unread messages from last 7 days
-      const sevenDaysAgo = Math.floor((Date.now() - 7 * 24 * 60 * 60 * 1000) / 1000);
-      const query = `is:unread after:${sevenDaysAgo}`;
+      // Fetch all messages from last 24 hours (read and unread)
+      // so Robert's brief always shows today's emails even after he reads them
+      const oneDayAgo = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000);
+      const query = `after:${oneDayAgo}`;
 
       const listRes = await fetch(
         `${GMAIL_API}/messages?maxResults=20&q=${encodeURIComponent(query)}`,
