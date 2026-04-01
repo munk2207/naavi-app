@@ -25,9 +25,11 @@ export function ConversationBubble({ role, content, timestamp }: Props) {
         <Text style={styles.label}>MyNaavi</Text>
       )}
       <View style={[styles.bubble, isNaavi ? styles.naaviBubble : styles.robertBubble]}>
-        <Text style={[styles.text, isNaavi ? styles.naaviText : styles.robertText]}>
-          {content}
-        </Text>
+        {content.split('\n').map((line, i) => (
+          <Text key={i} style={[styles.text, isNaavi ? styles.naaviText : styles.robertText]}>
+            {line}
+          </Text>
+        ))}
       </View>
       {timestamp && (
         <Text style={styles.timestamp}>{timestamp}</Text>
