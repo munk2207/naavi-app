@@ -398,13 +398,8 @@ export default function HomeScreen() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Load today's conversation history on mount
-  useEffect(() => {
-    if (!currentUserId) return;
-    loadTodayConversation().then(saved => {
-      if (saved.length > 0) loadHistory(saved as any);
-    });
-  }, [currentUserId]);
+  // Conversation intentionally starts fresh on every page load.
+  // (History is still saved to Supabase for records, just not re-displayed.)
 
   // Load driving preferences from knowledge fragments
   useEffect(() => {
