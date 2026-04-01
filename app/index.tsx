@@ -1099,19 +1099,14 @@ export default function HomeScreen() {
             editable={status === 'idle' || status === 'error'}
             accessibilityLabel="Message input"
           />
-          {isSupported ? (
-            <VoiceButton
-              status={voiceState === 'listening' ? 'speaking' : status}
-              onPress={inputText.trim() ? handleSend : handleVoicePress}
-              disabled={status === 'thinking'}
-            />
-          ) : (
-            <VoiceButton
-              status={status}
-              onPress={handleSend}
-              disabled={!inputText.trim()}
-            />
-          )}
+          <TouchableOpacity
+            style={[styles.sendBtn, (!inputText.trim() || status === 'thinking' || status === 'speaking') && styles.sendBtnDisabled]}
+            onPress={handleSend}
+            disabled={!inputText.trim() || status === 'thinking' || status === 'speaking'}
+            accessibilityLabel="Send message"
+          >
+            <Text style={styles.sendBtnText}>↑</Text>
+          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -1700,6 +1695,24 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1a5c35',
     letterSpacing: 0.5,
+  },
+  sendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#1a5c35',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  sendBtnDisabled: {
+    backgroundColor: '#ccc',
+  },
+  sendBtnText: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '700',
+    lineHeight: 26,
   },
   unifiedBtn: {
     width: 52,

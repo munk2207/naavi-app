@@ -27,7 +27,7 @@ const resources = {
         briefTitle: "Today's brief",
         noBriefItems: 'Nothing urgent today.',
         loadingBrief: 'Preparing your brief…',
-        inputPlaceholder: 'Type or speak to MyNaavi…',
+        inputPlaceholder: 'Type your message…',
         send: 'Send',
         holdToSpeak: 'Hold to speak',
         listening: 'Listening…',
