@@ -402,7 +402,7 @@ function sanitiseForSpeech(text: string): string {
 async function speakCloud(text: string): Promise<void> {
   try {
     const { data, error } = await supabase.functions.invoke('text-to-speech', {
-      body: { text, voice: 'nova' },
+      body: { text, voice: 'shimmer' },
     });
     if (error || !data?.audio) throw new Error('No audio returned');
 
