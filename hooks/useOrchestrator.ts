@@ -347,10 +347,9 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       setTurns(prev => [...prev, newTurn]);
       saveConversationTurn(newTurn).catch(() => {});
 
-      // Speak the response aloud
+      // Speak concurrently — text appears and voice starts at the same time
       setStatus('speaking');
-      await speakResponse(response.speech, language);
-      setStatus('idle');
+      speakResponse(response.speech, language).then(() => setStatus('idle')).catch(() => setStatus('idle'));
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
