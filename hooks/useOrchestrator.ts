@@ -398,83 +398,19 @@ function sanitiseForSpeech(text: string): string {
 
 // ─── Speech helper ────────────────────────────────────────────────────────────
 
-// Fetch TTS audio for a single chunk — returns an object URL or null
-async function fetchTTSChunk(chunk: string): Promise<string | null> {
-  try {
-    const { data, error } = await supabase.functions.invoke('text-to-speech', {
-      body: { text: chunk, voice: 'shimmer' },
-    });
-    if (error || !data?.audio) return null;
-    const binary = atob(data.audio);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const blob = new Blob([bytes], { type: 'audio/mpeg' });
-    return URL.createObjectURL(blob);
-  } catch {
-    return null;
-  }
-}
-
-function playAudioUrl(url: string): Promise<void> {
-  return new Promise((resolve) => {
-    const audio = new Audio(url);
-    audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-    audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
-    audio.play().catch(() => resolve());
-  });
-}
-
-// Cloud TTS via OpenAI — splits into sentences and fetches in parallel
-// so first sentence starts playing in ~2s regardless of total length
-async function speakCloud(text: string): Promise<void> {
-  try {
-    // Split on sentence boundaries, keep chunks meaningful
-    const chunks = text
-      .split(/(?<=[.!?])\s+|\n+/)
-      .map(s => s.trim())
-      .filter(s => s.length > 0)
-      .reduce<string[]>((acc, s) => {
-        // Merge very short fragments (< 20 chars) with previous chunk
-        if (acc.length > 0 && acc[acc.length - 1].length < 20) {
-          acc[acc.length - 1] += ' ' + s;
-        } else {
-          acc.push(s);
-        }
-        return acc;
-      }, []);
-
-    if (chunks.length === 0) return;
-
-    // Fetch all chunks in parallel — play in order as each resolves
-    const audioPromises = chunks.map(chunk => fetchTTSChunk(chunk));
-    for (const promise of audioPromises) {
-      const url = await promise;
-      if (url) await playAudioUrl(url);
-    }
-  } catch (err) {
-    console.warn('[Speech] Cloud TTS failed, falling back to browser:', err);
-    return speakBrowserFallback(text);
-  }
-}
-
-// Browser TTS fallback (used only if cloud TTS fails)
-function speakBrowserFallback(text: string): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) { resolve(); return; }
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.88;
-    utterance.pitch = 1.0;
-    utterance.onend = () => resolve();
-    utterance.onerror = () => resolve();
-    window.speechSynthesis.speak(utterance);
-  });
-}
-
 async function speakResponse(text: string, language: 'en' | 'fr'): Promise<void> {
   text = sanitiseForSpeech(text);
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    return speakCloud(text);
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.speechSynthesis) {
+    return new Promise((resolve) => {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.88;
+      utterance.pitch = 1.0;
+      utterance.lang = language === 'fr' ? 'fr-CA' : 'en-CA';
+      utterance.onend = () => resolve();
+      utterance.onerror = () => resolve();
+      window.speechSynthesis.speak(utterance);
+    });
   }
   await Speech.stop();
   return new Promise((resolve) => {
