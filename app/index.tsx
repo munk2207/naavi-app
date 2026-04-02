@@ -401,17 +401,19 @@ export default function HomeScreen() {
   // Conversation intentionally starts fresh on every page load.
   // (History is still saved to Supabase for records, just not re-displayed.)
 
-  // Load driving preferences from knowledge fragments
+  // Load driving preferences from knowledge fragments — re-checks after every turn
+  // so DELETE_MEMORY takes effect immediately without a page refresh
   useEffect(() => {
     if (!supabase || !currentUserId) return;
     supabase.from('knowledge_fragments')
       .select('content')
+      .eq('user_id', currentUserId)
       .ilike('content', '%highway%')
       .limit(5)
       .then(({ data }) => {
-        if (data && data.length > 0) avoidHighwaysRef.current = true;
+        avoidHighwaysRef.current = !!(data && data.length > 0);
       });
-  }, [currentUserId]);
+  }, [currentUserId, turns]);
 
   // Load calendar data whenever user ID becomes available
   useEffect(() => {
