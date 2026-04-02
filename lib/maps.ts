@@ -11,9 +11,10 @@ import { supabase } from './supabase';
 export interface TravelTime {
   durationMinutes: number;
   distanceKm: number;
-  leaveBy: string;   // e.g. "9:35 AM"
-  leaveByMs: number; // epoch ms — for timer comparison
-  summary: string;   // e.g. "🚗 25 min — leave by 9:35 AM"
+  leaveBy: string;      // e.g. "9:35 AM"
+  leaveByMs: number;    // epoch ms — for timer comparison
+  leaveByLabel: string; // e.g. "Leave by 9:35 p.m." or "Arrive by 9:35 p.m."
+  summary: string;      // e.g. "🚗 25 min — leave by 9:35 AM"
 }
 
 // ─── Get stored home address from knowledge fragments ─────────────────────────
@@ -60,7 +61,8 @@ function getCurrentLocation(): Promise<{ lat: number; lng: number } | null> {
 export async function fetchTravelTime(
   destination: string,
   eventStartISO: string,
-  avoidHighways = false
+  avoidHighways = false,
+  departureISO = ''
 ): Promise<TravelTime | null> {
   if (!supabase || !destination.trim()) return null;
 
@@ -85,26 +87,38 @@ export async function fetchTravelTime(
     const { durationMinutes, distanceKm } = data;
 
     const now = Date.now();
-    const eventStart = new Date(eventStartISO);
-    const eventIsUpcoming = eventStart.getTime() > now + 10 * 60 * 1000; // at least 10 min away
+    const timeOpts: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit', hour12: true };
 
     let leaveByMs: number;
+    let leaveByLabel: string;
     let leaveBy: string;
 
-    if (eventIsUpcoming) {
-      // Leave in time to arrive 5 min before event
-      leaveByMs = eventStart.getTime() - (durationMinutes + 5) * 60 * 1000;
-      leaveBy = new Date(leaveByMs).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true });
+    const departure = departureISO ? new Date(departureISO) : null;
+    const eventStart = eventStartISO ? new Date(eventStartISO) : null;
+    const eventIsUpcoming = eventStart && eventStart.getTime() > now + 10 * 60 * 1000;
+
+    if (departure && departure.getTime() > now) {
+      // User specified departure time — show arrival time
+      leaveByMs = departure.getTime();
+      const arriveAt = new Date(departure.getTime() + durationMinutes * 60 * 1000);
+      leaveBy = departure.toLocaleTimeString('en-CA', timeOpts);
+      leaveByLabel = `Arrive by ${arriveAt.toLocaleTimeString('en-CA', timeOpts)}`;
+    } else if (eventIsUpcoming) {
+      // Arrival/event time specified — show departure time
+      leaveByMs = eventStart!.getTime() - (durationMinutes + 5) * 60 * 1000;
+      leaveBy = new Date(leaveByMs).toLocaleTimeString('en-CA', timeOpts);
+      leaveByLabel = `Leave by ${leaveBy}`;
     } else {
-      // No specific event — leave now, show arrival time
+      // No time specified — leave now, show arrival time
       leaveByMs = now;
       const arriveAt = new Date(now + durationMinutes * 60 * 1000);
-      leaveBy = `now → arrive ${arriveAt.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+      leaveBy = `now → arrive ${arriveAt.toLocaleTimeString('en-CA', timeOpts)}`;
+      leaveByLabel = `Arrive by ${arriveAt.toLocaleTimeString('en-CA', timeOpts)}`;
     }
 
-    const summary = `🚗 ${durationMinutes} min — leave ${leaveBy}`;
+    const summary = `🚗 ${durationMinutes} min — ${leaveByLabel}`;
 
-    return { durationMinutes, distanceKm, leaveBy, leaveByMs, summary };
+    return { durationMinutes, distanceKm, leaveBy, leaveByMs, leaveByLabel, summary };
   } catch {
     return null;
   }

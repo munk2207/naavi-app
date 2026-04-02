@@ -879,7 +879,7 @@ export default function HomeScreen() {
                   <Text style={styles.navDestination}>{nav.destination}</Text>
                   <Text style={styles.navDetail}>{nav.durationMinutes} min · {nav.distanceKm.toFixed(1)} km</Text>
                   <Text style={styles.navLeaveBy}>
-                    Leave by {new Date(nav.leaveByMs).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit' })}
+                    {nav.leaveByLabel ?? `Leave by ${new Date(nav.leaveByMs).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true })}`}
                   </Text>
                   <TouchableOpacity
                     style={styles.navOpenBtn}
