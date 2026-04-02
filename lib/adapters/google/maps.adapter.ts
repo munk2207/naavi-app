@@ -17,8 +17,9 @@ export class GoogleMapsAdapter implements MapsAdapter {
   async fetchTravelTime(
     destination: string,
     eventStartISO: string,
+    avoidHighways = false,
   ): Promise<NavigationResult | null> {
-    const raw = await googleFetchTravelTime(destination, eventStartISO);
+    const raw = await googleFetchTravelTime(destination, eventStartISO, avoidHighways);
     if (!raw) return null;
 
     return {

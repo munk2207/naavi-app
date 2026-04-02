@@ -27,7 +27,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { destination, originLat, originLng } = body;
+    const { destination, originLat, originLng, originAddress, avoidHighways } = body;
 
     if (!destination) {
       return new Response(JSON.stringify({ error: 'Missing destination' }), {
@@ -37,13 +37,14 @@ serve(async (req) => {
 
     const origin = (originLat && originLng)
       ? `${originLat},${originLng}`
-      : 'Ottawa,ON,Canada'; // fallback
+      : (originAddress ?? 'Ottawa,ON,Canada');
 
     const url = new URL(DISTANCE_MATRIX_URL);
     url.searchParams.set('origins', origin);
     url.searchParams.set('destinations', destination);
     url.searchParams.set('mode', 'driving');
     url.searchParams.set('units', 'metric');
+    if (avoidHighways) url.searchParams.set('avoid', 'highways');
     url.searchParams.set('key', apiKey);
 
     const res = await fetch(url.toString());

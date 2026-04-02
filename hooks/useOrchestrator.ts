@@ -38,7 +38,7 @@ export interface ConversationTurn {
   timestamp?: string;
 }
 
-export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefItem[] = []) {
+export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefItem[] = [], avoidHighways = false) {
   const [status, setStatus] = useState<OrchestratorStatus>('idle');
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -175,7 +175,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           const eventStartISO = String(action.eventStartISO ?? '').trim();
           if (destination) {
             try {
-              const result = await registry.maps.fetchTravelTime(destination, eventStartISO);
+              const result = await registry.maps.fetchTravelTime(destination, eventStartISO, avoidHighways);
               if (result) turnNav.push(result);
             } catch (err) {
               console.error('[Orchestrator] FETCH_TRAVEL_TIME failed:', err);
