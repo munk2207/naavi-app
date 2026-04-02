@@ -27,7 +27,7 @@ function getCurrentLocation(): Promise<{ lat: number; lng: number } | null> {
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
       () => resolve(null),
-      { timeout: 5000 }
+      { timeout: 10000, enableHighAccuracy: true, maximumAge: 0 }
     );
   });
 }
