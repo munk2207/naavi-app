@@ -367,11 +367,21 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 // "aggan2207" → "aggan 2 2 0 7"   |   "test123" → "test 1 2 3"
 
 function sanitiseForSpeech(text: string): string {
-  // Spell out mixed letter+digit tokens character by character
-  // so usernames like "aggan2207" are read as "a g g a n 2 2 0 7" not as a word
-  return text.replace(/\b([A-Za-z]+\d+[A-Za-z0-9]*|[A-Za-z0-9]*\d+[A-Za-z]+[A-Za-z0-9]*)\b/g,
-    match => match.split('').join(' ')
-  );
+  return text
+    // Strip markdown bold/italic (**text**, *text*, __text__, _text_)
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    .replace(/_(.+?)_/g, '$1')
+    // Strip markdown headings (# ## ###)
+    .replace(/^#{1,6}\s+/gm, '')
+    // Strip inline code (`code`)
+    .replace(/`(.+?)`/g, '$1')
+    // Spell out mixed letter+digit tokens character by character
+    // so usernames like "aggan2207" are read as "a g g a n 2 2 0 7"
+    .replace(/\b([A-Za-z]+\d+[A-Za-z0-9]*|[A-Za-z0-9]*\d+[A-Za-z]+[A-Za-z0-9]*)\b/g,
+      match => match.split('').join(' ')
+    );
 }
 
 // ─── Speech helper ────────────────────────────────────────────────────────────
