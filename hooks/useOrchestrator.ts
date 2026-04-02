@@ -377,6 +377,9 @@ function sanitiseForSpeech(text: string): string {
     .replace(/^#{1,6}\s+/gm, '')
     // Strip inline code (`code`)
     .replace(/`(.+?)`/g, '$1')
+    // Remove any remaining stray asterisks or underscores not caught above
+    .replace(/\*+/g, '')
+    .replace(/_{2,}/g, '')
     // Spell out mixed letter+digit tokens character by character
     // so usernames like "aggan2207" are read as "a g g a n 2 2 0 7"
     .replace(/\b([A-Za-z]+\d+[A-Za-z0-9]*|[A-Za-z0-9]*\d+[A-Za-z]+[A-Za-z0-9]*)\b/g,
