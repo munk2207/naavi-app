@@ -402,7 +402,7 @@ function sanitiseForSpeech(text: string): string {
 async function fetchTTSChunk(chunk: string): Promise<string | null> {
   try {
     const { data, error } = await supabase.functions.invoke('text-to-speech', {
-      body: { text: chunk, voice: 'alloy' },
+      body: { text: chunk, voice: 'sage' },
     });
     if (error || !data?.audio) return null;
     const binary = atob(data.audio);
