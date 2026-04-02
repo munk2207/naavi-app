@@ -19,7 +19,7 @@ import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabas
 import { sendPushNotification } from '@/lib/push';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
 import { lookupContact, lookupContactByPhone } from '@/lib/contacts';
-import { ingestNote } from '@/lib/knowledge';
+import { ingestNote, deleteKnowledge } from '@/lib/knowledge';
 import { registry } from '@/lib/adapters/registry';
 import type { StorageFile, NavigationResult } from '@/lib/types';
 
@@ -259,6 +259,14 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             }
           }
           console.log(`[Orchestrator] SCHEDULE_MEDICATION: created ${created}/${events.length} events`);
+        }
+
+        if (action.type === 'DELETE_MEMORY') {
+          const keyword = String(action.keyword ?? action.query ?? '');
+          if (keyword) {
+            const deleted = await deleteKnowledge(keyword);
+            console.log(`[Orchestrator] DELETE_MEMORY: removed ${deleted} fragments matching "${keyword}"`);
+          }
         }
 
         if (action.type === 'DRAFT_MESSAGE' || action.type === 'ADD_CONTACT') {
