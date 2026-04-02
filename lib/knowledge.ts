@@ -82,7 +82,10 @@ export async function fetchAllKnowledge(limit = 100): Promise<KnowledgeFragment[
 // ─── Format fragments for Claude context ─────────────────────────────────────
 
 export function formatFragmentsForContext(fragments: KnowledgeFragment[], isFullDump = false): string {
-  if (fragments.length === 0) return '';
+  if (fragments.length === 0) {
+    if (isFullDump) return 'Relevant knowledge about Robert:\n- Nothing stored yet.';
+    return '';
+  }
   const lines = fragments.map(f => `- ${f.content}`);
   if (isFullDump) {
     return `Everything Naavi knows about Robert (${fragments.length} items — report ALL of them):\n${lines.join('\n')}`;
