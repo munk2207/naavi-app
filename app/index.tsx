@@ -401,8 +401,8 @@ export default function HomeScreen() {
   // Conversation intentionally starts fresh on every page load.
   // (History is still saved to Supabase for records, just not re-displayed.)
 
-  // Load driving preferences from knowledge fragments — re-checks after every turn
-  // so DELETE_MEMORY takes effect immediately without a page refresh
+  // Load driving preferences from knowledge fragments (re-runs on user change only;
+  // turns-based re-check is declared below after useOrchestrator is called)
   useEffect(() => {
     if (!supabase || !currentUserId) return;
     supabase.from('knowledge_fragments')
@@ -413,7 +413,7 @@ export default function HomeScreen() {
       .then(({ data }) => {
         avoidHighwaysRef.current = !!(data && data.length > 0);
       });
-  }, [currentUserId, turns]);
+  }, [currentUserId]);
 
   // Load calendar data whenever user ID becomes available
   useEffect(() => {
@@ -530,6 +530,18 @@ export default function HomeScreen() {
   }, [brief]);
 
   const { status, turns, error, send, loadHistory } = useOrchestrator('en', brief);
+
+  // Re-check highway preference after each turn so DELETE_MEMORY takes effect immediately
+  useEffect(() => {
+    if (!supabase || !currentUserId) return;
+    supabase.from('knowledge_fragments')
+      .select('content')
+      .eq('user_id', currentUserId)
+      .ilike('content', '%highway%')
+      .limit(5)
+      .then(({ data }) => { avoidHighwaysRef.current = !!(data && data.length > 0); });
+  }, [turns, currentUserId]);
+
   const { voiceState, voiceError, startListening, stopListening, isSupported } = useVoice('en');
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
   const memoStartedAtRef = useRef<number>(0);
