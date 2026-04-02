@@ -79,6 +79,27 @@ export async function fetchAllKnowledge(limit = 100): Promise<KnowledgeFragment[
   }
 }
 
+// ─── Delete fragments matching a keyword ─────────────────────────────────────
+
+export async function deleteKnowledge(keyword: string): Promise<number> {
+  if (!supabase || !keyword.trim()) return 0;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user?.id) return 0;
+    const { data, error } = await supabase
+      .from('knowledge_fragments')
+      .delete()
+      .eq('user_id', session.user.id)
+      .ilike('content', `%${keyword.trim()}%`)
+      .select('id');
+    if (error) { console.error('[Knowledge] Delete failed:', error.message); return 0; }
+    return data?.length ?? 0;
+  } catch (err) {
+    console.error('[Knowledge] Delete failed:', err);
+    return 0;
+  }
+}
+
 // ─── Format fragments for Claude context ─────────────────────────────────────
 
 export function formatFragmentsForContext(fragments: KnowledgeFragment[], isFullDump = false): string {
