@@ -542,6 +542,23 @@ export default function HomeScreen() {
       .then(({ data }) => { avoidHighwaysRef.current = !!(data && data.length > 0); });
   }, [turns, currentUserId]);
 
+  // Auto-open Google Maps when a navigation result arrives
+  const lastAutoOpenedTurnRef = useRef(-1);
+  useEffect(() => {
+    const lastIdx = turns.length - 1;
+    if (lastIdx < 0 || lastIdx === lastAutoOpenedTurnRef.current) return;
+    const lastTurn = turns[lastIdx];
+    if (lastTurn.navigationResults.length > 0) {
+      lastAutoOpenedTurnRef.current = lastIdx;
+      const nav = lastTurn.navigationResults[0];
+      const avoid = avoidHighwaysRef.current ? '&avoid=highways' : '';
+      const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(nav.destination)}&travelmode=driving${avoid}`;
+      const a = document.createElement('a');
+      a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }
+  }, [turns]);
+
   const { voiceState, voiceError, startListening, stopListening, isSupported } = useVoice('en');
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
   const memoStartedAtRef = useRef<number>(0);
