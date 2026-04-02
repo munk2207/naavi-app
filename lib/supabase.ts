@@ -79,9 +79,15 @@ export async function saveReminder(reminder: {
   title: string;
   datetime: string;
   source: string;
+  phone_number?: string;
 }): Promise<void> {
   if (!supabase) return;
-  const { error } = await supabase.from('reminders').insert(reminder);
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  const { error } = await supabase.from('reminders').insert({
+    ...reminder,
+    user_id: userId ?? null,
+  });
   if (error) console.error('[Supabase] Failed to save reminder:', error.message);
   else console.log('[Supabase] Reminder saved:', reminder.title);
 }

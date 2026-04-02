@@ -281,7 +281,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         } else if (action.type === 'SET_REMINDER') {
           const reminderTitle = String(action.title ?? '');
           const reminderDatetime = String(action.datetime ?? '');
-          await saveReminder({ title: reminderTitle, datetime: reminderDatetime, source: String(action.source ?? '') });
+          const reminderPhone = String(action.phoneNumber ?? '');
+          await saveReminder({ title: reminderTitle, datetime: reminderDatetime, source: String(action.source ?? ''), phone_number: reminderPhone || undefined });
           // Create a Google Calendar event so Robert gets a native notification
           if (reminderDatetime) {
             try {
