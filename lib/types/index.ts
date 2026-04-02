@@ -109,6 +109,7 @@ export interface NavigationResult {
   durationMinutes: number;            // Integer
   distanceKm: number;                 // Float, one decimal
   leaveByMs: number;                  // Unix timestamp in milliseconds
+  leaveByLabel: string;               // e.g. "Leave by 10:36 p.m." or "Arrive by 11:19 p.m."
   summary: string;                    // "23 min via Highway 417 — leave by 1:37 PM"
   // Optional
   origin?: string;                    // Full address or "Home"

@@ -18,8 +18,9 @@ export class GoogleMapsAdapter implements MapsAdapter {
     destination: string,
     eventStartISO: string,
     avoidHighways = false,
+    departureISO = '',
   ): Promise<NavigationResult | null> {
-    const raw = await googleFetchTravelTime(destination, eventStartISO, avoidHighways);
+    const raw = await googleFetchTravelTime(destination, eventStartISO, avoidHighways, departureISO);
     if (!raw) return null;
 
     return {
@@ -27,6 +28,7 @@ export class GoogleMapsAdapter implements MapsAdapter {
       durationMinutes: raw.durationMinutes,
       distanceKm:      raw.distanceKm,
       leaveByMs:       raw.leaveByMs,
+      leaveByLabel:    raw.leaveByLabel,
       summary:         raw.summary,
       provider:        'google_maps',
     };

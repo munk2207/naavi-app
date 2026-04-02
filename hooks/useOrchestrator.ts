@@ -173,9 +173,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         if (action.type === 'FETCH_TRAVEL_TIME') {
           const destination   = String(action.destination   ?? '').trim();
           const eventStartISO = String(action.eventStartISO ?? '').trim();
+          const departureISO  = String(action.departureISO  ?? '').trim();
           if (destination) {
             try {
-              const result = await registry.maps.fetchTravelTime(destination, eventStartISO, avoidHighways);
+              const result = await registry.maps.fetchTravelTime(destination, eventStartISO, avoidHighways, departureISO);
               if (result) turnNav.push(result);
             } catch (err) {
               console.error('[Orchestrator] FETCH_TRAVEL_TIME failed:', err);
