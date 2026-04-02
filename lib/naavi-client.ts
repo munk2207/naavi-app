@@ -145,13 +145,10 @@ function buildSystemPrompt(language: 'en' | 'fr', briefItems: BriefItem[], healt
 
   // Current time in Toronto with correct UTC offset (handles EDT/EST automatically)
   const torontoStr = now.toLocaleString('sv-SE', { timeZone: 'America/Toronto' }).replace(' ', 'T');
-  const offsetMinutes = -new Date(torontoStr).getTimezoneOffset
-    ? (() => {
-        const utcMs = now.getTime();
-        const torontoMs = new Date(torontoStr + 'Z').getTime();
-        return Math.round((torontoMs - utcMs) / 60000);
-      })()
-    : -300;
+  // Compute offset by comparing Toronto wall time vs UTC ms — avoids getTimezoneOffset() bug
+  const utcMs = now.getTime();
+  const torontoMs = new Date(torontoStr + 'Z').getTime();
+  const offsetMinutes = Math.round((torontoMs - utcMs) / 60000);
   const offsetSign = offsetMinutes >= 0 ? '+' : '-';
   const offsetAbs = Math.abs(offsetMinutes);
   const torontoOffset = `${offsetSign}${String(Math.floor(offsetAbs / 60)).padStart(2,'0')}:${String(offsetAbs % 60).padStart(2,'0')}`;
