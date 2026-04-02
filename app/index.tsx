@@ -529,7 +529,7 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [brief]);
 
-  const { status, turns, error, send, loadHistory } = useOrchestrator('en', brief);
+  const { status, turns, error, send, loadHistory } = useOrchestrator('en', brief, avoidHighwaysRef.current);
 
   // Re-check highway preference after each turn so DELETE_MEMORY takes effect immediately
   useEffect(() => {

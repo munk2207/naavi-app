@@ -16,6 +16,29 @@ export interface TravelTime {
   summary: string;   // e.g. "🚗 25 min — leave by 9:35 AM"
 }
 
+// ─── Get stored home address from knowledge fragments ─────────────────────────
+
+async function getStoredHomeAddress(): Promise<string | null> {
+  if (!supabase) return null;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user?.id) return null;
+    const { data } = await supabase
+      .from('knowledge_fragments')
+      .select('content')
+      .eq('user_id', session.user.id)
+      .or('content.ilike.%home address%,content.ilike.%i live at%,content.ilike.%my address%,content.ilike.%home is at%')
+      .limit(1)
+      .single();
+    if (!data?.content) return null;
+    // Extract the address portion after common phrases
+    const match = data.content.match(/(?:home address is|i live at|my address is|home is at)\s+(.+)/i);
+    return match ? match[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Get browser geolocation ──────────────────────────────────────────────────
 
 function getCurrentLocation(): Promise<{ lat: number; lng: number } | null> {
@@ -36,18 +59,24 @@ function getCurrentLocation(): Promise<{ lat: number; lng: number } | null> {
 
 export async function fetchTravelTime(
   destination: string,
-  eventStartISO: string
+  eventStartISO: string,
+  avoidHighways = false
 ): Promise<TravelTime | null> {
   if (!supabase || !destination.trim()) return null;
 
   try {
-    const location = await getCurrentLocation();
+    const [location, homeAddress] = await Promise.all([
+      getCurrentLocation(),
+      getStoredHomeAddress(),
+    ]);
 
     const { data, error } = await supabase.functions.invoke('get-travel-time', {
       body: {
         destination,
         originLat: location?.lat,
         originLng: location?.lng,
+        originAddress: (!location && homeAddress) ? homeAddress : undefined,
+        avoidHighways,
       },
     });
 
