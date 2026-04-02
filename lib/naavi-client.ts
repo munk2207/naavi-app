@@ -375,6 +375,16 @@ export async function sendToNaavi(
   ]);
   const knowledgeContext = formatFragmentsForContext(knowledgeFragments, isBroadQuery);
   const system = buildSystemPrompt(language, briefItems, healthContext, knowledgeContext);
+
+  // For broad knowledge queries inject the list directly into the user message so
+  // Claude is explicitly instructed to read every item aloud — not reference "above".
+  if (isBroadQuery && knowledgeFragments.length > 0) {
+    const itemLines = knowledgeFragments.map(f => `- ${f.content}`).join('\n');
+    messages[messages.length - 1] = {
+      role: 'user' as const,
+      content: `${userMessage}\n\n[These are the EXACT items you must read to Robert one by one — do not say "listed above", copy every single one into your speech field:\n${itemLines}]`,
+    };
+  }
   let rawText: string;
 
   if (isSupabaseConfigured()) {

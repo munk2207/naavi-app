@@ -24,12 +24,20 @@ serve(async (req) => {
   }
 
   try {
-    const { text, voice = 'nova' } = await req.json();
+    const rawBody = await req.text();
+    console.log('[text-to-speech] raw body length:', rawBody?.length ?? 0);
+    if (!rawBody) {
+      return new Response(JSON.stringify({ error: 'Empty request body' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const { text, voice = 'shimmer' } = JSON.parse(rawBody);
     if (!text?.trim()) {
       return new Response(JSON.stringify({ error: 'Missing text' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+    console.log('[text-to-speech] voice:', voice, 'text length:', text.length);
 
     const res = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
