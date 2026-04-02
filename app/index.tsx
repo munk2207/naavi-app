@@ -986,6 +986,17 @@ export default function HomeScreen() {
           ) : null}
         </ScrollView>
 
+        {/* Recording / transcribing status */}
+        {memoState === 'recording' ? (
+          <View style={styles.statusRow}>
+            <Text style={styles.recordingHintText}>🔴 Recording… tap ⏹ when done</Text>
+          </View>
+        ) : memoState === 'transcribing' ? (
+          <View style={styles.statusRow}>
+            <Text style={styles.memoTranscriptText}>Processing…</Text>
+          </View>
+        ) : null}
+
         {/* Memo transcript preview */}
         {memoTranscript ? (
           <View style={styles.statusRow}>
@@ -1421,6 +1432,12 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: Typography.sm,
     fontWeight: Typography.semibold,
+  },
+  recordingHintText: {
+    fontSize: Typography.sm,
+    color: '#E53E3E',
+    fontWeight: Typography.semibold,
+    flex: 1,
   },
   memoTranscriptText: {
     fontSize: Typography.sm,
