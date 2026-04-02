@@ -4,3 +4,9 @@ dist/
 .env
 *.log
 package-lock.json
+mobile/
+mynaavi-website/
+web/
+.claude/
+docs/
+supabase/
