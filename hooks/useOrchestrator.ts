@@ -398,10 +398,50 @@ function sanitiseForSpeech(text: string): string {
 
 // ─── Speech helper ────────────────────────────────────────────────────────────
 
+// Cloud TTS via OpenAI — consistent voice on every browser
+async function speakCloud(text: string): Promise<void> {
+  try {
+    const { data, error } = await supabase.functions.invoke('text-to-speech', {
+      body: { text, voice: 'nova' },
+    });
+    if (error || !data?.audio) throw new Error('No audio returned');
+
+    const binary = atob(data.audio);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: 'audio/mpeg' });
+    const url = URL.createObjectURL(blob);
+
+    return new Promise((resolve) => {
+      const audio = new Audio(url);
+      audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
+      audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
+      audio.play().catch(() => resolve());
+    });
+  } catch (err) {
+    console.warn('[Speech] Cloud TTS failed, falling back to browser:', err);
+    return speakBrowserFallback(text);
+  }
+}
+
+// Browser TTS fallback (used only if cloud TTS fails)
+function speakBrowserFallback(text: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) { resolve(); return; }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.88;
+    utterance.pitch = 1.0;
+    utterance.onend = () => resolve();
+    utterance.onerror = () => resolve();
+    window.speechSynthesis.speak(utterance);
+  });
+}
+
 async function speakResponse(text: string, language: 'en' | 'fr'): Promise<void> {
   text = sanitiseForSpeech(text);
-  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.speechSynthesis) {
-    return speakWeb(text, language);
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return speakCloud(text);
   }
   await Speech.stop();
   return new Promise((resolve) => {
@@ -412,64 +452,5 @@ async function speakResponse(text: string, language: 'en' | 'fr'): Promise<void>
       onDone: resolve,
       onError: () => resolve(),
     });
-  });
-}
-
-// Preferred voices in order — first match wins across all browsers/OS
-const PREFERRED_VOICES_EN = [
-  'Microsoft Aria Online (Natural)',   // Edge / Windows — best quality
-  'Microsoft Jenny Online (Natural)',  // Edge / Windows
-  'Google UK English Female',          // Chrome
-  'Google US English',                 // Chrome fallback
-  'Samantha',                          // Safari / macOS
-  'Karen',                             // Safari / macOS AU
-];
-const PREFERRED_VOICES_FR = [
-  'Microsoft Denise Online (Natural)', // Edge / Windows
-  'Google français',                   // Chrome
-  'Amelie',                            // Safari / macOS
-];
-
-function getPreferredVoice(language: 'en' | 'fr'): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis.getVoices();
-  const list = language === 'fr' ? PREFERRED_VOICES_FR : PREFERRED_VOICES_EN;
-  for (const name of list) {
-    const match = voices.find(v => v.name === name);
-    if (match) return match;
-  }
-  // Last resort: any voice matching the language
-  const langCode = language === 'fr' ? 'fr' : 'en';
-  return voices.find(v => v.lang.startsWith(langCode)) ?? null;
-}
-
-function speakWeb(text: string, language: 'en' | 'fr'): Promise<void> {
-  return new Promise((resolve) => {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.88;
-    utterance.pitch = 1.0;
-    utterance.lang = language === 'fr' ? 'fr-CA' : 'en-CA';
-    utterance.onend = () => resolve();
-    utterance.onerror = () => resolve();
-
-    const applyVoiceAndSpeak = () => {
-      const voice = getPreferredVoice(language);
-      if (voice) {
-        utterance.voice = voice;
-        console.log('[Speech] Using voice:', voice.name);
-      }
-      window.speechSynthesis.speak(utterance);
-    };
-
-    // Voices may not be loaded yet on first call — wait for them
-    const voices = window.speechSynthesis.getVoices();
-    if (voices.length > 0) {
-      applyVoiceAndSpeak();
-    } else {
-      window.speechSynthesis.onvoiceschanged = () => {
-        window.speechSynthesis.onvoiceschanged = null;
-        applyVoiceAndSpeak();
-      };
-    }
   });
 }
