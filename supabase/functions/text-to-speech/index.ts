@@ -1,0 +1,74 @@
+/**
+ * text-to-speech Edge Function
+ *
+ * Converts text to speech using OpenAI TTS API.
+ * Returns base64-encoded MP3 audio so it plays identically
+ * on every browser (Chrome, Edge, Safari, Firefox).
+ */
+
+import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+
+  const apiKey = Deno.env.get('OPENAI_API_KEY');
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: 'OpenAI API key not configured' }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
+    const { text, voice = 'nova' } = await req.json();
+    if (!text?.trim()) {
+      return new Response(JSON.stringify({ error: 'Missing text' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const res = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'tts-1',
+        input: text,
+        voice,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      console.error('[text-to-speech] OpenAI error:', err);
+      return new Response(JSON.stringify({ error: err }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const buffer = await res.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64 = btoa(binary);
+
+    return new Response(JSON.stringify({ audio: base64 }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[text-to-speech] Error:', msg);
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+});

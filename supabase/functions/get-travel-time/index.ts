@@ -2,13 +2,16 @@
  * get-travel-time Edge Function
  *
  * Returns driving duration from origin to destination using
- * Google Maps Distance Matrix API. Origin is the user's current
+ * Google Maps Directions API. Origin is the user's current
  * location (lat/lng from browser geolocation).
+ *
+ * Uses Directions API (not Distance Matrix) so avoid=highways
+ * matches the exact same routing Google Maps shows.
  */
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 
-const DISTANCE_MATRIX_URL = 'https://maps.googleapis.com/maps/api/distancematrix/json';
+const DIRECTIONS_URL = 'https://maps.googleapis.com/maps/api/directions/json';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,9 +42,9 @@ serve(async (req) => {
       ? `${originLat},${originLng}`
       : (originAddress ?? 'Ottawa,ON,Canada');
 
-    const url = new URL(DISTANCE_MATRIX_URL);
-    url.searchParams.set('origins', origin);
-    url.searchParams.set('destinations', destination);
+    const url = new URL(DIRECTIONS_URL);
+    url.searchParams.set('origin', origin);
+    url.searchParams.set('destination', destination);
     url.searchParams.set('mode', 'driving');
     url.searchParams.set('units', 'metric');
     if (avoidHighways) url.searchParams.set('avoid', 'highways');
@@ -57,16 +60,16 @@ serve(async (req) => {
       });
     }
 
-    const element = data.rows?.[0]?.elements?.[0];
-    if (!element || element.status !== 'OK') {
+    const leg = data.routes?.[0]?.legs?.[0];
+    if (!leg) {
       return new Response(JSON.stringify({ durationMinutes: null }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    const durationSeconds = element.duration.value;
+    const durationSeconds = leg.duration.value;
     const durationMinutes = Math.ceil(durationSeconds / 60);
-    const distanceKm = (element.distance.value / 1000).toFixed(1);
+    const distanceKm = (leg.distance.value / 1000).toFixed(1);
 
     console.log(`[get-travel-time] ${destination} — ${durationMinutes} min (${distanceKm} km)`);
 
