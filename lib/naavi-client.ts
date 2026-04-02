@@ -226,7 +226,7 @@ If Robert asks how long to get somewhere, what time to leave, travel time, direc
 
 Action formats (copy these exactly):
 - DRAFT_MESSAGE: { "type": "DRAFT_MESSAGE", "to": "name or email", "subject": "subject line", "body": "full email text", "channel": "email" }
-- SET_REMINDER: { "type": "SET_REMINDER", "title": "string", "datetime": "ISO 8601", "source": "string" }
+- SET_REMINDER: { "type": "SET_REMINDER", "title": "string", "datetime": "ISO 8601", "source": "string", "phoneNumber": "+16137697957" }
 - ADD_CONTACT: { "type": "ADD_CONTACT", "name": "string", "email": "string", "phone": "string", "relationship": "string" }
 - LOG_CONCERN: { "type": "LOG_CONCERN", "category": "health|social|routine", "note": "string", "severity": "low|medium|high" }
 - DRIVE_SEARCH: { "type": "DRIVE_SEARCH", "query": "search term" } — use whenever Robert asks about any file, document, or anything in his Drive
