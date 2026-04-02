@@ -20,21 +20,19 @@ import type { Email, EmailDraft } from '../../types';
 
 function rawToEmail(raw: GmailMessageRow): Email {
   return {
-    id:          `email_${raw.gmail_message_id ?? Date.now()}`,
+    id:          `email_${raw.gmail_message_id}`,
     from: {
-      name:  raw.sender_name  ?? raw.from_name  ?? '',
-      email: raw.sender_email ?? raw.from_email ?? '',
+      name:  raw.sender_name  ?? '',
+      email: raw.sender_email ?? '',
     },
-    to: raw.to
-      ? (Array.isArray(raw.to) ? raw.to : [{ name: '', email: raw.to }])
-      : [],
+    to:          [],
     subject:     raw.subject    ?? '',
-    bodyText:    raw.body_text  ?? raw.body ?? raw.snippet ?? '',
-    summary:     raw.summary    ?? raw.snippet ?? '',
-    isImportant: raw.is_important ?? raw.important ?? false,
-    isRead:      raw.is_read    ?? raw.read ?? false,
-    receivedAt:  raw.received_at ?? raw.date ?? new Date().toISOString(),
-    threadId:    raw.thread_id,
+    bodyText:    raw.snippet    ?? '',
+    summary:     raw.snippet    ?? '',
+    isImportant: raw.is_important ?? false,
+    isRead:      !raw.is_unread,
+    receivedAt:  raw.received_at ?? new Date().toISOString(),
+    threadId:    undefined,
     provider:    'gmail',
   };
 }
@@ -50,7 +48,18 @@ export class GoogleEmailAdapter implements EmailAdapter {
 
   async fetchFromPerson(name: string, userId: string): Promise<Email[]> {
     const raw = await gmailFetchFromPerson(name, userId);
-    return raw.map(rawToEmail);
+    return raw.map(r => ({
+      id:          `email_${Date.now()}`,
+      from:        { name: r.sender_name ?? '', email: r.sender_email ?? '' },
+      to:          [],
+      subject:     r.subject    ?? '',
+      bodyText:    r.snippet    ?? '',
+      summary:     r.snippet    ?? '',
+      isImportant: false,
+      isRead:      !r.is_unread,
+      receivedAt:  r.received_at ?? new Date().toISOString(),
+      provider:    'gmail' as const,
+    }));
   }
 
   async send(draft: EmailDraft): Promise<{ success: boolean; error?: string }> {
