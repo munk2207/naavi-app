@@ -1,0 +1,50 @@
+[functions.search-google-drive]
+verify_jwt = false
+
+[functions.send-drive-file]
+verify_jwt = false
+
+[functions.send-email]
+verify_jwt = false
+
+[functions.create-calendar-event]
+verify_jwt = false
+
+[functions.delete-calendar-event]
+verify_jwt = false
+
+[functions.save-push-subscription]
+verify_jwt = false
+
+[functions.send-push-notification]
+verify_jwt = false
+
+[functions.transcribe-memo]
+verify_jwt = false
+
+[functions.save-to-drive]
+verify_jwt = false
+
+[functions.lookup-contact]
+verify_jwt = false
+
+[functions.get-travel-time]
+verify_jwt = false
+
+[functions.ingest-note]
+verify_jwt = false
+
+[functions.search-knowledge]
+verify_jwt = false
+
+[functions.upload-conversation]
+verify_jwt = false
+
+[functions.poll-conversation]
+verify_jwt = false
+
+[functions.extract-actions]
+verify_jwt = false
+
+[functions.get-realtime-token]
+verify_jwt = false

@@ -8,10 +8,14 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
+import { Platform } from 'react-native';
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '@/lib/supabase';
 import { saveToDrive } from '@/lib/drive';
 import { saveDriveNote } from '@/lib/supabase';
 import { ingestNote } from '@/lib/knowledge';
+import { registry } from '@/lib/adapters/registry';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -84,6 +88,7 @@ export function useConversationRecorder(): UseConversationRecorderResult {
   const [savedDocLink, setSavedDocLink] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const nativeRecordingRef = useRef<Audio.Recording | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const transcriptIdRef = useRef<string | null>(null);
@@ -93,11 +98,13 @@ export function useConversationRecorder(): UseConversationRecorderResult {
   const conversationTitleRef = useRef<string>('');
   const utterancesRef = useRef<Utterance[]>([]);
 
-  const isSupported =
-    typeof window !== 'undefined' &&
-    typeof navigator !== 'undefined' &&
-    !!navigator.mediaDevices?.getUserMedia &&
-    typeof MediaRecorder !== 'undefined';
+  // Native is always supported via expo-av; web requires MediaRecorder
+  const isSupported = Platform.OS !== 'web'
+    ? true
+    : (typeof window !== 'undefined' &&
+       typeof navigator !== 'undefined' &&
+       !!navigator.mediaDevices?.getUserMedia &&
+       typeof MediaRecorder !== 'undefined');
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -117,7 +124,7 @@ export function useConversationRecorder(): UseConversationRecorderResult {
 
   const languageRef = useRef<string | undefined>(undefined);
 
-  const startRecording = useCallback((language?: string) => {
+  const startRecording = useCallback(async (language?: string) => {
     if (!isSupported) { setError('Audio recording not supported in this browser.'); return; }
 
     languageRef.current = language;
@@ -125,6 +132,34 @@ export function useConversationRecorder(): UseConversationRecorderResult {
     chunksRef.current = [];
     setElapsedSeconds(0);
 
+    // ── Native (Android/iOS) via expo-av ──────────────────────────────────────
+    if (Platform.OS !== 'web') {
+      try {
+        const { status } = await Audio.requestPermissionsAsync();
+        if (status !== 'granted') { setError('Microphone permission denied.'); return; }
+
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+
+        const recording = new Audio.Recording();
+        await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+        await recording.startAsync();
+        nativeRecordingRef.current = recording;
+        setConvState('recording');
+
+        timerRef.current = setInterval(() => {
+          setElapsedSeconds(s => s + 1);
+        }, 1000);
+      } catch (err) {
+        console.error('[useConversationRecorder] Native mic error:', err);
+        setError('Microphone error. Please try again.');
+      }
+      return;
+    }
+
+    // ── Web via MediaRecorder ─────────────────────────────────────────────────
     navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
       const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
 
@@ -136,7 +171,6 @@ export function useConversationRecorder(): UseConversationRecorderResult {
       mediaRecorderRef.current = recorder;
       setConvState('recording');
 
-      // elapsed timer
       timerRef.current = setInterval(() => {
         setElapsedSeconds(s => s + 1);
       }, 1000);
@@ -149,11 +183,55 @@ export function useConversationRecorder(): UseConversationRecorderResult {
 
   // ── Stop recording → upload ───────────────────────────────────────────────
 
-  const stopRecording = useCallback(() => {
+  const stopRecording = useCallback(async () => {
+    clearTimers();
+
+    // ── Native stop ───────────────────────────────────────────────────────────
+    if (Platform.OS !== 'web') {
+      const recording = nativeRecordingRef.current;
+      if (!recording) return;
+
+      try {
+        await recording.stopAndUnloadAsync();
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+        const uri = recording.getURI();
+        nativeRecordingRef.current = null;
+
+        if (!uri) throw new Error('No recording URI');
+        setConvState('uploading');
+
+        const info = await FileSystem.getInfoAsync(uri);
+        if (!info.exists || (info as any).size < 2000) {
+          throw new Error('Recording too short — please record at least a few seconds.');
+        }
+
+        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' as any });
+        FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+
+        if (!supabase) throw new Error('Supabase not configured');
+
+        const { data, error } = await supabase.functions.invoke('upload-conversation', {
+          body: { audio: base64, mimeType: 'audio/m4a', language: languageRef.current },
+        });
+
+        if (error || !data?.transcript_id) {
+          throw new Error(error?.message ?? 'Upload failed');
+        }
+
+        transcriptIdRef.current = data.transcript_id;
+        setConvState('transcribing');
+        pollTimerRef.current = setInterval(async () => { await pollTranscription(); }, 4000);
+
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Upload failed';
+        setError(msg);
+      }
+      return;
+    }
+
+    // ── Web stop ──────────────────────────────────────────────────────────────
     const recorder = mediaRecorderRef.current;
     if (!recorder || recorder.state === 'inactive') return;
-
-    clearTimers();
 
     recorder.onstop = async () => {
       recorder.stream.getTracks().forEach(t => t.stop());
@@ -161,13 +239,10 @@ export function useConversationRecorder(): UseConversationRecorderResult {
 
       try {
         const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        console.log('[ConvRecorder] Audio size:', audioBlob.size, 'bytes');
-
         if (audioBlob.size < 2000) {
           throw new Error('Recording too short — please record at least a few seconds.');
         }
 
-        // base64 encode
         const arrayBuffer = await audioBlob.arrayBuffer();
         const bytes = new Uint8Array(arrayBuffer);
         let binary = '';
@@ -185,13 +260,8 @@ export function useConversationRecorder(): UseConversationRecorderResult {
         }
 
         transcriptIdRef.current = data.transcript_id;
-        console.log('[ConvRecorder] Transcript ID:', data.transcript_id);
         setConvState('transcribing');
-
-        // Start polling
-        pollTimerRef.current = setInterval(async () => {
-          await pollTranscription();
-        }, 4000);
+        pollTimerRef.current = setInterval(async () => { await pollTranscription(); }, 4000);
 
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Upload failed';
@@ -274,6 +344,31 @@ export function useConversationRecorder(): UseConversationRecorderResult {
       const extracted: ConversationAction[] = data?.actions ?? [];
       setActions(extracted);
 
+      // Step 1b — auto-create calendar events for appointments, meetings, prescriptions, tests
+      const calendarTypes = ['appointment', 'meeting', 'call', 'test', 'prescription', 'follow_up'];
+      for (const action of extracted) {
+        if (calendarTypes.includes(action.type) && (action.calendar_title || action.title)) {
+          try {
+            const eventTitle = action.calendar_title || action.title;
+            // Use tomorrow at 9 AM as default if no specific time mentioned
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            tomorrow.setHours(9, 0, 0, 0);
+            const end = new Date(tomorrow.getTime() + 60 * 60 * 1000); // 1 hour
+            await registry.calendar.createEvent({
+              title:       eventTitle,
+              description: `${action.description}\n\nTiming: ${action.timing}\nSuggested by: ${action.suggested_by}`,
+              startISO:    tomorrow.toISOString(),
+              endISO:      end.toISOString(),
+              attendees:   [],
+            });
+            console.log('[ConvRecorder] Auto-created calendar event:', eventTitle);
+          } catch (err) {
+            console.error('[ConvRecorder] Failed to create event:', action.title, err);
+          }
+        }
+      }
+
       // Step 2 — format document content
       const date = new Date().toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
       const participants = Object.values(currentNames).filter(Boolean).join(', ') || 'Unknown speakers';
@@ -350,6 +445,7 @@ export function useConversationRecorder(): UseConversationRecorderResult {
     transcriptIdRef.current = null;
     chunksRef.current = [];
     mediaRecorderRef.current = null;
+    nativeRecordingRef.current = null;
   }, []);
 
   return {
