@@ -19,7 +19,9 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserName } from '@/lib/naavi-client';
+import { signOut, supabase } from '@/lib/supabase';
 import { isCalendarConnected, connectGoogleCalendar, disconnectGoogleCalendar } from '@/lib/calendar';
 import { saveNotionToken, getNotionToken, removeNotionToken, hasNotionToken } from '@/lib/notion';
 import { isEpicConnected, connectEpic, disconnectEpic } from '@/lib/epic';
@@ -86,6 +88,7 @@ function ProviderChip({
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function SettingsScreen() {
+  const router = useRouter();
   const [userName, setUserName]           = useState('');
   const [userNameSaved, setUserNameSaved] = useState(false);
   const [apiKey, setApiKey]               = useState('');
@@ -451,6 +454,21 @@ export default function SettingsScreen() {
 
         <View style={styles.divider} />
 
+        {/* Sign Out */}
+        <TouchableOpacity
+          style={styles.signOutBtn}
+          onPress={() => {
+            Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Sign Out', style: 'destructive', onPress: async () => { await signOut(); router.replace('/'); } },
+            ]);
+          }}
+        >
+          <Text style={styles.signOutBtnText}>Sign Out</Text>
+        </TouchableOpacity>
+
+        <View style={styles.divider} />
+
         {/* Version */}
         <Text style={styles.version}>MyNaavi — Phase 7 build</Text>
 
@@ -473,6 +491,21 @@ function ProviderRow({ label, children }: { label: string; children: React.React
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  signOutBtn: {
+    marginHorizontal: 16,
+    marginVertical: 8,
+    paddingVertical: 14,
+    borderRadius: 10,
+    backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+  },
+  signOutBtnText: {
+    color: '#DC2626',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   safe: {
     flex: 1,
     backgroundColor: Colors.background,
