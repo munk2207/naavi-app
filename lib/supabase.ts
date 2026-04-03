@@ -42,7 +42,7 @@ export async function signInWithGoogle(): Promise<void> {
     options: {
       redirectTo,
       skipBrowserRedirect: true,
-      scopes: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly',
+      scopes: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar',
       queryParams: { access_type: 'offline', prompt: 'consent' },
     },
   });
