@@ -1,0 +1,119 @@
+/**
+ * search-knowledge Edge Function
+ *
+ * Embeds the query using OpenAI text-embedding-3-small, then runs
+ * pgvector cosine similarity search against knowledge_fragments.
+ * Updates last_retrieved_at on returned fragments.
+ *
+ * Auth: RLS-based. verify_jwt = false in config.toml.
+ */
+
+import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const OPENAI_API = 'https://api.openai.com/v1/embeddings';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+async function generateEmbedding(text: string): Promise<number[] | null> {
+  try {
+    const res = await fetch(OPENAI_API, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${Deno.env.get('OPENAI_API_KEY')!}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'text-embedding-3-small',
+        input: text,
+        dimensions: 1536,
+      }),
+    });
+    const data = await res.json();
+    return data.data?.[0]?.embedding ?? null;
+  } catch {
+    return null;
+  }
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401, headers: corsHeaders,
+    });
+  }
+
+  const userClient = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_ANON_KEY')!,
+    { global: { headers: { Authorization: authHeader } } }
+  );
+
+  const { data: { user } } = await userClient.auth.getUser();
+  if (!user) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401, headers: corsHeaders,
+    });
+  }
+
+  const url = new URL(req.url);
+  const query  = url.searchParams.get('q') ?? (await req.json().catch(() => ({}))).q;
+  const topK   = parseInt(url.searchParams.get('top_k') ?? '5');
+
+  if (!query?.trim()) {
+    return new Response(JSON.stringify({ error: 'Missing query' }), {
+      status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
+    const embedding = await generateEmbedding(query);
+    if (!embedding) {
+      return new Response(JSON.stringify({ error: 'Embedding failed' }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // pgvector cosine similarity search via Supabase RPC
+    const { data: results, error } = await userClient.rpc('search_knowledge_fragments', {
+      query_embedding: JSON.stringify(embedding),
+      match_count: topK,
+      p_user_id: user.id,
+    });
+
+    if (error) {
+      console.error('[search-knowledge] RPC error:', error.message);
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Update last_retrieved_at on returned fragments
+    if (results && results.length > 0) {
+      const ids = results.map((r: { id: string }) => r.id);
+      await userClient
+        .from('knowledge_fragments')
+        .update({ last_retrieved_at: new Date().toISOString() })
+        .in('id', ids);
+    }
+
+    console.log(`[search-knowledge] "${query}" → ${results?.length ?? 0} results`);
+
+    return new Response(JSON.stringify({ results: results ?? [] }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[search-knowledge] Error:', msg);
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+});

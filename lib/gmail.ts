@@ -82,10 +82,24 @@ export async function sendEmail(opts: {
   if (!supabase) return { success: false, error: 'Not configured' };
 
   try {
-    const { data, error } = await supabase.functions.invoke('send-email', {
-      body: opts,
-    });
-    if (error) return { success: false, error: error.message ?? 'Send failed' };
+    // Race against 15-second timeout — Edge Function sometimes hangs with no response
+    const invokePromise = supabase.functions.invoke('send-email', { body: opts });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Connection timed out — please try again')), 15000)
+    );
+    const { data, error } = await Promise.race([invokePromise, timeoutPromise]);
+    if (error) {
+      // Try to extract the real server error message
+      let detail = error.message ?? 'Send failed';
+      try {
+        const ctx = (error as any)?.context;
+        if (ctx) {
+          const json = await ctx.json?.();
+          if (json?.error) detail = json.error;
+        }
+      } catch {}
+      return { success: false, error: detail };
+    }
     return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };

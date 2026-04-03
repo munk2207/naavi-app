@@ -14,6 +14,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system/legacy';
 import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
 import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
 import { sendPushNotification } from '@/lib/push';
@@ -398,26 +400,23 @@ function sanitiseForSpeech(text: string): string {
 
 // ─── Speech helper ────────────────────────────────────────────────────────────
 
-// Fetch TTS audio for a single chunk — returns an object URL or null
-async function fetchTTSChunk(chunk: string): Promise<string | null> {
+// Fetch TTS audio as base64 from OpenAI sage voice
+async function fetchTTSBase64(chunk: string): Promise<string | null> {
   try {
     const { data, error } = await supabase.functions.invoke('text-to-speech', {
-      body: { text: chunk, voice: 'sage' },
+      body: { text: chunk, voice: 'nova' },
     });
     if (error || !data?.audio) return null;
-    const binary = atob(data.audio);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const blob = new Blob([bytes], { type: 'audio/mpeg' });
-    return URL.createObjectURL(blob);
+    return data.audio as string;
   } catch {
     return null;
   }
 }
 
+// ── Web playback ──────────────────────────────────────────────────────────────
 function playAudioUrl(url: string): Promise<void> {
   return new Promise((resolve) => {
-    const audio = new Audio(url);
+    const audio = new (window as any).Audio(url);
     audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
     audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
     audio.play().catch(() => resolve());
@@ -425,27 +424,33 @@ function playAudioUrl(url: string): Promise<void> {
 }
 
 async function speakCloud(text: string): Promise<void> {
+  const chunks = text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 0)
+    .reduce<string[]>((acc, s) => {
+      if (acc.length > 0 && acc[acc.length - 1].length < 20) {
+        acc[acc.length - 1] += ' ' + s;
+      } else {
+        acc.push(s);
+      }
+      return acc;
+    }, []);
+  if (chunks.length === 0) return;
   try {
-    const chunks = text
-      .split(/(?<=[.!?])\s+|\n+/)
-      .map(s => s.trim())
-      .filter(s => s.length > 0)
-      .reduce<string[]>((acc, s) => {
-        if (acc.length > 0 && acc[acc.length - 1].length < 20) {
-          acc[acc.length - 1] += ' ' + s;
-        } else {
-          acc.push(s);
-        }
-        return acc;
-      }, []);
-    if (chunks.length === 0) return;
-    const audioPromises = chunks.map(chunk => fetchTTSChunk(chunk));
+    const audioPromises = chunks.map(chunk => fetchTTSBase64(chunk));
     for (const promise of audioPromises) {
-      const url = await promise;
-      if (url) await playAudioUrl(url);
+      const base64 = await promise;
+      if (!base64) continue;
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'audio/mpeg' });
+      const url = URL.createObjectURL(blob);
+      await playAudioUrl(url);
     }
   } catch {
-    // silent fail — browser TTS fallback
+    // Browser TTS fallback
     return new Promise((resolve) => {
       if (typeof window === 'undefined' || !window.speechSynthesis) { resolve(); return; }
       window.speechSynthesis.cancel();
@@ -458,19 +463,86 @@ async function speakCloud(text: string): Promise<void> {
   }
 }
 
+// ── Native playback ───────────────────────────────────────────────────────────
+async function playBase64AudioNative(base64: string): Promise<void> {
+  const tempUri = (FileSystem.cacheDirectory ?? '') + `tts_${Date.now()}.mp3`;
+  try {
+    await FileSystem.writeAsStringAsync(tempUri, base64, {
+      encoding: 'base64' as any,
+    });
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true,
+    });
+    const sound = new Audio.Sound();
+    await new Promise<void>((resolve, reject) => {
+      // Safety timeout — if playback never completes, resolve after 30s
+      const safetyTimer = setTimeout(() => resolve(), 30000);
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          clearTimeout(safetyTimer);
+          sound.unloadAsync().then(() => {
+            FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+            resolve();
+          });
+        }
+        // If loading failed, reject so the caller can fall back to expo-speech
+        if (!status.isLoaded && (status as any).error) {
+          clearTimeout(safetyTimer);
+          reject(new Error((status as any).error));
+        }
+      });
+      sound.loadAsync({ uri: tempUri })
+        .then(() => sound.playAsync())
+        .catch((err) => { clearTimeout(safetyTimer); reject(err); });
+    });
+  } catch (err) {
+    console.error('[TTS Native] playback error:', err);
+    FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+    throw err; // Re-throw so speakCloudNative falls back to expo-speech
+  }
+}
+
+async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<void> {
+  const chunks = text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 0)
+    .reduce<string[]>((acc, s) => {
+      if (acc.length > 0 && acc[acc.length - 1].length < 20) {
+        acc[acc.length - 1] += ' ' + s;
+      } else {
+        acc.push(s);
+      }
+      return acc;
+    }, []);
+  if (chunks.length === 0) return;
+  try {
+    const audioPromises = chunks.map(chunk => fetchTTSBase64(chunk));
+    for (const promise of audioPromises) {
+      const base64 = await promise;
+      if (base64) await playBase64AudioNative(base64);
+    }
+  } catch (err) {
+    // Fall back to expo-speech if cloud TTS fails
+    console.error('[TTS Native] cloud TTS failed, using expo-speech:', err);
+    await Speech.stop();
+    return new Promise((resolve) => {
+      Speech.speak(text, {
+        language: language === 'fr' ? 'fr-CA' : 'en-CA',
+        rate: 0.85,
+        onDone: resolve,
+        onError: () => resolve(),
+      });
+    });
+  }
+}
+
 async function speakResponse(text: string, language: 'en' | 'fr'): Promise<void> {
   text = sanitiseForSpeech(text);
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  if (Platform.OS === 'web') {
     return speakCloud(text);
   }
-  await Speech.stop();
-  return new Promise((resolve) => {
-    Speech.speak(text, {
-      language: language === 'fr' ? 'fr-CA' : 'en-CA',
-      rate: 0.85,
-      pitch: 1.0,
-      onDone: resolve,
-      onError: () => resolve(),
-    });
-  });
+  return speakCloudNative(text, language);
 }

@@ -7,10 +7,49 @@ import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as Linking from 'expo-linking';
 import '../lib/i18n'; // Initialise i18n before any screen renders
 import { Colors } from '@/constants/Colors';
+import { supabase } from '@/lib/supabase';
+
+// Handle Google OAuth deep link callback (naavi://auth/callback#access_token=...)
+async function handleAuthCallback(url: string) {
+  if (!url.includes('auth/callback')) return;
+  const fragment = url.includes('#') ? url.split('#')[1] : url.split('?')[1] ?? '';
+  const params = new URLSearchParams(fragment);
+  const access_token           = params.get('access_token');
+  const refresh_token          = params.get('refresh_token');
+  const provider_refresh_token = params.get('provider_refresh_token');
+
+  if (access_token && refresh_token && supabase) {
+    // Set the Supabase session so the user is logged in
+    await supabase.auth.setSession({ access_token, refresh_token });
+
+    // Get the Google refresh token — first try the URL, then the session object
+    // Supabase doesn't always include it in the URL so session is more reliable
+    let googleToken = provider_refresh_token;
+    if (!googleToken) {
+      const { data } = await supabase.auth.getSession();
+      googleToken = data?.session?.provider_refresh_token ?? null;
+    }
+
+    if (googleToken) {
+      supabase.functions.invoke('store-google-token', {
+        body: { refresh_token: googleToken },
+      }).catch(() => {});
+    }
+  }
+}
 
 export default function RootLayout() {
+  useEffect(() => {
+    // Listen for deep links while app is open
+    const sub = Linking.addEventListener('url', ({ url }) => handleAuthCallback(url));
+    // Handle deep link that launched the app
+    Linking.getInitialURL().then(url => { if (url) handleAuthCallback(url); });
+    return () => sub.remove();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <StatusBar style="light" backgroundColor={Colors.primary} />
