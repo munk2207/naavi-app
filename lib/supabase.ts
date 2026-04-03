@@ -7,6 +7,8 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import { Platform } from 'react-native';
+import * as Linking from 'expo-linking';
 
 const SUPABASE_URL     = process.env.EXPO_PUBLIC_SUPABASE_URL     ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -17,6 +19,40 @@ export const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
 
 export function isSupabaseConfigured(): boolean {
   return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+}
+
+// ─── Google Sign-In ───────────────────────────────────────────────────────────
+
+export async function signInWithGoogle(): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured');
+
+  const redirectTo = Platform.OS === 'web'
+    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/callback`
+    : Linking.createURL('auth/callback');
+
+  if (Platform.OS === 'web') {
+    await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } });
+    return;
+  }
+
+  // Native: open system browser — app handles callback via deep link in _layout.tsx
+  // access_type=offline + prompt=consent ensures Google returns a refresh token
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo,
+      skipBrowserRedirect: true,
+      scopes: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly',
+      queryParams: { access_type: 'offline', prompt: 'consent' },
+    },
+  });
+  if (error || !data.url) throw new Error(error?.message ?? 'No auth URL');
+  await Linking.openURL(data.url);
+}
+
+export async function signOut(): Promise<void> {
+  if (!supabase) return;
+  await supabase.auth.signOut();
 }
 
 // ─── Edge Function call ────────────────────────────────────────────────────────

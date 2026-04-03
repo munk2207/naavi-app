@@ -7,6 +7,7 @@
  */
 
 import { supabase } from './supabase';
+import * as Location from 'expo-location';
 
 export interface TravelTime {
   durationMinutes: number;
@@ -40,20 +41,28 @@ async function getStoredHomeAddress(): Promise<string | null> {
   }
 }
 
-// ─── Get browser geolocation ──────────────────────────────────────────────────
+// ─── Get device geolocation (Android-safe via expo-location) ─────────────────
 
-function getCurrentLocation(): Promise<{ lat: number; lng: number } | null> {
-  return new Promise((resolve) => {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      resolve(null);
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => resolve(null),
-      { timeout: 10000, enableHighAccuracy: true, maximumAge: 0 }
-    );
-  });
+async function getCurrentLocation(): Promise<{ lat: number; lng: number } | null> {
+  try {
+    // Request permission — on Android this shows the system permission dialog
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') return null;
+
+    // Try cached position first (instant) — good enough for driving directions
+    const last = await Location.getLastKnownPositionAsync({ maxAge: 60000 });
+    if (last) return { lat: last.coords.latitude, lng: last.coords.longitude };
+
+    // No cache — get fresh position with a timeout
+    const fresh = await Promise.race([
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 10000)),
+    ]);
+    if (!fresh) return null;
+    return { lat: (fresh as Location.LocationObject).coords.latitude, lng: (fresh as Location.LocationObject).coords.longitude };
+  } catch {
+    return null;
+  }
 }
 
 // ─── Fetch travel time for a destination ─────────────────────────────────────

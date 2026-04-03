@@ -56,7 +56,7 @@ function emailToBriefItem(email: Email): BriefItem {
 import { fetchOttawaWeather } from '@/lib/weather';
 import { sendDriveFileAsEmail } from '@/lib/drive';
 import { lookupContact } from '@/lib/contacts';
-import { saveContact, loadTodayConversation } from '@/lib/supabase';
+import { saveContact, loadTodayConversation, signInWithGoogle, signOut } from '@/lib/supabase';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
@@ -296,12 +296,11 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
       const contact = await lookupContact(to);
       if (contact?.email) {
         to = contact.email;
-      } else if (typeof window !== 'undefined') {
-        const entered = window.prompt(`No email found for ${to}. Enter email address:`);
-        if (!entered?.trim()) { setSending(false); return; }
-        to = entered.trim();
-        // Save for future lookups
-        await saveContact({ name: String(action.to ?? '').trim(), email: to, phone: '', relationship: 'contact' });
+      } else {
+        // No email found — show error instead of crashing on Android with window.prompt
+        setSending(false);
+        setSendError(`No email address found for ${to}. Try saying "Remember Hussein's email is hussein@example.com" first.`);
+        return;
       }
     }
 
@@ -369,6 +368,8 @@ export default function HomeScreen() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [navAlert, setNavAlert] = useState<{ title: string; location: string; startMs: number } | null>(null);
   const [showIntegrations, setShowIntegrations] = useState(false);
+  const [isSignedIn, setIsSignedIn] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [recordingPrompt, setRecordingPrompt] = useState<{ title: string; endMs: number } | null>(null);
 
@@ -383,7 +384,7 @@ export default function HomeScreen() {
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       console.log('[Home] getSession:', session?.user?.id ?? 'none');
-      if (session?.user) setCurrentUserId(session.user.id);
+      if (session?.user) { setCurrentUserId(session.user.id); setIsSignedIn(true); }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -392,7 +393,8 @@ export default function HomeScreen() {
         if (event === 'SIGNED_IN' && session?.provider_refresh_token) {
           await captureAndStoreGoogleToken();
         }
-        if (session?.user) setCurrentUserId(session.user.id);
+        if (session?.user) { setCurrentUserId(session.user.id); setIsSignedIn(true); }
+        if (event === 'SIGNED_OUT') { setCurrentUserId(null); setIsSignedIn(false); }
       }
     );
     return () => subscription.unsubscribe();
@@ -553,9 +555,13 @@ export default function HomeScreen() {
       const nav = lastTurn.navigationResults[0];
       const avoid = avoidHighwaysRef.current ? '&avoid=highways' : '';
       const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(nav.destination)}&travelmode=driving${avoid}`;
-      const a = document.createElement('a');
-      a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      if (Platform.OS === 'web') {
+        const a = document.createElement('a');
+        a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      } else {
+        Linking.openURL(url).catch(() => {});
+      }
     }
   }, [turns]);
 
@@ -810,6 +816,28 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Sign-in banner — only shown when not signed in on native */}
+          {!currentUserId && (
+            <TouchableOpacity
+              style={styles.signInBanner}
+              onPress={async () => {
+                try {
+                  setSigningIn(true);
+                  await signInWithGoogle();
+                } catch (e) {
+                  console.error('[SignIn]', e);
+                } finally {
+                  setSigningIn(false);
+                }
+              }}
+              disabled={signingIn}
+            >
+              <Text style={styles.signInBannerText}>
+                {signingIn ? 'Signing in…' : '🔑  Sign in with Google to unlock calendar, email & preferences'}
+              </Text>
+            </TouchableOpacity>
+          )}
 
           {/* Morning brief — grouped by category */}
           {turns.length === 0 && (
@@ -1230,6 +1258,21 @@ const styles = StyleSheet.create({
   },
   notesBtnText: {
     fontSize: 18,
+  },
+  signInBanner: {
+    backgroundColor: '#1a3a5c',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#C9922A',
+  },
+  signInBannerText: {
+    color: '#C9922A',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   settingsBtn: {
     width: 38,
