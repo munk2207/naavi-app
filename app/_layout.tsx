@@ -4,10 +4,12 @@
  */
 
 import { useEffect } from 'react';
-import { Stack } from 'expo-router';
+import { Platform } from 'react-native';
+import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
+import * as Notifications from 'expo-notifications';
 import '../lib/i18n'; // Initialise i18n before any screen renders
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
@@ -47,6 +49,24 @@ export default function RootLayout() {
     const sub = Linking.addEventListener('url', ({ url }) => handleAuthCallback(url));
     // Handle deep link that launched the app
     Linking.getInitialURL().then(url => { if (url) handleAuthCallback(url); });
+
+    // Android: set up notification channel and handle notification taps
+    if (Platform.OS === 'android') {
+      // Handle tap on a notification when the app is in the foreground or background
+      const notifSub = Notifications.addNotificationResponseReceivedListener((response) => {
+        const url = response.notification.request.content.data?.url as string | undefined;
+        if (url) {
+          // Route to the deep link embedded in the notification (e.g. naavi://brief)
+          Linking.openURL(url).catch(() => router.replace('/'));
+        }
+      });
+
+      return () => {
+        sub.remove();
+        notifSub.remove();
+      };
+    }
+
     return () => sub.remove();
   }, []);
 
@@ -74,6 +94,10 @@ export default function RootLayout() {
           name="notes"
           options={{ title: 'My Notes', headerShown: true }}
         />
+        {/* Google Assistant App Action deep link screens — transient, no header */}
+        <Stack.Screen name="brief"    options={{ headerShown: false }} />
+        <Stack.Screen name="calendar" options={{ headerShown: false }} />
+        <Stack.Screen name="contacts" options={{ headerShown: false }} />
       </Stack>
     </SafeAreaProvider>
   );

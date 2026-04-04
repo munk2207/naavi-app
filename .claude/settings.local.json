@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(cmd.exe /c \"node --version && npm --version\")",
+      "Bash(pandoc --version)",
+      "Bash(npx vercel:*)",
+      "WebFetch(domain:naavi-app.vercel.app)"
+    ]
+  }
+}

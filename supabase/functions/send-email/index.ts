@@ -41,11 +41,24 @@ function toBase64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+/**
+ * RFC 2047 — encode a header value that may contain non-ASCII characters.
+ * Email clients cannot read raw UTF-8 in headers, so special characters
+ * (em dashes, curly quotes, accented letters, etc.) must be wrapped in
+ * the =?UTF-8?B?...?= format before being placed in the Subject line.
+ */
+function encodeEmailHeader(value: string): string {
+  if (/^[\x00-\x7F]*$/.test(value)) return value; // pure ASCII — no encoding needed
+  let binary = '';
+  for (const b of new TextEncoder().encode(value)) binary += String.fromCharCode(b);
+  return `=?UTF-8?B?${btoa(binary)}?=`;
+}
+
 function buildPlainEmail(to: string, subject: string, body: string): string {
   const nl = '\r\n';
   const raw = [
     `To: ${to}`,
-    `Subject: ${subject}`,
+    `Subject: ${encodeEmailHeader(subject)}`,
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=UTF-8',
     '',
