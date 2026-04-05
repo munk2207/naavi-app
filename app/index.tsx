@@ -675,6 +675,7 @@ export default function HomeScreen() {
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={90}
+        enabled={Platform.OS === 'ios'}
       >
         {/* Navigation alert banner */}
         {navAlert && (
