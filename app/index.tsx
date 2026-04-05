@@ -391,7 +391,10 @@ export default function HomeScreen() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('[Home] onAuthStateChange:', event, 'user:', session?.user?.id ?? 'none');
-        if (event === 'SIGNED_IN' && session?.provider_refresh_token) {
+        // Capture token on SIGNED_IN or TOKEN_REFRESHED — Supabase fires either
+        // depending on whether the user was already authenticated
+        if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.provider_refresh_token) {
+          console.log('[Home] Capturing Google token for event:', event, 'refresh_token present:', !!session.provider_refresh_token);
           await captureAndStoreGoogleToken(session.provider_refresh_token);
         }
         if (session?.user) { setCurrentUserId(session.user.id); setIsSignedIn(true); }
