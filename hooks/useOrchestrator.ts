@@ -142,15 +142,25 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         if (action.type === 'REMEMBER') {
           const text = String(action.text ?? '');
           if (text) {
+            // Push immediately so the card is included in newTurn below
+            turnMemory.push({ text, count: 0 });
+            // Save in background — update count once done
             ingestNote(text, 'stated').then(fragments => {
-              turnMemory.push({ text, count: fragments.length });
               setTurns(prev => {
                 const updated = [...prev];
                 const last = updated[updated.length - 1];
-                if (last) updated[updated.length - 1] = { ...last, rememberedItems: [...last.rememberedItems, { text, count: fragments.length }] };
-                return updated;
+                if (!last) return prev;
+                return [
+                  ...updated.slice(0, -1),
+                  {
+                    ...last,
+                    rememberedItems: last.rememberedItems.map(item =>
+                      item.text === text ? { ...item, count: fragments.length } : item
+                    ),
+                  },
+                ];
               });
-            });
+            }).catch(() => {});
           }
         }
 
