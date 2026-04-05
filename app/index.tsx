@@ -392,7 +392,7 @@ export default function HomeScreen() {
       async (event, session) => {
         console.log('[Home] onAuthStateChange:', event, 'user:', session?.user?.id ?? 'none');
         if (event === 'SIGNED_IN' && session?.provider_refresh_token) {
-          await captureAndStoreGoogleToken();
+          await captureAndStoreGoogleToken(session.provider_refresh_token);
         }
         if (session?.user) { setCurrentUserId(session.user.id); setIsSignedIn(true); }
         if (event === 'SIGNED_OUT') { setCurrentUserId(null); setIsSignedIn(false); }

@@ -97,7 +97,7 @@ export async function disconnectGoogleCalendar(): Promise<void> {
  * Stores the refresh token server-side and triggers the first sync.
  * After this, Robert never needs to reconnect.
  */
-export async function captureAndStoreGoogleToken(): Promise<void> {
+export async function captureAndStoreGoogleToken(providedRefreshToken?: string): Promise<void> {
   if (!supabase) return;
 
   // Only capture token after an intentional OAuth connect — not on every page load
@@ -106,8 +106,13 @@ export async function captureAndStoreGoogleToken(): Promise<void> {
     return;
   }
 
-  const { data: { session } } = await supabase.auth.getSession();
-  const refreshToken = session?.provider_refresh_token;
+  // Prefer the token passed directly from the auth callback (Supabase doesn't
+  // persist provider_refresh_token in getSession() after the initial callback)
+  let refreshToken = providedRefreshToken;
+  if (!refreshToken) {
+    const { data: { session } } = await supabase.auth.getSession();
+    refreshToken = session?.provider_refresh_token ?? undefined;
+  }
 
   if (!refreshToken) {
     console.log('[Calendar] No refresh token in session — skipping store');
