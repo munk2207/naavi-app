@@ -21,7 +21,7 @@ interface Reminder {
   user_id: string;
   title: string;
   datetime: string;
-  phone_number: string;
+  phone_number: string | null;
 }
 
 serve(async (req) => {
@@ -42,7 +42,6 @@ serve(async (req) => {
     .from('reminders')
     .select('id, user_id, title, datetime, phone_number')
     .eq('fired', false)
-    .not('phone_number', 'is', null)
     .lte('datetime', now);
 
   if (error) {
@@ -70,22 +69,40 @@ serve(async (req) => {
         hour12: true,
       });
 
-      const smsBody = `🔔 Reminder: ${reminder.title}\n🕐 ${alertTime}\n— MyNaavi`;
+      const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-      const smsRes = await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${interFnKey}`,
-        },
-        body: JSON.stringify({ to: reminder.phone_number, body: smsBody }),
-      });
+      // Always send push; SMS only if phone number is stored
+      const tasks: Promise<any>[] = [
+        fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${serviceRoleKey}`,
+          },
+          body: JSON.stringify({
+            user_id: reminder.user_id,
+            title:   '🔔 Reminder',
+            body:    reminder.title,
+            url:     '/',
+          }),
+        }).catch((err) => console.error('[check-reminders] Push failed:', err)),
+      ];
 
-      if (!smsRes.ok) {
-        const errData = await smsRes.json().catch(() => ({}));
-        errors.push(`Reminder ${reminder.id}: ${errData.error ?? smsRes.status}`);
-        continue;
+      if (reminder.phone_number) {
+        const smsBody = `🔔 Reminder: ${reminder.title}\n🕐 ${alertTime}\n— MyNaavi`;
+        tasks.push(
+          fetch(`${supabaseUrl}/functions/v1/send-sms`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${interFnKey}`,
+            },
+            body: JSON.stringify({ to: reminder.phone_number, body: smsBody }),
+          }).catch((err) => console.error('[check-reminders] SMS failed:', err))
+        );
       }
+
+      await Promise.all(tasks);
 
       // Mark as fired
       await adminClient
@@ -94,7 +111,7 @@ serve(async (req) => {
         .eq('id', reminder.id);
 
       fired.push(reminder.id);
-      console.log(`[check-reminders] Fired: "${reminder.title}" → ${reminder.phone_number}`);
+      console.log(`[check-reminders] Fired: "${reminder.title}" (push${reminder.phone_number ? ' + SMS' : ' only'})`);
 
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

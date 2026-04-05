@@ -529,11 +529,13 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
     console.error('[TTS Native] cloud TTS failed, using expo-speech:', err);
     await Speech.stop();
     return new Promise((resolve) => {
+      // Safety timeout — if TTS never calls onDone/onError (common on Android), resolve after 10s
+      const safetyTimer = setTimeout(resolve, 10000);
       Speech.speak(text, {
-        language: language === 'fr' ? 'fr-CA' : 'en-CA',
+        language: language === 'fr' ? 'fr-FR' : 'en-US',
         rate: 0.85,
-        onDone: resolve,
-        onError: () => resolve(),
+        onDone:  () => { clearTimeout(safetyTimer); resolve(); },
+        onError: () => { clearTimeout(safetyTimer); resolve(); },
       });
     });
   }

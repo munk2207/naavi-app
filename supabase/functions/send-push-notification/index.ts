@@ -137,30 +137,48 @@ serve(async (req) => {
     });
   }
 
-  const userClient = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } }
-  );
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const isServiceRole  = authHeader === `Bearer ${serviceRoleKey}`;
 
-  const { data: { user } } = await userClient.auth.getUser();
-  if (!user) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401, headers: corsHeaders,
-    });
-  }
+  const requestBody = await req.json();
+  const { title, body, url = '/', user_id: bodyUserId } = requestBody;
 
-  const { title, body, url = '/' } = await req.json();
   if (!title || !body) {
     return new Response(JSON.stringify({ error: 'Missing title or body' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  const { data: subs } = await userClient
+  let userId: string;
+
+  if (isServiceRole && bodyUserId) {
+    // Internal server-to-server call (e.g. from check-reminders)
+    userId = bodyUserId;
+  } else {
+    // Normal user-authenticated call
+    const userClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+    const { data: { user } } = await userClient.auth.getUser();
+    if (!user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401, headers: corsHeaders,
+      });
+    }
+    userId = user.id;
+  }
+
+  const adminClient = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    serviceRoleKey,
+  );
+
+  const { data: subs } = await adminClient
     .from('push_subscriptions')
     .select('platform, endpoint, p256dh, auth, fcm_token')
-    .eq('user_id', user.id);
+    .eq('user_id', userId);
 
   if (!subs?.length) {
     return new Response(JSON.stringify({ sent: 0, message: 'No subscriptions found' }), {
@@ -214,13 +232,13 @@ serve(async (req) => {
       console.error(`[send-push] Failed for ${sub.platform}:`, msg);
       // Remove expired/invalid web subscriptions
       if (sub.platform === 'web' && (msg.includes('410') || msg.includes('404'))) {
-        await userClient.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
+        await adminClient.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
         console.log('[send-push] Removed stale web subscription');
       }
     }
   }
 
-  console.log(`[send-push] Sent ${sent}/${subs.length} for user ${user.id}`);
+  console.log(`[send-push] Sent ${sent}/${subs.length} for user ${userId}`);
   return new Response(JSON.stringify({ success: true, sent }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });

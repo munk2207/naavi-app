@@ -45,8 +45,9 @@ async function getStoredHomeAddress(): Promise<string | null> {
 
 async function getCurrentLocation(): Promise<{ lat: number; lng: number } | null> {
   try {
-    // Request permission — on Android this shows the system permission dialog
-    const { status } = await Location.requestForegroundPermissionsAsync();
+    // Check permission without requesting — never show a dialog automatically.
+    // Location permission is granted via the Settings screen.
+    const { status } = await Location.getForegroundPermissionsAsync();
     if (status !== 'granted') return null;
 
     // Try cached position first (instant) — good enough for driving directions
