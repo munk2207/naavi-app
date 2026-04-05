@@ -109,16 +109,19 @@ export async function captureAndStoreGoogleToken(providedRefreshToken?: string):
     return;
   }
 
-  // Prefer the token passed directly from the auth callback (Supabase doesn't
-  // persist provider_refresh_token in getSession() after the initial callback)
-  let refreshToken = providedRefreshToken;
-  if (!refreshToken) {
-    const { data: { session } } = await supabase.auth.getSession();
-    refreshToken = session?.provider_refresh_token ?? undefined;
+  // Always fetch the session — we need access_token for the Edge Function call
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) {
+    console.log('[Calendar] No active session — skipping store');
+    return;
   }
 
+  // Prefer the refresh token passed directly from the auth callback — Supabase does
+  // not persist provider_refresh_token in getSession() after the initial callback
+  const refreshToken = providedRefreshToken ?? session.provider_refresh_token ?? undefined;
+
   if (!refreshToken) {
-    console.log('[Calendar] No refresh token in session — skipping store');
+    console.log('[Calendar] No refresh token available — skipping store');
     return;
   }
 
