@@ -810,9 +810,16 @@ export default function HomeScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* Greeting row with action buttons */}
-          <View style={styles.greetingRow}>
-            <Text style={styles.greeting}>{getGreeting()}</Text>
+          {/* Header — greeting + date + action buttons */}
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              <Text style={styles.greeting}>{getGreeting()}</Text>
+              <Text style={styles.headerDate}>
+                {new Date().toLocaleDateString('en-CA', {
+                  weekday: 'long', month: 'long', day: 'numeric',
+                })}
+              </Text>
+            </View>
             <View style={styles.greetingActions}>
               <TouchableOpacity
                 style={styles.infoBtn}
@@ -860,42 +867,29 @@ export default function HomeScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Morning brief — grouped by category */}
-          {turns.length === 0 && (
+          {/* Morning brief — horizontal widget scroll */}
+          {turns.length === 0 && brief.length > 0 && (
             <View style={styles.briefSection}>
               <Text style={styles.sectionTitle}>{t('home.briefTitle')}</Text>
-              {[
-                { key: 'weather',  label: 'Weather' },
-                { key: 'calendar', label: 'Calendar' },
-                { key: 'task',     label: 'Email' },
-                { key: 'social',   label: 'Birthdays' },
-                { key: 'health',   label: 'Health' },
-                { key: 'home',     label: 'Home' },
-              ].map(({ key, label }) => {
-                const items = brief.filter(i => i.category === key);
-                if (items.length === 0) return null;
-                const collapsed = collapsedGroups[key] ?? true;
-                return (
-                  <View key={key} style={styles.briefGroup}>
-                    <TouchableOpacity
-                      style={styles.briefGroupHeader}
-                      onPress={() => setCollapsedGroups(prev => ({ ...prev, [key]: !collapsed }))}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.briefGroupLabel}>{label}</Text>
-                      <Text style={styles.briefGroupCount}>{items.length}</Text>
-                      <Text style={styles.briefGroupArrow}>{collapsed ? '+' : '−'}</Text>
-                    </TouchableOpacity>
-                    {!collapsed && items.map(item => (
-                      <BriefCard
-                        key={item.id}
-                        item={item}
-                        onPress={handleBriefItemPress}
-                      />
-                    ))}
-                  </View>
-                );
-              })}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.briefScroll}
+                decelerationRate="fast"
+              >
+                {brief.map(item => (
+                  <BriefCard
+                    key={item.id}
+                    item={item}
+                    onPress={handleBriefItemPress}
+                  />
+                ))}
+              </ScrollView>
+            </View>
+          )}
+          {turns.length === 0 && brief.length === 0 && currentUserId && (
+            <View style={styles.briefLoading}>
+              <Text style={styles.briefLoadingText}>Loading your brief…</Text>
             </View>
           )}
 
@@ -1245,6 +1239,20 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  headerLeft: {
+    flex: 1,
+  },
+  headerDate: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
   greetingRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1361,7 +1369,19 @@ const styles = StyleSheet.create({
     lineHeight: 28,
   },
   briefSection: {
-    marginBottom: 16,
+    marginBottom: 20,
+  },
+  briefScroll: {
+    paddingBottom: 8,
+    paddingRight: 20,
+  },
+  briefLoading: {
+    paddingVertical: 24,
+    alignItems: 'center',
+  },
+  briefLoadingText: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
   },
   conversationSection: {
     marginTop: 8,

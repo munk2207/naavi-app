@@ -32,6 +32,10 @@ export const Colors = {
   error:    '#DC2626',
   info:     '#1D4ED8',
 
+  // Accent
+  gold:        '#C9963A', // Warm gold — tasks, highlights, urgency
+  goldLight:   '#FEF3C7', // Light gold background
+
   // UI
   border:      '#E5E7EB',
   divider:     '#F3F4F6',
