@@ -21,7 +21,9 @@
         "RECORD_AUDIO",
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
       ]
     },
     "plugins": [
@@ -29,6 +31,8 @@
       "expo-secure-store",
       "expo-sqlite",
       "expo-localization",
+      "expo-location",
+      "expo-notifications",
       "./plugins/withAppActions"
     ],
     "scheme": "naavi",
