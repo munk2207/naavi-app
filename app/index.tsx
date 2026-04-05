@@ -978,10 +978,21 @@ export default function HomeScreen() {
 
               {/* Calendar events created */}
               {turn.createdEvents.map((ev, i) => (
-                <TouchableOpacity key={i} style={styles.eventCard} onPress={() => { if (ev.htmlLink) { if (Platform.OS === 'web') { const a = document.createElement('a'); a.href = ev.htmlLink; a.target = '_blank'; a.rel = 'noopener noreferrer'; document.body.appendChild(a); a.click(); document.body.removeChild(a); } else { Linking.openURL(ev.htmlLink).catch(() => {}); } } }} accessibilityLabel="Open event in Google Calendar">
+                <TouchableOpacity key={i} style={styles.eventCard} onPress={() => {
+                    if (!ev.htmlLink) return;
+                    if (Platform.OS === 'web') {
+                      const a = document.createElement('a');
+                      a.href = ev.htmlLink; a.target = '_blank'; a.rel = 'noopener noreferrer';
+                      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                    }
+                    // On Android: skip opening Google Calendar URL — it triggers OAuth consent screen.
+                    // The event is already saved; Robert can view it in Google Calendar directly.
+                  }} accessibilityLabel="Event added to calendar">
                   <Text style={styles.eventLabel}>📅 Event added to calendar</Text>
                   <Text style={styles.eventTitle}>{ev.summary}</Text>
-                  {ev.htmlLink ? <Text style={styles.eventLink}>Tap to view in Google Calendar</Text> : null}
+                  {Platform.OS !== 'web'
+                    ? <Text style={styles.eventLink}>Saved — open Google Calendar app to view</Text>
+                    : ev.htmlLink ? <Text style={styles.eventLink}>Tap to view in Google Calendar</Text> : null}
                 </TouchableOpacity>
               ))}
 
