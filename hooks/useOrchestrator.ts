@@ -31,8 +31,9 @@ export interface ConversationTurn {
   userMessage: string;
   assistantSpeech: string;
   drafts: NaaviAction[];
-  createdEvents: { summary: string; htmlLink?: string }[];
+  createdEvents: { summary: string; htmlLink?: string; startISO?: string }[];
   deletedEvents: { count: number; titles: string[] }[];
+  deletedMemory: { count: number; keyword: string }[];
   savedDocs: { title: string; webViewLink?: string }[];
   rememberedItems: { text: string; count: number }[];
   driveFiles: StorageFile[];
@@ -68,8 +69,9 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     const turnNav: NavigationResult[] = [];
     const turnDrive: StorageFile[] = [];
     const turnDrafts: NaaviAction[] = [];
-    const turnEvents: { summary: string; htmlLink?: string }[] = [];
+    const turnEvents: { summary: string; htmlLink?: string; startISO?: string }[] = [];
     const turnDeleted: { count: number; titles: string[] }[] = [];
+    const turnDeletedMemory: { count: number; keyword: string }[] = [];
     const turnDocs: { title: string; webViewLink?: string }[] = [];
     const turnMemory: { text: string; count: number }[] = [];
 
@@ -166,7 +168,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                 ? action.recurrence.map(String)
                 : undefined,
             });
-            turnEvents.push({ summary: event.title, htmlLink: event.htmlLink });
+            turnEvents.push({ summary: event.title, htmlLink: event.htmlLink, startISO: String(action.start ?? '') });
           } catch (err) {
             console.error('[Orchestrator] CREATE_EVENT failed:', err);
           }
@@ -269,6 +271,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           if (keyword) {
             const deleted = await deleteKnowledge(keyword);
             console.log(`[Orchestrator] DELETE_MEMORY: removed ${deleted} fragments matching "${keyword}"`);
+            turnDeletedMemory.push({ count: deleted, keyword });
           }
         }
 
@@ -340,6 +343,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         drafts:           turnDrafts,
         createdEvents:    turnEvents,
         deletedEvents:    turnDeleted,
+        deletedMemory:    turnDeletedMemory,
         savedDocs:        turnDocs,
         rememberedItems:  turnMemory,
         driveFiles:       turnDrive,

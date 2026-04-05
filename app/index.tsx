@@ -991,21 +991,30 @@ export default function HomeScreen() {
                     // On Android: skip opening Google Calendar URL — it triggers OAuth consent screen.
                     // The event is already saved; Robert can view it in Google Calendar directly.
                   }} accessibilityLabel="Event added to calendar">
-                  <Text style={styles.eventLabel}>📅 Event added to calendar</Text>
+                  <Text style={styles.eventLabel}>📅 Added to calendar</Text>
                   <Text style={styles.eventTitle}>{ev.summary}</Text>
-                  {Platform.OS !== 'web'
+                  {ev.startISO ? (
+                    <Text style={styles.eventLink}>
+                      {new Date(ev.startISO).toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' })}
+                      {' · '}
+                      {new Date(ev.startISO).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                    </Text>
+                  ) : Platform.OS !== 'web'
                     ? <Text style={styles.eventLink}>Saved — open Google Calendar app to view</Text>
                     : ev.htmlLink ? <Text style={styles.eventLink}>Tap to view in Google Calendar</Text> : null}
                 </TouchableOpacity>
               ))}
 
-              {/* Memory saved */}
+              {/* Memory saved — simple inline list */}
               {turn.rememberedItems.map((item, i) => (
-                <View key={i} style={styles.memoryCard}>
-                  <Text style={styles.memoryLabel}>🧠 Saved to memory</Text>
-                  <Text style={styles.memoryText}>{item.text}</Text>
-                  {item.count > 0 && <Text style={styles.memoryMeta}>{item.count} fragment{item.count !== 1 ? 's' : ''} stored</Text>}
-                </View>
+                <Text key={i} style={styles.memoryInline}>🧠 {item.text}</Text>
+              ))}
+
+              {/* Memory deleted — simple inline feedback */}
+              {turn.deletedMemory?.map((item, i) => (
+                <Text key={i} style={styles.memoryInline}>
+                  {item.count > 0 ? `🗑 Removed from memory: "${item.keyword}"` : `Nothing found in memory matching "${item.keyword}"`}
+                </Text>
               ))}
             </View>
           ))}
@@ -1508,6 +1517,12 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     color: '#9333EA',
     marginTop: 4,
+    fontStyle: 'italic',
+  },
+  memoryInline: {
+    fontSize: Typography.sm,
+    color: Colors.textSecondary,
+    marginTop: 6,
     fontStyle: 'italic',
   },
   draftCard: {
