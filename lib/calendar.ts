@@ -48,6 +48,9 @@ export async function connectGoogleCalendar(): Promise<void> {
   if (!supabase) return;
   // Mark that we intentionally started an OAuth flow — captureAndStoreGoogleToken checks this
   if (typeof sessionStorage !== 'undefined') sessionStorage.setItem('naavi_google_oauth_pending', '1');
+  // Sign out locally first — when already signed in, Supabase's OAuth update does not
+  // include provider_refresh_token in the auth callback. A fresh sign-in always does.
+  await supabase.auth.signOut({ scope: 'local' });
   await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
