@@ -23,6 +23,7 @@ import {
   ActivityIndicator,
   Linking,
   Modal,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -533,6 +534,25 @@ export default function HomeScreen() {
 
   const { status, turns, error, send, loadHistory } = useOrchestrator('en', brief, avoidHighwaysRef.current);
 
+  // Load today's conversation on mount and when app returns to foreground
+  useEffect(() => {
+    if (!currentUserId) return;
+    loadTodayConversation(currentUserId).then(saved => {
+      if (saved && saved.length > 0) loadHistory(saved);
+    }).catch(() => {});
+  }, [currentUserId]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && currentUserId) {
+        loadTodayConversation(currentUserId).then(saved => {
+          if (saved && saved.length > 0) loadHistory(saved);
+        }).catch(() => {});
+      }
+    });
+    return () => sub.remove();
+  }, [currentUserId]);
+
   // Re-check highway preference after each turn so DELETE_MEMORY takes effect immediately
   useEffect(() => {
     if (!supabase || !currentUserId) return;
@@ -964,7 +984,7 @@ export default function HomeScreen() {
 
               {/* Calendar events created */}
               {turn.createdEvents.map((ev, i) => (
-                <TouchableOpacity key={i} style={styles.eventCard} onPress={() => { if (ev.htmlLink) { const a = document.createElement('a'); a.href = ev.htmlLink; a.target = '_blank'; a.rel = 'noopener noreferrer'; document.body.appendChild(a); a.click(); document.body.removeChild(a); } }} accessibilityLabel="Open event in Google Calendar">
+                <TouchableOpacity key={i} style={styles.eventCard} onPress={() => { if (ev.htmlLink) { if (Platform.OS === 'web') { const a = document.createElement('a'); a.href = ev.htmlLink; a.target = '_blank'; a.rel = 'noopener noreferrer'; document.body.appendChild(a); a.click(); document.body.removeChild(a); } else { Linking.openURL(ev.htmlLink).catch(() => {}); } } }} accessibilityLabel="Open event in Google Calendar">
                   <Text style={styles.eventLabel}>📅 Event added to calendar</Text>
                   <Text style={styles.eventTitle}>{ev.summary}</Text>
                   {ev.htmlLink ? <Text style={styles.eventLink}>Tap to view in Google Calendar</Text> : null}

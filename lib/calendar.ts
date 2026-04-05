@@ -261,31 +261,60 @@ export async function fetchUpcomingEvents(days = 7, passedUserId?: string): Prom
   future.setDate(future.getDate() + days);
 
   try {
-    const { data: events, error } = await supabase
+    // Fetch calendar events (date-range filtered)
+    const { data: events, error: evError } = await supabase
       .from('calendar_events')
-      .select('google_event_id, title, start_time, end_time, location, description')
+      .select('google_event_id, title, start_time, end_time, location, description, item_type')
       .eq('user_id', userId)
+      .neq('item_type', 'task')
       .gte('start_time', startOfDay.toISOString())
       .lte('start_time', future.toISOString())
       .order('start_time', { ascending: true })
       .limit(20);
 
-    console.log('[Calendar] fetchUpcomingEvents — found:', events?.length ?? 0, 'error:', error?.message ?? 'none');
-    if (error || !events) return [];
+    // Fetch tasks — include those with no due date AND those due within the window
+    const { data: tasks, error: taskError } = await supabase
+      .from('calendar_events')
+      .select('google_event_id, title, start_time, end_time, location, description, item_type')
+      .eq('user_id', userId)
+      .eq('item_type', 'task')
+      .or(`start_time.is.null,start_time.lte.${future.toISOString()}`)
+      .order('start_time', { ascending: true, nullsFirst: false })
+      .limit(20);
 
-    return events.map(event => {
+    console.log('[Calendar] fetchUpcomingEvents — events:', events?.length ?? 0, 'tasks:', tasks?.length ?? 0);
+    if (evError) console.error('[Calendar] events error:', evError.message);
+    if (taskError) console.error('[Calendar] tasks error:', taskError.message);
+
+    const allItems = [...(events ?? []), ...(tasks ?? [])];
+
+    return allItems.map(event => {
       const startRaw = event.start_time ?? '';
-      const date = new Date(startRaw);
-      const today = new Date();
+      const isTask   = event.item_type === 'task';
+      const date     = startRaw ? new Date(startRaw) : null;
+      const today    = new Date();
       const tomorrow = new Date(); tomorrow.setDate(today.getDate() + 1);
 
       let dayLabel: string;
-      if (date.toDateString() === today.toDateString()) {
+      if (!date) {
+        dayLabel = 'No due date';
+      } else if (date.toDateString() === today.toDateString()) {
         dayLabel = 'Today';
       } else if (date.toDateString() === tomorrow.toDateString()) {
         dayLabel = 'Tomorrow';
       } else {
         dayLabel = date.toLocaleDateString('en-CA', { weekday: 'long', month: 'short', day: 'numeric' });
+      }
+
+      if (isTask) {
+        return {
+          id:       event.google_event_id,
+          category: 'task' as const,
+          title:    `☑ ${event.title}`,
+          detail:   dayLabel,
+          urgent:   false,
+          startISO: event.start_time ?? '',
+        } as BriefItem;
       }
 
       return mapEventToBriefItem(event, dayLabel);
