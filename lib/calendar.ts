@@ -284,13 +284,13 @@ export async function fetchUpcomingEvents(days = 7, passedUserId?: string): Prom
       .order('start_time', { ascending: true })
       .limit(20);
 
-    // Fetch tasks — include those with no due date AND those due within the window
+    // Fetch all incomplete tasks — sync only stores incomplete tasks (showCompleted=false)
+    // so no date filter needed; just get everything and show the soonest ones
     const { data: tasks, error: taskError } = await supabase
       .from('calendar_events')
       .select('google_event_id, title, start_time, end_time, location, description, item_type')
       .eq('user_id', userId)
       .eq('item_type', 'task')
-      .or(`start_time.is.null,start_time.lte.${future.toISOString()}`)
       .order('start_time', { ascending: true, nullsFirst: false })
       .limit(20);
 
