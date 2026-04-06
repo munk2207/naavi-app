@@ -545,21 +545,15 @@ export function useHandsfreeMode(
 
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
 
-  // ── Watch orchestrator: speaking → idle = enter wake-listen mode ─────────
-  // After Naavi responds, wait for TTS to fully stop, then open mic in
-  // wake-only mode — only "Hi Naavi" or "Goodbye" are accepted.
-  // All other audio (noise, TTS tail) is silently discarded.
+  // ── Watch orchestrator: speaking → idle = mic OFF, wait for tap ──────────
+  // Mic is completely closed after Naavi responds. No background listening.
+  // Robert taps Resume to start the next turn. "Hey Google" will also work
+  // once the app is published on Play Store.
 
   useEffect(() => {
     if (stateRef.current === 'waiting' && orchestratorStatus === 'idle') {
-      console.log('[Handsfree] Orchestrator idle — entering wake-listen mode after delay');
-      setState('wake_listen');
-      setTimeout(() => {
-        if (stateRef.current === 'wake_listen') {
-          wakeListenModeRef.current = true;
-          startListeningRef.current();
-        }
-      }, POST_TTS_DELAY_MS);
+      console.log('[Handsfree] Orchestrator idle — mic OFF, waiting for tap');
+      setState('paused');
     }
   }, [orchestratorStatus]);
 
