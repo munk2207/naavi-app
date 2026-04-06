@@ -220,7 +220,7 @@ export function useHandsfreeMode(
       const mimeType = mimeMap[ext] ?? 'audio/m4a';
 
       const { data, error: fnErr } = await supabase.functions.invoke('transcribe-memo', {
-        body: { audio: base64, mimeType },
+        body: { audio: base64, mimeType, language: 'en' },
       });
 
       if (fnErr || !data?.transcript) return null;
@@ -269,6 +269,17 @@ export function useHandsfreeMode(
     console.log('[Handsfree] Transcript chunk (mode:', currentMode, '):', transcript);
 
     const lower = transcript.toLowerCase().trim();
+
+    // ── Garbage filter — discard very short non-keyword transcripts ───────
+    const wordCount = lower.split(/\s+/).length;
+    const hasAnyKeyword = matchesKeyword(lower, KEYWORDS.EXIT) ||
+                          matchesKeyword(lower, KEYWORDS.SUBMIT) ||
+                          matchesKeyword(lower, KEYWORDS.WAKE);
+    if (wordCount <= 2 && !hasAnyKeyword) {
+      console.log('[Handsfree] Garbage discarded (too short, no keyword):', transcript);
+      startListeningRef.current();
+      return;
+    }
 
     // ── EXIT keywords — always checked, highest priority ──────────────────
     if (matchesKeyword(lower, KEYWORDS.EXIT)) {
