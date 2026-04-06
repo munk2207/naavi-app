@@ -397,9 +397,12 @@ export function useHandsfreeMode(
         return;
       }
 
+      // Reset audio mode — required after TTS playback to allow recording again
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
       });
 
       const { recording } = await Audio.Recording.createAsync({
@@ -531,9 +534,13 @@ export function useHandsfreeMode(
 
   // ── Start listening ──────────────────────────────────────────────────────
 
-  const startListening = useCallback(() => {
+  const startListening = useCallback(async () => {
     setError(null);
     silenceStartRef.current = null;
+
+    // Always clean up any previous recording first to prevent "Could not start microphone"
+    await stopRecordingSilently();
+
     recordingStartedAtRef.current = Date.now();
 
     if (isNative) {
@@ -541,7 +548,7 @@ export function useHandsfreeMode(
     } else {
       startWebListening();
     }
-  }, [startNativeListening, startWebListening]);
+  }, [stopRecordingSilently, startNativeListening, startWebListening]);
 
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
 
@@ -559,10 +566,12 @@ export function useHandsfreeMode(
 
   // ── Activate ─────────────────────────────────────────────────────────────
 
-  const activate = useCallback(() => {
+  const activate = useCallback(async () => {
     if (stateRef.current !== 'inactive' && stateRef.current !== 'paused') return;
 
     console.log('[Handsfree] Activating');
+    // Clean up any stale recording before starting
+    await stopRecordingSilently();
     pendingTranscriptRef.current = '';
     wakeListenModeRef.current = false;
     speakCueRef.current("I'm listening.");
@@ -570,7 +579,7 @@ export function useHandsfreeMode(
     setTimeout(() => {
       startListeningRef.current();
     }, 1500);
-  }, []);
+  }, [stopRecordingSilently]);
 
   // ── Deactivate ───────────────────────────────────────────────────────────
 
