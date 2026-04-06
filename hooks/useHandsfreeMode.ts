@@ -39,12 +39,14 @@ export interface UseHandsfreeModeResult {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const SILENCE_THRESHOLD_DB = -45;       // dB — below this = silence (native)
-const SILENCE_THRESHOLD_WEB = 0.01;     // RMS amplitude — below this = silence (web)
+const SILENCE_THRESHOLD_DB = -35;       // dB — below this = silence (native). Raised from -45 to reject ambient noise.
+const SILENCE_THRESHOLD_WEB = 0.02;     // RMS amplitude — below this = silence (web). Raised from 0.01.
 const SILENCE_DURATION_MS = 2000;       // 2s of silence → auto-submit
 const IDLE_TIMEOUT_MS = 60_000;         // 60s of no speech at all → auto-exit
-const MIN_RECORDING_MS = 1000;          // ignore recordings shorter than 1s
+const MIN_RECORDING_MS = 1500;          // ignore recordings shorter than 1.5s
+const MIN_SPEECH_MS = 500;              // need at least 500ms of actual speech before we consider submitting
 const METERING_INTERVAL_MS = 250;       // how often to check audio level
+const POST_TTS_DELAY_MS = 1500;         // wait 1.5s after Naavi speaks before opening mic (avoid capturing TTS tail)
 
 // Exit keywords — checked against lowercase transcript
 const EXIT_KEYWORDS = ['goodbye', 'stop listening', "that's all", 'thats all'];
@@ -79,6 +81,7 @@ export function useHandsfreeMode(
 
   // Silence detection refs
   const silenceStartRef = useRef<number | null>(null);
+  const speechAccumulatedMsRef = useRef<number>(0);  // total ms of speech detected in current recording
   const meteringTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Idle timeout ref (no speech for 60s → auto-exit)
@@ -324,6 +327,7 @@ export function useHandsfreeMode(
 
       // Poll metering for silence detection
       let speechDetected = false;
+      speechAccumulatedMsRef.current = 0;
       meteringTimerRef.current = setInterval(async () => {
         if (stateRef.current !== 'listening' || !nativeRecordingRef.current) return;
 
@@ -335,13 +339,15 @@ export function useHandsfreeMode(
 
           if (db > SILENCE_THRESHOLD_DB) {
             speechDetected = true;
+            speechAccumulatedMsRef.current += METERING_INTERVAL_MS;
             silenceStartRef.current = null;
             resetIdleTimer();
-          } else if (speechDetected) {
+          } else if (speechDetected && speechAccumulatedMsRef.current >= MIN_SPEECH_MS) {
+            // Only consider silence-after-speech if enough real speech was captured
             if (!silenceStartRef.current) {
               silenceStartRef.current = Date.now();
             } else if (Date.now() - silenceStartRef.current >= SILENCE_DURATION_MS) {
-              console.log('[Handsfree] Silence detected (native), submitting');
+              console.log('[Handsfree] Silence detected (native), speech:', speechAccumulatedMsRef.current, 'ms, submitting');
               submitRecordingRef.current();
             }
           }
@@ -383,6 +389,7 @@ export function useHandsfreeMode(
 
       const dataArray = new Float32Array(analyser.fftSize);
       let speechDetected = false;
+      speechAccumulatedMsRef.current = 0;
 
       meteringTimerRef.current = setInterval(() => {
         if (stateRef.current !== 'listening' || !analyserRef.current) return;
@@ -397,13 +404,14 @@ export function useHandsfreeMode(
 
         if (rms > SILENCE_THRESHOLD_WEB) {
           speechDetected = true;
+          speechAccumulatedMsRef.current += METERING_INTERVAL_MS;
           silenceStartRef.current = null;
           resetIdleTimer();
-        } else if (speechDetected) {
+        } else if (speechDetected && speechAccumulatedMsRef.current >= MIN_SPEECH_MS) {
           if (!silenceStartRef.current) {
             silenceStartRef.current = Date.now();
           } else if (Date.now() - silenceStartRef.current >= SILENCE_DURATION_MS) {
-            console.log('[Handsfree] Silence detected (web), submitting');
+            console.log('[Handsfree] Silence detected (web), speech:', speechAccumulatedMsRef.current, 'ms, submitting');
             submitRecordingRef.current();
           }
         }
@@ -433,11 +441,16 @@ export function useHandsfreeMode(
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
 
   // ── Watch orchestrator: speaking → idle = restart listening ───────────────
+  // Delay mic restart to avoid capturing TTS audio from the speaker
 
   useEffect(() => {
     if (stateRef.current === 'waiting' && orchestratorStatus === 'idle') {
-      console.log('[Handsfree] Orchestrator idle, restarting listening');
-      startListeningRef.current();
+      console.log('[Handsfree] Orchestrator idle, waiting', POST_TTS_DELAY_MS, 'ms before restarting mic');
+      setTimeout(() => {
+        if (stateRef.current === 'waiting') {
+          startListeningRef.current();
+        }
+      }, POST_TTS_DELAY_MS);
     }
   }, [orchestratorStatus]);
 
