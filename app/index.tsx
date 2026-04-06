@@ -21,17 +21,18 @@ import {
   Platform,
   TouchableOpacity,
   ActivityIndicator,
-  Linking,
   Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
+import * as Linking from 'expo-linking';
 
 import { getUserName } from '@/lib/naavi-client';
 import { useOrchestrator } from '@/hooks/useOrchestrator';
 import { useVoice } from '@/hooks/useVoice';
 import { useWhisperMemo } from '@/hooks/useWhisperMemo';
+import { useHandsfreeMode } from '@/hooks/useHandsfreeMode';
 import { useConversationRecorder } from '@/hooks/useConversationRecorder';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { VoiceButton } from '@/components/VoiceButton';
@@ -371,6 +372,7 @@ export default function HomeScreen() {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [briefDays, setBriefDays] = useState<number>(1); // default: today only
   const [recordingPrompt, setRecordingPrompt] = useState<{ title: string; endMs: number } | null>(null);
 
   // Load weather immediately (no auth needed)
@@ -531,7 +533,7 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [brief]);
 
-  const { status, turns, error, send, loadHistory } = useOrchestrator('en', brief, avoidHighwaysRef.current);
+  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking } = useOrchestrator('en', brief, avoidHighwaysRef.current);
 
   // Re-check highway preference after each turn so DELETE_MEMORY takes effect immediately
   useEffect(() => {
@@ -543,6 +545,13 @@ export default function HomeScreen() {
       .limit(5)
       .then(({ data }) => { avoidHighwaysRef.current = !!(data && data.length > 0); });
   }, [turns, currentUserId]);
+
+  // Auto-scroll to bottom when new conversation turns arrive
+  useEffect(() => {
+    if (turns.length > 0) {
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }, [turns.length]);
 
   // Auto-open Google Maps when a navigation result arrives
   const lastAutoOpenedTurnRef = useRef(-1);
@@ -564,6 +573,37 @@ export default function HomeScreen() {
       }
     }
   }, [turns]);
+
+  // ── Hands-free mode ──────────────────────────────────────────────────────
+  // speakCue: short spoken cue using expo-speech (fast, no cloud call needed)
+  const speakCueRef = useRef((text: string) => {
+    const Speech = require('expo-speech');
+    Speech.speak(text, { language: 'en-CA', rate: 0.9 });
+  });
+
+  const handsfree = useHandsfreeMode(status, send, speakCueRef.current);
+
+  // Auto-activate hands-free when app is opened via "Hey Google" (naavi:// deep link)
+  const handsfreeActivatedRef = useRef(false);
+  useEffect(() => {
+    if (handsfreeActivatedRef.current) return;
+
+    async function checkIntent() {
+      try {
+        const url = await Linking.getInitialURL();
+        if (url && url.startsWith('naavi://')) {
+          console.log('[Home] Opened via intent:', url, '— activating hands-free');
+          handsfreeActivatedRef.current = true;
+          // Small delay to let the screen render first
+          setTimeout(() => handsfree.activate(), 500);
+        }
+      } catch {}
+    }
+
+    if (Platform.OS !== 'web') {
+      checkIntent();
+    }
+  }, []);
 
   const { voiceState, voiceError, startListening, stopListening, isSupported } = useVoice('en');
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
@@ -793,26 +833,38 @@ export default function HomeScreen() {
           <View style={styles.greetingRow}>
             <Text style={styles.greeting}>{getGreeting()}</Text>
             <View style={styles.greetingActions}>
+              {turns.length > 0 && (
+                <TouchableOpacity
+                  style={styles.newChatBtn}
+                  onPress={clearHistory}
+                  accessibilityLabel="New chat"
+                >
+                  <Text style={styles.newChatBtnText}>+ New</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
-                style={styles.infoBtn}
+                style={styles.labeledBtn}
                 onPress={() => setShowIntegrations(true)}
                 accessibilityLabel="View integrations"
               >
-                <Text style={styles.infoBtnText}>?</Text>
+                <View style={styles.infoBtn}><Text style={styles.infoBtnText}>?</Text></View>
+                <Text style={styles.btnLabel} numberOfLines={1}>Info</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.notesBtn}
+                style={styles.labeledBtn}
                 onPress={() => router.push('/notes')}
                 accessibilityLabel="Open notes"
               >
-                <Text style={styles.notesBtnText}>📋</Text>
+                <View style={styles.notesBtn}><Text style={styles.notesBtnText}>📋</Text></View>
+                <Text style={styles.btnLabel}>Notes</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.settingsBtn}
+                style={styles.labeledBtn}
                 onPress={() => router.push('/settings')}
                 accessibilityLabel="Open settings"
               >
-                <Text style={styles.settingsIcon}>⚙</Text>
+                <View style={styles.settingsBtn}><Text style={styles.settingsIcon}>⚙</Text></View>
+                <Text style={styles.btnLabel}>Settings</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -843,15 +895,36 @@ export default function HomeScreen() {
           {turns.length === 0 && (
             <View style={styles.briefSection}>
               <Text style={styles.sectionTitle}>{t('home.briefTitle')}</Text>
+              <View style={styles.daySelector}>
+                {[1, 3, 7].map(d => (
+                  <TouchableOpacity
+                    key={d}
+                    style={[styles.daySelectorBtn, briefDays === d && styles.daySelectorBtnActive]}
+                    onPress={() => setBriefDays(d)}
+                  >
+                    <Text style={[styles.daySelectorText, briefDays === d && styles.daySelectorTextActive]}>
+                      {d === 1 ? 'Today' : `${d} days`}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               {[
                 { key: 'weather',  label: 'Weather' },
                 { key: 'calendar', label: 'Calendar' },
-                { key: 'task',     label: 'Email' },
-                { key: 'social',   label: 'Birthdays' },
+                { key: 'task',     label: 'Tasks' },
                 { key: 'health',   label: 'Health' },
-                { key: 'home',     label: 'Home' },
               ].map(({ key, label }) => {
-                const items = brief.filter(i => i.category === key);
+                const items = brief.filter(i => {
+                  if (i.category !== key) return false;
+                  if (i.category === 'weather') return true;
+                  if (briefDays >= 7) return true;
+                  if (!i.startISO) return false;
+                  const itemDate = new Date(i.startISO);
+                  const cutoff = new Date();
+                  cutoff.setDate(cutoff.getDate() + briefDays - 1);
+                  cutoff.setHours(23, 59, 59, 999);
+                  return itemDate <= cutoff;
+                });
                 if (items.length === 0) return null;
                 const collapsed = collapsedGroups[key] ?? true;
                 return (
@@ -1094,10 +1167,59 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Input bar */}
+        {/* Stop speaking button — visible only while Naavi is talking */}
+        {status === 'speaking' && (
+          <TouchableOpacity
+            style={styles.stopSpeakingBtn}
+            onPress={stopSpeaking}
+            accessibilityLabel="Stop speaking"
+          >
+            <Text style={styles.stopSpeakingText}>⏹ Stop</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Hands-free mode status banner */}
+        {handsfree.state === 'listening' && (
+          <View style={styles.handsfreeBanner}>
+            <View style={styles.handsfreePulse} />
+            <Text style={styles.handsfreeBannerText}>Listening…</Text>
+            <TouchableOpacity onPress={handsfree.deactivate} style={styles.handsfreeStopBtn}>
+              <Text style={styles.handsfreeStopText}>End</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        {handsfree.state === 'processing' && (
+          <View style={styles.handsfreeBanner}>
+            <ActivityIndicator size="small" color="#fff" />
+            <Text style={styles.handsfreeBannerText}>Processing…</Text>
+          </View>
+        )}
+        {handsfree.state === 'waiting' && (
+          <View style={styles.handsfreeBanner}>
+            <ActivityIndicator size="small" color="#fff" />
+            <Text style={styles.handsfreeBannerText}>
+              {status === 'thinking' ? 'Thinking…' : status === 'speaking' ? 'Speaking…' : 'Working…'}
+            </Text>
+          </View>
+        )}
+        {handsfree.state === 'paused' && (
+          <View style={[styles.handsfreeBanner, styles.handsfreeBannerPaused]}>
+            <Text style={styles.handsfreeBannerText}>Listening paused</Text>
+            <TouchableOpacity onPress={handsfree.activate} style={styles.handsfreeResumeBtn}>
+              <Text style={styles.handsfreeStopText}>Resume</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        {handsfree.error && (
+          <View style={styles.statusRow}>
+            <Text style={styles.errorText}>{handsfree.error}</Text>
+          </View>
+        )}
+
+        {/* Input bar — hidden when hands-free is fully active (listening/processing/waiting) */}
         <View style={styles.inputBar}>
           {/* Naavi mic — speak a question, note, or command */}
-          {memoSupported && (
+          {memoSupported && handsfree.state === 'inactive' && (
             <TouchableOpacity
               style={[styles.unifiedBtn, memoState === 'recording' && styles.unifiedBtnActive]}
               onPress={() => {
@@ -1121,11 +1243,24 @@ export default function HomeScreen() {
               <Text style={styles.unifiedBtnText}>
                 {memoState === 'recording' ? '⏹' : memoState === 'transcribing' ? '…' : '🎙'}
               </Text>
+              <Text style={styles.bottomBtnLabel}>Voice</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Hands-free button — activates continuous listening mode */}
+          {memoSupported && handsfree.state === 'inactive' && (
+            <TouchableOpacity
+              style={[styles.unifiedBtn, styles.handsfreeBtn]}
+              onPress={handsfree.activate}
+              accessibilityLabel="Activate hands-free mode"
+            >
+              <Text style={styles.unifiedBtnText}>🎧</Text>
+              <Text style={styles.bottomBtnLabel}>Hands-free</Text>
             </TouchableOpacity>
           )}
 
           {/* Conversation button — tap to start, tap to stop, info badge shows timer */}
-          {memoSupported && (
+          {memoSupported && handsfree.state === 'inactive' && (
             <TouchableOpacity
               style={[styles.convBtn, convState === 'recording' && styles.convBtnActive]}
               onPress={() => {
@@ -1143,11 +1278,12 @@ export default function HomeScreen() {
                   {convState === 'recording' ? '⏹' : convState === 'labeling' ? '🏷️' : '👥'}
                 </Text>
               )}
+              <Text style={styles.bottomBtnLabel}>Record</Text>
             </TouchableOpacity>
           )}
 
           {/* Timer badge — info only, not tappable */}
-          {convState === 'recording' && (
+          {convState === 'recording' && handsfree.state === 'inactive' && (
             <View style={styles.convTimerBadge} pointerEvents="none">
               <View style={styles.convTimerDot} />
               <Text style={styles.convTimerText}>
@@ -1156,27 +1292,32 @@ export default function HomeScreen() {
             </View>
           )}
 
-          <TextInput
-            style={styles.input}
-            value={inputText}
-            onChangeText={setInputText}
-            placeholder={t('home.inputPlaceholder')}
-            placeholderTextColor={Colors.textMuted}
-            multiline
-            maxLength={500}
-            returnKeyType="send"
-            onSubmitEditing={handleSend}
-            editable={status === 'idle' || status === 'error'}
-            accessibilityLabel="Message input"
-          />
-          <TouchableOpacity
-            style={[styles.sendBtn, (!inputText.trim() || status === 'thinking' || status === 'speaking') && styles.sendBtnDisabled]}
-            onPress={handleSend}
-            disabled={!inputText.trim() || status === 'thinking' || status === 'speaking'}
-            accessibilityLabel="Send message"
-          >
-            <Text style={styles.sendBtnText}>➤</Text>
-          </TouchableOpacity>
+          {handsfree.state === 'inactive' && (
+            <>
+              <TextInput
+                style={styles.input}
+                value={inputText}
+                onChangeText={setInputText}
+                placeholder={t('home.inputPlaceholder')}
+                placeholderTextColor={Colors.textMuted}
+                multiline
+                maxLength={500}
+                returnKeyType="send"
+                onSubmitEditing={handleSend}
+                editable={status === 'idle' || status === 'error'}
+                accessibilityLabel="Message input"
+              />
+              <TouchableOpacity
+                style={[styles.sendBtn, (!inputText.trim() || status === 'thinking' || status === 'speaking') && styles.sendBtnDisabled]}
+                onPress={handleSend}
+                disabled={!inputText.trim() || status === 'thinking' || status === 'speaking'}
+                accessibilityLabel="Send message"
+              >
+                <Text style={styles.sendBtnText}>➤</Text>
+                <Text style={styles.sendBtnLabel}>Send</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -1229,6 +1370,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 20,
+  },
+  newChatBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: Colors.primary,
+  },
+  newChatBtnText: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: '#fff',
+  },
+  labeledBtn: {
+    alignItems: 'center',
+    gap: 2,
+    minWidth: 50,
+    overflow: 'visible',
+  },
+  btnLabel: {
+    fontSize: 10,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    width: 50,
   },
   greetingActions: {
     flexDirection: 'row',
@@ -1341,6 +1505,28 @@ const styles = StyleSheet.create({
   },
   briefSection: {
     marginBottom: 16,
+  },
+  daySelector: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  daySelectorBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#F3F4F1',
+  },
+  daySelectorBtnActive: {
+    backgroundColor: Colors.primary,
+  },
+  daySelectorText: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.textSecondary,
+  },
+  daySelectorTextActive: {
+    color: '#fff',
   },
   conversationSection: {
     marginTop: 8,
@@ -1701,6 +1887,19 @@ const styles = StyleSheet.create({
   memoBtnText: {
     fontSize: 22,
   },
+  stopSpeakingBtn: {
+    alignSelf: 'center',
+    backgroundColor: '#DC2626',
+    borderRadius: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  stopSpeakingText: {
+    color: '#fff',
+    fontSize: Typography.sm,
+    fontWeight: Typography.bold,
+  },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -1802,6 +2001,19 @@ const styles = StyleSheet.create({
   sendBtnText: {
     fontSize: 24,
     lineHeight: 28,
+  },
+  sendBtnLabel: {
+    fontSize: 9,
+    color: '#fff',
+    marginTop: -2,
+    textAlign: 'center',
+  },
+  bottomBtnLabel: {
+    fontSize: 9,
+    color: Colors.textMuted,
+    marginTop: 2,
+    textAlign: 'center',
+    width: 52,
   },
   unifiedBtn: {
     width: 52,
@@ -2014,5 +2226,53 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  // ── Hands-free mode styles ──────────────────────────────────────────────
+  handsfreeBtn: {
+    backgroundColor: '#1a5c35',
+  },
+  handsfreeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1a5c35',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 12,
+    gap: 10,
+  },
+  handsfreeBannerPaused: {
+    backgroundColor: '#666',
+  },
+  handsfreeBannerText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    flex: 1,
+  },
+  handsfreePulse: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#4ADE80',
+  },
+  handsfreeStopBtn: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  handsfreeResumeBtn: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  handsfreeStopText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
