@@ -35,10 +35,11 @@ import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
 
 export type HandsfreeState =
   | 'inactive'     // not in hands-free mode
-  | 'listening'    // mic is active, waiting for speech
+  | 'listening'    // mic is active, accepting speech + keywords
+  | 'wake_listen'  // mic is active but ONLY listening for "Hi Naavi" (after TTS)
   | 'processing'   // recording stopped, sending to Whisper
   | 'waiting'      // waiting for orchestrator to finish (thinking + speaking)
-  | 'paused';      // auto-paused after silence timeout
+  | 'paused';      // auto-paused after idle timeout (mic off)
 
 export interface UseHandsfreeModeResult {
   state: HandsfreeState;
@@ -133,6 +134,9 @@ export function useHandsfreeMode(
 
   // Idle timeout ref
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Whether we're in wake-only listening mode (only "Hi Naavi" and "Goodbye" accepted)
+  const wakeListenModeRef = useRef<boolean>(false);
 
   // Function refs to break circular dependency
   const startListeningRef = useRef<() => void>(() => {});
@@ -254,18 +258,19 @@ export function useHandsfreeMode(
 
   const handleTranscript = useCallback(async (transcript: string | null) => {
     if (!transcript || !transcript.trim()) {
-      // Empty — resume listening
+      // Empty — resume listening in same mode
       if (stateRef.current === 'processing') {
         startListeningRef.current();
       }
       return;
     }
 
-    console.log('[Handsfree] Transcript chunk:', transcript);
+    const currentMode = stateRef.current;
+    console.log('[Handsfree] Transcript chunk (mode:', currentMode, '):', transcript);
 
     const lower = transcript.toLowerCase().trim();
 
-    // ── Check EXIT keywords first (highest priority) ──────────────────────
+    // ── EXIT keywords — always checked, highest priority ──────────────────
     if (matchesKeyword(lower, KEYWORDS.EXIT)) {
       console.log('[Handsfree] EXIT keyword detected');
       pendingTranscriptRef.current = '';
@@ -274,16 +279,35 @@ export function useHandsfreeMode(
       return;
     }
 
-    // ── Check SUBMIT keywords — send accumulated message ──────────────────
+    // ── WAKE keyword — transitions from wake_listen → full listening ──────
+    if (matchesKeyword(lower, KEYWORDS.WAKE)) {
+      console.log('[Handsfree] WAKE keyword detected — switching to full listening');
+      pendingTranscriptRef.current = '';
+      wakeListenModeRef.current = false;
+      setState('listening');
+      speakCueRef.current("I'm listening.");
+      // Switch to full listening mode after cue plays
+      setTimeout(() => {
+        startListeningRef.current();
+      }, 1500);
+      return;
+    }
+
+    // ── If in wake_listen mode, discard everything that isn't WAKE or EXIT ─
+    if (currentMode === 'processing' && wakeListenModeRef.current) {
+      console.log('[Handsfree] Wake-only mode — discarding non-keyword audio');
+      startListeningRef.current();
+      return;
+    }
+
+    // ── SUBMIT keywords — send accumulated message ────────────────────────
     const submitMatch = matchesKeyword(lower, KEYWORDS.SUBMIT);
     if (submitMatch) {
-      // Combine any pending text with this chunk, strip the keyword
       const fullText = (pendingTranscriptRef.current + ' ' + transcript).trim();
       const cleaned = stripKeyword(fullText, submitMatch);
       pendingTranscriptRef.current = '';
 
       if (!cleaned) {
-        // Just the keyword with no actual message — resume listening
         console.log('[Handsfree] SUBMIT keyword but no message, resuming');
         startListeningRef.current();
         return;
@@ -296,29 +320,9 @@ export function useHandsfreeMode(
       return;
     }
 
-    // ── Check WAKE keywords — acknowledge and keep listening ──────────────
-    if (matchesKeyword(lower, KEYWORDS.WAKE)) {
-      console.log('[Handsfree] WAKE keyword detected');
-      pendingTranscriptRef.current = '';
-      // If paused, this reactivates — handled by activate() call from UI
-      // If already listening, just acknowledge
-      speakCueRef.current("I'm listening.");
-      // Wait for cue to play, then resume
-      setTimeout(() => {
-        if (stateRef.current === 'processing') {
-          startListeningRef.current();
-        }
-      }, 1500);
-      return;
-    }
-
-    // ── No keyword found — accumulate as pending text ─────────────────────
-    // This handles the case where Robert speaks in multiple chunks
-    // before saying "thank you". We keep the text and wait for the keyword.
+    // ── No keyword — accumulate pending text ──────────────────────────────
     pendingTranscriptRef.current = (pendingTranscriptRef.current + ' ' + transcript).trim();
     console.log('[Handsfree] No keyword — accumulated:', pendingTranscriptRef.current);
-
-    // Resume listening for the next chunk
     startListeningRef.current();
   }, [clearIdleTimer]);
 
@@ -530,13 +534,18 @@ export function useHandsfreeMode(
 
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
 
-  // ── Watch orchestrator: speaking → idle = restart listening ───────────────
+  // ── Watch orchestrator: speaking → idle = enter wake-listen mode ─────────
+  // After Naavi responds, wait for TTS to fully stop, then open mic in
+  // wake-only mode — only "Hi Naavi" or "Goodbye" are accepted.
+  // All other audio (noise, TTS tail) is silently discarded.
 
   useEffect(() => {
     if (stateRef.current === 'waiting' && orchestratorStatus === 'idle') {
-      console.log('[Handsfree] Orchestrator idle, waiting', POST_TTS_DELAY_MS, 'ms before restarting mic');
+      console.log('[Handsfree] Orchestrator idle — entering wake-listen mode after delay');
+      setState('wake_listen');
       setTimeout(() => {
-        if (stateRef.current === 'waiting') {
+        if (stateRef.current === 'wake_listen') {
+          wakeListenModeRef.current = true;
           startListeningRef.current();
         }
       }, POST_TTS_DELAY_MS);
@@ -550,6 +559,7 @@ export function useHandsfreeMode(
 
     console.log('[Handsfree] Activating');
     pendingTranscriptRef.current = '';
+    wakeListenModeRef.current = false;
     speakCueRef.current("I'm listening.");
 
     setTimeout(() => {
@@ -565,6 +575,7 @@ export function useHandsfreeMode(
     clearIdleTimer();
     await stopRecordingSilently();
     pendingTranscriptRef.current = '';
+    wakeListenModeRef.current = false;
     setState('inactive');
   }, [clearMeteringTimer, clearIdleTimer, stopRecordingSilently]);
 
