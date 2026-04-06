@@ -1,14 +1,24 @@
 /**
- * useHandsfreeMode hook
+ * useHandsfreeMode hook — walkie-talkie model
  *
- * Wraps existing Whisper recording + orchestrator into a continuous
- * hands-free voice loop so Robert never needs to tap the screen.
+ * Robert controls the conversation with voice keywords:
+ *   "Hi Naavi"    → wake up, start listening
+ *   "Thank you"   → submit my message to Naavi
+ *   "Goodbye"     → exit hands-free mode
  *
  * Flow:
- *   activate() → mic starts → Robert speaks → silence detected (~2s)
- *   → auto-submit to Whisper → orchestrator processes → Naavi speaks
- *   → mic restarts → Robert speaks again → …
- *   → Robert says "goodbye" or 60s silence → deactivate
+ *   1. Hands-free activated (button or Google intent)
+ *   2. Mic opens continuously — always recording
+ *   3. Silence detection segments audio into chunks
+ *   4. Each chunk is transcribed by Whisper
+ *   5. Transcript checked for keywords:
+ *      - SUBMIT keyword found → strip it, send message to orchestrator
+ *      - EXIT keyword found → deactivate hands-free
+ *      - WAKE keyword found → acknowledge and keep listening
+ *      - No keyword → discard (garbage/noise), keep listening
+ *   6. After Naavi responds → mic reopens, cycle continues
+ *
+ * Keywords are configurable — edit the KEYWORDS table below.
  *
  * Native (Android/iOS): expo-av metering for silence detection
  * Web: AnalyserNode on MediaRecorder stream
@@ -37,21 +47,55 @@ export interface UseHandsfreeModeResult {
   deactivate: () => void;
 }
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+// ─── Configurable Keyword Table ─────────────────────────────────────────────
+// Edit these to change voice commands. All matching is case-insensitive.
+// Each category is an array — any match triggers the action.
 
-const SILENCE_THRESHOLD_DB = -35;       // dB — below this = silence (native). Raised from -45 to reject ambient noise.
-const SILENCE_THRESHOLD_WEB = 0.02;     // RMS amplitude — below this = silence (web). Raised from 0.01.
-const SILENCE_DURATION_MS = 2000;       // 2s of silence → auto-submit
-const IDLE_TIMEOUT_MS = 60_000;         // 60s of no speech at all → auto-exit
+export const KEYWORDS = {
+  /** Say one of these to submit your message to Naavi */
+  SUBMIT: ['thank you', 'thank you naavi', 'thanks naavi', 'over'],
+
+  /** Say one of these to exit hands-free mode completely */
+  EXIT: ['goodbye', 'goodbye naavi', 'stop listening', "that's all", 'thats all'],
+
+  /** Say one of these to wake Naavi up (when paused or as acknowledgement) */
+  WAKE: ['hi naavi', 'hey naavi', 'hello naavi', 'naavi'],
+};
+
+// ─── Audio Constants ────────────────────────────────────────────────────────
+
+const SILENCE_THRESHOLD_DB = -35;       // dB — below this = silence (native)
+const SILENCE_THRESHOLD_WEB = 0.02;     // RMS amplitude — below this = silence (web)
+const SILENCE_DURATION_MS = 2000;       // 2s of silence → segment (stop recording, transcribe chunk)
+const IDLE_TIMEOUT_MS = 60_000;         // 60s of no speech at all → auto-pause
 const MIN_RECORDING_MS = 1500;          // ignore recordings shorter than 1.5s
-const MIN_SPEECH_MS = 500;              // need at least 500ms of actual speech before we consider submitting
+const MIN_SPEECH_MS = 500;              // need at least 500ms of actual speech before segmenting
 const METERING_INTERVAL_MS = 250;       // how often to check audio level
-const POST_TTS_DELAY_MS = 1500;         // wait 1.5s after Naavi speaks before opening mic (avoid capturing TTS tail)
-
-// Exit keywords — checked against lowercase transcript
-const EXIT_KEYWORDS = ['goodbye', 'stop listening', "that's all", 'thats all'];
+const POST_TTS_DELAY_MS = 1500;         // wait after Naavi speaks before opening mic
 
 const isNative = Platform.OS === 'android' || Platform.OS === 'ios';
+
+// ─── Keyword matching helpers ───────────────────────────────────────────────
+
+function matchesKeyword(transcript: string, keywords: string[]): string | null {
+  const lower = transcript.toLowerCase().trim();
+  for (const kw of keywords) {
+    if (lower.includes(kw)) return kw;
+  }
+  return null;
+}
+
+function stripKeyword(transcript: string, keyword: string): string {
+  // Remove the keyword from the end of the transcript (most common position)
+  const lower = transcript.toLowerCase();
+  const idx = lower.lastIndexOf(keyword);
+  if (idx >= 0) {
+    const before = transcript.slice(0, idx).trim();
+    const after = transcript.slice(idx + keyword.length).trim();
+    return (before + ' ' + after).trim();
+  }
+  return transcript;
+}
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
@@ -70,6 +114,9 @@ export function useHandsfreeMode(
   const sendMessageRef = useRef(sendMessage);
   const speakCueRef = useRef(speakCue);
 
+  // Accumulator: collects transcript fragments until a SUBMIT keyword is spoken
+  const pendingTranscriptRef = useRef<string>('');
+
   // Native recording ref
   const nativeRecordingRef = useRef<Audio.Recording | null>(null);
 
@@ -81,14 +128,13 @@ export function useHandsfreeMode(
 
   // Silence detection refs
   const silenceStartRef = useRef<number | null>(null);
-  const speechAccumulatedMsRef = useRef<number>(0);  // total ms of speech detected in current recording
+  const speechAccumulatedMsRef = useRef<number>(0);
   const meteringTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Idle timeout ref (no speech for 60s → auto-exit)
+  // Idle timeout ref
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Function refs to break circular dependency:
-  // startListening ↔ submitRecording ↔ handleTranscript all call each other
+  // Function refs to break circular dependency
   const startListeningRef = useRef<() => void>(() => {});
   const submitRecordingRef = useRef<() => void>(() => {});
   const deactivateRef = useRef<() => void>(() => {});
@@ -121,7 +167,7 @@ export function useHandsfreeMode(
       if (stateRef.current === 'listening') {
         console.log('[Handsfree] Idle timeout — no speech for 60s');
         setState('paused');
-        speakCueRef.current('Listening paused. Tap to resume.');
+        speakCueRef.current('Listening paused. Say Hi Naavi to resume.');
       }
     }, IDLE_TIMEOUT_MS);
   }, [clearIdleTimer]);
@@ -184,7 +230,7 @@ export function useHandsfreeMode(
   const transcribeWeb = useCallback(async (chunks: Blob[]): Promise<string | null> => {
     try {
       const audioBlob = new Blob(chunks, { type: 'audio/webm' });
-      if (audioBlob.size < 1000) return null; // too short
+      if (audioBlob.size < 1000) return null;
 
       const arrayBuffer = await audioBlob.arrayBuffer();
       const bytes = new Uint8Array(arrayBuffer);
@@ -204,37 +250,80 @@ export function useHandsfreeMode(
     }
   }, []);
 
-  // ── Core loop functions (assigned to refs to break circular deps) ────────
+  // ── Handle completed transcription (keyword-based) ───────────────────────
 
-  // handleTranscript: process transcription result
   const handleTranscript = useCallback(async (transcript: string | null) => {
     if (!transcript || !transcript.trim()) {
-      // Empty transcription — resume listening
+      // Empty — resume listening
       if (stateRef.current === 'processing') {
         startListeningRef.current();
       }
       return;
     }
 
-    console.log('[Handsfree] Transcript:', transcript);
+    console.log('[Handsfree] Transcript chunk:', transcript);
 
-    // Check for exit keywords
     const lower = transcript.toLowerCase().trim();
-    if (EXIT_KEYWORDS.some(kw => lower.includes(kw))) {
-      console.log('[Handsfree] Exit keyword detected');
+
+    // ── Check EXIT keywords first (highest priority) ──────────────────────
+    if (matchesKeyword(lower, KEYWORDS.EXIT)) {
+      console.log('[Handsfree] EXIT keyword detected');
+      pendingTranscriptRef.current = '';
       speakCueRef.current('Goodbye Robert.');
       deactivateRef.current();
       return;
     }
 
-    // Send to orchestrator
-    setState('waiting');
-    clearIdleTimer();
-    await sendMessageRef.current(transcript);
-    // The useEffect watching orchestratorStatus will restart listening when idle
+    // ── Check SUBMIT keywords — send accumulated message ──────────────────
+    const submitMatch = matchesKeyword(lower, KEYWORDS.SUBMIT);
+    if (submitMatch) {
+      // Combine any pending text with this chunk, strip the keyword
+      const fullText = (pendingTranscriptRef.current + ' ' + transcript).trim();
+      const cleaned = stripKeyword(fullText, submitMatch);
+      pendingTranscriptRef.current = '';
+
+      if (!cleaned) {
+        // Just the keyword with no actual message — resume listening
+        console.log('[Handsfree] SUBMIT keyword but no message, resuming');
+        startListeningRef.current();
+        return;
+      }
+
+      console.log('[Handsfree] SUBMIT — sending:', cleaned);
+      setState('waiting');
+      clearIdleTimer();
+      await sendMessageRef.current(cleaned);
+      return;
+    }
+
+    // ── Check WAKE keywords — acknowledge and keep listening ──────────────
+    if (matchesKeyword(lower, KEYWORDS.WAKE)) {
+      console.log('[Handsfree] WAKE keyword detected');
+      pendingTranscriptRef.current = '';
+      // If paused, this reactivates — handled by activate() call from UI
+      // If already listening, just acknowledge
+      speakCueRef.current("I'm listening.");
+      // Wait for cue to play, then resume
+      setTimeout(() => {
+        if (stateRef.current === 'processing') {
+          startListeningRef.current();
+        }
+      }, 1500);
+      return;
+    }
+
+    // ── No keyword found — accumulate as pending text ─────────────────────
+    // This handles the case where Robert speaks in multiple chunks
+    // before saying "thank you". We keep the text and wait for the keyword.
+    pendingTranscriptRef.current = (pendingTranscriptRef.current + ' ' + transcript).trim();
+    console.log('[Handsfree] No keyword — accumulated:', pendingTranscriptRef.current);
+
+    // Resume listening for the next chunk
+    startListeningRef.current();
   }, [clearIdleTimer]);
 
-  // submitRecording: stop recording and transcribe
+  // ── Submit recording (silence segmented a chunk) ─────────────────────────
+
   const submitRecording = useCallback(async () => {
     if (stateRef.current !== 'listening') return;
 
@@ -282,7 +371,8 @@ export function useHandsfreeMode(
   // Keep submitRecording ref current
   useEffect(() => { submitRecordingRef.current = submitRecording; }, [submitRecording]);
 
-  // startNativeListening: open mic with metering
+  // ── Native listening with metering ───────────────────────────────────────
+
   const startNativeListening = useCallback(async () => {
     try {
       const { status: permStatus } = await Audio.requestPermissionsAsync();
@@ -325,7 +415,7 @@ export function useHandsfreeMode(
       setState('listening');
       resetIdleTimer();
 
-      // Poll metering for silence detection
+      // Poll metering for silence detection (segments audio into chunks)
       let speechDetected = false;
       speechAccumulatedMsRef.current = 0;
       meteringTimerRef.current = setInterval(async () => {
@@ -343,11 +433,10 @@ export function useHandsfreeMode(
             silenceStartRef.current = null;
             resetIdleTimer();
           } else if (speechDetected && speechAccumulatedMsRef.current >= MIN_SPEECH_MS) {
-            // Only consider silence-after-speech if enough real speech was captured
             if (!silenceStartRef.current) {
               silenceStartRef.current = Date.now();
             } else if (Date.now() - silenceStartRef.current >= SILENCE_DURATION_MS) {
-              console.log('[Handsfree] Silence detected (native), speech:', speechAccumulatedMsRef.current, 'ms, submitting');
+              console.log('[Handsfree] Silence segment (native), speech:', speechAccumulatedMsRef.current, 'ms');
               submitRecordingRef.current();
             }
           }
@@ -363,7 +452,8 @@ export function useHandsfreeMode(
     }
   }, [resetIdleTimer]);
 
-  // startWebListening: open mic with AnalyserNode
+  // ── Web listening with AnalyserNode ──────────────────────────────────────
+
   const startWebListening = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -411,7 +501,7 @@ export function useHandsfreeMode(
           if (!silenceStartRef.current) {
             silenceStartRef.current = Date.now();
           } else if (Date.now() - silenceStartRef.current >= SILENCE_DURATION_MS) {
-            console.log('[Handsfree] Silence detected (web), speech:', speechAccumulatedMsRef.current, 'ms, submitting');
+            console.log('[Handsfree] Silence segment (web), speech:', speechAccumulatedMsRef.current, 'ms');
             submitRecordingRef.current();
           }
         }
@@ -424,7 +514,8 @@ export function useHandsfreeMode(
     }
   }, [resetIdleTimer]);
 
-  // startListening: entry point that delegates to native or web
+  // ── Start listening ──────────────────────────────────────────────────────
+
   const startListening = useCallback(() => {
     setError(null);
     silenceStartRef.current = null;
@@ -437,11 +528,9 @@ export function useHandsfreeMode(
     }
   }, [startNativeListening, startWebListening]);
 
-  // Keep startListening ref current
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
 
   // ── Watch orchestrator: speaking → idle = restart listening ───────────────
-  // Delay mic restart to avoid capturing TTS audio from the speaker
 
   useEffect(() => {
     if (stateRef.current === 'waiting' && orchestratorStatus === 'idle') {
@@ -460,9 +549,9 @@ export function useHandsfreeMode(
     if (stateRef.current !== 'inactive' && stateRef.current !== 'paused') return;
 
     console.log('[Handsfree] Activating');
+    pendingTranscriptRef.current = '';
     speakCueRef.current("I'm listening.");
 
-    // Small delay so the "I'm listening" cue plays before mic opens
     setTimeout(() => {
       startListeningRef.current();
     }, 1500);
@@ -475,10 +564,10 @@ export function useHandsfreeMode(
     clearMeteringTimer();
     clearIdleTimer();
     await stopRecordingSilently();
+    pendingTranscriptRef.current = '';
     setState('inactive');
   }, [clearMeteringTimer, clearIdleTimer, stopRecordingSilently]);
 
-  // Keep deactivate ref current
   useEffect(() => { deactivateRef.current = deactivateInternal; }, [deactivateInternal]);
 
   const deactivate = useCallback(() => {
