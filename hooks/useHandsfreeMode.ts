@@ -53,7 +53,7 @@ export interface UseHandsfreeModeResult {
 
 export const KEYWORDS = {
   /** Say one of these to submit your message to Naavi */
-  SUBMIT: ['thank you', 'thank you naavi', 'thanks naavi', 'over'],
+  SUBMIT: ['thank you', 'thank you naavi', 'thanks', 'thanks naavi', 'over'],
 
   /** Say one of these to exit hands-free mode completely */
   EXIT: ['goodbye', 'goodbye naavi', 'stop listening', "that's all", 'thats all'],
