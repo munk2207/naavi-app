@@ -10,6 +10,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
 import * as Notifications from 'expo-notifications';
+import * as Updates from 'expo-updates';
 import '../lib/i18n'; // Initialise i18n before any screen renders
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
@@ -44,6 +45,22 @@ async function handleAuthCallback(url: string) {
 }
 
 export default function RootLayout() {
+  // Check for OTA updates on launch
+  useEffect(() => {
+    async function checkForOTA() {
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          await Updates.reloadAsync();
+        }
+      } catch (e) {
+        console.log('[OTA] Error:', e);
+      }
+    }
+    checkForOTA();
+  }, []);
+
   useEffect(() => {
     // Listen for deep links while app is open
     const sub = Linking.addEventListener('url', ({ url }) => handleAuthCallback(url));

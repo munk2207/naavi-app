@@ -21,7 +21,7 @@ import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabas
 import { sendPushNotification } from '@/lib/push';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
 import { lookupContact, lookupContactByPhone } from '@/lib/contacts';
-import { ingestNote, deleteKnowledge } from '@/lib/knowledge';
+import { ingestNote, deleteKnowledge, fetchAllKnowledge, searchKnowledge } from '@/lib/knowledge';
 import { registry } from '@/lib/adapters/registry';
 import type { StorageFile, NavigationResult } from '@/lib/types';
 
@@ -61,6 +61,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const send = useCallback(async (userMessage: string) => {
     if (status === 'thinking' || status === 'speaking') return;
 
+    _speechStopped = false;
     setStatus('thinking');
     setError(null);
 
@@ -120,8 +121,15 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
       }
 
-      const response = await sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language);
+      // Check if this is a broad knowledge query — fetch memories directly
+      const isBroadQuery = /\b(all|list|everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
+
+      const [response, knowledgeResult] = await Promise.all([
+        sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language),
+        isBroadQuery ? fetchAllKnowledge(100) : Promise.resolve([]),
+      ]);
       console.log('[Orchestrator] actions:', JSON.stringify(response.actions));
+      console.log('[Orchestrator] knowledgeItems from direct fetch:', knowledgeResult.length);
 
       // ── Execute actions ────────────────────────────────────────────────────────
 
@@ -344,7 +352,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         rememberedItems:  turnMemory,
         driveFiles:       turnDrive,
         navigationResults: turnNav,
-        timestamp: new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
+        timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' }) + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
       };
       setTurns(prev => [...prev, newTurn]);
       saveConversationTurn(newTurn).catch(() => {});
@@ -361,6 +369,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   }, [status, language]);
 
   const clearHistory = useCallback(() => {
+    stopSpeaking();
     setTurns([]);
     setError(null);
     setStatus('idle');
@@ -370,7 +379,12 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     setTurns(savedTurns);
   }, []);
 
-  return { status, turns, error, send, clearHistory, loadHistory };
+  const stopAndReset = useCallback(() => {
+    stopSpeaking();
+    setStatus('idle');
+  }, []);
+
+  return { status, turns, error, send, clearHistory, loadHistory, stopSpeaking: stopAndReset };
 }
 
 // ─── Speech sanitiser ─────────────────────────────────────────────────────────
@@ -398,6 +412,29 @@ function sanitiseForSpeech(text: string): string {
     );
 }
 
+// ─── Stop speaking ───────────────────────────────────────────────────────────
+let _speechStopped = false;
+let _currentAudio: HTMLAudioElement | null = null;
+let _currentSound: any = null;
+
+export function stopSpeaking(): void {
+  _speechStopped = true;
+  // Web
+  if (_currentAudio) {
+    _currentAudio.pause();
+    _currentAudio = null;
+  }
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+  // Native
+  if (_currentSound) {
+    try { _currentSound.stopAsync().catch(() => {}); } catch {}
+    _currentSound = null;
+  }
+  Speech.stop().catch(() => {});
+}
+
 // ─── Speech helper ────────────────────────────────────────────────────────────
 
 // Fetch TTS audio as base64 from OpenAI sage voice
@@ -416,9 +453,11 @@ async function fetchTTSBase64(chunk: string): Promise<string | null> {
 // ── Web playback ──────────────────────────────────────────────────────────────
 function playAudioUrl(url: string): Promise<void> {
   return new Promise((resolve) => {
+    if (_speechStopped) { resolve(); return; }
     const audio = new (window as any).Audio(url);
-    audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-    audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
+    _currentAudio = audio;
+    audio.onended = () => { _currentAudio = null; URL.revokeObjectURL(url); resolve(); };
+    audio.onerror = () => { _currentAudio = null; URL.revokeObjectURL(url); resolve(); };
     audio.play().catch(() => resolve());
   });
 }
@@ -440,8 +479,9 @@ async function speakCloud(text: string): Promise<void> {
   try {
     const audioPromises = chunks.map(chunk => fetchTTSBase64(chunk));
     for (const promise of audioPromises) {
+      if (_speechStopped) break;
       const base64 = await promise;
-      if (!base64) continue;
+      if (!base64 || _speechStopped) continue;
       const binary = atob(base64);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -521,8 +561,9 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
   try {
     const audioPromises = chunks.map(chunk => fetchTTSBase64(chunk));
     for (const promise of audioPromises) {
+      if (_speechStopped) break;
       const base64 = await promise;
-      if (base64) await playBase64AudioNative(base64);
+      if (base64 && !_speechStopped) await playBase64AudioNative(base64);
     }
   } catch (err) {
     // Fall back to expo-speech if cloud TTS fails

@@ -29,7 +29,14 @@ export async function ingestNote(
     const { data, error } = await supabase.functions.invoke('ingest-note', {
       body: { text, source },
     });
-    if (error || !data?.fragments) return [];
+    if (error) {
+      console.error('[Knowledge] Ingest error:', error.message ?? error);
+      return [];
+    }
+    if (!data?.fragments) {
+      console.error('[Knowledge] Ingest returned no fragments. Response:', JSON.stringify(data));
+      return [];
+    }
     console.log(`[Knowledge] Ingested ${data.fragments.length} fragments`);
     return data.fragments;
   } catch (err) {
@@ -93,6 +100,7 @@ export async function deleteKnowledge(keyword: string): Promise<number> {
       .ilike('content', `%${keyword.trim()}%`)
       .select('id');
     if (error) { console.error('[Knowledge] Delete failed:', error.message); return 0; }
+    console.log(`[Knowledge] Deleted ${data?.length ?? 0} fragments matching "${keyword}"`);
     return data?.length ?? 0;
   } catch (err) {
     console.error('[Knowledge] Delete failed:', err);

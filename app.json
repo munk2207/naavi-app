@@ -3,6 +3,12 @@
     "name": "MyNaavi",
     "slug": "naavi",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/be293d9d-cab2-48ff-85a5-d27187ff4340"
+    },
     "orientation": "default",
     "userInterfaceStyle": "light",
     "ios": {
@@ -15,6 +21,7 @@
       }
     },
     "android": {
+      "versionCode": 2,
       "package": "ca.naavi.app",
       "googleServicesFile": "./google-services.json",
       "permissions": [
@@ -29,7 +36,8 @@
       "expo-secure-store",
       "expo-sqlite",
       "expo-localization",
-      "./plugins/withAppActions"
+      "./plugins/withAppActions",
+      "expo-updates"
     ],
     "scheme": "naavi",
     "extra": {
