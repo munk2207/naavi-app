@@ -3,6 +3,9 @@
  *
  * Displays a single turn of conversation — either Robert's message
  * or Naavi's response. Senior-friendly sizing and high contrast.
+ *
+ * Naavi's responses are simple text (no box/bubble).
+ * Robert's messages use a light grey bubble.
  */
 
 import React from 'react';
@@ -24,13 +27,23 @@ export function ConversationBubble({ role, content, timestamp }: Props) {
       {isNaavi && (
         <Text style={styles.label}>MyNaavi</Text>
       )}
-      <View style={[styles.bubble, isNaavi ? styles.naaviBubble : styles.robertBubble]}>
-        {content.split('\n').map((line, i) => (
-          <Text key={i} style={[styles.text, isNaavi ? styles.naaviText : styles.robertText]}>
-            {line}
-          </Text>
-        ))}
-      </View>
+      {isNaavi ? (
+        <View style={styles.naaviPlain}>
+          {content.split('\n').map((line, i) => (
+            <Text key={i} style={styles.naaviText}>
+              {line}
+            </Text>
+          ))}
+        </View>
+      ) : (
+        <View style={[styles.bubble, styles.robertBubble]}>
+          {content.split('\n').map((line, i) => (
+            <Text key={i} style={styles.robertText}>
+              {line}
+            </Text>
+          ))}
+        </View>
+      )}
       {timestamp && (
         <Text style={styles.timestamp}>{timestamp}</Text>
       )}
@@ -61,22 +74,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  naaviBubble: {
-    backgroundColor: Colors.bubbleNaavi,
-    borderBottomLeftRadius: 4,
+  naaviPlain: {
+    paddingHorizontal: 4,
+    paddingVertical: 4,
   },
   robertBubble: {
     backgroundColor: Colors.bubbleRobert,
     borderBottomRightRadius: 4,
   },
-  text: {
+  naaviText: {
     fontSize: Typography.md,
     lineHeight: Typography.lineHeightMd,
-  },
-  naaviText: {
-    color: Colors.textOnDark,
+    color: Colors.textPrimary,
   },
   robertText: {
+    fontSize: Typography.md,
+    lineHeight: Typography.lineHeightMd,
     color: Colors.textPrimary,
   },
   timestamp: {

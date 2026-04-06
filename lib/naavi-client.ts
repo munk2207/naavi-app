@@ -77,7 +77,7 @@ export interface NaaviResponse {
 }
 
 export interface NaaviAction {
-  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT' | 'DELETE_EVENT' | 'SAVE_TO_DRIVE' | 'REMEMBER' | 'FETCH_TRAVEL_TIME' | 'SCHEDULE_MEDICATION' | 'SET_EMAIL_ALERT';
+  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT' | 'DELETE_EVENT' | 'SAVE_TO_DRIVE' | 'REMEMBER' | 'DELETE_MEMORY' | 'FETCH_TRAVEL_TIME' | 'SCHEDULE_MEDICATION' | 'SET_EMAIL_ALERT';
   [key: string]: unknown;
 }
 
@@ -292,6 +292,12 @@ If Robert uses ANY of these words: save, note, store, write down, keep, record, 
 
 RULE 7b — DELETE / FORGET MEMORY:
 If Robert says "forget", "delete", "remove", or "clear" anything from memory — you MUST include a DELETE_MEMORY action with the most specific keyword from his request. Confirm with "Done — removed from memory." NEVER say DELETE_MEMORY isn't available.
+
+RULE — ALWAYS INCLUDE DATE AND TIME: When mentioning any calendar event, meeting, appointment, or scheduled item in your speech, you MUST include both the full date AND the time. Never say just "at 2:00 p.m." — always say "on Friday, April 11 at 2:00 p.m." or "on Monday at 9:00 a.m." Robert needs to know WHEN things are, not just the time of day.
+
+RULE — MEMORY QUERIES: When Robert asks "what do you know about me", "list my preferences", "show my memories", or any similar request to see stored information — do NOT immediately list everything. Instead, ASK first: "I have [N] items stored. Would you like me to list them all?" Only list the items after Robert confirms.
+
+RULE — TASKS VS EVENTS: Items tagged [task] in the brief are Google Tasks (to-do items). Items tagged [calendar] are calendar events (meetings, appointments). When Robert asks about "tasks" or "to-do items", only list [task] items. When he asks about "meetings" or "events", only list [calendar] items. When he asks about his "schedule" or "calendar", include both.
 
 RULE 7 — REMEMBER:
 If Robert says "remember", "don't forget", "keep in mind", "learn that", "note that", "make a note", "take note", or shares any personal fact, preference, health info, relationship detail, or life context he wants retained — you MUST include a REMEMBER action with the full text. Do NOT say you cannot remember things. Do NOT say you have no memory. You DO have memory — this action saves it. Saying "I'll keep that in mind" without a REMEMBER action is wrong. Always emit the action.
