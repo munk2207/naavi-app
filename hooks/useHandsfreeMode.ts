@@ -100,6 +100,10 @@ export function useHandsfreeMode(
   // Pending transcript accumulator (for multi-chunk speech before keyword)
   const pendingTranscriptRef = useRef<string>('');
 
+  // Error retry counter — prevents infinite loop
+  const errorRetryCountRef = useRef(0);
+  const MAX_ERROR_RETRIES = 3;
+
   // Web recording refs (fallback)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -249,6 +253,7 @@ export function useHandsfreeMode(
 
     // Only act on final results
     if (result.isFinal) {
+      errorRetryCountRef.current = 0; // reset on successful recognition
       const transcript = result.transcript;
       console.log('[Handsfree] Final result:', transcript);
       setState('processing');
@@ -271,17 +276,27 @@ export function useHandsfreeMode(
     }
   });
 
-  // Error — log and restart if recoverable
+  // Error — log and restart if recoverable (max 3 retries)
   useSpeechRecognitionEvent('error', (event) => {
     console.error('[Handsfree] Recognition error:', event.error, event.message);
-    // "no-speech" is normal — just means silence, restart silently
+    // "no-speech" is normal — just means silence, restart silently (doesn't count as error)
     if (event.error === 'no-speech') {
+      errorRetryCountRef.current = 0; // reset on normal silence
       if (stateRef.current === 'listening') {
         startListeningRef.current();
       }
       return;
     }
-    // Network or other real errors — tell Robert, then retry
+    // Real error — check retry limit
+    errorRetryCountRef.current += 1;
+    if (errorRetryCountRef.current > MAX_ERROR_RETRIES) {
+      console.log('[Handsfree] Max retries reached — pausing');
+      errorRetryCountRef.current = 0;
+      setState('paused');
+      speakCueRef.current("I'm having trouble with the microphone. Say Hi Naavi to try again.");
+      return;
+    }
+    // Retry with delay
     if (stateRef.current === 'listening' || stateRef.current === 'processing') {
       speakCueRef.current("Sorry, I had a problem hearing you. Trying again.").then(() => {
         setTimeout(() => {
