@@ -21,7 +21,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const { to, body } = await req.json() as { to: string; body: string };
+    const { to, body, channel } = await req.json() as { to: string; body: string; channel?: string };
 
     if (!to || !body) {
       return new Response(JSON.stringify({ error: 'Missing to or body' }), {
@@ -36,6 +36,11 @@ serve(async (req) => {
 
     const credentials = btoa(`${accountSid}:${authToken}`);
 
+    // WhatsApp: prefix To and From with "whatsapp:" per Twilio API
+    const isWhatsApp = channel === 'whatsapp';
+    const toNumber = isWhatsApp ? `whatsapp:${to}` : to;
+    const fromNum = isWhatsApp ? `whatsapp:${fromNumber}` : fromNumber;
+
     const res = await fetch(
       `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
       {
@@ -44,21 +49,21 @@ serve(async (req) => {
           Authorization: `Basic ${credentials}`,
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: new URLSearchParams({ To: to, From: fromNumber, Body: body }),
+        body: new URLSearchParams({ To: toNumber, From: fromNum, Body: body }),
       }
     );
 
     const data = await res.json();
 
     if (!res.ok) {
-      console.error('[send-sms] Twilio error:', data);
+      console.error(`[send-sms] Twilio error (${isWhatsApp ? 'WhatsApp' : 'SMS'}):`, data);
       return new Response(JSON.stringify({ error: data.message ?? 'Twilio error' }), {
         status: 502,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    console.log(`[send-sms] Sent to ${to}: ${body.slice(0, 60)}`);
+    console.log(`[send-sms] ${isWhatsApp ? 'WhatsApp' : 'SMS'} sent to ${to}: ${body.slice(0, 60)}`);
     return new Response(JSON.stringify({ success: true, sid: data.sid }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
