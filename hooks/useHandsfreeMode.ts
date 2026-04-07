@@ -281,11 +281,15 @@ export function useHandsfreeMode(
     console.error('[Handsfree] Recognition error:', event.error, event.message);
     // Show error code on screen so we can debug
     setError(`[${event.error}] ${event.message ?? ''}`);
-    // "no-speech" is normal — just means silence, restart silently
-    if (event.error === 'no-speech') {
+    // "no-speech" and "aborted" are normal — restart silently
+    if (event.error === 'no-speech' || event.error === 'aborted') {
       errorRetryCountRef.current = 0;
       if (stateRef.current === 'listening') {
-        startListeningRef.current();
+        setTimeout(() => {
+          if (stateRef.current === 'listening') {
+            startListeningRef.current();
+          }
+        }, 500);
       }
       return;
     }
