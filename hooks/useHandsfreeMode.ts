@@ -412,7 +412,16 @@ export function useHandsfreeMode(
         return;
       }
 
-      // Reset audio mode — required after TTS playback to allow recording again
+      // Force-release audio session from any prior TTS playback
+      // Without this, Android refuses to start a new recording
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: false,
+        });
+      } catch {}
+
+      // Now set recording mode
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
@@ -420,7 +429,7 @@ export function useHandsfreeMode(
         shouldDuckAndroid: true,
       });
 
-      const { recording } = await Audio.Recording.createAsync({
+      const recordingOptions = {
         isMeteringEnabled: true,
         android: {
           extension: '.m4a',
@@ -442,7 +451,18 @@ export function useHandsfreeMode(
           linearPCMIsFloat: false,
         },
         web: { mimeType: 'audio/webm', bitsPerSecond: 32000 },
-      });
+      };
+
+      let recording: Audio.Recording;
+      try {
+        ({ recording } = await Audio.Recording.createAsync(recordingOptions));
+      } catch (firstErr) {
+        // Retry once after a short delay — audio session may need time to release
+        console.log('[Handsfree] First recording attempt failed, retrying in 500ms');
+        await new Promise(r => setTimeout(r, 500));
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+        ({ recording } = await Audio.Recording.createAsync(recordingOptions));
+      }
 
       nativeRecordingRef.current = recording;
       setState('listening');
