@@ -276,35 +276,33 @@ export function useHandsfreeMode(
     }
   });
 
-  // Error — log and restart if recoverable (max 3 retries)
+  // Error — silently retry or pause (no spoken errors to avoid feedback loop)
   useSpeechRecognitionEvent('error', (event) => {
     console.error('[Handsfree] Recognition error:', event.error, event.message);
-    // "no-speech" is normal — just means silence, restart silently (doesn't count as error)
+    // "no-speech" is normal — just means silence, restart silently
     if (event.error === 'no-speech') {
-      errorRetryCountRef.current = 0; // reset on normal silence
+      errorRetryCountRef.current = 0;
       if (stateRef.current === 'listening') {
         startListeningRef.current();
       }
       return;
     }
-    // Real error — check retry limit
+    // Real error — count retries
     errorRetryCountRef.current += 1;
     if (errorRetryCountRef.current > MAX_ERROR_RETRIES) {
-      console.log('[Handsfree] Max retries reached — pausing');
+      // Stop trying — pause silently, show banner
+      console.log('[Handsfree] Max retries reached — pausing silently');
       errorRetryCountRef.current = 0;
       setState('paused');
-      speakCueRef.current("I'm having trouble with the microphone. Say Hi Naavi to try again.");
       return;
     }
-    // Retry with delay
+    // Silent retry with delay (no TTS, just wait and try again)
     if (stateRef.current === 'listening' || stateRef.current === 'processing') {
-      speakCueRef.current("Sorry, I had a problem hearing you. Trying again.").then(() => {
-        setTimeout(() => {
-          if (stateRef.current === 'listening') {
-            startListeningRef.current();
-          }
-        }, 500);
-      });
+      setTimeout(() => {
+        if (stateRef.current === 'listening') {
+          startListeningRef.current();
+        }
+      }, 1000);
     }
   });
 
