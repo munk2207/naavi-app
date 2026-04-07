@@ -27,8 +27,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import * as Linking from 'expo-linking';
-import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system/legacy';
 
 import { getUserName } from '@/lib/naavi-client';
 import { useOrchestrator } from '@/hooks/useOrchestrator';
@@ -613,76 +611,24 @@ export default function HomeScreen() {
   }, [turns]);
 
   // ── Hands-free mode ──────────────────────────────────────────────────────
-  // speakCue: speaks short cues using OpenAI nova voice (same voice as responses).
-  // Returns a Promise that resolves when playback finishes — hands-free waits
+  // speakCue: short spoken cue using expo-speech (local, instant, no echo).
+  // Returns a Promise that resolves when TTS finishes — hands-free waits
   // before starting speech recognition (Android can't do both simultaneously).
-  // Falls back to expo-speech if cloud TTS fails.
+  // Cloud TTS (nova) is used for Naavi's full responses, not for short cues.
   const speakCueRef = useRef((text: string): Promise<void> => {
-    return (async () => {
-      try {
-        if (!supabase) throw new Error('No supabase');
-        const { data, error } = await supabase.functions.invoke('text-to-speech', {
-          body: { text, voice: 'nova' },
-        });
-        if (error || !data?.audio) throw new Error('TTS failed');
-
-        if (Platform.OS === 'web') {
-          // Web: play via Audio element
-          const binary = atob(data.audio);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          const blob = new Blob([bytes], { type: 'audio/mpeg' });
-          const url = URL.createObjectURL(blob);
-          await new Promise<void>((resolve) => {
-            const audio = new (window as any).Audio(url);
-            audio.onended = () => { URL.revokeObjectURL(url); resolve(); };
-            audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
-            audio.play().catch(() => resolve());
-          });
-        } else {
-          // Native: write base64 to temp file, play with expo-av
-          const tempUri = (FileSystem.cacheDirectory ?? '') + `cue_${Date.now()}.mp3`;
-          await FileSystem.writeAsStringAsync(tempUri, data.audio, {
-            encoding: 'base64' as any,
-          });
-          await Audio.setAudioModeAsync({
-            playsInSilentModeIOS: true,
-            staysActiveInBackground: false,
-            shouldDuckAndroid: false,
-          });
-          const sound = new Audio.Sound();
-          await new Promise<void>((resolve) => {
-            const safetyTimer = setTimeout(resolve, 8000);
-            sound.setOnPlaybackStatusUpdate((status) => {
-              if (status.isLoaded && status.didJustFinish) {
-                clearTimeout(safetyTimer);
-                sound.unloadAsync().then(() => {
-                  FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-                  resolve();
-                });
-              }
-            });
-            sound.loadAsync({ uri: tempUri })
-              .then(() => sound.playAsync())
-              .catch(() => { clearTimeout(safetyTimer); resolve(); });
-          });
-        }
-      } catch {
-        // Fallback: expo-speech (different voice, but better than silence)
-        await new Promise<void>((resolve) => {
-          const Speech = require('expo-speech');
-          Speech.speak(text, {
-            language: 'en-CA',
-            rate: 0.85,
-            pitch: 1.05,
-            onDone: () => resolve(),
-            onError: () => resolve(),
-            onStopped: () => resolve(),
-          });
-          setTimeout(resolve, 3000);
-        });
-      }
-    })();
+    return new Promise((resolve) => {
+      const Speech = require('expo-speech');
+      Speech.speak(text, {
+        language: 'en-CA',
+        rate: 0.85,
+        pitch: 1.05,
+        onDone: () => resolve(),
+        onError: () => resolve(),
+        onStopped: () => resolve(),
+      });
+      // Safety timeout in case callbacks don't fire
+      setTimeout(resolve, 5000);
+    });
   });
 
   const handsfree = useHandsfreeMode(status, send, speakCueRef.current);
