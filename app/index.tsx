@@ -576,9 +576,21 @@ export default function HomeScreen() {
 
   // ── Hands-free mode ──────────────────────────────────────────────────────
   // speakCue: short spoken cue using expo-speech (fast, no cloud call needed)
-  const speakCueRef = useRef((text: string) => {
-    const Speech = require('expo-speech');
-    Speech.speak(text, { language: 'en-CA', rate: 0.9 });
+  // Returns a Promise that resolves when TTS finishes — hands-free waits for this
+  // before starting speech recognition (Android can't do both simultaneously).
+  const speakCueRef = useRef((text: string): Promise<void> => {
+    return new Promise((resolve) => {
+      const Speech = require('expo-speech');
+      Speech.speak(text, {
+        language: 'en-CA',
+        rate: 0.9,
+        onDone: () => resolve(),
+        onError: () => resolve(),
+        onStopped: () => resolve(),
+      });
+      // Safety timeout — resolve even if callbacks don't fire
+      setTimeout(resolve, 3000);
+    });
   });
 
   const handsfree = useHandsfreeMode(status, send, speakCueRef.current);
