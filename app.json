@@ -37,7 +37,15 @@
       "expo-sqlite",
       "expo-localization",
       "./plugins/withAppActions",
-      "expo-updates"
+      "expo-updates",
+      [
+        "@jamsch/expo-speech-recognition",
+        {
+          "microphonePermission": "MyNaavi uses the microphone so Robert can speak to it.",
+          "speechRecognitionPermission": "MyNaavi listens to Robert's voice to understand his requests.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ]
     ],
     "scheme": "naavi",
     "extra": {

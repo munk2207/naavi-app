@@ -1,30 +1,26 @@
 /**
- * useHandsfreeMode hook — walkie-talkie model with VAD
+ * useHandsfreeMode hook — walkie-talkie model with native speech recognition
  *
  * Robert controls the conversation with voice keywords:
  *   "Hi Naavi"    → wake up, start listening
  *   "Thanks"      → submit my message to Naavi
  *   "Goodbye"     → exit hands-free mode
  *
- * Speech detection uses Silero VAD (on-device ML model) to distinguish
- * real speech from silence/noise. Only real speech is sent to Whisper.
- * Silence never reaches Whisper — no hallucinations.
+ * Speech detection uses Android's native SpeechRecognizer via
+ * @jamsch/expo-speech-recognition. Built-in VAD means silence never
+ * produces a transcript — no hallucinations.
  *
- * Flow:
- *   1. Hands-free activated → VAD starts monitoring mic
- *   2. VAD detects speech → start capturing audio
- *   3. VAD detects speech end → stop capture, transcribe via Whisper
- *   4. Transcript checked for keywords (SUBMIT/EXIT/WAKE)
- *   5. After Naavi responds → VAD keeps monitoring for "Hi Naavi"
- *   6. No taps needed at any point
+ * Web fallback: MediaRecorder + Whisper (unchanged).
  *
  * Keywords are configurable — edit the KEYWORDS table below.
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Platform } from 'react-native';
-import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system/legacy';
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent,
+} from '@jamsch/expo-speech-recognition';
 import { supabase } from '@/lib/supabase';
 import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
 
@@ -32,8 +28,8 @@ import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
 
 export type HandsfreeState =
   | 'inactive'     // not in hands-free mode
-  | 'listening'    // VAD is monitoring mic, waiting for speech
-  | 'processing'   // speech captured, sending to Whisper
+  | 'listening'    // recognition active, waiting for speech
+  | 'processing'   // speech captured, processing transcript
   | 'waiting'      // waiting for orchestrator to finish (thinking + speaking)
   | 'paused';      // paused (idle timeout or error)
 
@@ -61,7 +57,7 @@ export const KEYWORDS = {
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const IDLE_TIMEOUT_MS = 60_000;         // 60s of no speech → auto-pause
-const POST_TTS_DELAY_MS = 1500;         // wait after Naavi speaks before VAD resumes
+const POST_TTS_DELAY_MS = 1500;         // wait after Naavi speaks before recognition resumes
 
 const isNative = Platform.OS === 'android' || Platform.OS === 'ios';
 
@@ -104,10 +100,7 @@ export function useHandsfreeMode(
   // Pending transcript accumulator (for multi-chunk speech before keyword)
   const pendingTranscriptRef = useRef<string>('');
 
-  // Native recording ref
-  const nativeRecordingRef = useRef<Audio.Recording | null>(null);
-
-  // Web recording refs
+  // Web recording refs (fallback)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
@@ -140,17 +133,17 @@ export function useHandsfreeMode(
         console.log('[Handsfree] Idle timeout — no speech for 60s');
         setState('paused');
         speakCueRef.current('Listening paused. Say Hi Naavi to resume.');
+        // Stop native recognition
+        if (isNative) {
+          try { ExpoSpeechRecognitionModule.abort(); } catch {}
+        }
       }
     }, IDLE_TIMEOUT_MS);
   }, [clearIdleTimer]);
 
   const stopRecordingSilently = useCallback(async () => {
     if (isNative) {
-      const recording = nativeRecordingRef.current;
-      if (recording) {
-        try { await recording.stopAndUnloadAsync(); } catch {}
-        nativeRecordingRef.current = null;
-      }
+      try { ExpoSpeechRecognitionModule.abort(); } catch {}
     } else {
       const recorder = mediaRecorderRef.current;
       if (recorder && recorder.state !== 'inactive') {
@@ -162,58 +155,6 @@ export function useHandsfreeMode(
       }
       mediaRecorderRef.current = null;
       chunksRef.current = [];
-    }
-  }, []);
-
-  // ── Transcribe helpers ─────────────────────────────────────────────────
-
-  const transcribeNative = useCallback(async (recording: Audio.Recording): Promise<string | null> => {
-    try {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      nativeRecordingRef.current = null;
-
-      if (!uri) return null;
-
-      const raw = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' as any });
-      const base64 = raw.replace(/\s/g, '');
-
-      const ext = uri.split('.').pop()?.toLowerCase() ?? 'm4a';
-      const mimeMap: Record<string, string> = { m4a: 'audio/m4a', mp4: 'audio/mp4', '3gp': 'audio/3gp', wav: 'audio/wav' };
-      const mimeType = mimeMap[ext] ?? 'audio/m4a';
-
-      const { data, error: fnErr } = await supabase.functions.invoke('transcribe-memo', {
-        body: { audio: base64, mimeType, language: 'en' },
-      });
-
-      if (fnErr || !data?.transcript) return null;
-      return data.transcript;
-    } catch (err) {
-      console.error('[Handsfree] Native transcribe error:', err);
-      return null;
-    }
-  }, []);
-
-  const transcribeWeb = useCallback(async (chunks: Blob[]): Promise<string | null> => {
-    try {
-      const audioBlob = new Blob(chunks, { type: 'audio/webm' });
-      if (audioBlob.size < 1000) return null;
-
-      const arrayBuffer = await audioBlob.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      let binary = '';
-      for (const b of bytes) binary += String.fromCharCode(b);
-      const base64 = btoa(binary);
-
-      const { data, error: fnErr } = await supabase.functions.invoke('transcribe-memo', {
-        body: { audio: base64, mimeType: 'audio/webm', language: 'en' },
-      });
-
-      if (fnErr || !data?.transcript) return null;
-      return data.transcript;
-    } catch (err) {
-      console.error('[Handsfree] Web transcribe error:', err);
-      return null;
     }
   }, []);
 
@@ -289,105 +230,128 @@ export function useHandsfreeMode(
   }, [clearIdleTimer, stopRecordingSilently]);
 
   // ══════════════════════════════════════════════════════════════════════
-  // ── VAD-POWERED LISTENING ─────────────────────────────────────────────
-  //
-  // TODO: Replace this section with Silero VAD integration.
-  //
-  // Current: placeholder that records for a fixed window, then transcribes.
-  // Target:  VAD detects speech start → record → VAD detects speech end
-  //          → transcribe. Silence never sent to Whisper.
-  //
-  // The VAD integration will:
-  //   1. Open mic and feed audio frames to Silero VAD model
-  //   2. VAD returns true/false for each frame (is speech?)
-  //   3. On speech start: begin capturing audio to a buffer
-  //   4. On speech end (after sustained silence): stop capture
-  //   5. Send only the speech buffer to Whisper for transcription
-  //   6. Loop: keep VAD monitoring for next speech segment
+  // ── NATIVE: expo-speech-recognition event handlers ────────────────────
   // ══════════════════════════════════════════════════════════════════════
 
-  // Placeholder: record for up to 10s, then transcribe
-  // This will be replaced by VAD-triggered recording
+  // Speech detected — reset idle timer
+  useSpeechRecognitionEvent('speechstart', () => {
+    if (stateRef.current !== 'listening') return;
+    console.log('[Handsfree] speechstart — speech detected');
+    resetIdleTimer();
+  });
+
+  // Final result — process transcript
+  useSpeechRecognitionEvent('result', (event) => {
+    if (stateRef.current !== 'listening' && stateRef.current !== 'processing') return;
+    const result = event.results[event.results.length - 1];
+    if (!result) return;
+
+    // Only act on final results
+    if (result.isFinal) {
+      const transcript = result.transcript;
+      console.log('[Handsfree] Final result:', transcript);
+      setState('processing');
+      handleTranscript(transcript);
+    }
+  });
+
+  // Recognition ended — restart if still listening (continuous loop)
+  useSpeechRecognitionEvent('end', () => {
+    console.log('[Handsfree] Recognition ended, state:', stateRef.current);
+    // Android may stop recognition after each utterance even with continuous: true
+    // Restart if we're still supposed to be listening
+    if (stateRef.current === 'listening') {
+      console.log('[Handsfree] Restarting recognition (auto-restart)');
+      setTimeout(() => {
+        if (stateRef.current === 'listening') {
+          startListeningRef.current();
+        }
+      }, 300);
+    }
+  });
+
+  // Error — log and restart if recoverable
+  useSpeechRecognitionEvent('error', (event) => {
+    console.error('[Handsfree] Recognition error:', event.error, event.message);
+    // "no-speech" is normal — just means silence, restart
+    if (event.error === 'no-speech') {
+      if (stateRef.current === 'listening') {
+        startListeningRef.current();
+      }
+      return;
+    }
+    // For other errors, try to recover
+    if (stateRef.current === 'listening' || stateRef.current === 'processing') {
+      setTimeout(() => {
+        if (stateRef.current === 'listening') {
+          startListeningRef.current();
+        }
+      }, 1000);
+    }
+  });
+
+  // ── Web transcribe helper (fallback) ──────────────────────────────────
+
+  const transcribeWeb = useCallback(async (chunks: Blob[]): Promise<string | null> => {
+    try {
+      const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+      if (audioBlob.size < 1000) return null;
+
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      for (const b of bytes) binary += String.fromCharCode(b);
+      const base64 = btoa(binary);
+
+      const { data, error: fnErr } = await supabase.functions.invoke('transcribe-memo', {
+        body: { audio: base64, mimeType: 'audio/webm', language: 'en' },
+      });
+
+      if (fnErr || !data?.transcript) return null;
+      return data.transcript;
+    } catch (err) {
+      console.error('[Handsfree] Web transcribe error:', err);
+      return null;
+    }
+  }, []);
+
+  // ── Start listening ───────────────────────────────────────────────────
+
   const startListening = useCallback(async () => {
     setError(null);
-    await stopRecordingSilently();
 
     setState('listening');
     resetIdleTimer();
 
     if (isNative) {
+      // ── Native: expo-speech-recognition ───────────────────────────
       try {
-        const { status: permStatus } = await Audio.requestPermissionsAsync();
-        if (permStatus !== 'granted') {
-          setError('Microphone permission denied.');
+        const { status } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+        if (status !== 'granted') {
+          setError('Microphone/speech permission denied.');
           deactivateRef.current();
           return;
         }
 
-        try {
-          await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: false });
-        } catch {}
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-          staysActiveInBackground: false,
-          shouldDuckAndroid: true,
+        ExpoSpeechRecognitionModule.start({
+          lang: 'en-US',
+          continuous: true,
+          interimResults: false,
+          contextualStrings: [
+            ...KEYWORDS.SUBMIT,
+            ...KEYWORDS.EXIT,
+            ...KEYWORDS.WAKE,
+          ],
         });
-
-        const recordingOptions = {
-          isMeteringEnabled: true,
-          android: {
-            extension: '.m4a',
-            outputFormat: 2,
-            audioEncoder: 3,
-            sampleRate: 16000,
-            numberOfChannels: 1,
-            bitRate: 32000,
-          },
-          ios: {
-            extension: '.m4a',
-            outputFormat: 'aac' as any,
-            audioQuality: 32,
-            sampleRate: 16000,
-            numberOfChannels: 1,
-            bitRate: 32000,
-            linearPCMBitDepth: 16,
-            linearPCMIsBigEndian: false,
-            linearPCMIsFloat: false,
-          },
-          web: { mimeType: 'audio/webm', bitsPerSecond: 32000 },
-        };
-
-        let recording: Audio.Recording;
-        try {
-          ({ recording } = await Audio.Recording.createAsync(recordingOptions));
-        } catch {
-          await new Promise(r => setTimeout(r, 500));
-          await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-          ({ recording } = await Audio.Recording.createAsync(recordingOptions));
-        }
-
-        nativeRecordingRef.current = recording;
-
-        // ── VAD PLACEHOLDER ──────────────────────────────────────────
-        // Currently: record for 8 seconds max, then transcribe.
-        // With VAD: speech-start → capture, speech-end → stop & transcribe.
-        // The 8s window is a temporary safety net.
-        setTimeout(async () => {
-          if (stateRef.current !== 'listening' || !nativeRecordingRef.current) return;
-          setState('processing');
-          const transcript = await transcribeNative(nativeRecordingRef.current);
-          await handleTranscript(transcript);
-        }, 8000);
-
       } catch (err) {
         console.error('[Handsfree] Native start error:', err);
-        setError('Could not start microphone.');
+        setError('Could not start speech recognition.');
         deactivateRef.current();
       }
     } else {
-      // Web path — placeholder
+      // ── Web: MediaRecorder + Whisper (fallback) ───────────────────
       try {
+        await stopRecordingSilently();
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         streamRef.current = stream;
         chunksRef.current = [];
@@ -398,13 +362,14 @@ export function useHandsfreeMode(
         recorder.start(250);
         mediaRecorderRef.current = recorder;
 
+        // Web placeholder: record 8s then transcribe
         setTimeout(async () => {
           if (stateRef.current !== 'listening' || !mediaRecorderRef.current) return;
           setState('processing');
-          const recorder = mediaRecorderRef.current;
-          if (recorder && recorder.state !== 'inactive') {
+          const rec = mediaRecorderRef.current;
+          if (rec && rec.state !== 'inactive') {
             const transcript = await new Promise<string | null>((resolve) => {
-              recorder.onstop = async () => {
+              rec.onstop = async () => {
                 if (streamRef.current) {
                   streamRef.current.getTracks().forEach(t => t.stop());
                   streamRef.current = null;
@@ -413,7 +378,7 @@ export function useHandsfreeMode(
                 chunksRef.current = [];
                 resolve(result);
               };
-              recorder.stop();
+              rec.stop();
             });
             mediaRecorderRef.current = null;
             await handleTranscript(transcript);
@@ -426,7 +391,7 @@ export function useHandsfreeMode(
         deactivateRef.current();
       }
     }
-  }, [stopRecordingSilently, resetIdleTimer, transcribeNative, transcribeWeb, handleTranscript]);
+  }, [stopRecordingSilently, resetIdleTimer, transcribeWeb, handleTranscript]);
 
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
 
@@ -434,7 +399,7 @@ export function useHandsfreeMode(
 
   useEffect(() => {
     if (stateRef.current === 'waiting' && orchestratorStatus === 'idle') {
-      console.log('[Handsfree] Orchestrator idle — resuming VAD after delay');
+      console.log('[Handsfree] Orchestrator idle — resuming after delay');
       setTimeout(() => {
         if (stateRef.current === 'waiting') {
           startListeningRef.current();
