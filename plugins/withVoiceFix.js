@@ -1,9 +1,14 @@
 /**
  * Expo config plugin to fix @react-native-voice/voice for Gradle 9+ / AGP 8+
  *
- * Problems:
- * 1. Library uses jcenter() which is removed in Gradle 9 → replace with mavenCentral()
- * 2. Library doesn't specify compileSdk → add it (required by newer AGP)
+ * The library's build.gradle is stuck on 2019-era defaults:
+ * 1. Uses jcenter() (removed in Gradle 9)
+ * 2. Uses compileSdkVersion (needs compileSdk for AGP 8+)
+ * 3. Uses com.android.support:appcompat-v7 (conflicts with AndroidX)
+ * 4. Has a buildscript block with old AGP 3.3.2
+ *
+ * This plugin rewrites the entire build.gradle to a modern, minimal version
+ * that works with Expo SDK 55 / React Native 0.83 / Gradle 9.
  */
 
 const { withDangerousMod } = require('expo/config-plugins');
@@ -28,22 +33,33 @@ module.exports = function withVoiceFix(config) {
         return config;
       }
 
-      let contents = fs.readFileSync(voiceBuildGradle, 'utf-8');
+      // Replace the entire build.gradle with a modern version
+      const modernBuildGradle = `
+apply plugin: 'com.android.library'
 
-      // Fix 1: Replace jcenter() with mavenCentral()
-      contents = contents.replace(/jcenter\(\)/g, 'mavenCentral()');
+android {
+    compileSdk rootProject.ext.has('compileSdkVersion') ? rootProject.ext.compileSdkVersion : 34
 
-      // Fix 2: Add compileSdk if missing
-      if (!contents.includes('compileSdk') && !contents.includes('compileSdkVersion')) {
-        // Insert compileSdkVersion into the android { } block
-        contents = contents.replace(
-          /android\s*\{/,
-          'android {\n    compileSdkVersion 34',
-        );
-      }
+    defaultConfig {
+        minSdkVersion rootProject.ext.has('minSdkVersion') ? rootProject.ext.minSdkVersion : 24
+        targetSdkVersion rootProject.ext.has('targetSdkVersion') ? rootProject.ext.targetSdkVersion : 34
+    }
 
-      fs.writeFileSync(voiceBuildGradle, contents, 'utf-8');
-      console.log('[withVoiceFix] Patched @react-native-voice/voice build.gradle');
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.facebook.react:react-native:+'
+}
+`;
+
+      fs.writeFileSync(voiceBuildGradle, modernBuildGradle, 'utf-8');
+      console.log('[withVoiceFix] Rewrote @react-native-voice/voice build.gradle for Gradle 9+');
 
       return config;
     },
