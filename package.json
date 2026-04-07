@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.79.0",
     "@expo/metro-runtime": "~55.0.6",
     "@expo/ngrok": "^4.1.0",
+    "@jamsch/expo-speech-recognition": "^0.2.15",
     "@react-native-async-storage/async-storage": "^2.1.2",
     "@supabase/supabase-js": "^2.99.2",
     "expo": "^55.0.9",
