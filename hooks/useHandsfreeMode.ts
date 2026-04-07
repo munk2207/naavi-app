@@ -1,27 +1,24 @@
 /**
- * useHandsfreeMode hook — walkie-talkie model
+ * useHandsfreeMode hook — walkie-talkie model with VAD
  *
  * Robert controls the conversation with voice keywords:
  *   "Hi Naavi"    → wake up, start listening
- *   "Thank you"   → submit my message to Naavi
+ *   "Thanks"      → submit my message to Naavi
  *   "Goodbye"     → exit hands-free mode
  *
+ * Speech detection uses Silero VAD (on-device ML model) to distinguish
+ * real speech from silence/noise. Only real speech is sent to Whisper.
+ * Silence never reaches Whisper — no hallucinations.
+ *
  * Flow:
- *   1. Hands-free activated (button or Google intent)
- *   2. Mic opens continuously — always recording
- *   3. Silence detection segments audio into chunks
- *   4. Each chunk is transcribed by Whisper
- *   5. Transcript checked for keywords:
- *      - SUBMIT keyword found → strip it, send message to orchestrator
- *      - EXIT keyword found → deactivate hands-free
- *      - WAKE keyword found → acknowledge and keep listening
- *      - No keyword → discard (garbage/noise), keep listening
- *   6. After Naavi responds → mic reopens, cycle continues
+ *   1. Hands-free activated → VAD starts monitoring mic
+ *   2. VAD detects speech → start capturing audio
+ *   3. VAD detects speech end → stop capture, transcribe via Whisper
+ *   4. Transcript checked for keywords (SUBMIT/EXIT/WAKE)
+ *   5. After Naavi responds → VAD keeps monitoring for "Hi Naavi"
+ *   6. No taps needed at any point
  *
  * Keywords are configurable — edit the KEYWORDS table below.
- *
- * Native (Android/iOS): expo-av metering for silence detection
- * Web: AnalyserNode on MediaRecorder stream
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -35,11 +32,10 @@ import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
 
 export type HandsfreeState =
   | 'inactive'     // not in hands-free mode
-  | 'listening'    // mic is active, accepting speech + keywords
-  | 'wake_listen'  // mic is active but ONLY listening for "Hi Naavi" (after TTS)
-  | 'processing'   // recording stopped, sending to Whisper
+  | 'listening'    // VAD is monitoring mic, waiting for speech
+  | 'processing'   // speech captured, sending to Whisper
   | 'waiting'      // waiting for orchestrator to finish (thinking + speaking)
-  | 'paused';      // auto-paused after idle timeout (mic off)
+  | 'paused';      // paused (idle timeout or error)
 
 export interface UseHandsfreeModeResult {
   state: HandsfreeState;
@@ -50,7 +46,6 @@ export interface UseHandsfreeModeResult {
 
 // ─── Configurable Keyword Table ─────────────────────────────────────────────
 // Edit these to change voice commands. All matching is case-insensitive.
-// Each category is an array — any match triggers the action.
 
 export const KEYWORDS = {
   /** Say one of these to submit your message to Naavi */
@@ -59,20 +54,14 @@ export const KEYWORDS = {
   /** Say one of these to exit hands-free mode completely */
   EXIT: ['goodbye', 'goodbye naavi', 'stop listening', "that's all", 'thats all'],
 
-  /** Say one of these to wake Naavi up (when paused or as acknowledgement) */
+  /** Say one of these to wake Naavi up (after response or from paused) */
   WAKE: ['hi naavi', 'hey naavi', 'hello naavi', 'naavi'],
 };
 
-// ─── Audio Constants ────────────────────────────────────────────────────────
+// ─── Constants ──────────────────────────────────────────────────────────────
 
-const SILENCE_THRESHOLD_DB = -15;       // dB — only actual close-range speech passes this. Room noise, hardware noise, TTS bleed all below.
-const SILENCE_THRESHOLD_WEB = 0.02;     // RMS amplitude — below this = silence (web)
-const SILENCE_DURATION_MS = 2000;       // 2s of silence → segment (stop recording, transcribe chunk)
-const IDLE_TIMEOUT_MS = 60_000;         // 60s of no speech at all → auto-pause
-const MIN_RECORDING_MS = 1500;          // ignore recordings shorter than 1.5s
-const MIN_SPEECH_MS = 2000;             // need at least 2s of actual speech above -15dB before sending to Whisper
-const METERING_INTERVAL_MS = 250;       // how often to check audio level
-const POST_TTS_DELAY_MS = 1500;         // wait after Naavi speaks before opening mic
+const IDLE_TIMEOUT_MS = 60_000;         // 60s of no speech → auto-pause
+const POST_TTS_DELAY_MS = 1500;         // wait after Naavi speaks before VAD resumes
 
 const isNative = Platform.OS === 'android' || Platform.OS === 'ios';
 
@@ -87,7 +76,6 @@ function matchesKeyword(transcript: string, keywords: string[]): string | null {
 }
 
 function stripKeyword(transcript: string, keyword: string): string {
-  // Remove the keyword from the end of the transcript (most common position)
   const lower = transcript.toLowerCase();
   const idx = lower.lastIndexOf(keyword);
   if (idx >= 0) {
@@ -108,14 +96,12 @@ export function useHandsfreeMode(
   const [state, setState] = useState<HandsfreeState>('inactive');
   const [error, setError] = useState<string | null>(null);
 
-  // ── Refs for current values (avoid stale closures) ─────────────────────
+  // ── Refs ───────────────────────────────────────────────────────────────
   const stateRef = useRef<HandsfreeState>('inactive');
-  const orchestratorStatusRef = useRef<OrchestratorStatus>(orchestratorStatus);
-  const recordingStartedAtRef = useRef<number>(0);
   const sendMessageRef = useRef(sendMessage);
   const speakCueRef = useRef(speakCue);
 
-  // Accumulator: collects transcript fragments until a SUBMIT keyword is spoken
+  // Pending transcript accumulator (for multi-chunk speech before keyword)
   const pendingTranscriptRef = useRef<string>('');
 
   // Native recording ref
@@ -124,39 +110,21 @@ export function useHandsfreeMode(
   // Web recording refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-
-  // Silence detection refs
-  const silenceStartRef = useRef<number | null>(null);
-  const speechAccumulatedMsRef = useRef<number>(0);
-  const meteringTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Idle timeout ref
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Whether we're in wake-only listening mode (only "Hi Naavi" and "Goodbye" accepted)
-  const wakeListenModeRef = useRef<boolean>(false);
-
-  // Function refs to break circular dependency
+  // Function refs to break circular deps
   const startListeningRef = useRef<() => void>(() => {});
-  const submitRecordingRef = useRef<() => void>(() => {});
   const deactivateRef = useRef<() => void>(() => {});
 
   // Keep refs current
-  useEffect(() => { orchestratorStatusRef.current = orchestratorStatus; }, [orchestratorStatus]);
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
   useEffect(() => { speakCueRef.current = speakCue; }, [speakCue]);
 
-  // ── Cleanup helpers ──────────────────────────────────────────────────────
-
-  const clearMeteringTimer = useCallback(() => {
-    if (meteringTimerRef.current) {
-      clearInterval(meteringTimerRef.current);
-      meteringTimerRef.current = null;
-    }
-  }, []);
+  // ── Cleanup helpers ──────────────────────────────────────────────────
 
   const clearIdleTimer = useCallback(() => {
     if (idleTimerRef.current) {
@@ -176,11 +144,7 @@ export function useHandsfreeMode(
     }, IDLE_TIMEOUT_MS);
   }, [clearIdleTimer]);
 
-  // ── Stop current recording (without transcribing) ────────────────────────
-
   const stopRecordingSilently = useCallback(async () => {
-    clearMeteringTimer();
-
     if (isNative) {
       const recording = nativeRecordingRef.current;
       if (recording) {
@@ -197,12 +161,11 @@ export function useHandsfreeMode(
         streamRef.current = null;
       }
       mediaRecorderRef.current = null;
-      analyserRef.current = null;
       chunksRef.current = [];
     }
-  }, [clearMeteringTimer]);
+  }, []);
 
-  // ── Transcribe helpers ───────────────────────────────────────────────────
+  // ── Transcribe helpers ─────────────────────────────────────────────────
 
   const transcribeNative = useCallback(async (recording: Audio.Recording): Promise<string | null> => {
     try {
@@ -254,70 +217,52 @@ export function useHandsfreeMode(
     }
   }, []);
 
-  // ── Handle completed transcription (keyword-based) ───────────────────────
+  // ── Handle transcript (keyword-based) ──────────────────────────────────
 
   const handleTranscript = useCallback(async (transcript: string | null) => {
     if (!transcript || !transcript.trim()) {
-      // Empty — resume listening in same mode
       if (stateRef.current === 'processing') {
         startListeningRef.current();
       }
       return;
     }
 
-    const currentMode = stateRef.current;
-    console.log('[Handsfree] Transcript chunk (mode:', currentMode, '):', transcript);
-
+    console.log('[Handsfree] Transcript:', transcript);
     const lower = transcript.toLowerCase().trim();
 
-    // ── Garbage filter — discard very short non-keyword transcripts ───────
+    // Garbage filter — very short, no keyword
     const wordCount = lower.split(/\s+/).length;
     const hasAnyKeyword = matchesKeyword(lower, KEYWORDS.EXIT) ||
                           matchesKeyword(lower, KEYWORDS.SUBMIT) ||
                           matchesKeyword(lower, KEYWORDS.WAKE);
     if (wordCount <= 2 && !hasAnyKeyword) {
-      console.log('[Handsfree] Garbage discarded (too short, no keyword):', transcript);
+      console.log('[Handsfree] Discarded (short, no keyword):', transcript);
       startListeningRef.current();
       return;
     }
 
-    // ── EXIT keywords — always checked, highest priority ──────────────────
+    // EXIT — highest priority
     if (matchesKeyword(lower, KEYWORDS.EXIT)) {
-      console.log('[Handsfree] EXIT keyword detected — deactivating immediately');
+      console.log('[Handsfree] EXIT keyword');
       pendingTranscriptRef.current = '';
-      wakeListenModeRef.current = false;
-      // Deactivate FIRST (stops mic, clears timers, sets state to inactive)
-      clearMeteringTimer();
       clearIdleTimer();
-      stopRecordingSilently();
+      await stopRecordingSilently();
       setState('inactive');
-      // Then speak the goodbye cue
       speakCueRef.current('Goodbye Robert.');
       return;
     }
 
-    // ── WAKE keyword — transitions from wake_listen → full listening ──────
+    // WAKE — acknowledge and listen
     if (matchesKeyword(lower, KEYWORDS.WAKE)) {
-      console.log('[Handsfree] WAKE keyword detected — switching to full listening');
+      console.log('[Handsfree] WAKE keyword');
       pendingTranscriptRef.current = '';
-      wakeListenModeRef.current = false;
       setState('listening');
       speakCueRef.current("I'm listening.");
-      // Switch to full listening mode after cue plays
-      setTimeout(() => {
-        startListeningRef.current();
-      }, 1500);
+      setTimeout(() => { startListeningRef.current(); }, 1500);
       return;
     }
 
-    // ── If in wake_listen mode, discard everything that isn't WAKE or EXIT ─
-    if (currentMode === 'processing' && wakeListenModeRef.current) {
-      console.log('[Handsfree] Wake-only mode — discarding non-keyword audio');
-      startListeningRef.current();
-      return;
-    }
-
-    // ── SUBMIT keywords — send accumulated message ────────────────────────
+    // SUBMIT — send message
     const submitMatch = matchesKeyword(lower, KEYWORDS.SUBMIT);
     if (submitMatch) {
       const fullText = (pendingTranscriptRef.current + ' ' + transcript).trim();
@@ -325,277 +270,176 @@ export function useHandsfreeMode(
       pendingTranscriptRef.current = '';
 
       if (!cleaned) {
-        console.log('[Handsfree] SUBMIT keyword but no message, resuming');
+        console.log('[Handsfree] SUBMIT but no message');
         startListeningRef.current();
         return;
       }
 
-      console.log('[Handsfree] SUBMIT — sending:', cleaned);
+      console.log('[Handsfree] SUBMIT:', cleaned);
       setState('waiting');
       clearIdleTimer();
       await sendMessageRef.current(cleaned);
       return;
     }
 
-    // ── No keyword — accumulate pending text ──────────────────────────────
+    // No keyword — accumulate
     pendingTranscriptRef.current = (pendingTranscriptRef.current + ' ' + transcript).trim();
-    console.log('[Handsfree] No keyword — accumulated:', pendingTranscriptRef.current);
+    console.log('[Handsfree] Accumulated:', pendingTranscriptRef.current);
     startListeningRef.current();
-  }, [clearIdleTimer]);
+  }, [clearIdleTimer, stopRecordingSilently]);
 
-  // ── Submit recording (silence segmented a chunk) ─────────────────────────
+  // ══════════════════════════════════════════════════════════════════════
+  // ── VAD-POWERED LISTENING ─────────────────────────────────────────────
+  //
+  // TODO: Replace this section with Silero VAD integration.
+  //
+  // Current: placeholder that records for a fixed window, then transcribes.
+  // Target:  VAD detects speech start → record → VAD detects speech end
+  //          → transcribe. Silence never sent to Whisper.
+  //
+  // The VAD integration will:
+  //   1. Open mic and feed audio frames to Silero VAD model
+  //   2. VAD returns true/false for each frame (is speech?)
+  //   3. On speech start: begin capturing audio to a buffer
+  //   4. On speech end (after sustained silence): stop capture
+  //   5. Send only the speech buffer to Whisper for transcription
+  //   6. Loop: keep VAD monitoring for next speech segment
+  // ══════════════════════════════════════════════════════════════════════
 
-  const submitRecording = useCallback(async () => {
-    if (stateRef.current !== 'listening') return;
-
-    const elapsed = Date.now() - recordingStartedAtRef.current;
-    if (elapsed < MIN_RECORDING_MS) {
-      console.log('[Handsfree] Recording too short, resuming');
-      await stopRecordingSilently();
-      startListeningRef.current();
-      return;
-    }
-
-    // Gate: don't send to Whisper if not enough real speech was detected
-    // This prevents hallucinations from background noise / silence
-    if (speechAccumulatedMsRef.current < MIN_SPEECH_MS) {
-      console.log('[Handsfree] Not enough speech detected (', speechAccumulatedMsRef.current, 'ms), discarding');
-      await stopRecordingSilently();
-      startListeningRef.current();
-      return;
-    }
-
-    clearMeteringTimer();
-    setState('processing');
-
-    let transcript: string | null = null;
-
-    if (isNative) {
-      const recording = nativeRecordingRef.current;
-      if (recording) {
-        transcript = await transcribeNative(recording);
-      }
-    } else {
-      const recorder = mediaRecorderRef.current;
-      if (recorder && recorder.state !== 'inactive') {
-        transcript = await new Promise<string | null>((resolve) => {
-          recorder.onstop = async () => {
-            if (streamRef.current) {
-              streamRef.current.getTracks().forEach(t => t.stop());
-              streamRef.current = null;
-            }
-            const result = await transcribeWeb([...chunksRef.current]);
-            chunksRef.current = [];
-            resolve(result);
-          };
-          recorder.stop();
-        });
-      }
-      mediaRecorderRef.current = null;
-      analyserRef.current = null;
-    }
-
-    await handleTranscript(transcript);
-  }, [clearMeteringTimer, stopRecordingSilently, transcribeNative, transcribeWeb, handleTranscript]);
-
-  // Keep submitRecording ref current
-  useEffect(() => { submitRecordingRef.current = submitRecording; }, [submitRecording]);
-
-  // ── Native listening with metering ───────────────────────────────────────
-
-  const startNativeListening = useCallback(async () => {
-    try {
-      const { status: permStatus } = await Audio.requestPermissionsAsync();
-      if (permStatus !== 'granted') {
-        setError('Microphone permission denied.');
-        deactivateRef.current();
-        return;
-      }
-
-      // Force-release audio session from any prior TTS playback
-      // Without this, Android refuses to start a new recording
-      try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          playsInSilentModeIOS: false,
-        });
-      } catch {}
-
-      // Now set recording mode
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-        shouldDuckAndroid: true,
-      });
-
-      const recordingOptions = {
-        isMeteringEnabled: true,
-        android: {
-          extension: '.m4a',
-          outputFormat: 2,      // MPEG_4
-          audioEncoder: 3,      // AAC
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 32000,
-        },
-        ios: {
-          extension: '.m4a',
-          outputFormat: 'aac' as any,
-          audioQuality: 32,
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 32000,
-          linearPCMBitDepth: 16,
-          linearPCMIsBigEndian: false,
-          linearPCMIsFloat: false,
-        },
-        web: { mimeType: 'audio/webm', bitsPerSecond: 32000 },
-      };
-
-      let recording: Audio.Recording;
-      try {
-        ({ recording } = await Audio.Recording.createAsync(recordingOptions));
-      } catch (firstErr) {
-        // Retry once after a short delay — audio session may need time to release
-        console.log('[Handsfree] First recording attempt failed, retrying in 500ms');
-        await new Promise(r => setTimeout(r, 500));
-        await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-        ({ recording } = await Audio.Recording.createAsync(recordingOptions));
-      }
-
-      nativeRecordingRef.current = recording;
-      setState('listening');
-      resetIdleTimer();
-
-      // Poll metering for silence detection (segments audio into chunks)
-      let speechDetected = false;
-      speechAccumulatedMsRef.current = 0;
-      meteringTimerRef.current = setInterval(async () => {
-        if (stateRef.current !== 'listening' || !nativeRecordingRef.current) return;
-
-        try {
-          const statusResult = await nativeRecordingRef.current.getStatusAsync();
-          if (!statusResult.isRecording) return;
-
-          const db = statusResult.metering ?? -160;
-
-          if (db > SILENCE_THRESHOLD_DB) {
-            speechDetected = true;
-            speechAccumulatedMsRef.current += METERING_INTERVAL_MS;
-            silenceStartRef.current = null;
-            resetIdleTimer();
-          } else if (speechDetected && speechAccumulatedMsRef.current >= MIN_SPEECH_MS) {
-            if (!silenceStartRef.current) {
-              silenceStartRef.current = Date.now();
-            } else if (Date.now() - silenceStartRef.current >= SILENCE_DURATION_MS) {
-              console.log('[Handsfree] Silence segment (native), speech:', speechAccumulatedMsRef.current, 'ms');
-              submitRecordingRef.current();
-            }
-          }
-        } catch {
-          // Recording may have been stopped
-        }
-      }, METERING_INTERVAL_MS);
-
-    } catch (err) {
-      console.error('[Handsfree] Native start error:', err);
-      setError('Could not start microphone.');
-      deactivateRef.current();
-    }
-  }, [resetIdleTimer]);
-
-  // ── Web listening with AnalyserNode ──────────────────────────────────────
-
-  const startWebListening = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      const audioCtx = new AudioContext();
-      const source = audioCtx.createMediaStreamSource(stream);
-      const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 2048;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-
-      chunksRef.current = [];
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      recorder.start(250);
-      mediaRecorderRef.current = recorder;
-
-      setState('listening');
-      resetIdleTimer();
-
-      const dataArray = new Float32Array(analyser.fftSize);
-      let speechDetected = false;
-      speechAccumulatedMsRef.current = 0;
-
-      meteringTimerRef.current = setInterval(() => {
-        if (stateRef.current !== 'listening' || !analyserRef.current) return;
-
-        analyserRef.current.getFloatTimeDomainData(dataArray);
-
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i] * dataArray[i];
-        }
-        const rms = Math.sqrt(sum / dataArray.length);
-
-        if (rms > SILENCE_THRESHOLD_WEB) {
-          speechDetected = true;
-          speechAccumulatedMsRef.current += METERING_INTERVAL_MS;
-          silenceStartRef.current = null;
-          resetIdleTimer();
-        } else if (speechDetected && speechAccumulatedMsRef.current >= MIN_SPEECH_MS) {
-          if (!silenceStartRef.current) {
-            silenceStartRef.current = Date.now();
-          } else if (Date.now() - silenceStartRef.current >= SILENCE_DURATION_MS) {
-            console.log('[Handsfree] Silence segment (web), speech:', speechAccumulatedMsRef.current, 'ms');
-            submitRecordingRef.current();
-          }
-        }
-      }, METERING_INTERVAL_MS);
-
-    } catch (err) {
-      console.error('[Handsfree] Web start error:', err);
-      setError('Microphone blocked. Allow it in your browser settings.');
-      deactivateRef.current();
-    }
-  }, [resetIdleTimer]);
-
-  // ── Start listening ──────────────────────────────────────────────────────
-
+  // Placeholder: record for up to 10s, then transcribe
+  // This will be replaced by VAD-triggered recording
   const startListening = useCallback(async () => {
     setError(null);
-    silenceStartRef.current = null;
-
-    // Always clean up any previous recording first to prevent "Could not start microphone"
     await stopRecordingSilently();
 
-    recordingStartedAtRef.current = Date.now();
+    setState('listening');
+    resetIdleTimer();
 
     if (isNative) {
-      startNativeListening();
+      try {
+        const { status: permStatus } = await Audio.requestPermissionsAsync();
+        if (permStatus !== 'granted') {
+          setError('Microphone permission denied.');
+          deactivateRef.current();
+          return;
+        }
+
+        try {
+          await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: false });
+        } catch {}
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid: true,
+        });
+
+        const recordingOptions = {
+          isMeteringEnabled: true,
+          android: {
+            extension: '.m4a',
+            outputFormat: 2,
+            audioEncoder: 3,
+            sampleRate: 16000,
+            numberOfChannels: 1,
+            bitRate: 32000,
+          },
+          ios: {
+            extension: '.m4a',
+            outputFormat: 'aac' as any,
+            audioQuality: 32,
+            sampleRate: 16000,
+            numberOfChannels: 1,
+            bitRate: 32000,
+            linearPCMBitDepth: 16,
+            linearPCMIsBigEndian: false,
+            linearPCMIsFloat: false,
+          },
+          web: { mimeType: 'audio/webm', bitsPerSecond: 32000 },
+        };
+
+        let recording: Audio.Recording;
+        try {
+          ({ recording } = await Audio.Recording.createAsync(recordingOptions));
+        } catch {
+          await new Promise(r => setTimeout(r, 500));
+          await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+          ({ recording } = await Audio.Recording.createAsync(recordingOptions));
+        }
+
+        nativeRecordingRef.current = recording;
+
+        // ── VAD PLACEHOLDER ──────────────────────────────────────────
+        // Currently: record for 8 seconds max, then transcribe.
+        // With VAD: speech-start → capture, speech-end → stop & transcribe.
+        // The 8s window is a temporary safety net.
+        setTimeout(async () => {
+          if (stateRef.current !== 'listening' || !nativeRecordingRef.current) return;
+          setState('processing');
+          const transcript = await transcribeNative(nativeRecordingRef.current);
+          await handleTranscript(transcript);
+        }, 8000);
+
+      } catch (err) {
+        console.error('[Handsfree] Native start error:', err);
+        setError('Could not start microphone.');
+        deactivateRef.current();
+      }
     } else {
-      startWebListening();
+      // Web path — placeholder
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
+        chunksRef.current = [];
+        const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        recorder.ondataavailable = (e) => {
+          if (e.data.size > 0) chunksRef.current.push(e.data);
+        };
+        recorder.start(250);
+        mediaRecorderRef.current = recorder;
+
+        setTimeout(async () => {
+          if (stateRef.current !== 'listening' || !mediaRecorderRef.current) return;
+          setState('processing');
+          const recorder = mediaRecorderRef.current;
+          if (recorder && recorder.state !== 'inactive') {
+            const transcript = await new Promise<string | null>((resolve) => {
+              recorder.onstop = async () => {
+                if (streamRef.current) {
+                  streamRef.current.getTracks().forEach(t => t.stop());
+                  streamRef.current = null;
+                }
+                const result = await transcribeWeb([...chunksRef.current]);
+                chunksRef.current = [];
+                resolve(result);
+              };
+              recorder.stop();
+            });
+            mediaRecorderRef.current = null;
+            await handleTranscript(transcript);
+          }
+        }, 8000);
+
+      } catch (err) {
+        console.error('[Handsfree] Web start error:', err);
+        setError('Microphone blocked.');
+        deactivateRef.current();
+      }
     }
-  }, [stopRecordingSilently, startNativeListening, startWebListening]);
+  }, [stopRecordingSilently, resetIdleTimer, transcribeNative, transcribeWeb, handleTranscript]);
 
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
 
-  // ── Watch orchestrator: speaking → idle = mic OFF, wait for tap ──────────
-  // Mic is completely closed after Naavi responds. No background listening.
-  // Robert taps Resume to start the next turn. "Hey Google" will also work
-  // once the app is published on Play Store.
+  // ── Watch orchestrator: speaking → idle = wait then resume listening ────
 
   useEffect(() => {
     if (stateRef.current === 'waiting' && orchestratorStatus === 'idle') {
-      console.log('[Handsfree] Orchestrator idle — mic OFF, waiting for tap');
-      setState('paused');
+      console.log('[Handsfree] Orchestrator idle — resuming VAD after delay');
+      setTimeout(() => {
+        if (stateRef.current === 'waiting') {
+          startListeningRef.current();
+        }
+      }, POST_TTS_DELAY_MS);
     }
   }, [orchestratorStatus]);
 
@@ -603,30 +447,22 @@ export function useHandsfreeMode(
 
   const activate = useCallback(async () => {
     if (stateRef.current !== 'inactive' && stateRef.current !== 'paused') return;
-
     console.log('[Handsfree] Activating');
-    // Clean up any stale recording before starting
     await stopRecordingSilently();
     pendingTranscriptRef.current = '';
-    wakeListenModeRef.current = false;
     speakCueRef.current("I'm listening.");
-
-    setTimeout(() => {
-      startListeningRef.current();
-    }, 1500);
+    setTimeout(() => { startListeningRef.current(); }, 1500);
   }, [stopRecordingSilently]);
 
   // ── Deactivate ───────────────────────────────────────────────────────────
 
   const deactivateInternal = useCallback(async () => {
     console.log('[Handsfree] Deactivating');
-    clearMeteringTimer();
     clearIdleTimer();
     await stopRecordingSilently();
     pendingTranscriptRef.current = '';
-    wakeListenModeRef.current = false;
     setState('inactive');
-  }, [clearMeteringTimer, clearIdleTimer, stopRecordingSilently]);
+  }, [clearIdleTimer, stopRecordingSilently]);
 
   useEffect(() => { deactivateRef.current = deactivateInternal; }, [deactivateInternal]);
 
@@ -638,11 +474,10 @@ export function useHandsfreeMode(
 
   useEffect(() => {
     return () => {
-      clearMeteringTimer();
       clearIdleTimer();
       stopRecordingSilently();
     };
-  }, [clearMeteringTimer, clearIdleTimer, stopRecordingSilently]);
+  }, [clearIdleTimer, stopRecordingSilently]);
 
   return { state, error, activate, deactivate };
 }
