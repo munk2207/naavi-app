@@ -368,10 +368,10 @@ export function useHandsfreeMode(
             },
           );
           if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-            deactivateRef.current();
-            const msg = 'Microphone permission denied. Please allow it in Settings.';
-            setError(msg);
-            speakCueRef.current(msg);
+            clearIdleTimer();
+            setState('inactive');
+            setError('Microphone permission denied. Please allow it in Settings.');
+            speakCueRef.current('Microphone permission denied.');
             return;
           }
         }
@@ -379,21 +379,21 @@ export function useHandsfreeMode(
         // Check availability
         const available = await Voice.isAvailable();
         if (!available) {
-          deactivateRef.current();
-          const msg = 'Speech recognition is not available on this device.';
-          setError(msg);
-          speakCueRef.current(msg);
+          clearIdleTimer();
+          setState('inactive');
+          setError('Speech recognition is not available on this device.');
+          speakCueRef.current('Speech recognition is not available.');
           return;
         }
 
         await Voice.start('en-US');
       } catch (err) {
         console.error('[Handsfree] Native start error:', err);
-        deactivateRef.current();
+        clearIdleTimer();
+        setState('inactive');
         const errMsg = err instanceof Error ? err.message : String(err);
-        const msg = `Voice error: ${errMsg}`;
-        setError(msg);
-        speakCueRef.current('Could not start speech recognition. Please try again.');
+        setError(`Voice error: ${errMsg}`);
+        speakCueRef.current('Could not start speech recognition.');
       }
     } else {
       // ── Web: MediaRecorder + Whisper (fallback) ───────────────────
