@@ -113,6 +113,10 @@ export function useWhisperMemo(): UseWhisperMemoResult {
             return;
           }
 
+          // Abort any lingering session before starting a new one
+          try { ExpoSpeechRecognitionModule.abort(); } catch {}
+          await new Promise(r => setTimeout(r, 300));
+
           ExpoSpeechRecognitionModule.start({
             lang: 'en-US',
             interimResults: false,
@@ -120,7 +124,7 @@ export function useWhisperMemo(): UseWhisperMemoResult {
           setMemoState('recording');
         } catch (err) {
           console.error('[useWhisperMemo] Native start error:', err);
-          setMemoError('Could not start recording.');
+          setMemoError('Could not start microphone. Please try again.');
           setMemoState('error');
           setTimeout(() => { setMemoState('idle'); setMemoError(null); }, 4000);
         }
