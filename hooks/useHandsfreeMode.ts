@@ -279,6 +279,8 @@ export function useHandsfreeMode(
   // Error — silently retry or pause (no spoken errors to avoid feedback loop)
   useSpeechRecognitionEvent('error', (event) => {
     console.error('[Handsfree] Recognition error:', event.error, event.message);
+    // Show error code on screen so we can debug
+    setError(`[${event.error}] ${event.message ?? ''}`);
     // "no-speech" is normal — just means silence, restart silently
     if (event.error === 'no-speech') {
       errorRetryCountRef.current = 0;
