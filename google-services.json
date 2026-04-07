@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "947457707861",
+    "project_id": "mynaavi-3b74b",
+    "storage_bucket": "mynaavi-3b74b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:947457707861:android:907a6ac619182bb23329dc",
+        "android_client_info": {
+          "package_name": "ca.naavi.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCvEolK6R2akE4-LavK7WBQ4SM6IZPyO-0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

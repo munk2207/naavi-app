@@ -5,7 +5,16 @@
       "Bash(cmd.exe /c \"node --version && npm --version\")",
       "Bash(pandoc --version)",
       "Bash(npx vercel:*)",
-      "WebFetch(domain:naavi-app.vercel.app)"
+      "WebFetch(domain:naavi-app.vercel.app)",
+      "Bash(python3 -c \"import json,sys; p=json.load\\(sys.stdin\\); print\\(''''RN:'''', p.get\\(''''dependencies'''',{}\\).get\\(''''react-native'''',''''?''''\\)\\); print\\(''''Expo:'''', p.get\\(''''dependencies'''',{}\\).get\\(''''expo'''',''''?''''\\)\\)\")",
+      "Read(//mnt/c/Users/waela/OneDrive/Desktop/**)",
+      "Bash(node -e \"const p=require\\(''./package.json''\\); console.log\\(''RN:'', p.dependencies[''react-native'']\\); console.log\\(''Expo:'', p.dependencies[''expo'']\\);\")",
+      "Bash(git -C \"C:\\\\Users\\\\waela\\\\OneDrive\\\\Desktop\\\\Naavi\" ls-files google-services.json)",
+      "Bash(git -C \"C:\\\\Users\\\\waela\\\\OneDrive\\\\Desktop\\\\Naavi\" log --oneline -5)",
+      "Bash(npx supabase:*)",
+      "Bash(curl -s -X POST \"https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/sync-google-calendar\" -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhoZ3lwcGJ4Z21qcndkcGR1YmN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NTc3MDYsImV4cCI6MjA4OTMzMzcwNn0.I4w141wZlfxOCxDEcsNcgsatHcsXtPOvGV-X5oM3VuQ\" -H \"Content-Type: application/json\")",
+      "Bash(npx tsc:*)",
+      "Bash(npx expo:*)"
     ]
   }
 }
