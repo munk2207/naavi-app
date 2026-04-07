@@ -1,20 +1,18 @@
 /**
- * useWhisperMemo hook — tap-to-talk voice input
+ * useWhisperMemo hook
  *
- * - Native (Android / iOS): uses @jamsch/expo-speech-recognition (on-device STT)
- * - Web: uses MediaRecorder + Whisper Edge Function (fallback)
+ * Records audio and sends it to the transcribe-memo Edge Function (Whisper).
+ *
+ * - Native (Android / iOS): uses expo-av Audio.Recording
+ * - Web: uses MediaRecorder browser API
  *
  * Robert taps the button → speaks → taps stop → Naavi transcribes.
- *
- * Hook signature is unchanged — callers don't need to change.
  */
 
 import { useState, useRef, useCallback } from 'react';
 import { Platform } from 'react-native';
-import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
-} from '@jamsch/expo-speech-recognition';
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '@/lib/supabase';
 
 export type MemoState = 'idle' | 'recording' | 'transcribing' | 'error';
@@ -37,8 +35,8 @@ export function useWhisperMemo(): UseWhisperMemoResult {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
-  // Native: callback ref — set when stopRecording is called, fired by result event
-  const onTranscriptRef = useRef<((text: string) => void) | null>(null);
+  // Native ref
+  const nativeRecordingRef = useRef<Audio.Recording | null>(null);
 
   const isSupported = isNative || (
     typeof window !== 'undefined' &&
@@ -46,52 +44,6 @@ export function useWhisperMemo(): UseWhisperMemoResult {
     !!navigator.mediaDevices?.getUserMedia &&
     typeof MediaRecorder !== 'undefined'
   );
-
-  // ── Native: expo-speech-recognition event handlers ────────────────────
-
-  // Final result — deliver transcript via callback
-  useSpeechRecognitionEvent('result', (event) => {
-    // Only handle if we're in tap-to-talk mode (recording/transcribing)
-    if (!onTranscriptRef.current) return;
-
-    const result = event.results[event.results.length - 1];
-    if (!result?.isFinal) return;
-
-    const transcript = result.transcript;
-    const cb = onTranscriptRef.current;
-    onTranscriptRef.current = null;
-
-    if (transcript && transcript.trim()) {
-      setMemoState('idle');
-      cb(transcript);
-    } else {
-      setMemoError('No speech detected — try again.');
-      setMemoState('error');
-      setTimeout(() => { setMemoState('idle'); setMemoError(null); }, 4000);
-    }
-  });
-
-  // Recognition ended without a result (e.g. no speech)
-  useSpeechRecognitionEvent('end', () => {
-    if (!onTranscriptRef.current) return;
-    // If we still have a pending callback, recognition ended without a final result
-    onTranscriptRef.current = null;
-    setMemoError('No speech detected — try again.');
-    setMemoState('error');
-    setTimeout(() => { setMemoState('idle'); setMemoError(null); }, 4000);
-  });
-
-  // Error during recognition
-  useSpeechRecognitionEvent('error', (event) => {
-    if (!onTranscriptRef.current) return;
-    console.error('[useWhisperMemo] Recognition error:', event.error, event.message);
-    onTranscriptRef.current = null;
-    setMemoError(event.message || 'Speech recognition failed.');
-    setMemoState('error');
-    setTimeout(() => { setMemoState('idle'); setMemoError(null); }, 4000);
-  });
-
-  // ── Start recording ───────────────────────────────────────────────────
 
   const startRecording = useCallback(() => {
     if (!isSupported) {
@@ -103,24 +55,48 @@ export function useWhisperMemo(): UseWhisperMemoResult {
     setMemoError(null);
 
     if (isNative) {
-      // ── Native: start speech recognition ─────────────────────────
+      // ── Native recording ──────────────────────────────────────────
       (async () => {
         try {
-          const { status } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+          const { status } = await Audio.requestPermissionsAsync();
           if (status !== 'granted') {
             setMemoError('Microphone permission denied. Allow it in Settings.');
             setTimeout(() => setMemoError(null), 4000);
             return;
           }
 
-          ExpoSpeechRecognitionModule.start({
-            lang: 'en-US',
-            interimResults: false,
+          await Audio.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
           });
+
+          const { recording } = await Audio.Recording.createAsync({
+            android: {
+              extension: '.m4a',
+              outputFormat: 2,      // MPEG_4
+              audioEncoder: 3,      // AAC
+              sampleRate: 16000,
+              numberOfChannels: 1,
+              bitRate: 32000,
+            },
+            ios: {
+              extension: '.m4a',
+              outputFormat: 'aac' as any,
+              audioQuality: 32,     // LOW
+              sampleRate: 16000,
+              numberOfChannels: 1,
+              bitRate: 32000,
+              linearPCMBitDepth: 16,
+              linearPCMIsBigEndian: false,
+              linearPCMIsFloat: false,
+            },
+            web: { mimeType: 'audio/webm', bitsPerSecond: 32000 },
+          });
+          nativeRecordingRef.current = recording;
           setMemoState('recording');
         } catch (err) {
           console.error('[useWhisperMemo] Native start error:', err);
-          setMemoError('Could not start microphone. Please try again.');
+          setMemoError('Could not start recording.');
           setMemoState('error');
           setTimeout(() => { setMemoState('idle'); setMemoError(null); }, 4000);
         }
@@ -145,22 +121,58 @@ export function useWhisperMemo(): UseWhisperMemoResult {
     }
   }, [isSupported]);
 
-  // ── Stop recording ────────────────────────────────────────────────────
-
   const stopRecording = useCallback((onTranscript: (text: string) => void, language?: string) => {
     if (isNative) {
-      // ── Native: stop recognition → triggers final result event ───
-      onTranscriptRef.current = onTranscript;
-      setMemoState('transcribing');
-      try {
-        ExpoSpeechRecognitionModule.stop();
-      } catch (err) {
-        console.error('[useWhisperMemo] Native stop error:', err);
-        onTranscriptRef.current = null;
-        setMemoError('Could not stop recording.');
-        setMemoState('error');
-        setTimeout(() => { setMemoState('idle'); setMemoError(null); }, 4000);
-      }
+      // ── Native stop ───────────────────────────────────────────────
+      const recording = nativeRecordingRef.current;
+      if (!recording) return;
+
+      (async () => {
+        try {
+          await recording.stopAndUnloadAsync();
+          const uri = recording.getURI();
+          nativeRecordingRef.current = null;
+
+          if (!uri) throw new Error('No recording URI');
+
+          setMemoState('transcribing');
+
+          const raw = await FileSystem.readAsStringAsync(uri, {
+            encoding: 'base64' as any,
+          });
+          const base64 = raw.replace(/\s/g, '');
+
+          if (!supabase) throw new Error('Supabase not configured');
+
+          const ext = uri.split('.').pop()?.toLowerCase() ?? 'm4a';
+          const mimeMap: Record<string, string> = { m4a: 'audio/m4a', mp4: 'audio/mp4', '3gp': 'audio/3gp', wav: 'audio/wav' };
+          const mimeType = mimeMap[ext] ?? 'audio/m4a';
+
+          const { data, error } = await supabase.functions.invoke('transcribe-memo', {
+            body: { audio: base64, mimeType, language },
+          });
+
+          if (error || !data?.transcript) {
+            const ctxJson  = (error as any)?.context?.json?.error;
+            const ctxText  = (error as any)?.context?.text;
+            const detail   = (typeof ctxJson === 'string' ? ctxJson : null)
+              ?? (typeof ctxText === 'string' ? ctxText : null)
+              ?? error?.message
+              ?? 'Transcription failed';
+            throw new Error(detail);
+          }
+
+          setMemoState('idle');
+          onTranscript(data.transcript);
+
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Transcription failed';
+          console.error('[useWhisperMemo] Native stop error:', msg);
+          setMemoError(msg);
+          setMemoState('error');
+          setTimeout(() => { setMemoState('idle'); setMemoError(null); }, 4000);
+        }
+      })();
 
     } else {
       // ── Web stop ──────────────────────────────────────────────────
