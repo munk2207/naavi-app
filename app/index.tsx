@@ -583,7 +583,8 @@ export default function HomeScreen() {
       const Speech = require('expo-speech');
       Speech.speak(text, {
         language: 'en-CA',
-        rate: 0.9,
+        rate: 0.85,
+        pitch: 1.05,
         onDone: () => resolve(),
         onError: () => resolve(),
         onStopped: () => resolve(),
