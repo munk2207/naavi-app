@@ -280,8 +280,9 @@ export function useHandsfreeMode(
   // Error — silently retry or pause (no spoken errors to avoid feedback loop)
   useSpeechRecognitionEvent('error', (event) => {
     console.error('[Handsfree] Recognition error:', event.error, event.message);
-    // Show error code on screen so we can debug
+    // Show error code on screen temporarily for debugging
     setError(`[${event.error}] ${event.message ?? ''}`);
+    setTimeout(() => setError(null), 5000);
     // "no-speech" and "aborted" are normal — restart silently
     if (event.error === 'no-speech' || event.error === 'aborted') {
       errorRetryCountRef.current = 0;
@@ -465,6 +466,8 @@ export function useHandsfreeMode(
     clearIdleTimer();
     await stopRecordingSilently();
     pendingTranscriptRef.current = '';
+    errorRetryCountRef.current = 0;
+    setError(null);
     setState('inactive');
   }, [clearIdleTimer, stopRecordingSilently]);
 
