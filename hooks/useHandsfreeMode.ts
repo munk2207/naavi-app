@@ -87,7 +87,7 @@ function stripKeyword(transcript: string, keyword: string): string {
 export function useHandsfreeMode(
   orchestratorStatus: OrchestratorStatus,
   sendMessage: (text: string) => Promise<void>,
-  speakCue: (text: string) => void,
+  speakCue: (text: string) => Promise<void>,
 ): UseHandsfreeModeResult {
   const [state, setState] = useState<HandsfreeState>('inactive');
   const [error, setError] = useState<string | null>(null);
@@ -198,8 +198,9 @@ export function useHandsfreeMode(
       console.log('[Handsfree] WAKE keyword');
       pendingTranscriptRef.current = '';
       setState('listening');
-      speakCueRef.current("I'm listening.");
-      setTimeout(() => { startListeningRef.current(); }, 1500);
+      await speakCueRef.current("I'm listening.");
+      await new Promise(r => setTimeout(r, 500));
+      startListeningRef.current();
       return;
     }
 
@@ -280,14 +281,15 @@ export function useHandsfreeMode(
       }
       return;
     }
-    // Network or other real errors — tell Robert
+    // Network or other real errors — tell Robert, then retry
     if (stateRef.current === 'listening' || stateRef.current === 'processing') {
-      speakCueRef.current("Sorry, I had a problem hearing you. Trying again.");
-      setTimeout(() => {
-        if (stateRef.current === 'listening') {
-          startListeningRef.current();
-        }
-      }, 2000);
+      speakCueRef.current("Sorry, I had a problem hearing you. Trying again.").then(() => {
+        setTimeout(() => {
+          if (stateRef.current === 'listening') {
+            startListeningRef.current();
+          }
+        }, 500);
+      });
     }
   });
 
@@ -434,8 +436,10 @@ export function useHandsfreeMode(
     console.log('[Handsfree] Activating');
     await stopRecordingSilently();
     pendingTranscriptRef.current = '';
-    speakCueRef.current("I'm listening.");
-    setTimeout(() => { startListeningRef.current(); }, 1500);
+    await speakCueRef.current("I'm listening.");
+    // Extra buffer after TTS finishes so Android releases the audio system
+    await new Promise(r => setTimeout(r, 500));
+    startListeningRef.current();
   }, [stopRecordingSilently]);
 
   // ── Deactivate ───────────────────────────────────────────────────────────
