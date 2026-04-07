@@ -273,20 +273,21 @@ export function useHandsfreeMode(
   // Error — log and restart if recoverable
   useSpeechRecognitionEvent('error', (event) => {
     console.error('[Handsfree] Recognition error:', event.error, event.message);
-    // "no-speech" is normal — just means silence, restart
+    // "no-speech" is normal — just means silence, restart silently
     if (event.error === 'no-speech') {
       if (stateRef.current === 'listening') {
         startListeningRef.current();
       }
       return;
     }
-    // For other errors, try to recover
+    // Network or other real errors — tell Robert
     if (stateRef.current === 'listening' || stateRef.current === 'processing') {
+      speakCueRef.current("Sorry, I had a problem hearing you. Trying again.");
       setTimeout(() => {
         if (stateRef.current === 'listening') {
           startListeningRef.current();
         }
-      }, 1000);
+      }, 2000);
     }
   });
 
@@ -328,7 +329,9 @@ export function useHandsfreeMode(
       try {
         const { status } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
         if (status !== 'granted') {
-          setError('Microphone/speech permission denied.');
+          const msg = 'Microphone or speech permission denied. Please allow it in Settings.';
+          setError(msg);
+          speakCueRef.current(msg);
           deactivateRef.current();
           return;
         }
@@ -345,7 +348,9 @@ export function useHandsfreeMode(
         });
       } catch (err) {
         console.error('[Handsfree] Native start error:', err);
-        setError('Could not start speech recognition.');
+        const msg = 'Could not start speech recognition. Please try again.';
+        setError(msg);
+        speakCueRef.current(msg);
         deactivateRef.current();
       }
     } else {
@@ -387,7 +392,9 @@ export function useHandsfreeMode(
 
       } catch (err) {
         console.error('[Handsfree] Web start error:', err);
-        setError('Microphone blocked.');
+        const msg = 'Microphone is blocked. Please allow it in your browser settings.';
+        setError(msg);
+        speakCueRef.current(msg);
         deactivateRef.current();
       }
     }
@@ -395,16 +402,24 @@ export function useHandsfreeMode(
 
   useEffect(() => { startListeningRef.current = startListening; }, [startListening]);
 
-  // ── Watch orchestrator: speaking → idle = wait then resume listening ────
+  // ── Watch orchestrator: resume after response, or speak errors ─────────
 
   useEffect(() => {
-    if (stateRef.current === 'waiting' && orchestratorStatus === 'idle') {
+    if (stateRef.current !== 'waiting') return;
+
+    if (orchestratorStatus === 'idle') {
       console.log('[Handsfree] Orchestrator idle — resuming after delay');
       setTimeout(() => {
         if (stateRef.current === 'waiting') {
           startListeningRef.current();
         }
       }, POST_TTS_DELAY_MS);
+    }
+
+    if (orchestratorStatus === 'error') {
+      console.log('[Handsfree] Orchestrator error — telling Robert');
+      speakCueRef.current("Sorry, something went wrong. Say Hi Naavi to try again.");
+      setState('paused');
     }
   }, [orchestratorStatus]);
 
