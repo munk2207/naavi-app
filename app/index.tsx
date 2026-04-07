@@ -634,7 +634,6 @@ export default function HomeScreen() {
   const handsfree = useHandsfreeMode(status, send, speakCueRef.current);
 
   // Auto-activate hands-free when app is opened via "Hey Google" (naavi:// deep link)
-  // Disabled until speech recognition is fixed
   const handsfreeActivatedRef = useRef(false);
   useEffect(() => {
     if (handsfreeActivatedRef.current) return;
@@ -643,8 +642,10 @@ export default function HomeScreen() {
       try {
         const url = await Linking.getInitialURL();
         if (url && url.startsWith('naavi://')) {
-          console.log('[Home] Opened via intent:', url, '— hands-free disabled, skipping');
-          // setTimeout(() => handsfree.activate(), 500);
+          console.log('[Home] Opened via intent:', url, '— activating hands-free');
+          handsfreeActivatedRef.current = true;
+          // Small delay to let the screen render first
+          setTimeout(() => handsfree.activate(), 500);
         }
       } catch {}
     }
@@ -1299,17 +1300,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Hands-free button — disabled until speech recognition is fixed
-          {memoSupported && handsfree.state === 'inactive' && (
-            <TouchableOpacity
-              style={[styles.unifiedBtn, styles.handsfreeBtn]}
-              onPress={handsfree.activate}
-              accessibilityLabel="Activate hands-free mode"
-            >
-              <Text style={styles.unifiedBtnText}>🎧</Text>
-              <Text style={styles.bottomBtnLabel}>Hands-free</Text>
-            </TouchableOpacity>
-          )} */}
+          {/* Hands-free button — disabled until speech recognition is fixed */}
 
           {/* Conversation button — tap to start, tap to stop, info badge shows timer */}
           {memoSupported && handsfree.state === 'inactive' && (
