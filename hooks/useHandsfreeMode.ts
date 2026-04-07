@@ -283,10 +283,16 @@ export function useHandsfreeMode(
 
     // ── EXIT keywords — always checked, highest priority ──────────────────
     if (matchesKeyword(lower, KEYWORDS.EXIT)) {
-      console.log('[Handsfree] EXIT keyword detected');
+      console.log('[Handsfree] EXIT keyword detected — deactivating immediately');
       pendingTranscriptRef.current = '';
+      wakeListenModeRef.current = false;
+      // Deactivate FIRST (stops mic, clears timers, sets state to inactive)
+      clearMeteringTimer();
+      clearIdleTimer();
+      stopRecordingSilently();
+      setState('inactive');
+      // Then speak the goodbye cue
       speakCueRef.current('Goodbye Robert.');
-      deactivateRef.current();
       return;
     }
 
