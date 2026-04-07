@@ -451,13 +451,10 @@ export function useHandsfreeMode(
   const activate = useCallback(async () => {
     if (stateRef.current !== 'inactive' && stateRef.current !== 'paused') return;
     console.log('[Handsfree] Activating');
-    await stopRecordingSilently();
     pendingTranscriptRef.current = '';
-    await speakCueRef.current("I'm listening.");
-    // Extra buffer after TTS finishes so Android releases the audio system
-    await new Promise(r => setTimeout(r, 500));
+    // Skip TTS cue — go straight to recognition to avoid audio session conflicts
     startListeningRef.current();
-  }, [stopRecordingSilently]);
+  }, []);
 
   // ── Deactivate ───────────────────────────────────────────────────────────
 
