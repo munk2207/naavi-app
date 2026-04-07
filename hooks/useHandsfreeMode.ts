@@ -357,10 +357,6 @@ export function useHandsfreeMode(
           return;
         }
 
-        // Abort any lingering session before starting a new one
-        try { ExpoSpeechRecognitionModule.abort(); } catch {}
-        await new Promise(r => setTimeout(r, 300));
-
         ExpoSpeechRecognitionModule.start({
           lang: 'en-US',
           continuous: true,
