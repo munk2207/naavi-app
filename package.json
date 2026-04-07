@@ -6,14 +6,12 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web",
-    "postinstall": "node scripts/patch-voice.js"
+    "web": "expo start --web"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",
     "@expo/metro-runtime": "~55.0.6",
     "@expo/ngrok": "^4.1.0",
-    "@react-native-voice/voice": "^3.2.4",
     "@react-native-async-storage/async-storage": "^2.1.2",
     "@supabase/supabase-js": "^2.99.2",
     "expo": "^55.0.9",

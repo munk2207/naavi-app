@@ -16,11 +16,13 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Platform, PermissionsAndroid } from 'react-native';
-import Voice from '@react-native-voice/voice';
-import type { SpeechResultsEvent, SpeechErrorEvent, SpeechStartEvent } from '@react-native-voice/voice';
+import { Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
 import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
+
+// NOTE: Native speech recognition disabled — @react-native-voice/voice
+// could not auto-link on Expo SDK 55 / RN 0.83 (NativeModules.Voice was null).
+// Hook is kept for future use but native path is inactive.
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
