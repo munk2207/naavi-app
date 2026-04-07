@@ -7,7 +7,7 @@
  *   "Goodbye"     → exit hands-free mode
  *
  * Speech detection uses Android's native SpeechRecognizer via
- * @jamsch/expo-speech-recognition. Built-in VAD means silence never
+ * @react-native-voice/voice. Built-in VAD means silence never
  * produces a transcript — no hallucinations.
  *
  * Web fallback: MediaRecorder + Whisper (unchanged).
@@ -16,11 +16,9 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Platform } from 'react-native';
-import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
-} from '@jamsch/expo-speech-recognition';
+import { Platform, PermissionsAndroid } from 'react-native';
+import Voice from '@react-native-voice/voice';
+import type { SpeechResultsEvent, SpeechErrorEvent, SpeechStartEvent } from '@react-native-voice/voice';
 import { supabase } from '@/lib/supabase';
 import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
 
@@ -137,9 +135,8 @@ export function useHandsfreeMode(
         console.log('[Handsfree] Idle timeout — no speech for 60s');
         setState('paused');
         speakCueRef.current('Listening paused. Say Hi Naavi to resume.');
-        // Stop native recognition gracefully
         if (isNative) {
-          try { ExpoSpeechRecognitionModule.stop(); } catch {}
+          try { Voice.stop(); } catch {}
         }
       }
     }, IDLE_TIMEOUT_MS);
@@ -147,8 +144,7 @@ export function useHandsfreeMode(
 
   const stopRecordingSilently = useCallback(async () => {
     if (isNative) {
-      // Don't call abort() — it triggers an 'aborted' error event
-      // that cascades into failures. start() handles cleanup internally.
+      try { await Voice.stop(); } catch {}
     } else {
       const recorder = mediaRecorderRef.current;
       if (recorder && recorder.state !== 'inactive') {
@@ -236,83 +232,94 @@ export function useHandsfreeMode(
   }, [clearIdleTimer, stopRecordingSilently]);
 
   // ══════════════════════════════════════════════════════════════════════
-  // ── NATIVE: expo-speech-recognition event handlers ────────────────────
+  // ── NATIVE: @react-native-voice/voice event handlers ──────────────────
   // ══════════════════════════════════════════════════════════════════════
 
-  // Speech detected — reset idle timer
-  useSpeechRecognitionEvent('speechstart', () => {
-    if (stateRef.current !== 'listening') return;
-    console.log('[Handsfree] speechstart — speech detected');
-    resetIdleTimer();
-  });
+  useEffect(() => {
+    if (!isNative) return;
 
-  // Final result — process transcript
-  useSpeechRecognitionEvent('result', (event) => {
-    if (stateRef.current !== 'listening' && stateRef.current !== 'processing') return;
-    const result = event.results[event.results.length - 1];
-    if (!result) return;
+    // Speech detected — reset idle timer
+    Voice.onSpeechStart = (_e: SpeechStartEvent) => {
+      if (stateRef.current !== 'listening') return;
+      console.log('[Handsfree] speechstart — speech detected');
+      resetIdleTimer();
+    };
 
-    // Only act on final results
-    if (result.isFinal) {
+    // Final results — process transcript
+    Voice.onSpeechResults = (e: SpeechResultsEvent) => {
+      if (stateRef.current !== 'listening' && stateRef.current !== 'processing') return;
+
+      const transcript = e.value?.[0];
+      if (!transcript) return;
+
       errorRetryCountRef.current = 0; // reset on successful recognition
-      const transcript = result.transcript;
       console.log('[Handsfree] Final result:', transcript);
       setState('processing');
       handleTranscript(transcript);
-    }
-  });
+    };
 
-  // Recognition ended — restart if still listening (continuous loop)
-  useSpeechRecognitionEvent('end', () => {
-    console.log('[Handsfree] Recognition ended, state:', stateRef.current);
-    // Android may stop recognition after each utterance even with continuous: true
-    // Restart if we're still supposed to be listening
-    if (stateRef.current === 'listening') {
-      console.log('[Handsfree] Restarting recognition (auto-restart)');
-      setTimeout(() => {
-        if (stateRef.current === 'listening') {
-          startListeningRef.current();
-        }
-      }, 300);
-    }
-  });
-
-  // Error — silently retry or pause (no spoken errors to avoid feedback loop)
-  useSpeechRecognitionEvent('error', (event) => {
-    console.error('[Handsfree] Recognition error:', event.error, event.message);
-    // Show error code on screen temporarily for debugging
-    setError(`[${event.error}] ${event.message ?? ''}`);
-    setTimeout(() => setError(null), 5000);
-    // "no-speech" and "aborted" are normal — restart silently
-    if (event.error === 'no-speech' || event.error === 'aborted') {
-      errorRetryCountRef.current = 0;
+    // Recognition ended — restart if still listening (continuous loop)
+    Voice.onSpeechEnd = () => {
+      console.log('[Handsfree] Recognition ended, state:', stateRef.current);
+      // Android stops after each utterance — restart to keep listening
       if (stateRef.current === 'listening') {
+        console.log('[Handsfree] Restarting recognition (auto-restart)');
         setTimeout(() => {
           if (stateRef.current === 'listening') {
             startListeningRef.current();
           }
-        }, 500);
+        }, 300);
       }
-      return;
-    }
-    // Real error — count retries
-    errorRetryCountRef.current += 1;
-    if (errorRetryCountRef.current > MAX_ERROR_RETRIES) {
-      // Stop trying — pause silently, show banner
-      console.log('[Handsfree] Max retries reached — pausing silently');
-      errorRetryCountRef.current = 0;
-      setState('paused');
-      return;
-    }
-    // Silent retry with delay (no TTS, just wait and try again)
-    if (stateRef.current === 'listening' || stateRef.current === 'processing') {
-      setTimeout(() => {
+    };
+
+    // Error handling
+    Voice.onSpeechError = (e: SpeechErrorEvent) => {
+      const errorInfo = e.error as any;
+      const errorCode = errorInfo?.code ?? errorInfo ?? '';
+      const errorMsg = errorInfo?.message ?? String(errorInfo ?? '');
+      console.error('[Handsfree] Recognition error:', errorCode, errorMsg);
+
+      // Show error on screen temporarily
+      setError(`[${errorCode}] ${errorMsg}`);
+      setTimeout(() => setError(null), 5000);
+
+      // "no-speech" (code 7) and "client" (code 5) are normal — restart silently
+      const code = String(errorCode);
+      if (code === '7' || code === '5') {
+        errorRetryCountRef.current = 0;
         if (stateRef.current === 'listening') {
-          startListeningRef.current();
+          setTimeout(() => {
+            if (stateRef.current === 'listening') {
+              startListeningRef.current();
+            }
+          }, 500);
         }
-      }, 1000);
-    }
-  });
+        return;
+      }
+
+      // Real error — count retries
+      errorRetryCountRef.current += 1;
+      if (errorRetryCountRef.current > MAX_ERROR_RETRIES) {
+        console.log('[Handsfree] Max retries reached — pausing silently');
+        errorRetryCountRef.current = 0;
+        setState('paused');
+        return;
+      }
+
+      // Silent retry with delay
+      if (stateRef.current === 'listening' || stateRef.current === 'processing') {
+        setTimeout(() => {
+          if (stateRef.current === 'listening') {
+            startListeningRef.current();
+          }
+        }, 1000);
+      }
+    };
+
+    return () => {
+      Voice.destroy().then(Voice.removeAllListeners);
+    };
+  }, [resetIdleTimer, handleTranscript]);
 
   // ── Web transcribe helper (fallback) ──────────────────────────────────
 
@@ -348,27 +355,38 @@ export function useHandsfreeMode(
     resetIdleTimer();
 
     if (isNative) {
-      // ── Native: expo-speech-recognition ───────────────────────────
+      // ── Native: @react-native-voice/voice ─────────────────────────
       try {
-        const { status } = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-        if (status !== 'granted') {
-          const msg = 'Microphone or speech permission denied. Please allow it in Settings.';
+        // Request microphone permission on Android
+        if (Platform.OS === 'android') {
+          const granted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+            {
+              title: 'Microphone Permission',
+              message: 'MyNaavi needs access to your microphone for voice commands.',
+              buttonPositive: 'Allow',
+            },
+          );
+          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+            const msg = 'Microphone permission denied. Please allow it in Settings.';
+            setError(msg);
+            speakCueRef.current(msg);
+            deactivateRef.current();
+            return;
+          }
+        }
+
+        // Check availability
+        const available = await Voice.isAvailable();
+        if (!available) {
+          const msg = 'Speech recognition is not available on this device.';
           setError(msg);
           speakCueRef.current(msg);
           deactivateRef.current();
           return;
         }
 
-        ExpoSpeechRecognitionModule.start({
-          lang: 'en-US',
-          continuous: true,
-          interimResults: false,
-          contextualStrings: [
-            ...KEYWORDS.SUBMIT,
-            ...KEYWORDS.EXIT,
-            ...KEYWORDS.WAKE,
-          ],
-        });
+        await Voice.start('en-US');
       } catch (err) {
         console.error('[Handsfree] Native start error:', err);
         const msg = 'Could not start speech recognition. Please try again.';
@@ -480,6 +498,9 @@ export function useHandsfreeMode(
     return () => {
       clearIdleTimer();
       stopRecordingSilently();
+      if (isNative) {
+        Voice.destroy().then(Voice.removeAllListeners);
+      }
     };
   }, [clearIdleTimer, stopRecordingSilently]);
 

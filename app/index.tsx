@@ -1300,7 +1300,17 @@ export default function HomeScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Hands-free button — disabled until speech recognition is fixed */}
+          {/* Hands-free button */}
+          {memoSupported && handsfree.state === 'inactive' && (
+            <TouchableOpacity
+              style={[styles.unifiedBtn, styles.handsfreeBtn]}
+              onPress={handsfree.activate}
+              accessibilityLabel="Activate hands-free mode"
+            >
+              <Text style={styles.unifiedBtnText}>🎧</Text>
+              <Text style={styles.bottomBtnLabel}>Hands-free</Text>
+            </TouchableOpacity>
+          )}
 
           {/* Conversation button — tap to start, tap to stop, info badge shows timer */}
           {memoSupported && handsfree.state === 'inactive' && (
