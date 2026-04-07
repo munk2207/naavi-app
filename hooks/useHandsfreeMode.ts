@@ -243,7 +243,7 @@ export function useHandsfreeMode(
       const base64 = btoa(binary);
 
       const { data, error: fnErr } = await supabase.functions.invoke('transcribe-memo', {
-        body: { audio: base64, mimeType: 'audio/webm' },
+        body: { audio: base64, mimeType: 'audio/webm', language: 'en' },
       });
 
       if (fnErr || !data?.transcript) return null;

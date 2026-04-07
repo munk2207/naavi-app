@@ -59,6 +59,8 @@ serve(async (req) => {
     formData.append('model', 'whisper-1');
     // Use caller-supplied language if provided, otherwise Whisper auto-detects
     if (language) formData.append('language', language);
+    // Prompt prevents Whisper from hallucinating on silence/noise
+    formData.append('prompt', 'Voice command from Robert speaking English.');
 
     const res = await fetch(WHISPER_URL, {
       method: 'POST',
