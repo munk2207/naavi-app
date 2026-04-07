@@ -44,4 +44,27 @@ dependencies {
 `;
 
 fs.writeFileSync(buildGradlePath, modernBuildGradle, 'utf-8');
-console.log('[patch-voice] Patched @react-native-voice/voice build.gradle for Gradle 9+');
+console.log('[patch-voice] Patched build.gradle for Gradle 9+');
+
+// ── Fix 2: Add react-native.config.js for auto-linking ──────────────────
+// The library has no react-native.config.js, so React Native's auto-linking
+// doesn't discover the native module. Without it, NativeModules.Voice is null.
+
+const voiceRoot = path.join(__dirname, '..', 'node_modules', '@react-native-voice', 'voice');
+const configPath = path.join(voiceRoot, 'react-native.config.js');
+
+const configContent = `module.exports = {
+  dependency: {
+    platforms: {
+      android: {
+        sourceDir: './android',
+        packageImportPath: 'import com.wenkesj.voice.VoicePackage;',
+        packageInstance: 'new VoicePackage()',
+      },
+    },
+  },
+};
+`;
+
+fs.writeFileSync(configPath, configContent, 'utf-8');
+console.log('[patch-voice] Created react-native.config.js for auto-linking');

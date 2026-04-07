@@ -21,7 +21,7 @@
       }
     },
     "android": {
-      "versionCode": 9,
+      "versionCode": 10,
       "package": "ca.naavi.app",
       "googleServicesFile": "./google-services.json",
       "permissions": [
@@ -38,7 +38,8 @@
       "expo-localization",
       "./plugins/withAppActions",
       "expo-updates",
-      "./plugins/withVoiceFix"
+      "./plugins/withVoiceFix",
+      "@react-native-voice/voice"
     ],
     "scheme": "naavi",
     "extra": {
