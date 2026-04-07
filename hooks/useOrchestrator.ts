@@ -338,6 +338,41 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               else console.log('[Orchestrator] SET_EMAIL_ALERT saved:', action.label);
             }
           }
+        } else if (action.type === 'SET_ACTION_RULE') {
+          if (supabase) {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+              // Resolve contact for the action target
+              const actionConfig = (action.action_config ?? {}) as Record<string, any>;
+              const toName = String(actionConfig.to ?? '');
+              const actionType = String(action.action_type ?? 'sms');
+
+              if (toName && !actionConfig.to_phone && !actionConfig.to_email) {
+                const contact = await lookupContact(toName);
+                if (contact) {
+                  if ((actionType === 'sms' || actionType === 'whatsapp') && contact.phone) {
+                    actionConfig.to_phone = contact.phone;
+                    actionConfig.to_name = toName;
+                  } else if (actionType === 'email' && contact.email) {
+                    actionConfig.to_email = contact.email;
+                    actionConfig.to_name = toName;
+                  }
+                }
+              }
+
+              const { error } = await supabase.from('action_rules').insert({
+                user_id:        session.user.id,
+                trigger_type:   String(action.trigger_type ?? 'email'),
+                trigger_config: action.trigger_config ?? {},
+                action_type:    actionType,
+                action_config:  actionConfig,
+                label:          String(action.label ?? 'Action rule'),
+                one_shot:       action.one_shot ?? false,
+              });
+              if (error) console.error('[Orchestrator] SET_ACTION_RULE failed:', error.message);
+              else console.log('[Orchestrator] SET_ACTION_RULE saved:', action.label);
+            }
+          }
         }
       }
 
