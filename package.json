@@ -6,7 +6,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "postinstall": "node scripts/patch-voice.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",
