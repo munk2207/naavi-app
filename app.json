@@ -37,7 +37,8 @@
       "expo-sqlite",
       "expo-localization",
       "./plugins/withAppActions",
-      "expo-updates"
+      "expo-updates",
+      "./plugins/withVoiceFix"
     ],
     "scheme": "naavi",
     "extra": {
