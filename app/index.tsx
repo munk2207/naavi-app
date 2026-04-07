@@ -276,67 +276,103 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [resolvedEmail, setResolvedEmail] = useState<string | null>(null);
+  const [resolvedContact, setResolvedContact] = useState<string | null>(null);
 
-  // Auto-lookup email on mount if to field has no @
+  const channel = String(action.channel ?? 'email').toLowerCase() as 'email' | 'sms' | 'whatsapp';
+  const isMessaging = channel === 'sms' || channel === 'whatsapp';
+  const channelLabel = channel === 'whatsapp' ? 'WhatsApp' : channel === 'sms' ? 'SMS' : 'Email';
+  const channelIcon = channel === 'whatsapp' ? '💬' : channel === 'sms' ? '📱' : '✉';
+
+  // Auto-lookup contact on mount
   React.useEffect(() => {
     const to = String(action.to ?? '').trim();
-    if (!to.includes('@')) {
+    if (!to.includes('@') && !to.startsWith('+')) {
       lookupContact(to).then(contact => {
-        if (contact?.email) setResolvedEmail(contact.email);
+        if (isMessaging && contact?.phone) setResolvedContact(contact.phone);
+        else if (!isMessaging && contact?.email) setResolvedContact(contact.email);
       });
     }
   }, [action.to]);
 
-  async function handleSendEmail() {
+  async function handleSend() {
     setSending(true);
     setSendError(null);
 
-    let to = String(action.to ?? '').trim();
+    const to = String(action.to ?? '').trim();
 
-    // If no email address, try Google Contacts first
-    if (!to.includes('@')) {
-      const contact = await lookupContact(to);
-      if (contact?.email) {
-        to = contact.email;
-      } else {
-        // No email found — show error instead of crashing on Android with window.prompt
+    if (isMessaging) {
+      // SMS or WhatsApp — need phone number
+      let phone = to.startsWith('+') ? to : null;
+      if (!phone) {
+        const contact = await lookupContact(to);
+        phone = contact?.phone ?? null;
+      }
+      if (!phone) {
         setSending(false);
-        setSendError(`No email address found for ${to}. Try saying "Remember Hussein's email is hussein@example.com" first.`);
+        setSendError(`No phone number found for ${to}. Try saying "Remember ${to}'s phone is +1234567890" first.`);
         return;
       }
-    }
 
-    const originalName = String(action.to ?? '').trim();
-    const result = await registry.email.send({
-      to:      [{ name: to !== originalName ? originalName : '', email: to }],
-      subject: String(action.subject ?? ''),
-      body:    String(action.body    ?? ''),
-    });
-    setSending(false);
-    if (result.success) {
-      setSent(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('send-sms', {
+          body: { to: phone, body: String(action.body ?? ''), channel },
+        });
+        setSending(false);
+        if (error || !data?.success) {
+          setSendError(error?.message ?? data?.error ?? `${channelLabel} send failed`);
+        } else {
+          setSent(true);
+        }
+      } catch (err) {
+        setSending(false);
+        setSendError(err instanceof Error ? err.message : `${channelLabel} send failed`);
+      }
     } else {
-      setSendError(result.error ?? 'Send failed');
+      // Email
+      let email = to.includes('@') ? to : null;
+      if (!email) {
+        const contact = await lookupContact(to);
+        email = contact?.email ?? null;
+      }
+      if (!email) {
+        setSending(false);
+        setSendError(`No email address found for ${to}. Try saying "Remember ${to}'s email is name@example.com" first.`);
+        return;
+      }
+
+      const originalName = to;
+      const result = await registry.email.send({
+        to:      [{ name: email !== originalName ? originalName : '', email }],
+        subject: String(action.subject ?? ''),
+        body:    String(action.body    ?? ''),
+      });
+      setSending(false);
+      if (result.success) {
+        setSent(true);
+      } else {
+        setSendError(result.error ?? 'Send failed');
+      }
     }
   }
 
   return (
     <View style={styles.draftCard}>
       <Text style={styles.draftLabel}>
-        {sent ? '✓ Email sent' : '✉ Draft ready'}
+        {sent ? `✓ ${channelLabel} sent` : `${channelIcon} ${channelLabel} draft ready`}
       </Text>
       <Text style={styles.draftField}>
         <Text style={styles.draftFieldLabel}>To: </Text>
         {String(action.to ?? '')}
-        {resolvedEmail && !String(action.to ?? '').includes('@')
-          ? <Text style={styles.contactResolved}> ({resolvedEmail})</Text>
+        {resolvedContact && !String(action.to ?? '').includes('@') && !String(action.to ?? '').startsWith('+')
+          ? <Text style={styles.contactResolved}> ({resolvedContact})</Text>
           : null}
       </Text>
-      <Text style={styles.draftField}>
-        <Text style={styles.draftFieldLabel}>Subject: </Text>
-        {String(action.subject ?? '')}
-      </Text>
+      {!isMessaging && (
+        <Text style={styles.draftField}>
+          <Text style={styles.draftFieldLabel}>Subject: </Text>
+          {String(action.subject ?? '')}
+        </Text>
+      )}
       <Text style={styles.draftBody}>{String(action.body ?? '')}</Text>
       {sendError ? (
         <Text style={styles.draftSendError}>{sendError}</Text>
@@ -344,12 +380,12 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
       {!sent && (
         <TouchableOpacity
           style={[styles.draftSendBtn, sending && styles.draftSendBtnDisabled]}
-          onPress={handleSendEmail}
+          onPress={handleSend}
           disabled={sending}
-          accessibilityLabel="Send email"
+          accessibilityLabel={`Send ${channelLabel}`}
         >
           <Text style={styles.draftSendBtnText}>
-            {sending ? 'Sending…' : '✉ Send'}
+            {sending ? 'Sending…' : `${channelIcon} Send`}
           </Text>
         </TouchableOpacity>
       )}
