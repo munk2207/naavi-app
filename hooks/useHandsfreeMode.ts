@@ -137,9 +137,9 @@ export function useHandsfreeMode(
         console.log('[Handsfree] Idle timeout — no speech for 60s');
         setState('paused');
         speakCueRef.current('Listening paused. Say Hi Naavi to resume.');
-        // Stop native recognition
+        // Stop native recognition gracefully
         if (isNative) {
-          try { ExpoSpeechRecognitionModule.abort(); } catch {}
+          try { ExpoSpeechRecognitionModule.stop(); } catch {}
         }
       }
     }, IDLE_TIMEOUT_MS);
@@ -147,7 +147,8 @@ export function useHandsfreeMode(
 
   const stopRecordingSilently = useCallback(async () => {
     if (isNative) {
-      try { ExpoSpeechRecognitionModule.abort(); } catch {}
+      // Don't call abort() — it triggers an 'aborted' error event
+      // that cascades into failures. start() handles cleanup internally.
     } else {
       const recorder = mediaRecorderRef.current;
       if (recorder && recorder.state !== 'inactive') {
