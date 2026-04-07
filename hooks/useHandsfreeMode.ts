@@ -70,7 +70,7 @@ const SILENCE_THRESHOLD_WEB = 0.02;     // RMS amplitude — below this = silenc
 const SILENCE_DURATION_MS = 2000;       // 2s of silence → segment (stop recording, transcribe chunk)
 const IDLE_TIMEOUT_MS = 60_000;         // 60s of no speech at all → auto-pause
 const MIN_RECORDING_MS = 1500;          // ignore recordings shorter than 1.5s
-const MIN_SPEECH_MS = 500;              // need at least 500ms of actual speech before segmenting
+const MIN_SPEECH_MS = 800;              // need at least 800ms of actual speech above threshold before sending to Whisper
 const METERING_INTERVAL_MS = 250;       // how often to check audio level
 const POST_TTS_DELAY_MS = 1500;         // wait after Naavi speaks before opening mic
 
@@ -351,6 +351,15 @@ export function useHandsfreeMode(
     const elapsed = Date.now() - recordingStartedAtRef.current;
     if (elapsed < MIN_RECORDING_MS) {
       console.log('[Handsfree] Recording too short, resuming');
+      await stopRecordingSilently();
+      startListeningRef.current();
+      return;
+    }
+
+    // Gate: don't send to Whisper if not enough real speech was detected
+    // This prevents hallucinations from background noise / silence
+    if (speechAccumulatedMsRef.current < MIN_SPEECH_MS) {
+      console.log('[Handsfree] Not enough speech detected (', speechAccumulatedMsRef.current, 'ms), discarding');
       await stopRecordingSilently();
       startListeningRef.current();
       return;
