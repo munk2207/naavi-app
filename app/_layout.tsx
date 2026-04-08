@@ -45,21 +45,21 @@ async function handleAuthCallback(url: string) {
 }
 
 export default function RootLayout() {
-  // Check for OTA updates on launch
-  useEffect(() => {
-    async function checkForOTA() {
-      try {
-        const update = await Updates.checkForUpdateAsync();
-        if (update.isAvailable) {
-          await Updates.fetchUpdateAsync();
-          await Updates.reloadAsync();
-        }
-      } catch (e) {
-        console.log('[OTA] Error:', e);
-      }
-    }
-    checkForOTA();
-  }, []);
+  // OTA updates disabled — all deploys go through Google Play builds
+  // useEffect(() => {
+  //   async function checkForOTA() {
+  //     try {
+  //       const update = await Updates.checkForUpdateAsync();
+  //       if (update.isAvailable) {
+  //         await Updates.fetchUpdateAsync();
+  //         await Updates.reloadAsync();
+  //       }
+  //     } catch (e) {
+  //       console.log('[OTA] Error:', e);
+  //     }
+  //   }
+  //   checkForOTA();
+  // }, []);
 
   useEffect(() => {
     // Listen for deep links while app is open
