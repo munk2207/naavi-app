@@ -1312,7 +1312,17 @@ export default function HomeScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Hands-free button — disabled until speech recognition works on Samsung S23 */}
+          {/* Hands-free button — Google Cloud STT, no native libraries needed */}
+          {memoSupported && handsfree.state === 'inactive' && (
+            <TouchableOpacity
+              style={[styles.unifiedBtn, styles.handsfreeBtn]}
+              onPress={() => handsfree.activate()}
+              accessibilityLabel="Tap to start hands-free mode"
+            >
+              <Text style={styles.unifiedBtnText}>🎧</Text>
+              <Text style={styles.bottomBtnLabel}>Free</Text>
+            </TouchableOpacity>
+          )}
 
           {/* Conversation button — tap to start, tap to stop, info badge shows timer */}
           {memoSupported && handsfree.state === 'inactive' && (
