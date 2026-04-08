@@ -300,7 +300,11 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
 
     if (isMessaging) {
       // SMS or WhatsApp — need phone number
-      let phone = to.startsWith('+') ? to : null;
+      // Detect phone numbers: strip dashes/spaces/brackets, check if mostly digits
+      const stripped = to.replace(/[\s\-\(\)\.]/g, '');
+      let phone = stripped.startsWith('+') ? stripped
+                 : /^\d{7,15}$/.test(stripped) ? `+${stripped}`
+                 : null;
       if (!phone) {
         const contact = await lookupContact(to);
         phone = contact?.phone ?? null;

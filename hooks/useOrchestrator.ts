@@ -551,12 +551,14 @@ async function playBase64AudioNative(base64: string): Promise<void> {
       shouldDuckAndroid: true,
     });
     const sound = new Audio.Sound();
+    _currentSound = sound;
     await new Promise<void>((resolve, reject) => {
       // Safety timeout — if playback never completes, resolve after 30s
-      const safetyTimer = setTimeout(() => resolve(), 30000);
+      const safetyTimer = setTimeout(() => { _currentSound = null; resolve(); }, 30000);
       sound.setOnPlaybackStatusUpdate((status) => {
         if (status.isLoaded && status.didJustFinish) {
           clearTimeout(safetyTimer);
+          _currentSound = null;
           sound.unloadAsync().then(() => {
             FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
             resolve();
@@ -565,12 +567,13 @@ async function playBase64AudioNative(base64: string): Promise<void> {
         // If loading failed, reject so the caller can fall back to expo-speech
         if (!status.isLoaded && (status as any).error) {
           clearTimeout(safetyTimer);
+          _currentSound = null;
           reject(new Error((status as any).error));
         }
       });
       sound.loadAsync({ uri: tempUri })
         .then(() => sound.playAsync())
-        .catch((err) => { clearTimeout(safetyTimer); reject(err); });
+        .catch((err) => { clearTimeout(safetyTimer); _currentSound = null; reject(err); });
     });
   } catch (err) {
     console.error('[TTS Native] playback error:', err);
@@ -595,12 +598,22 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
   if (chunks.length === 0) return;
   try {
     const audioPromises = chunks.map(chunk => fetchTTSBase64(chunk));
+    let playedAny = false;
     for (const promise of audioPromises) {
       if (_speechStopped) break;
       const base64 = await promise;
-      if (base64 && !_speechStopped) await playBase64AudioNative(base64);
+      if (base64 && !_speechStopped) {
+        await playBase64AudioNative(base64);
+        playedAny = true;
+      }
+    }
+    // If no cloud TTS chunks played (all returned null), fall back to expo-speech
+    if (!playedAny && !_speechStopped) {
+      console.log('[TTS Native] No cloud TTS chunks played, falling back to expo-speech');
+      throw new Error('No TTS audio available');
     }
   } catch (err) {
+    if (_speechStopped) return;
     // Fall back to expo-speech if cloud TTS fails
     console.error('[TTS Native] cloud TTS failed, using expo-speech:', err);
     await Speech.stop();
