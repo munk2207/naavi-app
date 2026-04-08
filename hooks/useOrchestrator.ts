@@ -476,7 +476,7 @@ export function stopSpeaking(): void {
 async function fetchTTSBase64(chunk: string): Promise<string | null> {
   try {
     const { data, error } = await supabase.functions.invoke('text-to-speech', {
-      body: { text: chunk, voice: 'nova' },
+      body: { text: chunk, voice: 'shimmer' },
     });
     if (error || !data?.audio) return null;
     return data.audio as string;
