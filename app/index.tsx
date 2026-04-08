@@ -317,12 +317,19 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
       }
 
       try {
+        console.log(`[Send] ${channelLabel} to ${phone}, body: ${String(action.body ?? '').slice(0, 30)}`);
         const { data, error } = await supabase.functions.invoke('send-sms', {
           body: { to: phone, body: String(action.body ?? ''), channel },
         });
+        console.log('[Send] Response:', JSON.stringify({ data, error: error?.message }));
         setSending(false);
         if (error || !data?.success) {
-          setSendError(error?.message ?? data?.error ?? `${channelLabel} send failed`);
+          // Extract detailed error from Supabase FunctionsHttpError
+          let detail = '';
+          if (error && typeof (error as any).context?.json === 'function') {
+            try { const ctx = await (error as any).context.json(); detail = JSON.stringify(ctx); } catch {}
+          }
+          setSendError(detail || error?.message ?? data?.error ?? `${channelLabel} send failed`);
         } else {
           setSent(true);
         }
