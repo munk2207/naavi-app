@@ -303,7 +303,8 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
       // Detect phone numbers: strip dashes/spaces/brackets, check if mostly digits
       const stripped = to.replace(/[\s\-\(\)\.]/g, '');
       let phone = stripped.startsWith('+') ? stripped
-                 : /^\d{7,15}$/.test(stripped) ? `+${stripped}`
+                 : /^\d{10}$/.test(stripped) ? `+1${stripped}`   // 10-digit North American → add +1
+                 : /^\d{7,15}$/.test(stripped) ? `+${stripped}`  // other lengths → add +
                  : null;
       if (!phone) {
         const contact = await lookupContact(to);
