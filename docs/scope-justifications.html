@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MyNaavi — Scope Justifications</title>
+  <style>
+    :root {
+      --navy:  #080D1A;
+      --navy2: #0F1729;
+      --gold:  #C9922A;
+      --gold2: #E8B04A;
+      --cream: #F5F0E6;
+      --cream2:#EDE7D8;
+      --muted: #8A8478;
+      --white: #FDFAF4;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--navy);
+      color: var(--cream);
+      font-family: 'Georgia', serif;
+      font-weight: 400;
+      line-height: 1.8;
+      padding: 60px 48px 100px;
+      max-width: 860px;
+      margin: 0 auto;
+    }
+
+    .doc-label {
+      font-family: 'Arial', sans-serif;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 12px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 400;
+      color: var(--white);
+      margin-bottom: 8px;
+      line-height: 1.2;
+    }
+
+    .subtitle {
+      font-family: 'Arial', sans-serif;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 48px;
+      letter-spacing: 0.04em;
+    }
+
+    .divider {
+      width: 48px;
+      height: 1px;
+      background: var(--gold);
+      opacity: 0.5;
+      margin-bottom: 48px;
+    }
+
+    .section-title {
+      font-family: 'Arial', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--gold2);
+      margin-top: 48px;
+      margin-bottom: 32px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(201,146,42,0.2);
+    }
+
+    .scope {
+      margin-bottom: 36px;
+    }
+
+    .scope-name {
+      font-family: 'Courier New', monospace;
+      font-size: 0.9rem;
+      color: var(--gold2);
+      background: rgba(201,146,42,0.08);
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      letter-spacing: 0.05em;
+    }
+
+    .scope p {
+      font-size: 0.97rem;
+      color: var(--cream2);
+      line-height: 1.85;
+    }
+
+    .print-btn {
+      display: inline-block;
+      margin-bottom: 40px;
+      font-family: 'Arial', sans-serif;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--navy);
+      background: var(--gold);
+      padding: 10px 24px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    .print-btn:hover { background: var(--gold2); }
+
+    footer {
+      margin-top: 64px;
+      padding-top: 24px;
+      border-top: 1px solid rgba(201,146,42,0.12);
+      font-family: 'Arial', sans-serif;
+      font-size: 0.75rem;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+    }
+
+    @media print {
+      body { background: #fff; color: #111; padding: 40px; }
+      .print-btn { display: none; }
+      .scope-name { background: #f5f5f5; color: #333; }
+      .scope p { color: #333; }
+      .section-title { color: #333; border-bottom-color: #ccc; }
+      h1 { color: #111; }
+      .doc-label, .subtitle, footer { color: #666; }
+    }
+  </style>
+</head>
+<body>
+
+  <p class="doc-label">MyNaavi Foundation — Internal Document</p>
+  <h1>Scope Justifications</h1>
+  <p class="subtitle">Google OAuth &amp; iOS Permissions — Why each scope is required for Robert's use case &nbsp;·&nbsp; April 2026</p>
+  <div class="divider"></div>
+
+  <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
+
+  <!-- ── GOOGLE OAUTH ── -->
+  <div class="section-title">Google OAuth Scopes</div>
+
+  <div class="scope">
+    <div class="scope-name">calendar.events</div>
+    <p>MyNaavi reads Robert's Google Calendar events to build his daily morning brief — surfacing appointments, deadlines, and birthdays so he starts each day with a clear picture of what's ahead. The app also creates and updates calendar events when Robert sets reminders or schedules meetings by voice, eliminating the need for him to open Google Calendar manually.</p>
+  </div>
+
+  <div class="scope">
+    <div class="scope-name">gmail.modify &amp; gmail.send</div>
+    <p>MyNaavi reads Robert's Gmail to include relevant incoming emails in his morning brief and to alert him when a message arrives from someone important. The send scope allows Naavi to draft and send emails on Robert's behalf when he dictates a message by voice — a core feature for users who prefer speaking over typing.</p>
+  </div>
+
+  <div class="scope">
+    <div class="scope-name">drive.readonly &amp; drive.file</div>
+    <p>MyNaavi searches Robert's Google Drive documents when he asks questions such as "do I have a contract for this?" or "find my notes from the meeting." The drive.file scope allows saving voice memos and dictated notes directly to his Drive, keeping everything in one place without requiring him to manage files manually.</p>
+  </div>
+
+  <!-- ── IOS PERMISSIONS ── -->
+  <div class="section-title">iOS Permissions</div>
+
+  <div class="scope">
+    <div class="scope-name">NSMicrophoneUsageDescription</div>
+    <p>MyNaavi's primary interface is voice — Robert speaks his requests rather than typing them. The microphone captures his voice so the app can transcribe and respond to his instructions in real time. Without microphone access the core functionality of the application is unavailable.</p>
+  </div>
+
+  <div class="scope">
+    <div class="scope-name">NSSpeechRecognitionUsageDescription</div>
+    <p>MyNaavi uses on-device and server-side speech recognition to convert Robert's spoken words into text, which is then processed by the AI assistant. This is the core input mechanism of the entire application — allowing seniors who prefer speaking over typing to interact naturally.</p>
+  </div>
+
+  <div class="scope">
+    <div class="scope-name">NSHealthShareUsageDescription</div>
+    <p>MyNaavi reads health data — including medication reminders and activity — to include relevant health context in Robert's daily brief, helping him stay on top of his routine without manually checking a separate health app. All health data is read-only and is never shared with third parties.</p>
+  </div>
+
+  <footer>
+    &copy; 2026 MyNaavi Foundation &nbsp;·&nbsp; Confidential — For submission use only &nbsp;·&nbsp; legal@mynaavi.com
+  </footer>
+
+</body>
+</html>

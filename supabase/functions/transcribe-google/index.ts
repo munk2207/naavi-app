@@ -44,17 +44,15 @@ serve(async (req) => {
     const cleanAudio = audio.replace(/\s/g, '');
 
     // Map MIME type to Google Cloud STT encoding
-    const resolvedMime = (mimeType ?? 'audio/m4a').toLowerCase();
-    let encoding = 'AMR_WB';      // default fallback
+    const resolvedMime = (mimeType ?? 'audio/amr-wb').toLowerCase();
+    let encoding = 'AMR_WB';      // default — matches Android 3GP/AMR-WB recording
     let sampleRate = 16000;
 
-    if (resolvedMime.includes('m4a') || resolvedMime.includes('mp4') || resolvedMime.includes('aac')) {
-      // M4A/AAC — Google STT doesn't support directly, but MP4 container with AAC works
-      // We need to use the OGG_OPUS or send as-is and let Google detect
-      // Actually Google Cloud STT v1 supports: FLAC, LINEAR16, MULAW, AMR, AMR_WB, OGG_OPUS, WEBM_OPUS, MP3
-      // For M4A (AAC in MP4 container): not directly supported by v1
-      // Solution: use v1p1beta1 which has AUTO encoding detection
-      encoding = 'MP3';  // will use v1p1beta1 with auto-detect instead
+    if (resolvedMime.includes('amr')) {
+      encoding = 'AMR_WB';
+      sampleRate = 16000;
+    } else if (resolvedMime.includes('m4a') || resolvedMime.includes('mp4') || resolvedMime.includes('aac')) {
+      encoding = 'MP3';  // fallback for iOS
     } else if (resolvedMime.includes('webm') || resolvedMime.includes('opus')) {
       encoding = 'WEBM_OPUS';
     } else if (resolvedMime.includes('wav')) {
@@ -73,26 +71,28 @@ serve(async (req) => {
     // Use v1p1beta1 for auto encoding detection (handles M4A/AAC)
     const apiUrl = `https://speech.googleapis.com/v1p1beta1/speech:recognize?key=${apiKey}`;
 
-    const requestBody: Record<string, unknown> = {
-      config: {
-        languageCode: langCode,
-        sampleRateHertz: sampleRate,
-        audioChannelCount: 1,
-        enableAutomaticPunctuation: true,
-        model: 'default',
-      },
+    // For known formats (AMR, WEBM, WAV etc.) set encoding explicitly
+    // Only auto-detect for M4A/AAC which Google STT doesn't support directly
+    const isAutoDetect = resolvedMime.includes('m4a') || resolvedMime.includes('mp4') || resolvedMime.includes('aac');
+
+    const config: Record<string, unknown> = {
+      languageCode: langCode,
+      enableAutomaticPunctuation: true,
+      model: 'default',
+    };
+
+    if (!isAutoDetect) {
+      config.encoding = encoding;
+      config.sampleRateHertz = sampleRate;
+      config.audioChannelCount = 1;
+    }
+
+    const requestBody = {
+      config,
       audio: {
         content: cleanAudio,
       },
     };
-
-    // Only set encoding for formats Google recognizes directly
-    // For M4A/AAC, omit encoding and let Google auto-detect
-    if (resolvedMime.includes('m4a') || resolvedMime.includes('mp4') || resolvedMime.includes('aac')) {
-      // Omit encoding — v1p1beta1 auto-detects
-    } else {
-      (requestBody.config as Record<string, unknown>).encoding = encoding;
-    }
 
     const res = await fetch(apiUrl, {
       method: 'POST',
