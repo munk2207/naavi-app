@@ -49,8 +49,8 @@ serve(async (req) => {
         model: 'gpt-4o-mini-tts',
         input: text,
         voice,
-        speed: 0.9,
-        instructions: 'You are a warm, friendly companion speaking to someone you genuinely care about. Your tone is sincere, calm, and unhurried — like a trusted friend sharing good news over tea. Smile as you speak. Never sound clinical, robotic, or assertive. Pause naturally between thoughts. When asking questions, use a soft rising tone, not a demanding one. Keep your energy gentle and steady throughout.',
+        speed: 1.0,
+        instructions: 'You are a warm, friendly companion speaking to someone you genuinely care about. Your tone is sincere and calm — like a trusted friend. Smile as you speak. Never sound clinical, robotic, or assertive. Pause naturally between thoughts. When asking questions, use a soft rising tone, not a demanding one.',
       }),
     });
 
