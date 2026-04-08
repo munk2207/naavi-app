@@ -329,7 +329,7 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
           if (error && typeof (error as any).context?.json === 'function') {
             try { const ctx = await (error as any).context.json(); detail = JSON.stringify(ctx); } catch {}
           }
-          setSendError(detail || error?.message ?? data?.error ?? `${channelLabel} send failed`);
+          setSendError(detail || (error?.message ?? data?.error ?? `${channelLabel} send failed`));
         } else {
           setSent(true);
         }
