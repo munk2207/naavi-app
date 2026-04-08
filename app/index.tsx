@@ -1313,13 +1313,13 @@ export default function HomeScreen() {
           )}
 
           {/* Hands-free button — Google Cloud STT, no native libraries needed */}
-          {memoSupported && handsfree.state === 'inactive' && (
+          {handsfree.state === 'inactive' && (
             <TouchableOpacity
-              style={[styles.unifiedBtn, styles.handsfreeBtn]}
+              style={[styles.unifiedBtn, { backgroundColor: '#2563EB' }]}
               onPress={() => handsfree.activate()}
               accessibilityLabel="Tap to start hands-free mode"
             >
-              <Text style={styles.unifiedBtnText}>🎧</Text>
+              <Text style={styles.unifiedBtnText}>🙌</Text>
               <Text style={styles.bottomBtnLabel}>Free</Text>
             </TouchableOpacity>
           )}
