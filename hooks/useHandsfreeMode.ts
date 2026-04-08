@@ -1,15 +1,21 @@
 /**
- * useHandsfreeMode hook — DISABLED
+ * useHandsfreeMode hook
  *
- * Native speech recognition libraries could not auto-link on
- * Expo SDK 55 / RN 0.83 (Samsung S23 Ultra). Hook returns inactive
- * state and does nothing. Kept as a placeholder for future implementation
- * using auto-recording turn-taking with Whisper.
+ * Hands-free voice mode using expo-av recording + Google Cloud STT.
+ * Records 5-second audio chunks, sends to transcribe-google Edge Function,
+ * and uses keyword detection to control the conversation.
  *
- * Keywords and types are preserved for when hands-free is rebuilt.
+ * Keywords:
+ *   "Hi Naavi"  → wake / start fresh listening
+ *   "Thanks"    → submit accumulated speech to orchestrator
+ *   "Goodbye"   → exit hands-free mode
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { Platform } from 'react-native';
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system/legacy';
+import { supabase } from '@/lib/supabase';
 import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -28,7 +34,7 @@ export interface UseHandsfreeModeResult {
   deactivate: () => void;
 }
 
-// ─── Configurable Keyword Table (preserved for future use) ──────────────────
+// ─── Configurable Keyword Table ─────────────────────────────────────────────
 
 export const KEYWORDS = {
   SUBMIT: ['thank you', 'thank you naavi', 'thanks', 'thanks naavi', 'over'],
@@ -36,21 +42,295 @@ export const KEYWORDS = {
   WAKE: ['hi naavi', 'hey naavi', 'hello naavi', 'naavi'],
 };
 
-// ─── Hook (no-op stub) ──────────────────────────────────────────────────────
+// ─── Constants ──────────────────────────────────────────────────────────────
+
+const CHUNK_DURATION_MS = 5000;        // 5-second recording chunks
+const IDLE_TIMEOUT_MS = 60000;         // 60s silence → pause
+const POST_TTS_DELAY_MS = 1500;        // wait after TTS before reopening mic
+const SILENCE_COUNT_TO_PAUSE = 12;     // 12 × 5s = 60s of silence → pause
+
+const isNative = Platform.OS === 'android' || Platform.OS === 'ios';
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function matchKeyword(text: string, keywords: string[]): boolean {
+  const lower = text.toLowerCase().trim();
+  return keywords.some(k => lower.includes(k));
+}
+
+function stripKeywords(text: string): string {
+  let lower = text.toLowerCase();
+  for (const kw of [...KEYWORDS.SUBMIT, ...KEYWORDS.WAKE]) {
+    lower = lower.replace(new RegExp(kw, 'gi'), '');
+  }
+  return lower.replace(/\s+/g, ' ').trim();
+}
+
+// ─── Hook ───────────────────────────────────────────────────────────────────
 
 export function useHandsfreeMode(
-  _orchestratorStatus: OrchestratorStatus,
-  _sendMessage: (text: string) => Promise<void>,
-  _speakCue: (text: string) => Promise<void>,
+  orchestratorStatus: OrchestratorStatus,
+  sendMessage: (text: string) => Promise<void>,
+  speakCue: (text: string) => Promise<void>,
 ): UseHandsfreeModeResult {
-  const [state] = useState<HandsfreeState>('inactive');
-  const [error] = useState<string | null>(null);
+  const [state, setState] = useState<HandsfreeState>('inactive');
+  const [error, setError] = useState<string | null>(null);
 
-  const activate = useCallback(() => {
-    console.log('[Handsfree] Disabled — hands-free mode not available');
+  const stateRef = useRef<HandsfreeState>('inactive');
+  const pendingTextRef = useRef('');
+  const silenceCountRef = useRef(0);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const loopActiveRef = useRef(false);
+  const waitingForOrchestratorRef = useRef(false);
+
+  // Keep stateRef in sync
+  useEffect(() => { stateRef.current = state; }, [state]);
+
+  // ── Watch orchestrator status: when it goes idle after 'waiting', resume listening ──
+  useEffect(() => {
+    if (!waitingForOrchestratorRef.current) return;
+    if (orchestratorStatus === 'idle' && stateRef.current === 'waiting') {
+      waitingForOrchestratorRef.current = false;
+      // Delay before reopening mic (prevents picking up TTS audio)
+      setTimeout(() => {
+        if (stateRef.current === 'waiting' || stateRef.current === 'paused') {
+          console.log('[Handsfree] Orchestrator done, resuming listening');
+          pendingTextRef.current = '';
+          silenceCountRef.current = 0;
+          setState('listening');
+          stateRef.current = 'listening';
+          startRecordingLoop();
+        }
+      }, POST_TTS_DELAY_MS);
+    }
+  }, [orchestratorStatus]);
+
+  // ── Record one 5-second chunk and return base64 ──
+  async function recordChunk(): Promise<{ base64: string; mimeType: string } | null> {
+    try {
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== 'granted') {
+        setError('Microphone permission denied.');
+        return null;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const { recording } = await Audio.Recording.createAsync({
+        android: {
+          extension: '.m4a',
+          outputFormat: 2,      // MPEG_4
+          audioEncoder: 3,      // AAC
+          sampleRate: 16000,
+          numberOfChannels: 1,
+          bitRate: 32000,
+        },
+        ios: {
+          extension: '.m4a',
+          outputFormat: 'aac',
+          audioQuality: 32,
+          sampleRate: 16000,
+          numberOfChannels: 1,
+          bitRate: 32000,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
+        },
+        web: { mimeType: 'audio/webm', bitsPerSecond: 32000 },
+      });
+
+      recordingRef.current = recording;
+
+      // Wait for chunk duration
+      await new Promise(resolve => setTimeout(resolve, CHUNK_DURATION_MS));
+
+      // Stop recording — check it's still the same recording (not deactivated)
+      if (recordingRef.current !== recording) return null;
+
+      await recording.stopAndUnloadAsync();
+      recordingRef.current = null;
+
+      const uri = recording.getURI();
+      if (!uri) return null;
+
+      if (isNative) {
+        const base64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        return { base64, mimeType: 'audio/m4a' };
+      } else {
+        // Web fallback — not primary target but kept for testing
+        return null;
+      }
+
+    } catch (err) {
+      console.error('[Handsfree] Record error:', err);
+      recordingRef.current = null;
+      return null;
+    }
+  }
+
+  // ── Send audio to Google Cloud STT ──
+  async function transcribe(base64: string, mimeType: string): Promise<string> {
+    const { data, error: fnError } = await supabase.functions.invoke('transcribe-google', {
+      body: { audio: base64, mimeType, language: 'en' },
+    });
+
+    if (fnError) {
+      console.error('[Handsfree] Transcribe error:', fnError.message);
+      return '';
+    }
+
+    return data?.transcript ?? '';
+  }
+
+  // ── Main recording loop ──
+  async function startRecordingLoop() {
+    if (loopActiveRef.current) return;
+    loopActiveRef.current = true;
+
+    console.log('[Handsfree] Recording loop started');
+
+    while (loopActiveRef.current && stateRef.current === 'listening') {
+      const chunk = await recordChunk();
+
+      // Check if we were deactivated during recording
+      if (!loopActiveRef.current || stateRef.current !== 'listening') break;
+
+      if (!chunk) {
+        silenceCountRef.current++;
+        if (silenceCountRef.current >= SILENCE_COUNT_TO_PAUSE) {
+          console.log('[Handsfree] Idle timeout — pausing');
+          setState('paused');
+          stateRef.current = 'paused';
+          await speakCue("I'll be here when you need me. Say Hi Naavi to continue.");
+          break;
+        }
+        continue;
+      }
+
+      // Transcribe
+      setState('processing');
+      stateRef.current = 'processing';
+      const transcript = await transcribe(chunk.base64, chunk.mimeType);
+
+      // Check if deactivated during transcription
+      if (!loopActiveRef.current) break;
+
+      if (!transcript) {
+        // Silence — no hallucination, just record next chunk
+        silenceCountRef.current++;
+        if (silenceCountRef.current >= SILENCE_COUNT_TO_PAUSE) {
+          console.log('[Handsfree] Idle timeout — pausing');
+          setState('paused');
+          stateRef.current = 'paused';
+          await speakCue("I'll be here when you need me. Say Hi Naavi to continue.");
+          break;
+        }
+        setState('listening');
+        stateRef.current = 'listening';
+        continue;
+      }
+
+      // Got speech — reset silence counter
+      silenceCountRef.current = 0;
+      console.log(`[Handsfree] Transcript: "${transcript}"`);
+
+      // ── Keyword detection ──
+
+      // EXIT: goodbye
+      if (matchKeyword(transcript, KEYWORDS.EXIT)) {
+        console.log('[Handsfree] EXIT keyword detected');
+        loopActiveRef.current = false;
+        setState('inactive');
+        stateRef.current = 'inactive';
+        await speakCue('Goodbye Robert. Talk to you soon.');
+        break;
+      }
+
+      // SUBMIT: thanks / over
+      if (matchKeyword(transcript, KEYWORDS.SUBMIT)) {
+        // Add any speech before the keyword to pending
+        const cleaned = stripKeywords(transcript);
+        if (cleaned) pendingTextRef.current += (pendingTextRef.current ? ' ' : '') + cleaned;
+
+        const messageToSend = pendingTextRef.current.trim();
+        if (messageToSend) {
+          console.log(`[Handsfree] SUBMIT: "${messageToSend}"`);
+          setState('waiting');
+          stateRef.current = 'waiting';
+          waitingForOrchestratorRef.current = true;
+          loopActiveRef.current = false;
+          pendingTextRef.current = '';
+          await sendMessage(messageToSend);
+        } else {
+          // No accumulated text — keep listening
+          setState('listening');
+          stateRef.current = 'listening';
+        }
+        break;
+      }
+
+      // WAKE: hi naavi — reset and start fresh
+      if (matchKeyword(transcript, KEYWORDS.WAKE)) {
+        console.log('[Handsfree] WAKE keyword — starting fresh');
+        pendingTextRef.current = '';
+        const cleaned = stripKeywords(transcript);
+        if (cleaned) pendingTextRef.current = cleaned;
+        setState('listening');
+        stateRef.current = 'listening';
+        continue;
+      }
+
+      // Regular speech — accumulate
+      pendingTextRef.current += (pendingTextRef.current ? ' ' : '') + transcript;
+      console.log(`[Handsfree] Accumulated: "${pendingTextRef.current}"`);
+      setState('listening');
+      stateRef.current = 'listening';
+    }
+
+    loopActiveRef.current = false;
+    console.log('[Handsfree] Recording loop ended');
+  }
+
+  // ── Activate hands-free mode ──
+  const activate = useCallback(async () => {
+    if (stateRef.current !== 'inactive' && stateRef.current !== 'paused') return;
+
+    console.log('[Handsfree] Activating');
+    setError(null);
+    pendingTextRef.current = '';
+    silenceCountRef.current = 0;
+
+    setState('listening');
+    stateRef.current = 'listening';
+
+    await speakCue("I'm listening.");
+
+    startRecordingLoop();
   }, []);
 
-  const deactivate = useCallback(() => {}, []);
+  // ── Deactivate hands-free mode ──
+  const deactivate = useCallback(async () => {
+    console.log('[Handsfree] Deactivating');
+    loopActiveRef.current = false;
+    waitingForOrchestratorRef.current = false;
+    pendingTextRef.current = '';
+
+    // Stop any in-progress recording
+    if (recordingRef.current) {
+      try {
+        await recordingRef.current.stopAndUnloadAsync();
+      } catch {}
+      recordingRef.current = null;
+    }
+
+    setState('inactive');
+    stateRef.current = 'inactive';
+  }, []);
 
   return { state, error, activate, deactivate };
 }
