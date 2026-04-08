@@ -31,7 +31,7 @@ serve(async (req) => {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    const { text, voice = 'nova' } = JSON.parse(rawBody);
+    const { text, voice = 'shimmer' } = JSON.parse(rawBody);
     if (!text?.trim()) {
       return new Response(JSON.stringify({ error: 'Missing text' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -49,7 +49,8 @@ serve(async (req) => {
         model: 'gpt-4o-mini-tts',
         input: text,
         voice,
-        instructions: 'Speak gently and warmly, like a kind and patient caregiver talking to someone they truly care about. Never sound rushed, assertive, or demanding — even when asking questions. Keep a soft, reassuring tone throughout. Pause briefly between sentences.',
+        speed: 0.9,
+        instructions: 'You are a warm, friendly companion speaking to someone you genuinely care about. Your tone is sincere, calm, and unhurried — like a trusted friend sharing good news over tea. Smile as you speak. Never sound clinical, robotic, or assertive. Pause naturally between thoughts. When asking questions, use a soft rising tone, not a demanding one. Keep your energy gentle and steady throughout.',
       }),
     });
 
