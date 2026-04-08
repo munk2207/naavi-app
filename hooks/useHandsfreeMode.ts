@@ -12,7 +12,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '@/lib/supabase';
@@ -183,6 +183,7 @@ export function useHandsfreeMode(
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[Handsfree] Record error:', msg);
       setError(`Recording failed: ${msg}`);
+      if (isNative) Alert.alert('Handsfree Debug', `Record error: ${msg}`);
       recordingRef.current = null;
       return null;
     }
@@ -218,6 +219,7 @@ export function useHandsfreeMode(
     loopActiveRef.current = true;
 
     console.log('[Handsfree] Recording loop started');
+    if (isNative) Alert.alert('Handsfree Debug', 'Recording loop started');
 
     while (loopActiveRef.current && stateRef.current === 'listening') {
       const chunk = await recordChunk();
