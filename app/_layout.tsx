@@ -89,13 +89,13 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" backgroundColor={Colors.primary} />
+      <StatusBar style="light" backgroundColor={Colors.bgApp} />
       <Stack
         screenOptions={{
-          headerStyle: { backgroundColor: Colors.primary },
-          headerTintColor: Colors.textOnDark,
-          headerTitleStyle: { fontWeight: '600', fontSize: 18 },
-          contentStyle: { backgroundColor: Colors.background },
+          headerStyle: { backgroundColor: Colors.bgApp },
+          headerTintColor: Colors.textPrimary,
+          headerTitleStyle: { fontWeight: '600', fontSize: 17 },
+          contentStyle: { backgroundColor: Colors.bgApp },
           animation: 'slide_from_right',
         }}
       >

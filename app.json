@@ -10,7 +10,7 @@
       "url": "https://u.expo.dev/be293d9d-cab2-48ff-85a5-d27187ff4340"
     },
     "orientation": "default",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "ca.naavi.app",

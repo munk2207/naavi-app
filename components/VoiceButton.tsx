@@ -2,10 +2,8 @@
  * VoiceButton
  *
  * The primary interaction in Naavi — Robert's microphone button.
- * Large, accessible, clear visual states: idle / listening / thinking / speaking.
- *
- * Phase 7: Sends typed text from the input field above it.
- * Phase 7.5: Will record actual voice using expo-av.
+ * Large, accessible, clear visual states mapped to semantic ramp.
+ * Dark theme — no shadows, uses color elevation instead.
  */
 
 import React, { useEffect, useRef } from 'react';
@@ -14,7 +12,6 @@ import {
   StyleSheet,
   Animated,
   View,
-  AccessibilityInfo,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
@@ -29,9 +26,9 @@ interface Props {
 
 export function VoiceButton({ status, onPress, disabled }: Props) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const isActive = status === 'thinking'; // only block during thinking — allow tap to stop listening
+  const isActive = status === 'thinking';
 
-  // Pulse animation when thinking or speaking
+  // Pulse animation when thinking
   useEffect(() => {
     if (isActive) {
       const pulse = Animated.loop(
@@ -50,15 +47,15 @@ export function VoiceButton({ status, onPress, disabled }: Props) {
   const backgroundColor = {
     idle:       Colors.voiceIdle,
     thinking:   Colors.voiceProcessing,
-    speaking:   Colors.primary,
-    error:      Colors.error,
+    speaking:   Colors.voiceSpeaking,
+    error:      Colors.voiceError,
   }[status];
 
   const icon = {
     idle:       '🎙',
     thinking:   '💭',
     speaking:   '🔊',
-    error:      '!',
+    error:      '⚠',
   }[status];
 
   const accessibilityLabel = {
@@ -123,11 +120,7 @@ const styles = StyleSheet.create({
     borderRadius: Typography.touchTargetVoice / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: Colors.shadow,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
+    // No shadows in dark theme — use color elevation
   },
   disabled: {
     opacity: 0.4,
