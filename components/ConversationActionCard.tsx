@@ -2,6 +2,7 @@
  * ConversationActionCard
  *
  * Displays a single extracted action from a recorded conversation.
+ * Dark theme with semantic ramp color-coding.
  * Robert can tap "Add to Calendar" or "Draft Email" directly from the card.
  */
 
@@ -11,16 +12,17 @@ import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { ConversationAction } from '@/hooks/useConversationRecorder';
 
-const TYPE_CONFIG: Record<string, { icon: string; color: string; bg: string }> = {
-  appointment: { icon: '📅', color: '#0369A1', bg: '#E0F2FE' },
-  meeting:     { icon: '🤝', color: '#0369A1', bg: '#E0F2FE' },
-  call:        { icon: '📞', color: '#0891B2', bg: '#ECFEFF' },
-  email:       { icon: '✉️', color: '#4338CA', bg: '#EEF2FF' },
-  test:        { icon: '🧪', color: '#7C3AED', bg: '#F5F3FF' },
-  prescription:{ icon: '💊', color: '#065F46', bg: '#D1FAE5' },
-  follow_up:   { icon: '🔁', color: '#92400E', bg: '#FEF3C7' },
-  reminder:    { icon: '🔔', color: '#B45309', bg: '#FEF3C7' },
-  task:        { icon: '✅', color: '#1F2937', bg: '#F3F4F6' },
+// Map action types to semantic ramp levels
+const TYPE_CONFIG: Record<string, { icon: string; color: string }> = {
+  appointment:  { icon: '📅', color: Colors.moderate },
+  meeting:      { icon: '🤝', color: Colors.moderate },
+  call:         { icon: '📞', color: Colors.moderate },
+  email:        { icon: '✉️', color: Colors.moderate },
+  test:         { icon: '🧪', color: Colors.caution },
+  prescription: { icon: '💊', color: Colors.gentle },
+  follow_up:    { icon: '🔁', color: Colors.caution },
+  reminder:     { icon: '🔔', color: Colors.caution },
+  task:         { icon: '✅', color: Colors.gentle },
 };
 
 interface Props {
@@ -33,7 +35,7 @@ export function ConversationActionCard({ action, onCalendar, onEmail }: Props) {
   const cfg = TYPE_CONFIG[action.type] ?? TYPE_CONFIG.task;
 
   return (
-    <View style={[styles.card, { backgroundColor: cfg.bg, borderLeftColor: cfg.color }]}>
+    <View style={[styles.card, { borderLeftColor: cfg.color }]}>
       <View style={styles.headerRow}>
         <Text style={styles.icon}>{cfg.icon}</Text>
         <View style={styles.headerText}>
@@ -54,7 +56,7 @@ export function ConversationActionCard({ action, onCalendar, onEmail }: Props) {
       <View style={styles.actions}>
         {action.calendar_title && onCalendar && (
           <TouchableOpacity
-            style={[styles.btn, { backgroundColor: cfg.color }]}
+            style={styles.btn}
             onPress={() => onCalendar(action)}
             activeOpacity={0.8}
           >
@@ -63,11 +65,11 @@ export function ConversationActionCard({ action, onCalendar, onEmail }: Props) {
         )}
         {onEmail && (
           <TouchableOpacity
-            style={[styles.btn, styles.btnOutline, { borderColor: cfg.color }]}
+            style={styles.btnOutline}
             onPress={() => onEmail(action)}
             activeOpacity={0.8}
           >
-            <Text style={[styles.btnText, { color: cfg.color }]}>✉️ Draft Email</Text>
+            <Text style={styles.btnOutlineText}>✉️ Draft Email</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -77,9 +79,10 @@ export function ConversationActionCard({ action, onCalendar, onEmail }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 14,
+    backgroundColor: Colors.bgCard,
+    borderRadius: 16,
     borderLeftWidth: 4,
-    padding: 14,
+    padding: 16,
     marginBottom: 10,
     gap: 8,
   },
@@ -97,19 +100,20 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   typeLabel: {
-    fontSize: 10,
+    fontSize: Typography.caption,
     fontWeight: '700',
     letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
   title: {
-    fontSize: Typography.base,
+    fontSize: Typography.cardTitle,
     fontWeight: '700',
     color: Colors.textPrimary,
   },
   description: {
-    fontSize: Typography.sm,
+    fontSize: Typography.body,
     color: Colors.textSecondary,
-    lineHeight: 20,
+    lineHeight: Typography.lineHeightBody,
   },
   metaRow: {
     flexDirection: 'row',
@@ -117,32 +121,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   timing: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
+    fontSize: Typography.caption,
+    color: Colors.textHint,
     fontWeight: '600',
   },
   suggestedBy: {
-    fontSize: Typography.sm,
-    color: Colors.textMuted,
+    fontSize: Typography.caption,
+    color: Colors.textHint,
   },
   actions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
     marginTop: 4,
     flexWrap: 'wrap',
   },
   btn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
+    backgroundColor: Colors.accent,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  btnText: {
+    fontSize: Typography.body,
+    fontWeight: '600',
+    color: Colors.accentDark,
   },
   btnOutline: {
     backgroundColor: 'transparent',
-    borderWidth: 1.5,
+    borderWidth: 0.5,
+    borderColor: Colors.accent,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 14,
   },
-  btnText: {
-    fontSize: Typography.sm,
+  btnOutlineText: {
+    fontSize: Typography.body,
     fontWeight: '600',
-    color: '#fff',
+    color: Colors.accent,
   },
 });

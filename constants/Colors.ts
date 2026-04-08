@@ -1,44 +1,63 @@
 /**
- * Naavi design system — colours
+ * Naavi design system — dark theme colours
  *
- * Chosen for seniors: high contrast, warm tones, nothing harsh.
+ * Inspired by Gentler Streak (Apple Design Award 2024).
+ * Dark, warm, non-clinical. Colour encodes effort or state, never judgment.
  * All text/background combinations meet WCAG AA contrast ratio.
  */
 
 export const Colors = {
-  // Brand
-  primary:     '#1B4332', // Deep forest green — Naavi's identity colour
-  primaryMid:  '#40916C', // Medium green — active states, highlights
-  primaryLight:'#D8F3DC', // Very light green — backgrounds, tags
-
   // Backgrounds
-  background:  '#FAFAF8', // Warm off-white — easy on aging eyes
-  surface:     '#FFFFFF', // Card backgrounds
-  surfaceAlt:  '#F3F4F1', // Subtle alternate rows
+  bgApp:       '#1C1C1E',   // App background
+  bgCard:      '#2C2C2E',   // Cards, panels
+  bgElevated:  '#3A3A3C',   // Bottom sheets, modals, inputs
 
   // Text
-  textPrimary:   '#1A1A1A', // Near-black — main content
-  textSecondary: '#4B5563', // Mid grey — supporting content
-  textMuted:     '#9CA3AF', // Light grey — timestamps, labels
-  textOnDark:    '#FFFFFF', // White text on dark green backgrounds
+  textPrimary:   '#FFFFFF',                  // Headings, values
+  textSecondary: 'rgba(255,255,255,0.60)',   // Body copy, descriptions
+  textHint:      'rgba(255,255,255,0.35)',   // Captions, placeholders, metric labels
+
+  // Accent
+  accent:      '#5DCAA5',   // CTAs, active icons, links
+  accentDark:  '#085041',   // Text on accent background
+
+  // Borders
+  border:      'rgba(255,255,255,0.08)',   // Dividers, card borders
+  borderFocus: 'rgba(255,255,255,0.25)',   // Input focus ring
+
+  // Semantic ramp — use to signal intensity or state, never red/green pass-fail
+  gentle:   '#5DCAA5',   // Success, positive
+  moderate: '#4A9EDB',   // Info, scheduling
+  caution:  '#EF9F27',   // Active, attention
+  alert:    '#D85A30',   // Hard, error (never pure red)
+
+  // Voice button states (mapped to semantic ramp)
+  voiceIdle:       '#5DCAA5',   // Gentle — ready
+  voiceListening:  '#5DCAA5',   // Gentle — recording
+  voiceProcessing: '#EF9F27',   // Caution — thinking
+  voiceSpeaking:   '#4A9EDB',   // Moderate — responding
+  voiceError:      '#D85A30',   // Alert — error
 
   // Conversation bubbles
-  bubbleNaavi:   '#1B4332', // Naavi speaks — dark green
-  bubbleRobert:  '#F3F4F1', // Robert speaks — light grey
+  bubbleNaavi:  'transparent',  // Naavi speaks — plain text, no bubble
+  bubbleRobert: '#3A3A3C',     // Robert speaks — elevated surface
 
-  // Semantic
-  success:  '#2D6A4F',
-  warning:  '#D97706',
-  error:    '#DC2626',
-  info:     '#1D4ED8',
+  // Overlay
+  overlay: 'rgba(0,0,0,0.60)',
 
-  // UI
-  border:      '#E5E7EB',
-  divider:     '#F3F4F6',
-  shadow:      'rgba(0, 0, 0, 0.08)',
-
-  // Voice button states
-  voiceIdle:      '#2D9D5C',
-  voiceListening: '#DC2626', // Red when recording — clear visual signal
-  voiceProcessing:'#D97706', // Amber when thinking
+  // ---- Legacy aliases (for gradual migration) ----
+  primary:      '#5DCAA5',
+  primaryMid:   '#5DCAA5',
+  primaryLight: '#2C2C2E',
+  background:   '#1C1C1E',
+  surface:      '#2C2C2E',
+  surfaceAlt:   '#3A3A3C',
+  textOnDark:   '#FFFFFF',
+  textMuted:    '#9CA3AF',
+  success:      '#5DCAA5',
+  warning:      '#EF9F27',
+  error:        '#D85A30',
+  info:         '#4A9EDB',
+  divider:      'rgba(255,255,255,0.08)',
+  shadow:       'transparent',
 } as const;

@@ -2,10 +2,10 @@
  * ConversationBubble
  *
  * Displays a single turn of conversation — either Robert's message
- * or Naavi's response. Senior-friendly sizing and high contrast.
+ * or Naavi's response. Dark theme with Gentler Streak styling.
  *
  * Naavi's responses are simple text (no box/bubble).
- * Robert's messages use a light grey bubble.
+ * Robert's messages use an elevated surface bubble.
  */
 
 import React from 'react';
@@ -45,7 +45,7 @@ export function ConversationBubble({ role, content, timestamp }: Props) {
         </View>
       )}
       {timestamp && (
-        <Text style={styles.timestamp}>{timestamp}</Text>
+        <Text style={[styles.timestamp, !isNaavi && { textAlign: 'right' }]}>{timestamp}</Text>
       )}
     </View>
   );
@@ -63,8 +63,8 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
   label: {
-    fontSize: Typography.xs,
-    color: Colors.textMuted,
+    fontSize: Typography.caption,
+    color: Colors.textHint,
     marginBottom: 4,
     marginLeft: 4,
     fontWeight: Typography.medium,
@@ -79,22 +79,22 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   robertBubble: {
-    backgroundColor: Colors.bubbleRobert,
+    backgroundColor: Colors.bgElevated,
     borderBottomRightRadius: 4,
   },
   naaviText: {
-    fontSize: Typography.md,
-    lineHeight: Typography.lineHeightMd,
+    fontSize: Typography.body,
+    lineHeight: Typography.lineHeightBody,
     color: Colors.textPrimary,
   },
   robertText: {
-    fontSize: Typography.md,
-    lineHeight: Typography.lineHeightMd,
+    fontSize: Typography.body,
+    lineHeight: Typography.lineHeightBody,
     color: Colors.textPrimary,
   },
   timestamp: {
-    fontSize: Typography.xs,
-    color: Colors.textMuted,
+    fontSize: Typography.caption,
+    color: Colors.textHint,
     marginTop: 4,
     marginHorizontal: 4,
   },

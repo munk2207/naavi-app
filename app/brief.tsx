@@ -65,7 +65,7 @@ export default function BriefScreen() {
     <View style={styles.container}>
       {status === 'loading' && (
         <>
-          <ActivityIndicator size="large" color={Colors.primary} />
+          <ActivityIndicator size="large" color={Colors.accent} />
           <Text style={styles.label}>Getting your morning brief...</Text>
         </>
       )}
@@ -91,30 +91,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.bgApp,
   },
   title: {
     fontSize: 22,
     fontWeight: '700',
-    color: Colors.primary,
+    color: Colors.accent,
     marginBottom: 16,
     textAlign: 'center',
   },
   label: {
     fontSize: 16,
-    color: Colors.text ?? '#333',
+    color: Colors.textSecondary,
     marginTop: 16,
     textAlign: 'center',
   },
   body: {
     fontSize: 15,
-    color: Colors.text ?? '#333',
+    color: Colors.textSecondary,
     lineHeight: 22,
     textAlign: 'center',
   },
   error: {
     fontSize: 15,
-    color: '#c0392b',
+    color: Colors.alert,
     textAlign: 'center',
   },
 });

@@ -3,7 +3,7 @@
  *
  * Displays a single item from the morning brief — a calendar event,
  * health note, weather summary, or pending task.
- * Large text, clear category label, optional urgent indicator.
+ * Dark theme with Gentler Streak styling.
  */
 
 import React from 'react';
@@ -56,24 +56,23 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
+    backgroundColor: Colors.bgCard,
+    borderRadius: 16,
     padding: 16,
-    marginVertical: 6,
+    marginVertical: 5,
     borderWidth: 1,
     borderColor: Colors.border,
-    // Minimum touch target height
     minHeight: Typography.touchTargetIdeal,
   },
   urgentCard: {
-    borderColor: Colors.primaryMid,
+    borderColor: Colors.caution,
     borderWidth: 1.5,
   },
   iconContainer: {
     width: 44,
     height: 44,
-    borderRadius: 22,
-    backgroundColor: Colors.primaryLight,
+    borderRadius: 12,
+    backgroundColor: Colors.bgElevated,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
@@ -85,22 +84,22 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   title: {
-    fontSize: Typography.base,
+    fontSize: Typography.cardTitle,
     fontWeight: Typography.semibold,
     color: Colors.textPrimary,
-    lineHeight: Typography.lineHeightBase,
+    lineHeight: Typography.lineHeightCard,
   },
   detail: {
-    fontSize: Typography.sm,
+    fontSize: Typography.body,
     color: Colors.textSecondary,
-    marginTop: 4,
-    lineHeight: 22,
+    marginTop: 3,
+    lineHeight: Typography.lineHeightBody,
   },
   urgentDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: Colors.primaryMid,
+    backgroundColor: Colors.caution,
     marginLeft: 10,
   },
 });
