@@ -21,7 +21,7 @@
       }
     },
     "android": {
-      "versionCode": 21,
+      "versionCode": 22,
       "package": "ca.naavi.app",
       "googleServicesFile": "./google-services.json",
       "permissions": [

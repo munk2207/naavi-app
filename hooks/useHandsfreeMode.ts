@@ -108,6 +108,14 @@ export function useHandsfreeMode(
   // ── Record one 5-second chunk and return base64 ──
   async function recordChunk(): Promise<{ base64: string; mimeType: string } | null> {
     try {
+      // Clean up any leftover recording — Android only allows one at a time
+      if (recordingRef.current) {
+        try {
+          await recordingRef.current.stopAndUnloadAsync();
+        } catch (_) { /* already stopped */ }
+        recordingRef.current = null;
+      }
+
       console.log('[Handsfree] Requesting mic permission...');
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') {
