@@ -37,9 +37,11 @@ serve(async (req) => {
     const credentials = btoa(`${accountSid}:${authToken}`);
 
     // WhatsApp: prefix To and From with "whatsapp:" per Twilio API
+    // WhatsApp Sandbox uses +14155238886, not the SMS number
     const isWhatsApp = channel === 'whatsapp';
+    const whatsAppFrom = Deno.env.get('TWILIO_WHATSAPP_FROM') ?? '+14155238886';
     const toNumber = isWhatsApp ? `whatsapp:${to}` : to;
-    const fromNum = isWhatsApp ? `whatsapp:${fromNumber}` : fromNumber;
+    const fromNum = isWhatsApp ? `whatsapp:${whatsAppFrom}` : fromNumber;
 
     const res = await fetch(
       `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
