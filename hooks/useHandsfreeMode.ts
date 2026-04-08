@@ -108,17 +108,22 @@ export function useHandsfreeMode(
   // ── Record one 5-second chunk and return base64 ──
   async function recordChunk(): Promise<{ base64: string; mimeType: string } | null> {
     try {
+      console.log('[Handsfree] Requesting mic permission...');
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') {
         setError('Microphone permission denied.');
         return null;
       }
 
+      console.log('[Handsfree] Setting audio mode for recording...');
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        playThroughEarpieceAndroid: false,
+        staysActiveInBackground: false,
       });
 
+      console.log('[Handsfree] Starting 5s recording...');
       const { recording } = await Audio.Recording.createAsync({
         android: {
           extension: '.m4a',
@@ -148,18 +153,26 @@ export function useHandsfreeMode(
       await new Promise(resolve => setTimeout(resolve, CHUNK_DURATION_MS));
 
       // Stop recording — check it's still the same recording (not deactivated)
-      if (recordingRef.current !== recording) return null;
+      if (recordingRef.current !== recording) {
+        console.log('[Handsfree] Recording was replaced during wait — skipping');
+        return null;
+      }
 
       await recording.stopAndUnloadAsync();
       recordingRef.current = null;
 
       const uri = recording.getURI();
-      if (!uri) return null;
+      console.log('[Handsfree] Recording URI:', uri);
+      if (!uri) {
+        console.error('[Handsfree] No URI from recording');
+        return null;
+      }
 
       if (isNative) {
         const base64 = await FileSystem.readAsStringAsync(uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
+        console.log(`[Handsfree] Got base64 audio: ${base64.length} chars`);
         return { base64, mimeType: 'audio/m4a' };
       } else {
         // Web fallback — not primary target but kept for testing
@@ -167,7 +180,9 @@ export function useHandsfreeMode(
       }
 
     } catch (err) {
-      console.error('[Handsfree] Record error:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Handsfree] Record error:', msg);
+      setError(`Recording failed: ${msg}`);
       recordingRef.current = null;
       return null;
     }
@@ -175,16 +190,26 @@ export function useHandsfreeMode(
 
   // ── Send audio to Google Cloud STT ──
   async function transcribe(base64: string, mimeType: string): Promise<string> {
-    const { data, error: fnError } = await supabase.functions.invoke('transcribe-google', {
-      body: { audio: base64, mimeType, language: 'en' },
-    });
+    try {
+      console.log(`[Handsfree] Sending ${base64.length} chars to transcribe-google...`);
+      const { data, error: fnError } = await supabase.functions.invoke('transcribe-google', {
+        body: { audio: base64, mimeType, language: 'en' },
+      });
 
-    if (fnError) {
-      console.error('[Handsfree] Transcribe error:', fnError.message);
+      if (fnError) {
+        console.error('[Handsfree] Transcribe error:', fnError.message);
+        setError(`Transcribe failed: ${fnError.message}`);
+        return '';
+      }
+
+      console.log('[Handsfree] Transcribe result:', JSON.stringify(data));
+      return data?.transcript ?? '';
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Handsfree] Transcribe exception:', msg);
+      setError(`Transcribe exception: ${msg}`);
       return '';
     }
-
-    return data?.transcript ?? '';
   }
 
   // ── Main recording loop ──
