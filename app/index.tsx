@@ -301,7 +301,8 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
     if (isMessaging) {
       // SMS or WhatsApp — need phone number
       // Detect phone numbers: strip dashes/spaces/brackets, check if mostly digits
-      const stripped = to.replace(/[\s\-\(\)\.]/g, '');
+      const stripped = to.replace(/[^+\d]/g, '');  // keep only digits and +
+      console.log(`[Send] raw to="${to}" stripped="${stripped}" len=${stripped.length} allDigits=${/^\d+$/.test(stripped)}`);
       let phone = stripped.startsWith('+') ? stripped
                  : /^\d{10}$/.test(stripped) ? `+1${stripped}`   // 10-digit North American → add +1
                  : /^\d{7,15}$/.test(stripped) ? `+${stripped}`  // other lengths → add +
@@ -310,9 +311,10 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
         const contact = await lookupContact(to);
         phone = contact?.phone ?? null;
       }
+      console.log(`[Send] resolved phone="${phone}"`);
       if (!phone) {
         setSending(false);
-        setSendError(`No phone number found for ${to}. Try saying "Remember ${to}'s phone is +1234567890" first.`);
+        setSendError(`No phone number found for ${to}. Stripped="${stripped}" (${stripped.length} chars). Try saying the full number with country code.`);
         return;
       }
 
