@@ -58,14 +58,27 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_ANON_KEY')!,
     { global: { headers: { Authorization: authHeader } } }
   );
+  const { data: { user }, error: userError } = await userClient.auth.getUser();
+  if (userError || !user) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 
-  const { data: tokenRow, error: tokenError } = await userClient
+  const adminClient = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  );
+
+  const { data: tokenRow, error: tokenError } = await adminClient
     .from('user_tokens')
     .select('refresh_token')
+    .eq('user_id', user.id)
     .eq('provider', 'google')
     .single();
 
   if (tokenError || !tokenRow?.refresh_token) {
+    console.error('[save-to-drive] Token lookup failed for user:', user.id, tokenError?.message);
     return new Response(JSON.stringify({ error: 'No Google token found' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
