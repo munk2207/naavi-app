@@ -344,13 +344,20 @@ export function useConversationRecorder(): UseConversationRecorderResult {
       const extracted: ConversationAction[] = data?.actions ?? [];
       setActions(extracted);
 
-      // Step 1b — auto-create calendar events for appointments, meetings, prescriptions, tests
+      // Step 1b — auto-create calendar events for appointments, meetings, tests, follow-ups, prescriptions
       const calendarTypes = ['appointment', 'meeting', 'call', 'test', 'prescription', 'follow_up'];
+      const toLocalISO = (d: Date): string => {
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      };
+      const createdTitles = new Set<string>();
       for (const action of extracted) {
         if (calendarTypes.includes(action.type) && (action.calendar_title || action.title)) {
+          const eventTitle = action.calendar_title || action.title;
+          if (createdTitles.has(eventTitle.toLowerCase())) continue; // skip duplicates
+          createdTitles.add(eventTitle.toLowerCase());
           try {
-            const eventTitle = action.calendar_title || action.title;
-            // Use tomorrow at 9 AM as default if no specific time mentioned
+            // Use tomorrow at 9 AM local time as default if no specific time mentioned
             const tomorrow = new Date();
             tomorrow.setDate(tomorrow.getDate() + 1);
             tomorrow.setHours(9, 0, 0, 0);
@@ -358,13 +365,13 @@ export function useConversationRecorder(): UseConversationRecorderResult {
             await registry.calendar.createEvent({
               title:       eventTitle,
               description: `${action.description}\n\nTiming: ${action.timing}\nSuggested by: ${action.suggested_by}`,
-              startISO:    tomorrow.toISOString(),
-              endISO:      end.toISOString(),
+              startISO:    toLocalISO(tomorrow),
+              endISO:      toLocalISO(end),
               attendees:   [],
             });
             console.log('[ConvRecorder] Auto-created calendar event:', eventTitle);
           } catch (err) {
-            console.error('[ConvRecorder] Failed to create event:', action.title, err);
+            console.error('[ConvRecorder] Failed to create event:', eventTitle, err);
           }
         }
       }

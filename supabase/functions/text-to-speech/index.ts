@@ -49,7 +49,7 @@ serve(async (req) => {
         model: 'gpt-4o-mini-tts',
         input: text,
         voice,
-        instructions: 'Speak in a sincere, warm, and caring tone — like a trusted personal assistant who genuinely cares about the person they are helping.',
+        instructions: 'Speak gently and warmly, like a kind and patient caregiver talking to someone they truly care about. Never sound rushed, assertive, or demanding — even when asking questions. Keep a soft, reassuring tone throughout. Pause briefly between sentences.',
       }),
     });
 
