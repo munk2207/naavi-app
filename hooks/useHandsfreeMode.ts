@@ -134,12 +134,12 @@ export function useHandsfreeMode(
       console.log('[Handsfree] Starting 5s recording...');
       const { recording } = await Audio.Recording.createAsync({
         android: {
-          extension: '.3gp',
-          outputFormat: 2,      // THREE_GPP
-          audioEncoder: 4,      // AMR_WB — directly supported by Google Cloud STT
+          extension: '.m4a',
+          outputFormat: 2,      // MPEG_4
+          audioEncoder: 3,      // AAC
           sampleRate: 16000,
           numberOfChannels: 1,
-          bitRate: 23850,       // AMR-WB standard bitrate
+          bitRate: 64000,
         },
         ios: {
           extension: '.m4a',
@@ -181,7 +181,7 @@ export function useHandsfreeMode(
           encoding: FileSystem.EncodingType.Base64,
         });
         console.log(`[Handsfree] Got base64 audio: ${base64.length} chars`);
-        return { base64, mimeType: Platform.OS === 'android' ? 'audio/amr-wb' : 'audio/m4a' };
+        return { base64, mimeType: 'audio/m4a' };
       } else {
         // Web fallback — not primary target but kept for testing
         return null;

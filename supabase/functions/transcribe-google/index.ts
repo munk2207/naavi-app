@@ -1,16 +1,19 @@
 /**
  * transcribe-google Edge Function
  *
- * Receives base64-encoded audio from the app,
- * sends it to Google Cloud Speech-to-Text v1, and returns the transcript.
+ * Receives base64-encoded audio from the app (hands-free mode),
+ * sends it to OpenAI Whisper for transcription.
  *
- * Key advantage over Whisper: silence returns empty string (no hallucinations).
+ * Originally used Google Cloud STT but switched to Whisper because
+ * Google was returning empty transcripts for AMR-WB audio from Samsung S23.
+ * Whisper handles the same audio correctly (proven via tap-to-talk).
  *
- * Required Supabase secret:
- *   GOOGLE_CLOUD_STT_KEY  — Google Cloud API key with Speech-to-Text enabled
+ * Returns { transcript: string } — empty string for silence.
  */
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
+
+const WHISPER_URL = 'https://api.openai.com/v1/audio/transcriptions';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,9 +25,9 @@ serve(async (req) => {
 
   try {
     const { audio, mimeType, language } = await req.json() as {
-      audio: string;       // base64-encoded audio
-      mimeType?: string;   // e.g. 'audio/m4a', 'audio/webm'
-      language?: string;   // e.g. 'en', 'en-US'
+      audio: string;
+      mimeType?: string;
+      language?: string;
     };
 
     if (!audio) {
@@ -33,88 +36,61 @@ serve(async (req) => {
       });
     }
 
-    const apiKey = Deno.env.get('GOOGLE_CLOUD_STT_KEY');
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: 'GOOGLE_CLOUD_STT_KEY not configured' }), {
+    const openaiKey = Deno.env.get('OPENAI_API_KEY');
+    if (!openaiKey) {
+      return new Response(JSON.stringify({ error: 'OPENAI_API_KEY not configured' }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     // Clean base64 (mobile may include newlines)
     const cleanAudio = audio.replace(/\s/g, '');
+    console.log(`[transcribe-google] Received: mimeType=${mimeType}, audio length=${cleanAudio.length} chars`);
 
-    // Map MIME type to Google Cloud STT encoding
+    // Decode base64 to binary
+    const audioBytes = Uint8Array.from(atob(cleanAudio), c => c.charCodeAt(0));
     const resolvedMime = (mimeType ?? 'audio/amr-wb').toLowerCase();
-    let encoding = 'AMR_WB';      // default — matches Android 3GP/AMR-WB recording
-    let sampleRate = 16000;
+    const audioBlob = new Blob([audioBytes], { type: resolvedMime });
 
-    if (resolvedMime.includes('amr')) {
-      encoding = 'AMR_WB';
-      sampleRate = 16000;
-    } else if (resolvedMime.includes('m4a') || resolvedMime.includes('mp4') || resolvedMime.includes('aac')) {
-      encoding = 'MP3';  // fallback for iOS
-    } else if (resolvedMime.includes('webm') || resolvedMime.includes('opus')) {
-      encoding = 'WEBM_OPUS';
-    } else if (resolvedMime.includes('wav')) {
-      encoding = 'LINEAR16';
-    } else if (resolvedMime.includes('mp3') || resolvedMime.includes('mpeg')) {
-      encoding = 'MP3';
-    } else if (resolvedMime.includes('ogg')) {
-      encoding = 'OGG_OPUS';
-    } else if (resolvedMime.includes('flac')) {
-      encoding = 'FLAC';
-    }
-
-    // Resolve language code
-    const langCode = language?.includes('-') ? language : `${language ?? 'en'}-US`;
-
-    // Use v1p1beta1 for auto encoding detection (handles M4A/AAC)
-    const apiUrl = `https://speech.googleapis.com/v1p1beta1/speech:recognize?key=${apiKey}`;
-
-    // For known formats (AMR, WEBM, WAV etc.) set encoding explicitly
-    // Only auto-detect for M4A/AAC which Google STT doesn't support directly
-    const isAutoDetect = resolvedMime.includes('m4a') || resolvedMime.includes('mp4') || resolvedMime.includes('aac');
-
-    const config: Record<string, unknown> = {
-      languageCode: langCode,
-      enableAutomaticPunctuation: true,
-      model: 'default',
+    // Map MIME type to file extension for Whisper
+    const extMap: Record<string, string> = {
+      'audio/amr-wb': '3gp',
+      'audio/amr': '3gp',
+      'audio/3gpp': '3gp',
+      'audio/webm': 'webm',
+      'audio/m4a': 'm4a',
+      'audio/mp4': 'mp4',
+      'audio/mpeg': 'mp3',
+      'audio/ogg': 'ogg',
+      'audio/wav': 'wav',
     };
+    const ext = extMap[resolvedMime] ?? '3gp';
 
-    if (!isAutoDetect) {
-      config.encoding = encoding;
-      config.sampleRateHertz = sampleRate;
-      config.audioChannelCount = 1;
-    }
+    // Build multipart form for Whisper
+    const formData = new FormData();
+    formData.append('file', audioBlob, `chunk.${ext}`);
+    formData.append('model', 'whisper-1');
+    if (language) formData.append('language', language);
+    formData.append('prompt', 'Voice command from Robert speaking English.');
 
-    const requestBody = {
-      config,
-      audio: {
-        content: cleanAudio,
-      },
-    };
-
-    const res = await fetch(apiUrl, {
+    const res = await fetch(WHISPER_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
+      headers: {
+        Authorization: `Bearer ${openaiKey}`,
+      },
+      body: formData,
     });
 
-    const data = await res.json();
-
     if (!res.ok) {
-      console.error('[transcribe-google] Google STT error:', JSON.stringify(data));
-      return new Response(JSON.stringify({ error: data.error?.message ?? 'Google STT failed' }), {
+      const err = await res.text();
+      console.error('[transcribe-google] Whisper error:', err);
+      return new Response(JSON.stringify({ error: `Whisper failed: ${err}` }), {
         status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Extract transcript — empty results array means silence (no hallucination!)
-    const results = data.results ?? [];
-    const transcript = results
-      .map((r: { alternatives?: { transcript?: string }[] }) => r.alternatives?.[0]?.transcript ?? '')
-      .join(' ')
-      .trim();
+    const data = await res.json();
+    const transcript = (data.text ?? '').trim();
 
     console.log(`[transcribe-google] Transcribed: "${transcript.slice(0, 80)}${transcript.length > 80 ? '...' : ''}"`);
 
