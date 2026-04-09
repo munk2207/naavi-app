@@ -228,6 +228,7 @@ export function useHandsfreeMode(
 
     console.log('[Handsfree] Recording loop started');
 
+    try {
     while (loopActiveRef.current && stateRef.current === 'listening') {
       const chunk = await recordChunk();
 
@@ -325,20 +326,49 @@ export function useHandsfreeMode(
       setState('listening');
       stateRef.current = 'listening';
     }
-
-    loopActiveRef.current = false;
-    console.log('[Handsfree] Recording loop ended');
+    } catch (loopErr) {
+      // Watchdog: any unexpected error in the loop should not leave the user stuck.
+      const msg = loopErr instanceof Error ? loopErr.message : String(loopErr);
+      console.error('[Handsfree] Loop crashed:', msg);
+      setError(`Hands-free stopped unexpectedly: ${msg}`);
+    } finally {
+      loopActiveRef.current = false;
+      // If the loop ended while still in an "active" state (listening/processing), reset to paused
+      // so the user can tap the button to restart. Don't override 'inactive' or 'paused' set elsewhere.
+      if (stateRef.current === 'listening' || stateRef.current === 'processing') {
+        console.log('[Handsfree] Loop ended in active state — resetting to paused');
+        setState('paused');
+        stateRef.current = 'paused';
+      }
+      // Clean up any leftover recording so the next activation starts clean
+      if (recordingRef.current) {
+        try { await recordingRef.current.stopAndUnloadAsync(); } catch (_) { /* ignore */ }
+        recordingRef.current = null;
+      }
+      console.log('[Handsfree] Recording loop ended');
+    }
   }
 
-  // ── Activate hands-free mode ──
+  // ── Activate hands-free mode (self-healing) ──
+  // Always force-cleans any leftover state before starting fresh, so tapping
+  // the button always works even if the loop got stuck.
   const activate = useCallback(async () => {
-    if (stateRef.current !== 'inactive' && stateRef.current !== 'paused') return;
+    console.log('[Handsfree] Activate requested — current state:', stateRef.current);
 
-    console.log('[Handsfree] Activating');
-    setError(null);
+    // Force cleanup of any prior session (stuck loop, leftover recording, etc.)
+    loopActiveRef.current = false;
+    waitingForOrchestratorRef.current = false;
     pendingTextRef.current = '';
     silenceCountRef.current = 0;
 
+    if (recordingRef.current) {
+      try {
+        await recordingRef.current.stopAndUnloadAsync();
+      } catch (_) { /* already stopped */ }
+      recordingRef.current = null;
+    }
+
+    setError(null);
     setState('listening');
     stateRef.current = 'listening';
 

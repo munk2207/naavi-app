@@ -891,44 +891,46 @@ export default function HomeScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* Greeting row with action buttons */}
-          <View style={styles.greetingRow}>
-            <Text style={styles.greeting}>{getGreeting()}</Text>
-            <View style={styles.greetingActions}>
-              {turns.length > 0 && (
-                <TouchableOpacity
-                  style={styles.newChatBtn}
-                  onPress={clearHistory}
-                  accessibilityLabel="New chat"
-                >
-                  <Text style={styles.newChatBtnText}>+ New</Text>
-                </TouchableOpacity>
-              )}
+          {/* Greeting on its own row (left-aligned, small) */}
+          <View style={styles.greetingRowLeft}>
+            <Text style={styles.greetingSmall}>{getGreeting()}</Text>
+          </View>
+
+          {/* Action buttons on a separate row, right-aligned */}
+          <View style={styles.greetingActionsRow}>
+            {turns.length > 0 && (
               <TouchableOpacity
-                style={styles.labeledBtn}
-                onPress={() => setShowIntegrations(true)}
-                accessibilityLabel="View integrations"
+                style={styles.newChatBtn}
+                onPress={clearHistory}
+                accessibilityLabel="New chat"
               >
-                <View style={styles.infoBtn}><Text style={styles.infoBtnText}>?</Text></View>
-                <Text style={styles.btnLabel} numberOfLines={1}>Info</Text>
+                <Text style={styles.newChatBtnText}>+ New</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.labeledBtn}
-                onPress={() => router.push('/notes')}
-                accessibilityLabel="Open notes"
-              >
-                <View style={styles.notesBtn}><Text style={styles.notesBtnText}>📋</Text></View>
-                <Text style={styles.btnLabel}>Notes</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.labeledBtn}
-                onPress={() => router.push('/settings')}
-                accessibilityLabel="Open settings"
-              >
-                <View style={styles.settingsBtn}><Text style={styles.settingsIcon}>⚙</Text></View>
-                <Text style={styles.btnLabel}>Settings</Text>
-              </TouchableOpacity>
-            </View>
+            )}
+            <TouchableOpacity
+              style={styles.labeledBtn}
+              onPress={() => setShowIntegrations(true)}
+              accessibilityLabel="View integrations"
+            >
+              <View style={styles.infoBtn}><Text style={styles.infoBtnText}>?</Text></View>
+              <Text style={styles.btnLabel} numberOfLines={1}>Info</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.labeledBtn}
+              onPress={() => router.push('/notes')}
+              accessibilityLabel="Open notes"
+            >
+              <View style={styles.notesBtn}><Text style={styles.notesBtnText}>📋</Text></View>
+              <Text style={styles.btnLabel}>Notes</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.labeledBtn}
+              onPress={() => router.push('/settings')}
+              accessibilityLabel="Open settings"
+            >
+              <View style={styles.settingsBtn}><Text style={styles.settingsIcon}>⚙</Text></View>
+              <Text style={styles.btnLabel}>Settings</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Sign-in banner — only shown when not signed in on native */}
@@ -1281,84 +1283,11 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Input bar — hidden when hands-free is fully active (listening/processing/waiting) */}
-        <View style={styles.inputBar}>
-          {/* Naavi mic — speak a question, note, or command */}
-          {memoSupported && handsfree.state === 'inactive' && (
-            <TouchableOpacity
-              style={[styles.unifiedBtn, memoState === 'recording' && styles.unifiedBtnActive]}
-              onPress={() => {
-                if (memoState === 'recording') {
-                  // Ignore stop taps within 1500ms of starting — prevents double-fire on web
-                  if (Date.now() - memoStartedAtRef.current < 1500) return;
-                  stopRecording(async (transcript) => {
-                    if (!transcript.trim()) return;
-                    setMemoTranscript(transcript);
-                    await send(transcript);
-                    setTimeout(() => setMemoTranscript(null), 5000);
-                  }, voiceLang);
-                  return;
-                }
-                if (memoState === 'transcribing' || status === 'thinking') return;
-                memoStartedAtRef.current = Date.now();
-                startRecording();
-              }}
-              accessibilityLabel="Tap to speak to MyNaavi"
-            >
-              <Text style={styles.unifiedBtnText}>
-                {memoState === 'recording' ? '⏹' : memoState === 'transcribing' ? '…' : '🎙'}
-              </Text>
-              <Text style={styles.bottomBtnLabel}>Voice</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Hands-free button — Google Cloud STT, no native libraries needed */}
-          {handsfree.state === 'inactive' && (
-            <TouchableOpacity
-              style={[styles.unifiedBtn, { backgroundColor: '#2563EB' }]}
-              onPress={() => handsfree.activate()}
-              accessibilityLabel="Tap to start hands-free mode"
-            >
-              <Text style={styles.unifiedBtnText}>🙌</Text>
-              <Text style={styles.bottomBtnLabel}>Free</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Conversation button — tap to start, tap to stop, info badge shows timer */}
-          {memoSupported && handsfree.state === 'inactive' && (
-            <TouchableOpacity
-              style={[styles.convBtn, convState === 'recording' && styles.convBtnActive]}
-              onPress={() => {
-                if (convState === 'labeling') { setShowSpeakerModal(true); return; }
-                if (convState === 'recording') { stopConvRecording(); stopLive(); return; }
-                if (['uploading', 'transcribing', 'extracting'].includes(convState)) return;
-                resetConv(); clearLive(); startConvRecording(voiceLang); startLive();
-              }}
-              accessibilityLabel="Tap to record a conversation"
-            >
-              {['uploading', 'transcribing', 'extracting'].includes(convState) ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.unifiedBtnText}>
-                  {convState === 'recording' ? '⏹' : convState === 'labeling' ? '🏷️' : '👥'}
-                </Text>
-              )}
-              <Text style={styles.bottomBtnLabel}>Record</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Timer badge — info only, not tappable */}
-          {convState === 'recording' && handsfree.state === 'inactive' && (
-            <View style={styles.convTimerBadge} pointerEvents="none">
-              <View style={styles.convTimerDot} />
-              <Text style={styles.convTimerText}>
-                {Math.floor(elapsedSeconds / 60)}:{String(elapsedSeconds % 60).padStart(2, '0')}
-              </Text>
-            </View>
-          )}
-
-          {handsfree.state === 'inactive' && (
-            <>
+        {/* Input area — two rows when hands-free is inactive */}
+        {handsfree.state === 'inactive' ? (
+          <View style={styles.inputArea}>
+            {/* Row 1: text input + send (full width) */}
+            <View style={styles.inputRow}>
               <TextInput
                 style={styles.input}
                 value={inputText}
@@ -1381,9 +1310,84 @@ export default function HomeScreen() {
                 <Text style={styles.sendBtnText}>➤</Text>
                 <Text style={styles.sendBtnLabel}>Send</Text>
               </TouchableOpacity>
-            </>
-          )}
-        </View>
+            </View>
+
+            {/* Row 2: three action buttons centered */}
+            <View style={styles.actionButtonsRow}>
+              {/* Naavi mic — speak a question, note, or command */}
+              {memoSupported && (
+                <TouchableOpacity
+                  style={[styles.unifiedBtn, memoState === 'recording' && styles.unifiedBtnActive]}
+                  onPress={() => {
+                    if (memoState === 'recording') {
+                      // Ignore stop taps within 1500ms of starting — prevents double-fire on web
+                      if (Date.now() - memoStartedAtRef.current < 1500) return;
+                      stopRecording(async (transcript) => {
+                        if (!transcript.trim()) return;
+                        setMemoTranscript(transcript);
+                        await send(transcript);
+                        setTimeout(() => setMemoTranscript(null), 5000);
+                      }, voiceLang);
+                      return;
+                    }
+                    if (memoState === 'transcribing' || status === 'thinking') return;
+                    memoStartedAtRef.current = Date.now();
+                    startRecording();
+                  }}
+                  accessibilityLabel="Tap to speak to MyNaavi"
+                >
+                  <Text style={styles.unifiedBtnText}>
+                    {memoState === 'recording' ? '⏹' : memoState === 'transcribing' ? '…' : '🎙'}
+                  </Text>
+                  <Text style={styles.bottomBtnLabel}>Voice</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Hands-free button */}
+              <TouchableOpacity
+                style={[styles.unifiedBtn, { backgroundColor: '#2563EB' }]}
+                onPress={() => handsfree.activate()}
+                accessibilityLabel="Tap to start hands-free mode"
+              >
+                <Text style={styles.unifiedBtnText}>🙌</Text>
+                <Text style={styles.bottomBtnLabel}>Free</Text>
+              </TouchableOpacity>
+
+              {/* Conversation button */}
+              {memoSupported && (
+                <TouchableOpacity
+                  style={[styles.convBtn, convState === 'recording' && styles.convBtnActive]}
+                  onPress={() => {
+                    if (convState === 'labeling') { setShowSpeakerModal(true); return; }
+                    if (convState === 'recording') { stopConvRecording(); stopLive(); return; }
+                    if (['uploading', 'transcribing', 'extracting'].includes(convState)) return;
+                    resetConv(); clearLive(); startConvRecording(voiceLang); startLive();
+                  }}
+                  accessibilityLabel="Tap to record a conversation"
+                >
+                  {['uploading', 'transcribing', 'extracting'].includes(convState) ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.unifiedBtnText}>
+                      {convState === 'recording' ? '⏹' : convState === 'labeling' ? '🏷️' : '👥'}
+                    </Text>
+                  )}
+                  <Text style={styles.bottomBtnLabel}>Record</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Timer badge — info only, not tappable */}
+              {convState === 'recording' && (
+                <View style={styles.convTimerBadge} pointerEvents="none">
+                  <View style={styles.convTimerDot} />
+                  <Text style={styles.convTimerText}>
+                    {Math.floor(elapsedSeconds / 60)}:{String(elapsedSeconds % 60).padStart(2, '0')}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+        ) : null}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1435,6 +1439,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 20,
+  },
+  greetingRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    marginBottom: 8,
+  },
+  greetingActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginBottom: 16,
+  },
+  greetingSmall: {
+    fontSize: Typography.body,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
   },
   newChatBtn: {
     paddingHorizontal: 12,
@@ -1975,6 +1997,26 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.border,
     backgroundColor: Colors.bgApp,
     gap: 12,
+  },
+  inputArea: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    backgroundColor: Colors.bgApp,
+    gap: 12,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 12,
+  },
+  actionButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
   },
   input: {
     flex: 1,
