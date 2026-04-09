@@ -630,6 +630,9 @@ export default function HomeScreen() {
   const speakCueRef = useRef((text: string): Promise<void> => {
     return new Promise((resolve) => {
       const Speech = require('expo-speech');
+      // Cancel any in-flight cue first — prevents two voices overlapping
+      // when e.g. the pause cue is still playing and the user taps resume.
+      try { Speech.stop(); } catch {}
       Speech.speak(text, {
         language: 'en-CA',
         rate: 0.85,

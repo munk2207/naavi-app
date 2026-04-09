@@ -431,6 +431,12 @@ export function useHandsfreeMode(
 
     await speakCue("I'm listening.");
 
+    // Wait for speaker to release audio focus before opening the mic.
+    // Without this delay, the first Recording.createAsync after TTS on
+    // Android silently fails, leaving hands-free "listening" but capturing
+    // nothing. Matches the same delay used by the post-orchestrator resume.
+    await new Promise(resolve => setTimeout(resolve, POST_TTS_DELAY_MS));
+
     startRecordingLoop();
   }, []);
 
