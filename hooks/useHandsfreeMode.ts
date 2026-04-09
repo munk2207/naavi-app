@@ -66,6 +66,60 @@ function stripKeywords(text: string): string {
   return lower.replace(/\s+/g, ' ').trim();
 }
 
+// ── Detect Whisper hallucinations (invented text on silence/noise) ──
+// Whisper never returns empty for silence — it invents YouTube outros,
+// fillers, and repeated phrases. This filter catches them so the silence
+// counter can actually climb and hands-free can auto-pause.
+function isHallucination(text: string): boolean {
+  const trimmed = text.trim();
+  const lower = trimmed.toLowerCase().replace(/[.!?]+$/, '');
+
+  // Rule 1 — too short to be real speech
+  if (lower.length < 3) return true;
+
+  // Rule 2 — known Whisper outro phrases
+  const outros = [
+    'for watching',
+    'thank you for watching',
+    'thanks for watching',
+    'subscribe',
+    'like and subscribe',
+    "don't forget to like and subscribe",
+    'see you in the next video',
+    'see you next time',
+    'see you again',
+    'if you enjoyed',
+    'jingle bells',
+    'welcome to pyramid chili',
+  ];
+  if (outros.some(o => lower === o || lower.includes(o))) return true;
+
+  // Rule 3 — filler word standing alone
+  const fillers = ['mm', 'uh', 'ah', 'hmm', 'okay', 'ok', 'bye', 'yeah', 'huh'];
+  if (fillers.includes(lower)) return true;
+
+  // Rule 4 — same short word/phrase repeated 3+ times in a row
+  //   e.g. "america acts america acts america acts"
+  const words = lower.split(/\s+/);
+  if (words.length >= 3) {
+    // check repeated single words
+    for (let i = 0; i <= words.length - 3; i++) {
+      if (words[i] === words[i + 1] && words[i + 1] === words[i + 2]) return true;
+    }
+    // check repeated 2-word phrases
+    if (words.length >= 6) {
+      for (let i = 0; i <= words.length - 6; i++) {
+        if (
+          words[i] === words[i + 2] && words[i + 2] === words[i + 4] &&
+          words[i + 1] === words[i + 3] && words[i + 3] === words[i + 5]
+        ) return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 // ─── Hook ───────────────────────────────────────────────────────────────────
 
 export function useHandsfreeMode(
@@ -255,8 +309,11 @@ export function useHandsfreeMode(
       // Check if deactivated during transcription
       if (!loopActiveRef.current) break;
 
-      if (!transcript) {
-        // Silence — no hallucination, just record next chunk
+      if (!transcript || isHallucination(transcript)) {
+        if (transcript) {
+          console.log(`[Handsfree] Ignored hallucination: "${transcript}"`);
+        }
+        // Silence or hallucination — treat both the same way
         silenceCountRef.current++;
         if (silenceCountRef.current >= SILENCE_COUNT_TO_PAUSE) {
           console.log('[Handsfree] Idle timeout — pausing');
