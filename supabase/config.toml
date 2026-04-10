@@ -51,3 +51,6 @@ verify_jwt = false
 
 [functions.assistant-fulfillment]
 verify_jwt = false
+
+[functions.deepgram-token]
+verify_jwt = false
