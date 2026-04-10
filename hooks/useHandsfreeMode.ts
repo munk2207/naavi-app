@@ -25,8 +25,7 @@ export type HandsfreeState =
   | 'listening'
   | 'processing'
   | 'waiting'
-  | 'paused'       // light pause — mic open, only wake word works
-  | 'paused_full';  // full pause — mic closed, tap Resume to continue
+  | 'paused';
 
 export interface UseHandsfreeModeResult {
   state: HandsfreeState;
@@ -40,7 +39,7 @@ export interface UseHandsfreeModeResult {
 export const KEYWORDS = {
   SUBMIT: ['thank you', 'thank you naavi', 'thanks', 'thanks naavi', 'over'],
   EXIT: ['goodbye', 'goodbye naavi', 'stop listening', "that's all", 'thats all'],
-  WAKE: ['hi naavi', 'hey naavi', 'hello naavi', 'naavi', '1234', 'one two three four'],
+  WAKE: ['hi naavi', 'hey naavi', 'hello naavi', 'naavi'],
 };
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -48,8 +47,7 @@ export const KEYWORDS = {
 const CHUNK_DURATION_MS = 5000;        // 5-second recording chunks
 const IDLE_TIMEOUT_MS = 60000;         // 60s silence → pause
 const POST_TTS_DELAY_MS = 1500;        // wait after TTS before reopening mic
-const SILENCE_COUNT_TO_PAUSE = 12;     // 12 × 5s = 60s of silence → light pause
-const SILENCE_COUNT_TO_FULL_PAUSE = 12; // 12 more × 5s = another 60s → full pause (mic off)
+const SILENCE_COUNT_TO_PAUSE = 12;     // 12 × 5s = 60s of silence → pause
 
 const isNative = Platform.OS === 'android' || Platform.OS === 'ios';
 
@@ -138,8 +136,6 @@ export function useHandsfreeMode(
   const recordingRef = useRef<Audio.Recording | null>(null);
   const loopActiveRef = useRef(false);
   const waitingForOrchestratorRef = useRef(false);
-  const wakeWordOnlyRef = useRef(false);       // true = light pause, only WAKE keyword accepted
-  const wakeWordSilenceRef = useRef(0);         // silence counter during wake-word-only mode
 
   // Keep stateRef in sync
   useEffect(() => { stateRef.current = state; }, [state]);
@@ -280,8 +276,6 @@ export function useHandsfreeMode(
   }
 
   // ── Main recording loop ──
-  // Handles both normal listening AND wake-word-only mode in one loop.
-  // When wakeWordOnlyRef is true, only WAKE and EXIT keywords are accepted.
   async function startRecordingLoop() {
     if (loopActiveRef.current) return;
     loopActiveRef.current = true;
@@ -289,119 +283,81 @@ export function useHandsfreeMode(
     console.log('[Handsfree] Recording loop started');
 
     try {
-    while (loopActiveRef.current) {
-      // Check valid states for the loop
-      const s = stateRef.current;
-      if (s !== 'listening' && s !== 'paused') break;
-
+    while (loopActiveRef.current && stateRef.current === 'listening') {
       const chunk = await recordChunk();
 
       // Check if we were deactivated during recording
-      if (!loopActiveRef.current) break;
-      if (stateRef.current !== 'listening' && stateRef.current !== 'paused') break;
+      if (!loopActiveRef.current || stateRef.current !== 'listening') break;
 
-      // ── No chunk path ──
       if (!chunk) {
-        if (!wakeWordOnlyRef.current) {
-          // Normal mode: auto-submit if pending speech
-          if (pendingTextRef.current.trim()) {
-            const messageToSend = pendingTextRef.current.trim();
-            console.log(`[Handsfree] AUTO-SUBMIT (no chunk after speech): "${messageToSend}"`);
-            setState('waiting');
-            stateRef.current = 'waiting';
-            waitingForOrchestratorRef.current = true;
-            loopActiveRef.current = false;
-            pendingTextRef.current = '';
-            await sendMessage(messageToSend);
-            break;
-          }
-          // Count toward light pause
-          silenceCountRef.current++;
-          if (silenceCountRef.current >= SILENCE_COUNT_TO_PAUSE) {
-            console.log('[Handsfree] Idle timeout — entering wake-word-only mode');
-            wakeWordOnlyRef.current = true;
-            wakeWordSilenceRef.current = 0;
-            setState('paused');
-            stateRef.current = 'paused';
-            await speakCue("I'm still here. Say Hi Naavi to continue.");
-            await new Promise(resolve => setTimeout(resolve, POST_TTS_DELAY_MS));
-          }
-        } else {
-          // Wake-word mode: count toward full pause
-          wakeWordSilenceRef.current++;
-          if (wakeWordSilenceRef.current >= SILENCE_COUNT_TO_FULL_PAUSE) {
-            console.log('[Handsfree] Wake-word timeout — full pause (mic off)');
-            loopActiveRef.current = false;
-            setState('paused_full');
-            stateRef.current = 'paused_full';
-            await speakCue('Tap Resume when you need me.');
-            break;
-          }
+        // No chunk + pending speech → auto-submit
+        if (pendingTextRef.current.trim()) {
+          const messageToSend = pendingTextRef.current.trim();
+          console.log(`[Handsfree] AUTO-SUBMIT (no chunk after speech): "${messageToSend}"`);
+          setState('waiting');
+          stateRef.current = 'waiting';
+          waitingForOrchestratorRef.current = true;
+          loopActiveRef.current = false;
+          pendingTextRef.current = '';
+          await sendMessage(messageToSend);
+          break;
+        }
+        silenceCountRef.current++;
+        if (silenceCountRef.current >= SILENCE_COUNT_TO_PAUSE) {
+          console.log('[Handsfree] Idle timeout — pausing');
+          setState('paused');
+          stateRef.current = 'paused';
+          await speakCue('Tap Resume when you need me.');
+          break;
         }
         continue;
       }
 
-      // ── Transcribe ──
-      if (!wakeWordOnlyRef.current) {
-        setState('processing');
-        stateRef.current = 'processing';
-      }
+      // Transcribe
+      setState('processing');
+      stateRef.current = 'processing';
       const transcript = await transcribe(chunk.base64, chunk.mimeType);
 
+      // Check if deactivated during transcription
       if (!loopActiveRef.current) break;
 
-      // ── Empty / hallucination path ──
       if (!transcript || isHallucination(transcript)) {
         if (transcript) {
           console.log(`[Handsfree] Ignored hallucination: "${transcript}"`);
         }
-
-        if (!wakeWordOnlyRef.current) {
-          // Normal mode: auto-submit if pending speech
-          if (pendingTextRef.current.trim()) {
-            const messageToSend = pendingTextRef.current.trim();
-            console.log(`[Handsfree] AUTO-SUBMIT (silence after speech): "${messageToSend}"`);
-            setState('waiting');
-            stateRef.current = 'waiting';
-            waitingForOrchestratorRef.current = true;
-            loopActiveRef.current = false;
-            pendingTextRef.current = '';
-            await sendMessage(messageToSend);
-            break;
-          }
-          // Count toward light pause
-          silenceCountRef.current++;
-          if (silenceCountRef.current >= SILENCE_COUNT_TO_PAUSE) {
-            console.log('[Handsfree] Idle timeout — entering wake-word-only mode');
-            wakeWordOnlyRef.current = true;
-            wakeWordSilenceRef.current = 0;
-            setState('paused');
-            stateRef.current = 'paused';
-            await speakCue("I'm still here. Say Hi Naavi to continue.");
-            await new Promise(resolve => setTimeout(resolve, POST_TTS_DELAY_MS));
-          } else {
-            setState('listening');
-            stateRef.current = 'listening';
-          }
-        } else {
-          // Wake-word mode: count toward full pause
-          wakeWordSilenceRef.current++;
-          if (wakeWordSilenceRef.current >= SILENCE_COUNT_TO_FULL_PAUSE) {
-            console.log('[Handsfree] Wake-word timeout — full pause (mic off)');
-            loopActiveRef.current = false;
-            setState('paused_full');
-            stateRef.current = 'paused_full';
-            await speakCue('Tap Resume when you need me.');
-            break;
-          }
+        // Silence after speech → auto-submit accumulated text
+        if (pendingTextRef.current.trim()) {
+          const messageToSend = pendingTextRef.current.trim();
+          console.log(`[Handsfree] AUTO-SUBMIT (silence after speech): "${messageToSend}"`);
+          setState('waiting');
+          stateRef.current = 'waiting';
+          waitingForOrchestratorRef.current = true;
+          loopActiveRef.current = false;
+          pendingTextRef.current = '';
+          await sendMessage(messageToSend);
+          break;
         }
+        // No speech yet — just silence, count toward pause
+        silenceCountRef.current++;
+        if (silenceCountRef.current >= SILENCE_COUNT_TO_PAUSE) {
+          console.log('[Handsfree] Idle timeout — pausing');
+          setState('paused');
+          stateRef.current = 'paused';
+          await speakCue('Tap Resume when you need me.');
+          break;
+        }
+        setState('listening');
+        stateRef.current = 'listening';
         continue;
       }
 
-      // ── Got real speech ──
+      // Got speech — reset silence counter
+      silenceCountRef.current = 0;
       console.log(`[Handsfree] Transcript: "${transcript}"`);
 
-      // EXIT: always active in both modes
+      // ── Keyword detection ──
+
+      // EXIT: goodbye
       if (matchKeyword(transcript, KEYWORDS.EXIT)) {
         console.log('[Handsfree] EXIT keyword detected');
         loopActiveRef.current = false;
@@ -410,42 +366,6 @@ export function useHandsfreeMode(
         await speakCue('Goodbye Robert. Talk to you soon.');
         break;
       }
-
-      // WAKE: always active in both modes
-      if (matchKeyword(transcript, KEYWORDS.WAKE)) {
-        if (wakeWordOnlyRef.current) {
-          console.log('[Handsfree] WAKE detected during light pause — resuming');
-          wakeWordOnlyRef.current = false;
-          wakeWordSilenceRef.current = 0;
-          silenceCountRef.current = 0;
-          pendingTextRef.current = '';
-          const cleaned = stripKeywords(transcript);
-          if (cleaned) pendingTextRef.current = cleaned;
-          setState('listening');
-          stateRef.current = 'listening';
-          await speakCue("I'm listening.");
-          await new Promise(resolve => setTimeout(resolve, POST_TTS_DELAY_MS));
-        } else {
-          console.log('[Handsfree] WAKE keyword — starting fresh');
-          pendingTextRef.current = '';
-          const cleaned = stripKeywords(transcript);
-          if (cleaned) pendingTextRef.current = cleaned;
-          silenceCountRef.current = 0;
-          setState('listening');
-          stateRef.current = 'listening';
-        }
-        continue;
-      }
-
-      // ── Below here: only in normal mode, not wake-word mode ──
-      if (wakeWordOnlyRef.current) {
-        // Ignore non-wake speech during light pause, but reset silence counter
-        wakeWordSilenceRef.current = 0;
-        continue;
-      }
-
-      // Reset silence counter — real speech received
-      silenceCountRef.current = 0;
 
       // SUBMIT: thanks / over
       if (matchKeyword(transcript, KEYWORDS.SUBMIT)) {
@@ -468,6 +388,17 @@ export function useHandsfreeMode(
         break;
       }
 
+      // WAKE: hi naavi — reset and start fresh
+      if (matchKeyword(transcript, KEYWORDS.WAKE)) {
+        console.log('[Handsfree] WAKE keyword — starting fresh');
+        pendingTextRef.current = '';
+        const cleaned = stripKeywords(transcript);
+        if (cleaned) pendingTextRef.current = cleaned;
+        setState('listening');
+        stateRef.current = 'listening';
+        continue;
+      }
+
       // Regular speech — accumulate
       pendingTextRef.current += (pendingTextRef.current ? ' ' : '') + transcript;
       console.log(`[Handsfree] Accumulated: "${pendingTextRef.current}"`);
@@ -480,11 +411,10 @@ export function useHandsfreeMode(
       setError(`Hands-free stopped unexpectedly: ${msg}`);
     } finally {
       loopActiveRef.current = false;
-      wakeWordOnlyRef.current = false;
       if (stateRef.current === 'listening' || stateRef.current === 'processing') {
-        console.log('[Handsfree] Loop ended in active state — resetting to paused_full');
-        setState('paused_full');
-        stateRef.current = 'paused_full';
+        console.log('[Handsfree] Loop ended in active state — resetting to paused');
+        setState('paused');
+        stateRef.current = 'paused';
       }
       if (recordingRef.current) {
         try { await recordingRef.current.stopAndUnloadAsync(); } catch (_) { /* ignore */ }
@@ -514,8 +444,6 @@ export function useHandsfreeMode(
     }
 
     setError(null);
-    wakeWordOnlyRef.current = false;
-    wakeWordSilenceRef.current = 0;
     setState('listening');
     stateRef.current = 'listening';
 

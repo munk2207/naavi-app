@@ -1319,14 +1319,6 @@ export default function HomeScreen() {
         )}
         {handsfree.state === 'paused' && (
           <View style={[styles.handsfreeBanner, styles.handsfreeBannerPaused]}>
-            <Text style={styles.handsfreeBannerText}>Say "Hi Naavi" to continue</Text>
-            <TouchableOpacity onPress={handsfree.deactivate} style={styles.handsfreeStopBtn}>
-              <Text style={styles.handsfreeStopText}>End</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        {(handsfree.state === 'wake_listen' || handsfree.state === 'paused_full') && (
-          <View style={[styles.handsfreeBanner, styles.handsfreeBannerPaused]}>
             <Text style={styles.handsfreeBannerText}>Tap Resume to continue</Text>
             <TouchableOpacity onPress={handsfree.activate} style={styles.handsfreeResumeBtn}>
               <Text style={styles.handsfreeStopText}>Resume</Text>
