@@ -101,7 +101,11 @@ export default function RootLayout() {
       >
         <Stack.Screen
           name="index"
-          options={{ title: 'MyNaavi', headerShown: true }}
+          options={{
+            title: 'MyNaavi',
+            headerShown: true,
+            headerTitleStyle: { fontWeight: '700', fontSize: 22, letterSpacing: 0.5, color: Colors.accent },
+          }}
         />
         <Stack.Screen
           name="settings"

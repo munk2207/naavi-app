@@ -471,7 +471,7 @@ export default function SettingsScreen() {
         <View style={styles.divider} />
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V{Constants.expoConfig?.extra?.appVersion ?? Constants.expoConfig?.version ?? '?'} (build {Constants.expoConfig?.android?.versionCode ?? '?'})</Text>
+        <Text style={styles.version}>MyNaavi — V36 (build 30)</Text>
 
       </ScrollView>
     </SafeAreaView>

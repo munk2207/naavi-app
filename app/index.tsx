@@ -942,10 +942,9 @@ export default function HomeScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* Brand + greeting on its own row (left-aligned) */}
+          {/* Greeting on its own row (left-aligned) */}
           <View style={styles.greetingRowLeft}>
-            <Text style={styles.brandName}>MyNaavi</Text>
-            <Text style={styles.greetingSmall}>  {getGreeting()}</Text>
+            <Text style={styles.greetingSmall}>{getGreeting()}</Text>
           </View>
 
           {/* Action buttons on a separate row, right-aligned */}
