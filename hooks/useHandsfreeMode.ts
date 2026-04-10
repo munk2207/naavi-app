@@ -40,7 +40,7 @@ export interface UseHandsfreeModeResult {
 export const KEYWORDS = {
   SUBMIT: ['thank you', 'thank you naavi', 'thanks', 'thanks naavi', 'over'],
   EXIT: ['goodbye', 'goodbye naavi', 'stop listening', "that's all", 'thats all'],
-  WAKE: ['hi naavi', 'hey naavi', 'hello naavi', 'naavi'],
+  WAKE: ['hi naavi', 'hey naavi', 'hello naavi', 'naavi', '1234', 'one two three four'],
 };
 
 // ─── Constants ──────────────────────────────────────────────────────────────
