@@ -25,7 +25,8 @@ export type HandsfreeState =
   | 'listening'
   | 'processing'
   | 'waiting'
-  | 'paused';
+  | 'paused'       // light pause — mic open, only wake word works
+  | 'paused_full';  // full pause — mic closed, tap Resume to continue
 
 export interface UseHandsfreeModeResult {
   state: HandsfreeState;
@@ -47,7 +48,8 @@ export const KEYWORDS = {
 const CHUNK_DURATION_MS = 5000;        // 5-second recording chunks
 const IDLE_TIMEOUT_MS = 60000;         // 60s silence → pause
 const POST_TTS_DELAY_MS = 1500;        // wait after TTS before reopening mic
-const SILENCE_COUNT_TO_PAUSE = 12;     // 12 × 5s = 60s of silence → pause
+const SILENCE_COUNT_TO_PAUSE = 12;     // 12 × 5s = 60s of silence → light pause
+const SILENCE_COUNT_TO_FULL_PAUSE = 12; // 12 more × 5s = another 60s → full pause (mic off)
 
 const isNative = Platform.OS === 'android' || Platform.OS === 'ios';
 
@@ -275,6 +277,75 @@ export function useHandsfreeMode(
     }
   }
 
+  // ── Wake-word-only loop (light pause) ──
+  // Mic stays open but only "Hi Naavi" resumes full listening.
+  // After SILENCE_COUNT_TO_FULL_PAUSE more silent chunks → full pause (mic off).
+  async function startWakeWordLoop() {
+    console.log('[Handsfree] Wake-word loop started (light pause)');
+    let wakeWordSilenceCount = 0;
+
+    while (loopActiveRef.current && stateRef.current === 'paused') {
+      const chunk = await recordChunk();
+      if (!loopActiveRef.current || stateRef.current !== 'paused') break;
+
+      if (!chunk) {
+        wakeWordSilenceCount++;
+        if (wakeWordSilenceCount >= SILENCE_COUNT_TO_FULL_PAUSE) {
+          console.log('[Handsfree] Wake-word timeout — full pause (mic off)');
+          setState('paused_full');
+          stateRef.current = 'paused_full';
+          await speakCue('Tap Resume when you need me.');
+          break;
+        }
+        continue;
+      }
+
+      // Transcribe to check for wake word
+      const transcript = await transcribe(chunk.base64, chunk.mimeType);
+      if (!loopActiveRef.current) break;
+
+      if (!transcript || isHallucination(transcript)) {
+        wakeWordSilenceCount++;
+        if (wakeWordSilenceCount >= SILENCE_COUNT_TO_FULL_PAUSE) {
+          console.log('[Handsfree] Wake-word timeout — full pause (mic off)');
+          setState('paused_full');
+          stateRef.current = 'paused_full';
+          await speakCue('Tap Resume when you need me.');
+          break;
+        }
+        continue;
+      }
+
+      // Check for wake word
+      if (matchKeyword(transcript, KEYWORDS.WAKE)) {
+        console.log('[Handsfree] WAKE detected during light pause — resuming');
+        pendingTextRef.current = '';
+        const cleaned = stripKeywords(transcript);
+        if (cleaned) pendingTextRef.current = cleaned;
+        silenceCountRef.current = 0;
+        setState('listening');
+        stateRef.current = 'listening';
+        await speakCue("I'm listening.");
+        await new Promise(resolve => setTimeout(resolve, POST_TTS_DELAY_MS));
+        startRecordingLoop();
+        return; // exit wake-word loop — main loop takes over
+      }
+
+      // Check for exit keyword
+      if (matchKeyword(transcript, KEYWORDS.EXIT)) {
+        console.log('[Handsfree] EXIT during light pause');
+        loopActiveRef.current = false;
+        setState('inactive');
+        stateRef.current = 'inactive';
+        await speakCue('Goodbye Robert. Talk to you soon.');
+        return;
+      }
+
+      // Any other speech during light pause — ignore, reset silence counter
+      wakeWordSilenceCount = 0;
+    }
+  }
+
   // ── Main recording loop ──
   async function startRecordingLoop() {
     if (loopActiveRef.current) return;
@@ -304,11 +375,13 @@ export function useHandsfreeMode(
         }
         silenceCountRef.current++;
         if (silenceCountRef.current >= SILENCE_COUNT_TO_PAUSE) {
-          console.log('[Handsfree] Idle timeout — pausing');
+          console.log('[Handsfree] Idle timeout — entering light pause');
           setState('paused');
           stateRef.current = 'paused';
-          await speakCue("I'll be here when you need me. Say Hi Naavi to continue.");
-          break;
+          await speakCue("I'm still here. Say Hi Naavi to continue.");
+          await new Promise(resolve => setTimeout(resolve, POST_TTS_DELAY_MS));
+          startWakeWordLoop();
+          return; // exit main loop — wake-word loop takes over
         }
         continue;
       }
@@ -340,11 +413,13 @@ export function useHandsfreeMode(
         // No speech yet — just silence, count toward auto-pause
         silenceCountRef.current++;
         if (silenceCountRef.current >= SILENCE_COUNT_TO_PAUSE) {
-          console.log('[Handsfree] Idle timeout — pausing');
+          console.log('[Handsfree] Idle timeout — entering light pause');
           setState('paused');
           stateRef.current = 'paused';
-          await speakCue("I'll be here when you need me. Say Hi Naavi to continue.");
-          break;
+          await speakCue("I'm still here. Say Hi Naavi to continue.");
+          await new Promise(resolve => setTimeout(resolve, POST_TTS_DELAY_MS));
+          startWakeWordLoop();
+          return; // exit main loop — wake-word loop takes over
         }
         setState('listening');
         stateRef.current = 'listening';
@@ -414,12 +489,12 @@ export function useHandsfreeMode(
       setError(`Hands-free stopped unexpectedly: ${msg}`);
     } finally {
       loopActiveRef.current = false;
-      // If the loop ended while still in an "active" state (listening/processing), reset to paused
-      // so the user can tap the button to restart. Don't override 'inactive' or 'paused' set elsewhere.
+      // If the loop ended while still in an "active" state (listening/processing), reset to paused_full
+      // so the user can tap the button to restart. Don't override 'inactive' or 'paused'/'paused_full' set elsewhere.
       if (stateRef.current === 'listening' || stateRef.current === 'processing') {
-        console.log('[Handsfree] Loop ended in active state — resetting to paused');
-        setState('paused');
-        stateRef.current = 'paused';
+        console.log('[Handsfree] Loop ended in active state — resetting to paused_full');
+        setState('paused_full');
+        stateRef.current = 'paused_full';
       }
       // Clean up any leftover recording so the next activation starts clean
       if (recordingRef.current) {

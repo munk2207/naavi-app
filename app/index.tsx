@@ -1318,9 +1318,17 @@ export default function HomeScreen() {
             </Text>
           </View>
         )}
-        {(handsfree.state === 'wake_listen' || handsfree.state === 'paused') && (
+        {handsfree.state === 'paused' && (
           <View style={[styles.handsfreeBanner, styles.handsfreeBannerPaused]}>
             <Text style={styles.handsfreeBannerText}>Say "Hi Naavi" to continue</Text>
+            <TouchableOpacity onPress={handsfree.deactivate} style={styles.handsfreeStopBtn}>
+              <Text style={styles.handsfreeStopText}>End</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        {(handsfree.state === 'wake_listen' || handsfree.state === 'paused_full') && (
+          <View style={[styles.handsfreeBanner, styles.handsfreeBannerPaused]}>
+            <Text style={styles.handsfreeBannerText}>Tap Resume to continue</Text>
             <TouchableOpacity onPress={handsfree.activate} style={styles.handsfreeResumeBtn}>
               <Text style={styles.handsfreeStopText}>Resume</Text>
             </TouchableOpacity>
@@ -1506,9 +1514,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   brandName: {
-    fontSize: Typography.sectionHeading,
-    fontWeight: '600',
-    fontStyle: 'italic',
+    fontSize: 22,
+    fontWeight: '700',
+    letterSpacing: 0.5,
     color: Colors.accent,
   },
   greetingSmall: {

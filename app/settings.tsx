@@ -28,6 +28,7 @@ import { isEpicConnected, connectEpic, disconnectEpic } from '@/lib/epic';
 import { registerPushNotifications } from '@/lib/push';
 import { registry } from '@/lib/adapters/registry';
 import type { UserProfile } from '@/lib/types';
+import Constants from 'expo-constants';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 
@@ -470,7 +471,7 @@ export default function SettingsScreen() {
         <View style={styles.divider} />
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — Phase 7 build</Text>
+        <Text style={styles.version}>MyNaavi — V{Constants.expoConfig?.extra?.appVersion ?? Constants.expoConfig?.version ?? '?'} (build {Constants.expoConfig?.android?.versionCode ?? '?'})</Text>
 
       </ScrollView>
     </SafeAreaView>
