@@ -18,7 +18,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
-import { ExpoAudioStream } from '@mykin-ai/expo-audio-stream';
+import { ExpoPlayAudioStream } from '@mykin-ai/expo-audio-stream';
 import { supabase } from '@/lib/supabase';
 import { loadKeyterms } from '@/lib/loadKeyterms';
 import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
@@ -107,6 +107,7 @@ export function useHandsfreeMode(
   const pendingTextRef = useRef('');
   const wsRef = useRef<WebSocket | null>(null);
   const audioStreamActiveRef = useRef(false);
+  const audioSubscriptionRef = useRef<{ remove: () => void } | null>(null);
   const keepAliveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loopActiveRef = useRef(false);
@@ -166,9 +167,13 @@ export function useHandsfreeMode(
 
   // ── Stop audio streaming ──
   async function stopAudioStream() {
+    if (audioSubscriptionRef.current) {
+      try { audioSubscriptionRef.current.remove(); } catch (_) { /* ignore */ }
+      audioSubscriptionRef.current = null;
+    }
     if (audioStreamActiveRef.current) {
       try {
-        await ExpoAudioStream.stopRecording();
+        await ExpoPlayAudioStream.stopRecording();
       } catch (_) { /* already stopped */ }
       audioStreamActiveRef.current = false;
     }
@@ -194,27 +199,32 @@ export function useHandsfreeMode(
     });
 
     // Start streaming PCM audio
-    const streamResult = await ExpoAudioStream.startRecording({
+    const { recordingResult, subscription } = await ExpoPlayAudioStream.startRecording({
       sampleRate: 16000,
       channels: 1,
       encoding: 'pcm_16bit',
       interval: 250, // deliver chunks every 250ms
-      onAudioStream: (event: { data: string; position: number; fileUri: string; deltaSize: number; totalSize: number; mimeType: string }) => {
+      onAudioStream: (event: { data: string; position: number; eventDataSize: number; totalSize: number; soundLevel?: number; fileUri: string }) => {
         // event.data is base64-encoded PCM
         if (wsRef.current?.readyState === WebSocket.OPEN && event.data) {
-          // Decode base64 to binary and send
-          const binaryStr = atob(event.data);
-          const bytes = new Uint8Array(binaryStr.length);
-          for (let i = 0; i < binaryStr.length; i++) {
-            bytes[i] = binaryStr.charCodeAt(i);
+          try {
+            // Decode base64 to binary and send
+            const binaryStr = atob(event.data);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) {
+              bytes[i] = binaryStr.charCodeAt(i);
+            }
+            wsRef.current.send(bytes.buffer);
+          } catch (sendErr) {
+            console.error('[Handsfree] Failed to send audio:', sendErr);
           }
-          wsRef.current.send(bytes.buffer);
         }
       },
     });
 
+    audioSubscriptionRef.current = subscription ?? null;
     audioStreamActiveRef.current = true;
-    console.log('[Handsfree] Audio stream started');
+    console.log('[Handsfree] Audio stream started, result:', JSON.stringify(recordingResult));
   }
 
   // ── Process finalized transcript ──
