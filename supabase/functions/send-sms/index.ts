@@ -55,6 +55,7 @@ serve(async (req) => {
       templateName: rawTemplateName,
       variables: rawVariables,
       recipientName,
+      senderName,
     } = await req.json() as {
       to: string;
       body?: string;
@@ -62,6 +63,7 @@ serve(async (req) => {
       templateName?: 'message' | 'reminder' | 'task';
       variables?: Record<string, string>;
       recipientName?: string;
+      senderName?: string;
     };
 
     if (!to) {
@@ -82,7 +84,7 @@ serve(async (req) => {
       templateName = 'message';
       variables = {
         '1': recipientName?.trim() || 'there',
-        '2': 'Robert',
+        '2': senderName?.trim() || 'Robert',
         '3': body,
       };
     }

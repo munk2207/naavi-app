@@ -28,7 +28,7 @@ import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import * as Linking from 'expo-linking';
 
-import { getUserName } from '@/lib/naavi-client';
+import { getUserNameAsync } from '@/lib/naavi-client';
 import { useOrchestrator } from '@/hooks/useOrchestrator';
 import { useVoice } from '@/hooks/useVoice';
 import { useWhisperMemo } from '@/hooks/useWhisperMemo';
@@ -324,10 +324,17 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
   const [sendError, setSendError] = useState<string | null>(null);
   const [resolvedContact, setResolvedContact] = useState<string | null>(null);
 
+  const [senderName, setSenderName] = useState('Robert');
+
   const channel = String(action.channel ?? 'email').toLowerCase() as 'email' | 'sms' | 'whatsapp';
   const isMessaging = channel === 'sms' || channel === 'whatsapp';
   const channelLabel = channel === 'whatsapp' ? 'WhatsApp' : channel === 'sms' ? 'SMS' : 'Email';
   const channelIcon = channel === 'whatsapp' ? '💬' : channel === 'sms' ? '📱' : '✉';
+
+  // Load saved user name for sender field
+  React.useEffect(() => {
+    getUserNameAsync().then(name => { if (name) setSenderName(name); });
+  }, []);
 
   // Auto-lookup contact on mount
   React.useEffect(() => {
@@ -367,7 +374,7 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
       try {
         console.log(`[Send] ${channelLabel} to ${phone}, body: ${String(action.body ?? '').slice(0, 30)}`);
         const { data, error } = await supabase.functions.invoke('send-sms', {
-          body: { to: phone, body: String(action.body ?? ''), channel, recipientName: String(action.to ?? '') },
+          body: { to: phone, body: String(action.body ?? ''), channel, recipientName: String(action.to ?? ''), senderName },
         });
         console.log('[Send] Response:', JSON.stringify({ data, error: error?.message }));
         setSending(false);
@@ -749,7 +756,8 @@ export default function HomeScreen() {
   useEffect(() => {
     if (convState !== 'labeling') return;
 
-    const savedName = getUserName();
+    (async () => {
+    const savedName = await getUserNameAsync();
     const init: Record<string, string> = {};
     speakers.forEach(s => { init[s] = ''; });
 
@@ -773,6 +781,7 @@ export default function HomeScreen() {
     committedNamesRef.current = {};
     setLocalNames(init);
     setLocalTitle('');
+    })();
   }, [convState, speakers]);
 
   function getGreeting(): string {
