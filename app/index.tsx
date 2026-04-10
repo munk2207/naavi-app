@@ -367,7 +367,7 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
       try {
         console.log(`[Send] ${channelLabel} to ${phone}, body: ${String(action.body ?? '').slice(0, 30)}`);
         const { data, error } = await supabase.functions.invoke('send-sms', {
-          body: { to: phone, body: String(action.body ?? ''), channel },
+          body: { to: phone, body: String(action.body ?? ''), channel, recipientName: String(action.to ?? '') },
         });
         console.log('[Send] Response:', JSON.stringify({ data, error: error?.message }));
         setSending(false);

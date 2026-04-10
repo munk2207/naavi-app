@@ -18,6 +18,7 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
 import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
+import * as Notifications from 'expo-notifications';
 import { sendPushNotification } from '@/lib/push';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
 import { lookupContact, lookupContactByPhone } from '@/lib/contacts';
@@ -309,10 +310,27 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             } catch (err) {
               console.error('[Orchestrator] SET_REMINDER calendar event failed:', err);
             }
-            // Schedule a Web Push notification at the reminder time
-            const delayMs = new Date(reminderDatetime).getTime() - Date.now();
+            // Schedule a local Android push notification at the reminder time
+            const reminderDate = new Date(reminderDatetime);
+            if (reminderDate.getTime() > Date.now()) {
+              try {
+                await Notifications.scheduleNotificationAsync({
+                  content: {
+                    title: 'MyNaavi Reminder',
+                    body: reminderTitle || 'Time for your reminder',
+                    sound: 'default',
+                    channelId: 'mynaavi',
+                  },
+                  trigger: { date: reminderDate },
+                });
+                console.log(`[Orchestrator] Local notification scheduled for ${reminderDatetime}`);
+              } catch (notifErr) {
+                console.error('[Orchestrator] Local notification failed:', notifErr);
+              }
+            }
+            // Also send a Web Push as backup
+            const delayMs = reminderDate.getTime() - Date.now();
             if (delayMs > 0 && delayMs < 24 * 60 * 60 * 1000) {
-              // Only schedule if within 24 hours
               setTimeout(() => {
                 sendPushNotification(reminderTitle, 'Time for your reminder', '/').catch(() => {});
               }, delayMs);
