@@ -282,6 +282,7 @@ export function useHandsfreeMode(
   // After SILENCE_COUNT_TO_FULL_PAUSE more silent chunks → full pause (mic off).
   async function startWakeWordLoop() {
     console.log('[Handsfree] Wake-word loop started (light pause)');
+    loopActiveRef.current = true; // re-arm — main loop's finally may have cleared it
     let wakeWordSilenceCount = 0;
 
     while (loopActiveRef.current && stateRef.current === 'paused') {
