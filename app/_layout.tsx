@@ -4,7 +4,7 @@
  */
 
 import { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Platform, Text } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -104,7 +104,11 @@ export default function RootLayout() {
           options={{
             title: 'MyNaavi',
             headerShown: true,
-            headerTitleStyle: { fontWeight: '700', fontSize: 22, letterSpacing: 0.5, color: Colors.accent },
+            headerTitle: () => (
+              <Text style={{ fontWeight: '700', fontSize: 22, letterSpacing: 0.5, color: Colors.accent, fontStyle: 'italic' }}>
+                MyNaavi
+              </Text>
+            ),
           }}
         />
         <Stack.Screen

@@ -489,18 +489,22 @@ export function useHandsfreeMode(
       console.error('[Handsfree] Loop crashed:', msg);
       setError(`Hands-free stopped unexpectedly: ${msg}`);
     } finally {
-      loopActiveRef.current = false;
-      // If the loop ended while still in an "active" state (listening/processing), reset to paused_full
-      // so the user can tap the button to restart. Don't override 'inactive' or 'paused'/'paused_full' set elsewhere.
-      if (stateRef.current === 'listening' || stateRef.current === 'processing') {
-        console.log('[Handsfree] Loop ended in active state — resetting to paused_full');
-        setState('paused_full');
-        stateRef.current = 'paused_full';
-      }
-      // Clean up any leftover recording so the next activation starts clean
-      if (recordingRef.current) {
-        try { await recordingRef.current.stopAndUnloadAsync(); } catch (_) { /* ignore */ }
-        recordingRef.current = null;
+      // If handing off to wake-word loop (state === 'paused'), do NOT reset loopActive
+      // — the wake-word loop needs it to keep running.
+      if (stateRef.current !== 'paused') {
+        loopActiveRef.current = false;
+        // If the loop ended while still in an "active" state (listening/processing), reset to paused_full
+        // so the user can tap the button to restart. Don't override 'inactive' or 'paused_full' set elsewhere.
+        if (stateRef.current === 'listening' || stateRef.current === 'processing') {
+          console.log('[Handsfree] Loop ended in active state — resetting to paused_full');
+          setState('paused_full');
+          stateRef.current = 'paused_full';
+        }
+        // Clean up any leftover recording so the next activation starts clean
+        if (recordingRef.current) {
+          try { await recordingRef.current.stopAndUnloadAsync(); } catch (_) { /* ignore */ }
+          recordingRef.current = null;
+        }
       }
       console.log('[Handsfree] Recording loop ended');
     }
