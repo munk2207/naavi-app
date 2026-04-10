@@ -62,97 +62,99 @@ import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken
 import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
 
-// ─── Integrations data ────────────────────────────────────────────────────────
+// ─── How to use MyNaavi ───────────────────────────────────────────────────────
 
-const INTEGRATION_CATEGORIES = [
+const HOW_TO_FEATURES = [
   {
-    category: 'AI Core',
-    items: [
-      {
-        icon: '🤖',
-        name: 'MyNaavi AI',
-        description: 'Claude-powered assistant. Robert speaks or types naturally — MyNaavi understands intent and takes action without any app switching.',
-      },
-      {
-        icon: '🎙',
-        name: 'Whisper Voice',
-        description: 'Tap the red button, speak, release. OpenAI Whisper transcribes the audio and MyNaavi responds. Enables fully hands-free interaction.',
-      },
-    ],
+    icon: '📅',
+    name: 'Calendar',
+    description: 'Instead of opening Google Calendar, just ask. MyNaavi reads your events, creates new ones, and reminds you when to leave.',
   },
   {
-    category: 'Email & Contacts',
-    items: [
-      {
-        icon: '✉️',
-        name: 'Gmail',
-        description: 'Surfaces important unread emails in the brief. Robert can send emails by voice ("send John a message saying I\'ll be late") — draft appears for review, one tap to send.',
-      },
-      {
-        icon: '👤',
-        name: 'Google Contacts',
-        description: 'Automatically resolves contact names to email addresses. Robert says a name — MyNaavi finds the email. Unknown contacts are saved for future use.',
-      },
-    ],
+    icon: '✉️',
+    name: 'Email & Messaging',
+    description: 'Say who and what. MyNaavi picks the right channel based on your preference — email, WhatsApp, or text — drafts it, and sends when you confirm.',
   },
   {
-    category: 'Calendar & Navigation',
-    items: [
-      {
-        icon: '📅',
-        name: 'Google Calendar',
-        description: 'Reads upcoming events into the morning brief. Robert can create events by voice ("schedule a meeting with Sarah on Friday at 2pm") — automatically added to Google Calendar.',
-      },
-      {
-        icon: '🗺️',
-        name: 'Google Maps',
-        description: 'Shows driving time and leave-by time for meetings with a location. A banner automatically appears when it\'s time to leave — tap to open Google Maps navigation.',
-      },
-    ],
+    icon: '🗺️',
+    name: 'Navigation',
+    description: 'When a meeting has a location, MyNaavi shows driving time and a leave-by banner. Tap to open Google Maps.',
   },
   {
-    category: 'Files & Notes',
-    items: [
-      {
-        icon: '📁',
-        name: 'Google Drive',
-        description: 'Search documents by voice. Save voice notes or text directly as Google Docs. Send Drive files as email attachments — all without opening Drive.',
-      },
-      {
-        icon: '🧠',
-        name: 'Knowledge Memory',
-        description: 'Robert can say "remember that…" and MyNaavi stores it permanently. Facts, preferences, and life context are recalled automatically in future conversations — no need to repeat yourself.',
-      },
-    ],
+    icon: '🧠',
+    name: 'Memory',
+    description: 'Say "remember that…" and it sticks. MyNaavi recalls it automatically when it\'s relevant.',
+  },
+  {
+    icon: '⭐',
+    name: 'Your preferences',
+    description: 'MyNaavi learns how you like things done. No meetings before 10? It\'ll flag early invites. Prefer WhatsApp over email? It picks WhatsApp next time. You set it once — MyNaavi follows it from then on.',
+  },
+  {
+    icon: '☀️',
+    name: 'Morning / afternoon brief',
+    description: 'Before you ask, MyNaavi has already checked your calendar, email, and weather. One screen, everything that matters today.',
   },
 ];
 
-function IntegrationsModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+const FAQ_ITEMS = [
+  {
+    q: 'How do I talk to Naavi?',
+    a: 'Tap the red mic button and speak naturally. Say "Hi Naavi" in hands-free mode.',
+  },
+  {
+    q: 'Do I need to learn commands?',
+    a: 'No. Just talk like you would to a person.',
+  },
+  {
+    q: 'What if I want to cancel something?',
+    a: 'Say "cancel" or "no" before confirming. Nothing sends without your OK.',
+  },
+  {
+    q: 'Who sees my data?',
+    a: 'Nobody. Your data stays on Canadian servers. No audio is stored.',
+  },
+];
+
+function HowToModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={intStyles.overlay}>
         <View style={intStyles.sheet}>
           <View style={intStyles.header}>
-            <Text style={intStyles.title}>MyNaavi Integrations</Text>
+            <Text style={intStyles.title}>
+              How to use <Text style={intStyles.titleBrand}>MyNaavi</Text>
+            </Text>
             <TouchableOpacity onPress={onClose} style={intStyles.closeBtn}>
               <Text style={intStyles.closeText}>✕</Text>
             </TouchableOpacity>
           </View>
           <ScrollView showsVerticalScrollIndicator={false}>
-            {INTEGRATION_CATEGORIES.map(group => (
-              <View key={group.category}>
-                <Text style={intStyles.categoryLabel}>{group.category}</Text>
-                {group.items.map(int => (
-                  <View key={int.name} style={intStyles.card}>
-                    <Text style={intStyles.cardIcon}>{int.icon}</Text>
-                    <View style={intStyles.cardBody}>
-                      <Text style={intStyles.cardName}>{int.name}</Text>
-                      <Text style={intStyles.cardDesc}>{int.description}</Text>
-                    </View>
-                  </View>
-                ))}
+            {/* Tagline */}
+            <Text style={intStyles.tagline}>
+              MyNaavi navigates your daily tools so you don't have to.{'\n'}You speak once — MyNaavi handles the rest.
+            </Text>
+
+            {/* Features */}
+            {HOW_TO_FEATURES.map(item => (
+              <View key={item.name} style={intStyles.card}>
+                <Text style={intStyles.cardIcon}>{item.icon}</Text>
+                <View style={intStyles.cardBody}>
+                  <Text style={intStyles.cardName}>{item.name}</Text>
+                  <Text style={intStyles.cardDesc}>{item.description}</Text>
+                </View>
               </View>
             ))}
+
+            {/* FAQ */}
+            <Text style={intStyles.categoryLabel}>Questions</Text>
+            {FAQ_ITEMS.map(faq => (
+              <View key={faq.q} style={intStyles.faqCard}>
+                <Text style={intStyles.faqQ}>{faq.q}</Text>
+                <Text style={intStyles.faqA}>{faq.a}</Text>
+              </View>
+            ))}
+
             <View style={{ height: 32 }} />
           </ScrollView>
         </View>
@@ -183,8 +185,20 @@ const intStyles = StyleSheet.create({
   },
   title: {
     fontSize: Typography.sectionHeading,
-    fontWeight: '700',
+    fontWeight: '300',
     color: Colors.textPrimary,
+  },
+  titleBrand: {
+    fontStyle: 'italic',
+    fontWeight: '600',
+    color: Colors.accent,
+  },
+  tagline: {
+    fontSize: Typography.caption,
+    color: Colors.textSecondary,
+    lineHeight: 20,
+    marginBottom: 16,
+    textAlign: 'center',
   },
   closeBtn: {
     width: 32,
@@ -230,6 +244,25 @@ const intStyles = StyleSheet.create({
     marginBottom: 4,
   },
   cardDesc: {
+    fontSize: Typography.caption,
+    color: Colors.textSecondary,
+    lineHeight: 19,
+  },
+  faqCard: {
+    backgroundColor: Colors.bgElevated,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  faqQ: {
+    fontSize: Typography.body,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+    marginBottom: 4,
+  },
+  faqA: {
     fontSize: Typography.caption,
     color: Colors.textSecondary,
     lineHeight: 19,
@@ -825,7 +858,7 @@ export default function HomeScreen() {
           </View>
         )}
 
-        <IntegrationsModal visible={showIntegrations} onClose={() => setShowIntegrations(false)} />
+        <HowToModal visible={showIntegrations} onClose={() => setShowIntegrations(false)} />
 
         {/* Speaker labeling modal — appears after transcription completes */}
         <Modal
