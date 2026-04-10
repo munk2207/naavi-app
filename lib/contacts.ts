@@ -51,7 +51,31 @@ export async function lookupContact(name: string): Promise<Contact | null> {
 
   const nameLower = name.toLowerCase().trim();
 
-  // 1. Search Naavi's own contacts table
+  // Accumulate partial results — first source with phone wins for phone,
+  // first source with email wins for email.
+  let bestName = name;
+  let bestEmail: string | null = null;
+  let bestPhone: string | null = null;
+
+  // 1. Search people table (has phone + email, written by ADD_CONTACT)
+  try {
+    const { data } = await supabase
+      .from('people')
+      .select('name, email, phone')
+      .ilike('name', `%${nameLower}%`)
+      .limit(1);
+
+    if (data && data.length > 0) {
+      bestName = data[0].name ?? bestName;
+      if (data[0].phone) bestPhone = data[0].phone;
+      if (data[0].email) bestEmail = data[0].email;
+    }
+  } catch { /* continue */ }
+
+  // If we already have both, return early
+  if (bestPhone && bestEmail) return { name: bestName, email: bestEmail, phone: bestPhone };
+
+  // 2. Search Naavi's contacts table
   try {
     const { data } = await supabase
       .from('contacts')
@@ -59,32 +83,66 @@ export async function lookupContact(name: string): Promise<Contact | null> {
       .ilike('name', `%${nameLower}%`)
       .limit(1);
 
-    if (data && data.length > 0 && data[0].email) {
-      return { name: data[0].name, email: data[0].email, phone: null };
+    if (data && data.length > 0 && data[0].email && !bestEmail) {
+      bestName = data[0].name ?? bestName;
+      bestEmail = data[0].email;
     }
   } catch { /* continue */ }
 
-  // 2. Search Gmail sender cache
-  try {
-    const { data } = await supabase
-      .from('gmail_messages')
-      .select('sender_name, sender_email')
-      .ilike('sender_name', `%${nameLower}%`)
-      .not('sender_email', 'is', null)
-      .limit(1);
+  // 3. Search knowledge fragments (where "Remember X's phone is..." stores data)
+  if (!bestPhone) {
+    try {
+      const { data } = await supabase
+        .from('knowledge_fragments')
+        .select('content')
+        .ilike('content', `%${nameLower}%`)
+        .ilike('content', '%phone%')
+        .limit(5);
 
-    if (data && data.length > 0 && data[0].sender_email) {
-      return { name: data[0].sender_name ?? name, email: data[0].sender_email, phone: null };
-    }
-  } catch { /* continue */ }
+      if (data && data.length > 0) {
+        // Extract phone number from free text like "Hussein's phone is +16137697957"
+        for (const row of data) {
+          const phoneMatch = row.content.match(/(\+?\d[\d\s\-().]{7,})/);
+          if (phoneMatch) {
+            bestPhone = phoneMatch[1].replace(/[\s\-().]/g, '');
+            break;
+          }
+        }
+      }
+    } catch { /* continue */ }
+  }
 
-  // 3. Google People API via Edge Function
-  try {
-    const { data, error } = await supabase.functions.invoke('lookup-contact', {
-      body: { name },
-    });
-    if (!error && !data?.error && data?.contact) return data.contact;
-  } catch { /* continue */ }
+  // 4. Search Gmail sender cache
+  if (!bestEmail) {
+    try {
+      const { data } = await supabase
+        .from('gmail_messages')
+        .select('sender_name, sender_email')
+        .ilike('sender_name', `%${nameLower}%`)
+        .not('sender_email', 'is', null)
+        .limit(1);
 
-  return null;
+      if (data && data.length > 0 && data[0].sender_email) {
+        bestName = data[0].sender_name ?? bestName;
+        bestEmail = data[0].sender_email;
+      }
+    } catch { /* continue */ }
+  }
+
+  // 5. Google People API via Edge Function
+  if (!bestPhone || !bestEmail) {
+    try {
+      const { data, error } = await supabase.functions.invoke('lookup-contact', {
+        body: { name },
+      });
+      if (!error && !data?.error && data?.contact) {
+        if (!bestPhone && data.contact.phone) bestPhone = data.contact.phone;
+        if (!bestEmail && data.contact.email) bestEmail = data.contact.email;
+        bestName = data.contact.name ?? bestName;
+      }
+    } catch { /* continue */ }
+  }
+
+  if (!bestPhone && !bestEmail) return null;
+  return { name: bestName, email: bestEmail, phone: bestPhone };
 }
