@@ -86,6 +86,16 @@ const HOW_TO_FEATURES = [
     description: 'Say "remember that…" and it sticks. MyNaavi recalls it automatically when it\'s relevant.',
   },
   {
+    icon: '🏥',
+    name: 'Medical records',
+    description: 'MyNaavi connects to your health portal so you can check appointments, medications, and lab results without logging in yourself.',
+  },
+  {
+    icon: '👥',
+    name: 'Conversations',
+    description: 'Record a conversation and MyNaavi will remember the details — names, decisions, follow-ups — so you don\'t have to take notes.',
+  },
+  {
     icon: '⭐',
     name: 'Your preferences',
     description: 'MyNaavi learns how you like things done. No meetings before 10? It\'ll flag early invites. Prefer WhatsApp over email? It picks WhatsApp next time. You set it once — MyNaavi follows it from then on.',
@@ -94,6 +104,11 @@ const HOW_TO_FEATURES = [
     icon: '☀️',
     name: 'Morning / afternoon brief',
     description: 'Before you ask, MyNaavi has already checked your calendar, email, and weather. One screen, everything that matters today.',
+  },
+  {
+    icon: '🔜',
+    name: 'And more coming',
+    description: 'Behaviour monitoring, sharing with family and caregivers, and much more — MyNaavi keeps growing with you.',
   },
 ];
 
@@ -927,9 +942,10 @@ export default function HomeScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* Greeting on its own row (left-aligned, small) */}
+          {/* Brand + greeting on its own row (left-aligned) */}
           <View style={styles.greetingRowLeft}>
-            <Text style={styles.greetingSmall}>{getGreeting()}</Text>
+            <Text style={styles.brandName}>MyNaavi</Text>
+            <Text style={styles.greetingSmall}>  {getGreeting()}</Text>
           </View>
 
           {/* Action buttons on a separate row, right-aligned */}
@@ -1488,6 +1504,12 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: 8,
     marginBottom: 16,
+  },
+  brandName: {
+    fontSize: Typography.sectionHeading,
+    fontWeight: '600',
+    fontStyle: 'italic',
+    color: Colors.accent,
   },
   greetingSmall: {
     fontSize: Typography.body,
@@ -2053,6 +2075,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 16,
+    paddingBottom: 12,
   },
   input: {
     flex: 1,

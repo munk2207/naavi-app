@@ -290,6 +290,18 @@ export function useHandsfreeMode(
       if (!loopActiveRef.current || stateRef.current !== 'listening') break;
 
       if (!chunk) {
+        // No chunk + pending speech → auto-submit
+        if (pendingTextRef.current.trim()) {
+          const messageToSend = pendingTextRef.current.trim();
+          console.log(`[Handsfree] AUTO-SUBMIT (no chunk after speech): "${messageToSend}"`);
+          setState('waiting');
+          stateRef.current = 'waiting';
+          waitingForOrchestratorRef.current = true;
+          loopActiveRef.current = false;
+          pendingTextRef.current = '';
+          await sendMessage(messageToSend);
+          break;
+        }
         silenceCountRef.current++;
         if (silenceCountRef.current >= SILENCE_COUNT_TO_PAUSE) {
           console.log('[Handsfree] Idle timeout — pausing');
@@ -313,7 +325,19 @@ export function useHandsfreeMode(
         if (transcript) {
           console.log(`[Handsfree] Ignored hallucination: "${transcript}"`);
         }
-        // Silence or hallucination — treat both the same way
+        // Silence after speech → auto-submit accumulated text
+        if (pendingTextRef.current.trim()) {
+          const messageToSend = pendingTextRef.current.trim();
+          console.log(`[Handsfree] AUTO-SUBMIT (silence after speech): "${messageToSend}"`);
+          setState('waiting');
+          stateRef.current = 'waiting';
+          waitingForOrchestratorRef.current = true;
+          loopActiveRef.current = false;
+          pendingTextRef.current = '';
+          await sendMessage(messageToSend);
+          break;
+        }
+        // No speech yet — just silence, count toward auto-pause
         silenceCountRef.current++;
         if (silenceCountRef.current >= SILENCE_COUNT_TO_PAUSE) {
           console.log('[Handsfree] Idle timeout — pausing');
