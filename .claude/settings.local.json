@@ -14,7 +14,29 @@
       "Bash(npx supabase:*)",
       "Bash(curl -s -X POST \"https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/sync-google-calendar\" -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhoZ3lwcGJ4Z21qcndkcGR1YmN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NTc3MDYsImV4cCI6MjA4OTMzMzcwNn0.I4w141wZlfxOCxDEcsNcgsatHcsXtPOvGV-X5oM3VuQ\" -H \"Content-Type: application/json\")",
       "Bash(npx tsc:*)",
-      "Bash(npx expo:*)"
+      "Bash(npx expo:*)",
+      "Bash(cp \"C:/Users/waela/naavi-mobile/.env.local\" \"C:/Users/waela/naavi-mobile/.env.local.bak\")",
+      "Read(//c/Users/waela/naavi-mobile/**)",
+      "Bash(npm install:*)",
+      "Bash(npx eas:*)",
+      "WebSearch",
+      "WebFetch(domain:www.motionguide.ai)",
+      "WebFetch(domain:www.synthesia.io)",
+      "WebFetch(domain:trupeer.ai)",
+      "WebFetch(domain:narrateai.app)",
+      "Bash(node -e ':*)",
+      "Bash(node test-prompt.js)",
+      "Bash(curl -s -X POST https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/naavi-chat -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d @test-payload.json)",
+      "Bash(node test-prompt-broad.js)",
+      "Bash(curl -s -X POST https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/naavi-chat -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d @test-payload-broad.json)",
+      "Bash(node test-prompt-history.js)",
+      "Bash(curl -s -X POST https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/naavi-chat -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d @test-payload-history.json)",
+      "Bash(node test-prompt-broken-history.js)",
+      "Bash(curl -s -X POST https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/naavi-chat -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d @test-payload-broken.json)",
+      "Bash(node test-second-create.js)",
+      "Bash(curl -s -X POST https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/naavi-chat -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d @test-second-create.json)",
+      "Bash(node test-create-shopping-list.js)",
+      "Bash(curl -s -X POST https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/naavi-chat -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d @test-create-sl.json)"
     ]
   }
 }
