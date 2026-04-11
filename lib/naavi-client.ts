@@ -423,7 +423,7 @@ export async function sendToNaavi(
     { role: 'user' as const, content: userMessage },
   ];
 
-  const isBroadQuery = /\b(list all|list everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
+  const isBroadQuery = /\b(all|list|everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
   const [healthContext, knowledgeFragments] = await Promise.all([
     getEpicHealthContext(),
     isBroadQuery ? fetchAllKnowledge(100) : searchKnowledge(userMessage, 5),
