@@ -75,7 +75,7 @@ export async function createList(name: string, category: string = 'other'): Prom
 
   // Create a Google Doc via save-to-drive
   const { data, error } = await supabase.functions.invoke('save-to-drive', {
-    body: { title: name, content: `${name}\n` },
+    body: { title: name, content: '' },
   });
   if (error || !data?.fileId) {
     return { success: false, error: error?.message ?? 'Failed to create Drive doc' };
@@ -95,6 +95,13 @@ export async function createList(name: string, category: string = 'other'): Prom
     console.error('[Lists] Insert failed:', insertError.message);
     return { success: false, error: insertError.message };
   }
+
+  // Also save to naavi_notes so it appears in Drive Notes tab
+  await supabase.from('naavi_notes').insert({
+    user_id: userId,
+    title: name,
+    web_view_link: webViewLink,
+  });
 
   console.log(`[Lists] Created "${name}" — ${data.fileId}`);
   return {
@@ -174,9 +181,7 @@ export async function readList(listName: string): Promise<ListResult> {
   if (!list) return { success: false, error: `List "${listName}" not found` };
 
   const content = await readDriveFile(list.drive_file_id);
-  // Parse items — skip the first line (list name/title)
-  const allLines = content.split('\n').filter(l => l.trim());
-  const items = allLines.length > 1 ? allLines.slice(1) : [];
+  const items = content.split('\n').filter(l => l.trim());
 
   console.log(`[Lists] Read "${listName}" — ${items.length} items`);
   return { success: true, list, items };
