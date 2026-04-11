@@ -119,11 +119,16 @@ export async function addToList(listName: string, items: string[]): Promise<List
   const list = await findListByName(userId, listName);
   if (!list) return { success: false, error: `List "${listName}" not found` };
 
-  // Read current content
+  // Read current content, strip title line if it matches the list name
   const current = await readDriveFile(list.drive_file_id);
   const lines = current.split('\n').filter(l => l.trim());
 
-  // Add new items (skip the title line if present)
+  // Remove the title line if it matches the list name (legacy docs from V47)
+  if (lines.length > 0 && lines[0].toLowerCase() === list.name.toLowerCase()) {
+    lines.shift();
+  }
+
+  // Add new items
   for (const item of items) {
     if (item.trim()) lines.push(item.trim());
   }
@@ -151,9 +156,12 @@ export async function removeFromList(listName: string, items: string[]): Promise
   const list = await findListByName(userId, listName);
   if (!list) return { success: false, error: `List "${listName}" not found` };
 
-  // Read current content
+  // Read current content, strip title line if it matches the list name
   const current = await readDriveFile(list.drive_file_id);
   let lines = current.split('\n').filter(l => l.trim());
+  if (lines.length > 0 && lines[0].toLowerCase() === list.name.toLowerCase()) {
+    lines.shift();
+  }
 
   // Remove matching items (case-insensitive)
   const removeSet = new Set(items.map(i => i.trim().toLowerCase()));
@@ -182,6 +190,10 @@ export async function readList(listName: string): Promise<ListResult> {
 
   const content = await readDriveFile(list.drive_file_id);
   const items = content.split('\n').filter(l => l.trim());
+  // Strip title line if it matches the list name (legacy docs from V47)
+  if (items.length > 0 && items[0].toLowerCase() === list.name.toLowerCase()) {
+    items.shift();
+  }
 
   console.log(`[Lists] Read "${listName}" — ${items.length} items`);
   return { success: true, list, items };
