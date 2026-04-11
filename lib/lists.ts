@@ -75,7 +75,7 @@ export async function createList(name: string, category: string = 'other'): Prom
 
   // Create a Google Doc via save-to-drive
   const { data, error } = await supabase.functions.invoke('save-to-drive', {
-    body: { title: name, content: '' },
+    body: { title: name, content: `${name}\n` },
   });
   if (error || !data?.fileId) {
     return { success: false, error: error?.message ?? 'Failed to create Drive doc' };
@@ -96,13 +96,6 @@ export async function createList(name: string, category: string = 'other'): Prom
     return { success: false, error: insertError.message };
   }
 
-  // Also save to naavi_notes so it appears in Drive Notes tab
-  await supabase.from('naavi_notes').insert({
-    user_id: userId,
-    title: name,
-    web_view_link: webViewLink,
-  });
-
   console.log(`[Lists] Created "${name}" — ${data.fileId}`);
   return {
     success: true,
@@ -119,16 +112,11 @@ export async function addToList(listName: string, items: string[]): Promise<List
   const list = await findListByName(userId, listName);
   if (!list) return { success: false, error: `List "${listName}" not found` };
 
-  // Read current content, strip title line if it matches the list name
+  // Read current content
   const current = await readDriveFile(list.drive_file_id);
   const lines = current.split('\n').filter(l => l.trim());
 
-  // Remove the title line if it matches the list name (legacy docs from V47)
-  if (lines.length > 0 && lines[0].toLowerCase() === list.name.toLowerCase()) {
-    lines.shift();
-  }
-
-  // Add new items
+  // Add new items (skip the title line if present)
   for (const item of items) {
     if (item.trim()) lines.push(item.trim());
   }
@@ -156,12 +144,9 @@ export async function removeFromList(listName: string, items: string[]): Promise
   const list = await findListByName(userId, listName);
   if (!list) return { success: false, error: `List "${listName}" not found` };
 
-  // Read current content, strip title line if it matches the list name
+  // Read current content
   const current = await readDriveFile(list.drive_file_id);
   let lines = current.split('\n').filter(l => l.trim());
-  if (lines.length > 0 && lines[0].toLowerCase() === list.name.toLowerCase()) {
-    lines.shift();
-  }
 
   // Remove matching items (case-insensitive)
   const removeSet = new Set(items.map(i => i.trim().toLowerCase()));
@@ -189,11 +174,9 @@ export async function readList(listName: string): Promise<ListResult> {
   if (!list) return { success: false, error: `List "${listName}" not found` };
 
   const content = await readDriveFile(list.drive_file_id);
-  const items = content.split('\n').filter(l => l.trim());
-  // Strip title line if it matches the list name (legacy docs from V47)
-  if (items.length > 0 && items[0].toLowerCase() === list.name.toLowerCase()) {
-    items.shift();
-  }
+  // Parse items — skip the first line (list name/title)
+  const allLines = content.split('\n').filter(l => l.trim());
+  const items = allLines.length > 1 ? allLines.slice(1) : [];
 
   console.log(`[Lists] Read "${listName}" — ${items.length} items`);
   return { success: true, list, items };
