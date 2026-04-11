@@ -444,10 +444,20 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
       }
 
+      // ── Enrich speech with list items if LIST_READ was used ────────────────
+      let finalSpeech = response.speech;
+      for (const lr of turnLists) {
+        if (lr.action === 'read' && lr.items && lr.items.length > 0) {
+          finalSpeech += `\nHere's what's on your ${lr.listName}: ${lr.items.join(', ')}.`;
+        } else if (lr.action === 'read' && (!lr.items || lr.items.length === 0)) {
+          finalSpeech += `\nYour ${lr.listName} is empty.`;
+        }
+      }
+
       // ── Append turn with all its cards ────────────────────────────────────────
       const newTurn = {
         userMessage,
-        assistantSpeech: response.speech,
+        assistantSpeech: finalSpeech,
         drafts:           turnDrafts,
         createdEvents:    turnEvents,
         deletedEvents:    turnDeleted,
@@ -463,7 +473,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
       // Speak concurrently — text appears and voice starts at the same time
       setStatus('speaking');
-      speakResponse(response.speech, language).then(() => setStatus('idle')).catch(() => setStatus('idle'));
+      speakResponse(finalSpeech, language).then(() => setStatus('idle')).catch(() => setStatus('idle'));
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
