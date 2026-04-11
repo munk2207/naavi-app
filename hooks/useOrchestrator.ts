@@ -125,7 +125,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       }
 
       // Check if this is a broad knowledge query — fetch memories directly
-      const isBroadQuery = /\b(all|list|everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
+      const isBroadQuery = /\b(list all|list everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
 
       const [response, knowledgeResult] = await Promise.all([
         sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language),
