@@ -67,11 +67,18 @@ serve(async (req) => {
     const ext = extMap[resolvedMime] ?? '3gp';
 
     // Build multipart form for Whisper
+    // Anti-hallucination configuration:
+    // - NO priming prompt (prompts like "Robert speaking English" make Whisper
+    //   invent English speech on silence to match the expected pattern)
+    // - temperature=0 (deterministic, no creative completion)
+    // - response_format=verbose_json (so we get per-segment no_speech_prob and
+    //   avg_logprob, which let us detect and drop hallucinated silence server-side)
     const formData = new FormData();
     formData.append('file', audioBlob, `chunk.${ext}`);
     formData.append('model', 'whisper-1');
     if (language) formData.append('language', language);
-    formData.append('prompt', 'Voice command from Robert speaking English.');
+    formData.append('temperature', '0');
+    formData.append('response_format', 'verbose_json');
 
     const res = await fetch(WHISPER_URL, {
       method: 'POST',
@@ -89,10 +96,77 @@ serve(async (req) => {
       });
     }
 
-    const data = await res.json();
-    const transcript = (data.text ?? '').trim();
+    const data = await res.json() as {
+      text?: string;
+      segments?: Array<{
+        no_speech_prob?: number;
+        avg_logprob?: number;
+        compression_ratio?: number;
+        text?: string;
+      }>;
+    };
 
-    console.log(`[transcribe-google] Transcribed: "${transcript.slice(0, 80)}${transcript.length > 80 ? '...' : ''}"`);
+    const rawTranscript = (data.text ?? '').trim();
+
+    // ── Server-side hallucination detection ──
+    // Three layers of defense:
+    //   1. Single-word hallucination blacklist (most aggressive — Whisper tends
+    //      to invent single filler words on silence/noise with high confidence)
+    //   2. Per-segment confidence checks (no_speech_prob, avg_logprob, compression)
+    //   3. If every segment fails, drop the whole transcript
+    //
+    // The blacklist is intentionally narrow — it only triggers on single-word
+    // transcripts, so "Hi Naavi" (wake), "thanks" (submit), "goodbye" (exit)
+    // and any real voice command of 2+ words still pass through.
+    const SINGLE_WORD_HALLUCINATIONS = new Set([
+      'you', 'the', 'and', 'to', 'a', 'i', 'is', 'of', 'in', 'it',
+      'that', 'this', 'for', 'on', 'with', 'as', 'at', 'by', 'from',
+      'so', 'oh', 'um', 'uh', 'yeah', 'okay', 'ok', 'hmm', 'mm',
+      'hi', 'no', 'yes', 'what', 'huh', 'ah', 'eh', 'bye',
+      'well', 'now', 'just', 'like', 'go', 'see', 'me', 'my',
+    ]);
+
+    const segments = data.segments ?? [];
+    let transcript = rawTranscript;
+    let droppedReason: string | null = null;
+
+    const words = rawTranscript.toLowerCase().replace(/[.,!?;:]/g, '').split(/\s+/).filter(w => w);
+
+    // Compute worst-case segment confidence (for Layer 1 suspicion check)
+    const maxNoSpeechProb = segments.reduce((max, seg) => {
+      const ns = seg.no_speech_prob ?? 0;
+      return ns > max ? ns : max;
+    }, 0);
+
+    // Layer 1: single-word blacklist — only drop if segment ALSO looks suspicious.
+    // This protects real short responses (confident "Hi") while still catching
+    // hallucinated "you" / "the" / "oh" from silence.
+    const isBlacklistedSingleWord =
+      words.length === 1 && SINGLE_WORD_HALLUCINATIONS.has(words[0]);
+
+    if (isBlacklistedSingleWord && maxNoSpeechProb > 0.3) {
+      droppedReason = `suspicious single-word: "${words[0]}" (no_speech_prob=${maxNoSpeechProb.toFixed(2)})`;
+      transcript = '';
+    }
+    // Layer 2+3: per-segment confidence check
+    else if (segments.length > 0) {
+      const allHallucinated = segments.every(seg => {
+        const noSpeech = seg.no_speech_prob ?? 0;
+        const logprob = seg.avg_logprob ?? 0;
+        const compression = seg.compression_ratio ?? 0;
+        return noSpeech > 0.6 || logprob < -1.0 || compression > 2.4;
+      });
+      if (allHallucinated) {
+        droppedReason = `all ${segments.length} segments failed confidence checks`;
+        transcript = '';
+      }
+    }
+
+    if (droppedReason) {
+      console.log(`[transcribe-google] Dropped hallucination (${droppedReason}): "${rawTranscript.slice(0, 80)}"`);
+    } else {
+      console.log(`[transcribe-google] Transcribed: "${transcript.slice(0, 80)}${transcript.length > 80 ? '...' : ''}"`);
+    }
 
     return new Response(JSON.stringify({ transcript }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

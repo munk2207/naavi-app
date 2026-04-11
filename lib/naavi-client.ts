@@ -39,11 +39,16 @@ async function retrieveKey(key: string): Promise<string | null> {
 // ─── User profile ─────────────────────────────────────────────────────────────
 
 /** Save the user's own name (e.g. "Robert") — used to auto-label conversations */
-export function saveUserName(name: string): void {
+export async function saveUserName(name: string): Promise<void> {
   if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
     localStorage.setItem('naavi_user_name', name.trim());
   } else {
-    SecureStore.setItemAsync('naavi_user_name', name.trim()).catch(() => {});
+    try {
+      await SecureStore.setItemAsync('naavi_user_name', name.trim());
+      console.log('[NaaviClient] User name saved:', name.trim());
+    } catch (err) {
+      console.error('[NaaviClient] Failed to save user name:', err);
+    }
   }
 }
 

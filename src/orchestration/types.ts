@@ -70,6 +70,16 @@ export interface SetEmailAlertAction {
   label: string;            // Human label, e.g. "Emails from John Smith"
 }
 
+/** Add a person to Robert's contacts (people table) */
+export interface AddContactAction {
+  type: 'ADD_CONTACT';
+  name: string;
+  phone?: string;
+  email?: string;
+  relationship?: string;
+  notes?: string;
+}
+
 export type NaaviAction =
   | SpeakAction
   | SetReminderAction
@@ -77,7 +87,8 @@ export type NaaviAction =
   | DraftMessageAction
   | FetchDetailAction
   | LogConcernAction
-  | SetEmailAlertAction;
+  | SetEmailAlertAction
+  | AddContactAction;
 
 // ─── The structured response Claude returns ──────────────────────────────────
 

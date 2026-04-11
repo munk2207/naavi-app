@@ -35,6 +35,7 @@ export type HandsfreeState =
 export interface UseHandsfreeModeResult {
   state: HandsfreeState;
   error: string | null;
+  debugLog: string[];
   activate: () => void;
   deactivate: () => void;
 }
@@ -102,6 +103,13 @@ export function useHandsfreeMode(
 ): UseHandsfreeModeResult {
   const [state, setState] = useState<HandsfreeState>('inactive');
   const [error, setError] = useState<string | null>(null);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+  const audioChunkCountRef = useRef(0);
+
+  function dbg(msg: string) {
+    console.log(`[Handsfree] ${msg}`);
+    setDebugLog(prev => [...prev.slice(-9), `${new Date().toLocaleTimeString()} ${msg}`]);
+  }
 
   const stateRef = useRef<HandsfreeState>('inactive');
   const pendingTextRef = useRef('');
@@ -199,12 +207,20 @@ export function useHandsfreeMode(
     });
 
     // Start streaming PCM audio
+    dbg('Starting ExpoPlayAudioStream.startRecording...');
+    audioChunkCountRef.current = 0;
+
     const { recordingResult, subscription } = await ExpoPlayAudioStream.startRecording({
       sampleRate: 16000,
       channels: 1,
       encoding: 'pcm_16bit',
       interval: 250, // deliver chunks every 250ms
       onAudioStream: (event: { data: string; position: number; eventDataSize: number; totalSize: number; soundLevel?: number; fileUri: string }) => {
+        audioChunkCountRef.current++;
+        // Log first few chunks and then every 20th
+        if (audioChunkCountRef.current <= 3 || audioChunkCountRef.current % 20 === 0) {
+          dbg(`Audio chunk #${audioChunkCountRef.current}: ${event.data?.length ?? 0} chars, ws=${wsRef.current?.readyState}`);
+        }
         // event.data is base64-encoded PCM
         if (wsRef.current?.readyState === WebSocket.OPEN && event.data) {
           try {
@@ -216,7 +232,7 @@ export function useHandsfreeMode(
             }
             wsRef.current.send(bytes.buffer);
           } catch (sendErr) {
-            console.error('[Handsfree] Failed to send audio:', sendErr);
+            dbg(`Send failed: ${sendErr}`);
           }
         }
       },
@@ -224,7 +240,7 @@ export function useHandsfreeMode(
 
     audioSubscriptionRef.current = subscription ?? null;
     audioStreamActiveRef.current = true;
-    console.log('[Handsfree] Audio stream started, result:', JSON.stringify(recordingResult));
+    dbg(`Audio stream started. result: ${JSON.stringify(recordingResult)}`);
   }
 
   // ── Process finalized transcript ──
@@ -314,7 +330,7 @@ export function useHandsfreeMode(
       wsRef.current = ws;
 
       ws.onopen = async () => {
-        console.log('[Handsfree] Deepgram WebSocket connected');
+        dbg('Deepgram WS connected');
         reconnectAttemptsRef.current = 0;
         setError(null);
 
@@ -360,7 +376,7 @@ export function useHandsfreeMode(
       };
 
       ws.onclose = (event) => {
-        console.log(`[Handsfree] WebSocket closed: code=${event.code} reason="${event.reason}"`);
+        dbg(`WS closed: code=${event.code} reason="${event.reason}" chunks=${audioChunkCountRef.current}`);
         wsRef.current = null;
 
         // If still supposed to be active, try to reconnect
@@ -483,9 +499,10 @@ export function useHandsfreeMode(
     waitingForOrchestratorRef.current = false;
     pendingTextRef.current = '';
 
+    setError(null);
     setState('inactive');
     stateRef.current = 'inactive';
   }, []);
 
-  return { state, error, activate, deactivate };
+  return { state, error, debugLog, activate, deactivate };
 }

@@ -1342,6 +1342,13 @@ export default function HomeScreen() {
             <Text style={styles.errorText}>{handsfree.error}</Text>
           </View>
         )}
+        {handsfree.debugLog.length > 0 && handsfree.state !== 'inactive' && (
+          <View style={{ backgroundColor: 'rgba(0,0,0,0.85)', padding: 8, marginHorizontal: 8, borderRadius: 8, maxHeight: 150 }}>
+            {handsfree.debugLog.map((line, i) => (
+              <Text key={i} style={{ color: '#0f0', fontSize: 10, fontFamily: 'monospace' }}>{line}</Text>
+            ))}
+          </View>
+        )}
 
         {/* Input area — two rows when hands-free is inactive */}
         {handsfree.state === 'inactive' ? (

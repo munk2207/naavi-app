@@ -147,8 +147,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
 
         if (action.type === 'REMEMBER') {
+          // Skip REMEMBER if ADD_CONTACT already covers this contact info
+          const hasAddContact = response.actions.some((a: any) => a.type === 'ADD_CONTACT');
           const text = String(action.text ?? '');
-          if (text) {
+          const isContactInfo = hasAddContact && /\b(phone|email|number|contact)\b/i.test(text);
+          if (text && !isContactInfo) {
             ingestNote(text, 'stated').then(fragments => {
               turnMemory.push({ text, count: fragments.length });
               setTurns(prev => {

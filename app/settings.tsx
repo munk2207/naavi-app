@@ -201,10 +201,10 @@ export default function SettingsScreen() {
           />
           <TouchableOpacity
             style={[styles.saveBtn, !userName.trim() && styles.saveBtnDisabled]}
-            onPress={() => {
+            onPress={async () => {
               const name = userName.trim();
               if (!name) return;
-              saveUserName(name);
+              await saveUserName(name);
               setUserNameSaved(true);
             }}
             disabled={!userName.trim()}
@@ -472,7 +472,7 @@ export default function SettingsScreen() {
         <View style={styles.divider} />
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V44 (build 39)</Text>
+        <Text style={styles.version}>MyNaavi — V45 (build 40)</Text>
 
       </ScrollView>
     </SafeAreaView>

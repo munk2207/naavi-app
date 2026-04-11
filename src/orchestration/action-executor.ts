@@ -21,8 +21,10 @@ import type {
   FetchDetailAction,
   LogConcernAction,
   SetEmailAlertAction,
+  AddContactAction,
   ClaudeResponse,
 } from './types';
+import { savePerson } from '@/lib/memory';
 
 // ─── Execution result ─────────────────────────────────────────────────────────
 
@@ -107,6 +109,16 @@ async function executeSingleAction(action: NaaviAction): Promise<ExecutionResult
 
       case 'SET_EMAIL_ALERT':
         await setEmailAlert(action);
+        return { success: true, action };
+
+      case 'ADD_CONTACT':
+        await savePerson({
+          name:         action.name,
+          phone:        action.phone,
+          email:        action.email,
+          relationship: action.relationship,
+          notes:        action.notes,
+        });
         return { success: true, action };
 
       default:
