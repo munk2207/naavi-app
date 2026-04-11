@@ -25,34 +25,9 @@ serve(async (req) => {
     const apiKey = Deno.env.get('DEEPGRAM_API_KEY');
     if (!apiKey) throw new Error('DEEPGRAM_API_KEY not set');
 
-    // Try temporary token first, fall back to API key passthrough
-    let token: string;
-    try {
-      const res = await fetch('https://api.deepgram.com/v1/auth/grant', {
-        method: 'POST',
-        headers: {
-          Authorization: `Token ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ ttl_seconds: 60 }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        console.error(`[deepgram-token] Grant API failed (${res.status}): ${text}`);
-        // Fall back to passing API key directly
-        token = apiKey;
-        console.log('[deepgram-token] Falling back to API key passthrough');
-      } else {
-        const data = await res.json();
-        token = data.access_token ?? data.token ?? apiKey;
-        console.log('[deepgram-token] Temporary token issued, length:', token.length);
-      }
-    } catch (grantErr) {
-      console.error('[deepgram-token] Grant request failed:', grantErr);
-      token = apiKey;
-      console.log('[deepgram-token] Falling back to API key passthrough');
-    }
+    // Pass API key directly — temporary tokens cause 401 in React Native WebSocket
+    const token = apiKey;
+    console.log('[deepgram-token] Returning API key, length:', token.length);
 
     return new Response(
       JSON.stringify({ token }),
