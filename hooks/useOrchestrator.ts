@@ -23,6 +23,7 @@ import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, 
 import { lookupContact, lookupContactByPhone } from '@/lib/contacts';
 import { ingestNote, deleteKnowledge, fetchAllKnowledge, searchKnowledge } from '@/lib/knowledge';
 import { registry } from '@/lib/adapters/registry';
+import { createList, addToList, removeFromList, readList } from '@/lib/lists';
 import type { StorageFile, NavigationResult } from '@/lib/types';
 
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'error';
@@ -37,6 +38,7 @@ export interface ConversationTurn {
   rememberedItems: { text: string; count: number }[];
   driveFiles: StorageFile[];
   navigationResults: NavigationResult[];
+  listResults: { action: string; listName: string; items?: string[]; webViewLink?: string }[];
   timestamp?: string;
 }
 
@@ -73,6 +75,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     const turnDeleted: { count: number; titles: string[] }[] = [];
     const turnDocs: { title: string; webViewLink?: string }[] = [];
     const turnMemory: { text: string; count: number }[] = [];
+    const turnLists: { action: string; listName: string; items?: string[]; webViewLink?: string }[] = [];
 
     try {
       let enrichedMessage = userMessage;
@@ -272,6 +275,71 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           console.log(`[Orchestrator] SCHEDULE_MEDICATION: created ${created}/${events.length} events`);
         }
 
+        if (action.type === 'LIST_CREATE') {
+          const name = String(action.name ?? 'My List');
+          const category = String(action.category ?? 'other');
+          try {
+            const result = await createList(name, category);
+            if (result.success && result.list) {
+              turnLists.push({ action: 'created', listName: name, webViewLink: result.list.web_view_link ?? undefined });
+            } else {
+              console.error('[Orchestrator] LIST_CREATE failed:', result.error);
+            }
+          } catch (err) {
+            console.error('[Orchestrator] LIST_CREATE failed:', err);
+          }
+        }
+
+        if (action.type === 'LIST_ADD') {
+          const listName = String(action.listName ?? '');
+          const items = Array.isArray(action.items) ? action.items.map(String) : [];
+          if (listName && items.length > 0) {
+            try {
+              const result = await addToList(listName, items);
+              if (result.success) {
+                turnLists.push({ action: 'added', listName, items, webViewLink: result.list?.web_view_link ?? undefined });
+              } else {
+                console.error('[Orchestrator] LIST_ADD failed:', result.error);
+              }
+            } catch (err) {
+              console.error('[Orchestrator] LIST_ADD failed:', err);
+            }
+          }
+        }
+
+        if (action.type === 'LIST_REMOVE') {
+          const listName = String(action.listName ?? '');
+          const items = Array.isArray(action.items) ? action.items.map(String) : [];
+          if (listName && items.length > 0) {
+            try {
+              const result = await removeFromList(listName, items);
+              if (result.success) {
+                turnLists.push({ action: 'removed', listName, items, webViewLink: result.list?.web_view_link ?? undefined });
+              } else {
+                console.error('[Orchestrator] LIST_REMOVE failed:', result.error);
+              }
+            } catch (err) {
+              console.error('[Orchestrator] LIST_REMOVE failed:', err);
+            }
+          }
+        }
+
+        if (action.type === 'LIST_READ') {
+          const listName = String(action.listName ?? '');
+          if (listName) {
+            try {
+              const result = await readList(listName);
+              if (result.success) {
+                turnLists.push({ action: 'read', listName, items: result.items, webViewLink: result.list?.web_view_link ?? undefined });
+              } else {
+                console.error('[Orchestrator] LIST_READ failed:', result.error);
+              }
+            } catch (err) {
+              console.error('[Orchestrator] LIST_READ failed:', err);
+            }
+          }
+        }
+
         if (action.type === 'DELETE_MEMORY') {
           const keyword = String(action.keyword ?? action.query ?? '');
           if (keyword) {
@@ -387,6 +455,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         rememberedItems:  turnMemory,
         driveFiles:       turnDrive,
         navigationResults: turnNav,
+        listResults:      turnLists,
         timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' }) + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
       };
       setTurns(prev => [...prev, newTurn]);

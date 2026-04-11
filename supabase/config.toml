@@ -49,5 +49,11 @@ verify_jwt = false
 [functions.get-realtime-token]
 verify_jwt = false
 
+[functions.read-drive-file]
+verify_jwt = false
+
+[functions.update-drive-file]
+verify_jwt = false
+
 [functions.assistant-fulfillment]
 verify_jwt = false
