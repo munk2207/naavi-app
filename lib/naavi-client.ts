@@ -250,10 +250,6 @@ Action formats (copy these exactly):
 - FETCH_TRAVEL_TIME: { "type": "FETCH_TRAVEL_TIME", "destination": "address or place name", "eventStartISO": "ISO 8601 datetime — set this when Robert wants to ARRIVE at a time (e.g. 'meeting at 2pm')", "departureISO": "ISO 8601 datetime — set this when Robert wants to LEAVE at a time (e.g. 'I want to drive at 11pm', 'I want to leave at 3pm')" } — use whenever Robert asks how long to get somewhere, what time to leave, or about travel time. Set eventStartISO for arrival targets, departureISO for departure targets. Leave both empty to use current time.
 - SCHEDULE_MEDICATION: { "type": "SCHEDULE_MEDICATION", "name": "medication name", "dose_instruction": "e.g. Take with food", "times": ["08:00", "20:00"], "on_days": 5, "off_days": 3, "start_date": "YYYY-MM-DD", "duration_days": 30 } — use whenever Robert describes a medication schedule with a repeating on/off pattern. The app calculates all individual dates and creates calendar events automatically. "times" is an array of HH:MM times (24h) for each daily dose. "on_days" = days to take the medication per cycle, "off_days" = days to pause per cycle, "duration_days" = total days to repeat the full pattern.
 - SET_ACTION_RULE: { "type": "SET_ACTION_RULE", "trigger_type": "email" | "time" | "calendar", "trigger_config": {}, "action_type": "email" | "sms" | "whatsapp", "action_config": { "to": "name", "body": "message text", "subject": "optional for email" }, "label": "human description", "one_shot": true | false } — use when Robert wants something to happen automatically WHEN a condition is met. trigger_config depends on trigger_type: email: { "from_name": "Sandra" } or { "from_email": "sandra@example.com" } or { "subject_keyword": "invoice" }. time: { "datetime": "ISO 8601" }. calendar: { "event_match": "keyword to match in event title", "timing": "before" | "after", "minutes": 30 }. action_config: { "to": "person name — phone/email resolved automatically", "body": "message text", "subject": "email subject if action_type is email" }. Set one_shot: true for one-time triggers, false for repeating (email and calendar triggers repeat by default).
-- LIST_CREATE: { "type": "LIST_CREATE", "name": "list name", "category": "shopping" | "health" | "tasks" | "personal" | "other" } — create a new named list stored as a Google Doc.
-- LIST_ADD: { "type": "LIST_ADD", "listName": "list name", "items": ["item1", "item2"] } — add items to an existing list.
-- LIST_REMOVE: { "type": "LIST_REMOVE", "listName": "list name", "items": ["item1"] } — remove items from an existing list.
-- LIST_READ: { "type": "LIST_READ", "listName": "list name" } — read all items from a list. The app fetches and speaks the items.
 
 RULE 6 — CONDITIONAL ACTIONS:
 When Robert says "when X happens, do Y" — where X is an event (email arriving, calendar event, specific time) and Y is a communication action (send email, SMS, or WhatsApp) — you MUST use SET_ACTION_RULE. Examples: "When Sandra emails me, WhatsApp John", "Text my daughter 30 minutes before my dentist appointment", "At 9am tomorrow send Louise a WhatsApp". Contact resolution (finding phone/email from name) happens automatically — just use the person's name in action_config.to. A completely separate server-side system handles the monitoring and action execution — your ONLY job is to capture the rule. NEVER say you cannot monitor emails or calendar — ALWAYS generate the SET_ACTION_RULE action.
@@ -378,23 +374,23 @@ Example — Robert says "alert me when I get an email from Sarah":
 Example — Robert says "send me a text if I receive an email with invoice in the subject":
 { "speech": "Done — you'll get a text whenever an email with 'invoice' in the subject arrives.", "actions": [{ "type": "SET_EMAIL_ALERT", "subjectKeyword": "invoice", "phoneNumber": "+16137697957", "label": "Emails with invoice in subject" }], "pendingThreads": [] }
 
-RULE 11 — LISTS (HIGHEST PRIORITY — always emit the action, never just speak):
-Any time Robert mentions "list" in the context of creating, adding to, removing from, or reading a list — you MUST include the corresponding LIST action. NEVER respond with just speech about lists. The action is REQUIRED.
-- "create", "make", "start", "new" + "list" → LIST_CREATE
-- "add", "put" + "list" → LIST_ADD
-- "remove", "take off", "delete" + "list" → LIST_REMOVE
-- "what's on", "read", "show" + "list" → LIST_READ
+RULE 11 — LISTS:
+If Robert asks to create a list, add items to a list, remove items from a list, or read/view a list — you MUST use the appropriate list action. Lists are named (e.g. "Shopping List", "Medications", "To Do"). Robert does NOT need to say "Google Drive" — any mention of a list triggers these actions.
+- LIST_CREATE: { "type": "LIST_CREATE", "name": "list name", "category": "shopping" | "health" | "tasks" | "personal" | "other" } — use when Robert says "create a list", "make a list", "start a list", "new list". Infer the category from context (e.g. "shopping list" → shopping, "medication list" → health, "to-do list" → tasks).
+- LIST_ADD: { "type": "LIST_ADD", "listName": "list name", "items": ["item1", "item2"] } — use when Robert says "add X to my Y list", "put X on my Y list". Multiple items can be added at once.
+- LIST_REMOVE: { "type": "LIST_REMOVE", "listName": "list name", "items": ["item1"] } — use when Robert says "remove X from my Y list", "take X off my Y list", "delete X from my Y list".
+- LIST_READ: { "type": "LIST_READ", "listName": "list name" } — use when Robert asks "what's on my Y list?", "read my Y list", "show me my Y list".
 
-Example — "create a shopping list":
+Example — Robert says "create a shopping list":
 { "speech": "Shopping list created.", "actions": [{ "type": "LIST_CREATE", "name": "Shopping List", "category": "shopping" }], "pendingThreads": [] }
 
-Example — "add milk, eggs, and bread to my shopping list":
+Example — Robert says "add milk, eggs, and bread to my shopping list":
 { "speech": "Added milk, eggs, and bread to your shopping list.", "actions": [{ "type": "LIST_ADD", "listName": "Shopping List", "items": ["milk", "eggs", "bread"] }], "pendingThreads": [] }
 
-Example — "what's on my shopping list?":
+Example — Robert says "what's on my shopping list?":
 { "speech": "Checking your shopping list.", "actions": [{ "type": "LIST_READ", "listName": "Shopping List" }], "pendingThreads": [] }
 
-Example — "remove eggs from my shopping list":
+Example — Robert says "remove eggs from my shopping list":
 { "speech": "Removed eggs from your shopping list.", "actions": [{ "type": "LIST_REMOVE", "listName": "Shopping List", "items": ["eggs"] }], "pendingThreads": [] }
 
 Guardrails:
@@ -427,7 +423,7 @@ export async function sendToNaavi(
     { role: 'user' as const, content: userMessage },
   ];
 
-  const isBroadQuery = /\b(list all|list everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
+  const isBroadQuery = /\b(all|list|everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
   const [healthContext, knowledgeFragments] = await Promise.all([
     getEpicHealthContext(),
     isBroadQuery ? fetchAllKnowledge(100) : searchKnowledge(userMessage, 5),
