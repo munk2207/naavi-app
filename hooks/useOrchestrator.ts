@@ -24,6 +24,7 @@ import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, 
 import { lookupContact, lookupContactByPhone } from '@/lib/contacts';
 import { ingestNote, deleteKnowledge, fetchAllKnowledge, searchKnowledge } from '@/lib/knowledge';
 import { registry } from '@/lib/adapters/registry';
+import { saveToNativeContacts } from '@/lib/nativeContacts';
 import type { StorageFile, NavigationResult } from '@/lib/types';
 
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'error';
@@ -290,8 +291,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
         if (action.type === 'ADD_CONTACT') {
           const name = String(action.name ?? '');
-          await saveContact({ name, email: String(action.email ?? ''), phone: String(action.phone ?? ''), relationship: String(action.relationship ?? '') });
-          await savePerson({ name, email: String(action.email ?? ''), phone: String(action.phone ?? ''), relationship: String(action.relationship ?? '') });
+          const phone = String(action.phone ?? '');
+          const email = String(action.email ?? '');
+          const relationship = String(action.relationship ?? '');
+          await savePerson({ name, email, phone, relationship });
+          await saveToNativeContacts({ name, phone, email });
         } else if (action.type === 'SET_REMINDER') {
           const reminderTitle = String(action.title ?? '');
           const reminderDatetime = String(action.datetime ?? '');

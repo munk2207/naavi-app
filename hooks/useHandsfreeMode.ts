@@ -500,6 +500,14 @@ export function useHandsfreeMode(
     waitingForOrchestratorRef.current = false;
     pendingTextRef.current = '';
 
+    // Restore audio mode for TTS playback (recording mode blocks speaker output)
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      playThroughEarpieceAndroid: false,
+      staysActiveInBackground: false,
+    });
+
     setError(null);
     setState('inactive');
     stateRef.current = 'inactive';

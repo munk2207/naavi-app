@@ -275,8 +275,8 @@ export function extractPersonQuery(rawMessage: string): string | null {
   const patterns = [
     // "what do you have on John" / "what's on John" / "what do you have about John"
     /what(?:'s| is| do you have) (?:on|about) ([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
-    // "tell me about John"
-    /tell me about ([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
+    // "tell me about John" / "tell me what you have for John"
+    /tell me (?:about|what you (?:have|know) (?:for|on|about)) ([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
     // "give me everything on John"
     /give me (?:everything|what you have|all) (?:on|about) ([A-Z][a-z]+(?: [A-Z][a-z.]+)?)/i,
     // "status on John" / "update on John"
