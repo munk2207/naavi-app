@@ -72,7 +72,7 @@ function stripKeywords(text: string): string {
 
 // ─── Deepgram URL builder ───────────────────────────────────────────────────
 
-function buildDeepgramUrl(keyterms: string[]): string {
+function buildDeepgramUrl(keyterms: string[], token: string): string {
   const params = new URLSearchParams({
     model: 'nova-3',
     language: 'en',
@@ -84,6 +84,7 @@ function buildDeepgramUrl(keyterms: string[]): string {
     endpointing: '300',
     vad_events: 'true',
     smart_format: 'true',
+    token, // Auth via query param — RN WebSocket doesn't reliably send Sec-WebSocket-Protocol
   });
 
   // Append keyterms (Deepgram expects repeated keyterm= params)
@@ -323,10 +324,10 @@ export function useHandsfreeMode(
 
       if (!loopActiveRef.current) return; // deactivated during token fetch
 
-      const url = buildDeepgramUrl(keyterms);
-      console.log(`[Handsfree] Connecting to Deepgram (${keyterms.length} keyterms)...`);
+      const url = buildDeepgramUrl(keyterms, token);
+      dbg(`Connecting to Deepgram (${keyterms.length} keyterms)...`);
 
-      const ws = new WebSocket(url, ['token', token]);
+      const ws = new WebSocket(url);
       wsRef.current = ws;
 
       ws.onopen = async () => {

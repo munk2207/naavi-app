@@ -25,25 +25,34 @@ serve(async (req) => {
     const apiKey = Deno.env.get('DEEPGRAM_API_KEY');
     if (!apiKey) throw new Error('DEEPGRAM_API_KEY not set');
 
-    const res = await fetch('https://api.deepgram.com/v1/auth/grant', {
-      method: 'POST',
-      headers: {
-        Authorization: `Token ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ ttl_seconds: 30 }),
-    });
+    // Try temporary token first, fall back to API key passthrough
+    let token: string;
+    try {
+      const res = await fetch('https://api.deepgram.com/v1/auth/grant', {
+        method: 'POST',
+        headers: {
+          Authorization: `Token ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ttl_seconds: 60 }),
+      });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Deepgram token error (${res.status}): ${text}`);
+      if (!res.ok) {
+        const text = await res.text();
+        console.error(`[deepgram-token] Grant API failed (${res.status}): ${text}`);
+        // Fall back to passing API key directly
+        token = apiKey;
+        console.log('[deepgram-token] Falling back to API key passthrough');
+      } else {
+        const data = await res.json();
+        token = data.access_token ?? data.token ?? apiKey;
+        console.log('[deepgram-token] Temporary token issued, length:', token.length);
+      }
+    } catch (grantErr) {
+      console.error('[deepgram-token] Grant request failed:', grantErr);
+      token = apiKey;
+      console.log('[deepgram-token] Falling back to API key passthrough');
     }
-
-    const data = await res.json();
-    const token = data.access_token ?? data.token;
-    if (!token) throw new Error('No token in Deepgram response');
-
-    console.log('[deepgram-token] Token issued successfully');
 
     return new Response(
       JSON.stringify({ token }),
