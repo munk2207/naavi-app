@@ -1115,6 +1115,20 @@ export default function HomeScreen() {
                   {item.count > 0 && <Text style={styles.memoryMeta}>{item.count} fragment{item.count !== 1 ? 's' : ''} stored</Text>}
                 </View>
               ))}
+
+              {/* List results */}
+              {(turn.listResults ?? []).map((lr, i) => (
+                <TouchableOpacity key={i} style={styles.listCard} onPress={() => lr.webViewLink ? Linking.openURL(lr.webViewLink) : undefined} accessibilityLabel={`${lr.action} list ${lr.listName}`}>
+                  <Text style={styles.listLabel}>
+                    {lr.action === 'created' ? '📋 List created' : lr.action === 'added' ? '📋 Added to list' : lr.action === 'removed' ? '📋 Removed from list' : '📋 List items'}
+                  </Text>
+                  <Text style={styles.listTitle}>{lr.listName}</Text>
+                  {lr.items && lr.items.length > 0 && (
+                    <Text style={styles.listItems}>{lr.items.map(item => `• ${item}`).join('\n')}</Text>
+                  )}
+                  {lr.webViewLink ? <Text style={styles.eventLink}>Tap to open in Google Docs</Text> : null}
+                </TouchableOpacity>
+              ))}
             </View>
           ))}
 
@@ -1727,6 +1741,34 @@ const styles = StyleSheet.create({
     color: Colors.textHint,
     marginTop: 4,
     fontStyle: 'italic',
+  },
+  listCard: {
+    marginTop: 12,
+    backgroundColor: Colors.bgCard,
+    borderRadius: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#4CAF50',
+    padding: 16,
+    gap: 4,
+  },
+  listLabel: {
+    fontSize: Typography.caption,
+    fontWeight: Typography.semibold,
+    color: '#4CAF50',
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.6,
+    marginBottom: 4,
+  },
+  listTitle: {
+    fontSize: Typography.body,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  listItems: {
+    fontSize: Typography.body,
+    color: Colors.textPrimary,
+    lineHeight: Typography.lineHeightBody,
+    marginTop: 4,
   },
   draftCard: {
     marginTop: 12,
