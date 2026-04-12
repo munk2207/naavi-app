@@ -7,5 +7,16 @@ dist/
 .vercel
 .env*.local
 
-.vercel
-.env*.local
+# Claude Code worktrees and plans
+.claude/worktrees/
+.claude/plans/
+
+# Test files
+test-*.js
+test-*.json
+
+# OneDrive-locked docs
+docs/*.docx
+
+# Web build
+web/
