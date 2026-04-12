@@ -23,7 +23,7 @@ import {
   TextInput,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { searchDriveFiles, type DriveFile } from '@/lib/drive';
@@ -82,6 +82,7 @@ const cbStyles = StyleSheet.create({
 
 export default function NotesScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   const [memoryNotes, setMemoryNotes]   = useState<MemoryNote[]>([]);
   const [driveNotes,  setDriveNotes]    = useState<DriveNote[]>([]);
@@ -471,7 +472,7 @@ export default function NotesScreen() {
       {/* Delete button — appears when anything is selected */}
       {((activeTab === 'memory' && selectedMemory.size > 0) ||
         (activeTab === 'drive'  && selectedDrive.size  > 0)) && (
-        <View style={styles.deleteBar}>
+        <View style={[styles.deleteBar, { paddingBottom: 16 + insets.bottom }]}>
           <TouchableOpacity
             style={styles.deleteBtn}
             onPress={activeTab === 'memory' ? confirmDeleteMemory : confirmDeleteDrive}
