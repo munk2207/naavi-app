@@ -1,23 +1,31 @@
 /**
  * useHandsfreeMode hook
  *
- * Hands-free voice mode using expo-av recording + Google Cloud STT.
- * Records 5-second audio chunks, sends to transcribe-google Edge Function,
- * and uses keyword detection to control the conversation.
+ * Hands-free voice mode using Deepgram streaming transcription.
+ * Streams raw PCM audio over WebSocket to Deepgram Nova-3,
+ * which handles endpointing (detects when the user stops talking)
+ * and returns full-sentence transcripts.
  *
  * Keywords:
  *   "Hi Naavi"  → wake / start fresh listening
  *   "Thanks"    → submit accumulated speech to orchestrator
  *   "Goodbye"   → exit hands-free mode
+ *
+ * Auto-submit: When Deepgram fires UtteranceEnd (user stopped talking),
+ * accumulated text is submitted automatically — no keyword needed.
+ *
+ * Voice-Confirm (Phase A): After a confirmable action (DRAFT_MESSAGE),
+ * enters 'confirming' state — mic stays open, Robert says yes/no/edit.
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system/legacy';
+import { ExpoPlayAudioStream } from '@mykin-ai/expo-audio-stream';
 import { supabase } from '@/lib/supabase';
+import { loadKeyterms } from '@/lib/loadKeyterms';
 import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
-import { classifyConfirmation, CONFIRM_SILENCE_CHUNKS } from '@/lib/voice-confirm';
+import { classifyConfirmation, CONFIRM_TIMEOUT_MS } from '@/lib/voice-confirm';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -34,6 +42,7 @@ export type HandsfreeState =
 export interface UseHandsfreeModeResult {
   state: HandsfreeState;
   error: string | null;
+  debugLog: string[];
   activate: () => void;
   deactivate: () => void;
 }
@@ -48,12 +57,10 @@ export const KEYWORDS = {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const CHUNK_DURATION_MS = 5000;        // 5-second recording chunks
-const IDLE_TIMEOUT_MS = 60000;         // 60s silence → pause
+const IDLE_TIMEOUT_MS = 60000;         // 60s no speech → pause
 const POST_TTS_DELAY_MS = 1500;        // wait after TTS before reopening mic
-const SILENCE_COUNT_TO_PAUSE = 12;     // 12 × 5s = 60s of silence → pause
-
-const isNative = Platform.OS === 'android' || Platform.OS === 'ios';
+const KEEPALIVE_INTERVAL_MS = 4000;    // send keepalive every 4s during TTS
+const MAX_RECONNECT_ATTEMPTS = 3;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -70,414 +77,496 @@ function stripKeywords(text: string): string {
   return lower.replace(/\s+/g, ' ').trim();
 }
 
+// ─── Deepgram URL builder ───────────────────────────────────────────────────
+
+function buildDeepgramUrl(keyterms: string[]): string {
+  const params = new URLSearchParams({
+    model: 'nova-3',
+    language: 'en',
+    encoding: 'linear16',
+    sample_rate: '16000',
+    channels: '1',
+    interim_results: 'true',
+    utterance_end_ms: '1000',
+    endpointing: '300',
+    vad_events: 'true',
+    smart_format: 'true',
+  });
+
+  // Append keyterms (Deepgram expects repeated keyterm= params)
+  for (const term of keyterms) {
+    params.append('keyterm', term);
+  }
+
+  return `wss://api.deepgram.com/v1/listen?${params.toString()}`;
+}
+
 // ─── Hook ───────────────────────────────────────────────────────────────────
 
 export function useHandsfreeMode(
   orchestratorStatus: OrchestratorStatus,
   sendMessage: (text: string) => Promise<void>,
   speakCue: (text: string) => Promise<void>,
-  onConfirmResponse?: (response: ConfirmResponse, editText?: string) => void,  // generic callback for voice confirmation
+  onConfirmResponse?: (response: ConfirmResponse, editText?: string) => void,
 ): UseHandsfreeModeResult {
   const [state, setState] = useState<HandsfreeState>('inactive');
   const [error, setError] = useState<string | null>(null);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+  const audioChunkCountRef = useRef(0);
+
+  function dbg(msg: string) {
+    console.log(`[Handsfree] ${msg}`);
+    setDebugLog(prev => [...prev.slice(-9), `${new Date().toLocaleTimeString()} ${msg}`]);
+  }
 
   const stateRef = useRef<HandsfreeState>('inactive');
   const pendingTextRef = useRef('');
-  const silenceCountRef = useRef(0);
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const audioStreamActiveRef = useRef(false);
+  const audioSubscriptionRef = useRef<{ remove: () => void } | null>(null);
+  const keepAliveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loopActiveRef = useRef(false);
   const waitingForOrchestratorRef = useRef(false);
+  const reconnectAttemptsRef = useRef(0);
+  const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep stateRef in sync
   useEffect(() => { stateRef.current = state; }, [state]);
+
+  // ── Idle timer management ──
+  function resetIdleTimer() {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = setTimeout(async () => {
+      if (stateRef.current === 'listening' && loopActiveRef.current) {
+        console.log('[Handsfree] Idle timeout — pausing');
+        await stopStreaming();
+        setState('paused');
+        stateRef.current = 'paused';
+        await speakCue('Tap Resume when you need me.');
+      }
+    }, IDLE_TIMEOUT_MS);
+  }
+
+  function clearIdleTimer() {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+  }
+
+  // ── Keep-alive management (during TTS / waiting) ──
+  function startKeepAlive() {
+    stopKeepAlive();
+    keepAliveIntervalRef.current = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'KeepAlive' }));
+      }
+    }, KEEPALIVE_INTERVAL_MS);
+  }
+
+  function stopKeepAlive() {
+    if (keepAliveIntervalRef.current) {
+      clearInterval(keepAliveIntervalRef.current);
+      keepAliveIntervalRef.current = null;
+    }
+  }
+
+  // ── Confirm timeout management ──
+  function startConfirmTimeout() {
+    clearConfirmTimeout();
+    confirmTimeoutRef.current = setTimeout(() => {
+      if (stateRef.current === 'confirming') {
+        console.log('[Handsfree] Confirm timeout — auto-cancelling');
+        exitConfirmState('timeout');
+      }
+    }, CONFIRM_TIMEOUT_MS);
+  }
+
+  function clearConfirmTimeout() {
+    if (confirmTimeoutRef.current) {
+      clearTimeout(confirmTimeoutRef.current);
+      confirmTimeoutRef.current = null;
+    }
+  }
+
+  // ── Get Deepgram temporary token ──
+  async function getDeepgramToken(): Promise<string> {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { data, error: fnError } = await supabase.functions.invoke('deepgram-token');
+    if (fnError || !data?.token) {
+      throw new Error(`Failed to get Deepgram token: ${fnError?.message ?? 'no token'}`);
+    }
+    return data.token;
+  }
+
+  // ── Stop audio streaming ──
+  async function stopAudioStream() {
+    if (audioSubscriptionRef.current) {
+      try { audioSubscriptionRef.current.remove(); } catch (_) { /* ignore */ }
+      audioSubscriptionRef.current = null;
+    }
+    if (audioStreamActiveRef.current) {
+      try {
+        await ExpoPlayAudioStream.stopRecording();
+      } catch (_) { /* already stopped */ }
+      audioStreamActiveRef.current = false;
+    }
+  }
+
+  // ── Start audio streaming to WebSocket ──
+  async function startAudioStream() {
+    await stopAudioStream();
+
+    // Request mic permission
+    const { status } = await Audio.requestPermissionsAsync();
+    if (status !== 'granted') {
+      setError('Microphone permission denied.');
+      return;
+    }
+
+    // Set audio mode for recording
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+      playThroughEarpieceAndroid: false,
+      staysActiveInBackground: false,
+    });
+
+    // Start streaming PCM audio
+    dbg('Starting ExpoPlayAudioStream.startRecording...');
+    audioChunkCountRef.current = 0;
+
+    const { recordingResult, subscription } = await ExpoPlayAudioStream.startRecording({
+      sampleRate: 16000,
+      channels: 1,
+      encoding: 'pcm_16bit',
+      interval: 250, // deliver chunks every 250ms
+      onAudioStream: (event: { data: string; position: number; eventDataSize: number; totalSize: number; soundLevel?: number; fileUri: string }) => {
+        audioChunkCountRef.current++;
+        // Log first few chunks and then every 20th
+        if (audioChunkCountRef.current <= 3 || audioChunkCountRef.current % 20 === 0) {
+          dbg(`Audio chunk #${audioChunkCountRef.current}: ${event.data?.length ?? 0} chars, ws=${wsRef.current?.readyState}`);
+        }
+        // event.data is base64-encoded PCM
+        if (wsRef.current?.readyState === WebSocket.OPEN && event.data) {
+          try {
+            // Decode base64 to binary and send
+            const binaryStr = atob(event.data);
+            const bytes = new Uint8Array(binaryStr.length);
+            for (let i = 0; i < binaryStr.length; i++) {
+              bytes[i] = binaryStr.charCodeAt(i);
+            }
+            wsRef.current.send(bytes.buffer);
+          } catch (sendErr) {
+            dbg(`Send failed: ${sendErr}`);
+          }
+        }
+      },
+    });
+
+    audioSubscriptionRef.current = subscription ?? null;
+    audioStreamActiveRef.current = true;
+    dbg(`Audio stream started. result: ${JSON.stringify(recordingResult)}`);
+  }
+
+  // ── Exit confirm state and fire callback ──
+  function exitConfirmState(response: ConfirmResponse, editText?: string) {
+    clearConfirmTimeout();
+    waitingForOrchestratorRef.current = true;
+    setState('waiting');
+    stateRef.current = 'waiting';
+    onConfirmResponse?.(response, editText);
+  }
+
+  // ── Process finalized transcript ──
+  function processTranscript(transcript: string) {
+    if (!transcript.trim()) return;
+
+    console.log(`[Handsfree] Final transcript: "${transcript}"`);
+    resetIdleTimer();
+
+    // ── If in confirming state, classify the response ──
+    if (stateRef.current === 'confirming') {
+      console.log(`[Handsfree] Confirm transcript: "${transcript}"`);
+      const classification = classifyConfirmation(transcript);
+      console.log(`[Handsfree] Classification: ${classification}`);
+
+      if (classification === 'confirm') {
+        exitConfirmState('confirm');
+      } else if (classification === 'cancel') {
+        exitConfirmState('cancel');
+      } else {
+        exitConfirmState('edit', transcript);
+      }
+      return;
+    }
+
+    // EXIT: goodbye
+    if (matchKeyword(transcript, KEYWORDS.EXIT)) {
+      console.log('[Handsfree] EXIT keyword detected');
+      loopActiveRef.current = false;
+      stopStreaming().then(() => {
+        setState('inactive');
+        stateRef.current = 'inactive';
+        speakCue('Goodbye Robert. Talk to you soon.');
+      });
+      return;
+    }
+
+    // SUBMIT: thanks / over
+    if (matchKeyword(transcript, KEYWORDS.SUBMIT)) {
+      const cleaned = stripKeywords(transcript);
+      if (cleaned) pendingTextRef.current += (pendingTextRef.current ? ' ' : '') + cleaned;
+
+      const messageToSend = pendingTextRef.current.trim();
+      if (messageToSend) {
+        console.log(`[Handsfree] SUBMIT: "${messageToSend}"`);
+        submitMessage(messageToSend);
+      }
+      return;
+    }
+
+    // WAKE: hi naavi — reset and start fresh
+    if (matchKeyword(transcript, KEYWORDS.WAKE)) {
+      console.log('[Handsfree] WAKE keyword — starting fresh');
+      pendingTextRef.current = '';
+      const cleaned = stripKeywords(transcript);
+      if (cleaned) pendingTextRef.current = cleaned;
+      return;
+    }
+
+    // Regular speech — accumulate
+    pendingTextRef.current += (pendingTextRef.current ? ' ' : '') + transcript;
+    console.log(`[Handsfree] Accumulated: "${pendingTextRef.current}"`);
+  }
+
+  // ── Handle UtteranceEnd — auto-submit or timeout confirm ──
+  function handleUtteranceEnd() {
+    // In confirming state, UtteranceEnd after speech is handled by processTranscript
+    // (classification already fired). Nothing extra needed here.
+    if (stateRef.current === 'confirming') return;
+
+    // Normal mode — auto-submit accumulated text
+    const messageToSend = pendingTextRef.current.trim();
+    if (messageToSend) {
+      console.log(`[Handsfree] UtteranceEnd — auto-submit: "${messageToSend}"`);
+      submitMessage(messageToSend);
+    }
+  }
+
+  // ── Submit accumulated message to orchestrator ──
+  async function submitMessage(text: string) {
+    console.log(`[Handsfree] Submitting: "${text}"`);
+
+    // Pause audio but keep WebSocket alive
+    await stopAudioStream();
+    startKeepAlive();
+    clearIdleTimer();
+
+    setState('waiting');
+    stateRef.current = 'waiting';
+    waitingForOrchestratorRef.current = true;
+    pendingTextRef.current = '';
+
+    await sendMessage(text);
+  }
+
+  // ── Start Deepgram WebSocket streaming ──
+  async function startStreaming() {
+    if (loopActiveRef.current) return;
+    loopActiveRef.current = true;
+
+    try {
+      setState('listening');
+      stateRef.current = 'listening';
+
+      // Load keyterms (contact names) and get auth token
+      const [keyterms, token] = await Promise.all([
+        loadKeyterms(),
+        getDeepgramToken(),
+      ]);
+
+      if (!loopActiveRef.current) return; // deactivated during token fetch
+
+      const url = buildDeepgramUrl(keyterms);
+      dbg(`Connecting to Deepgram (${keyterms.length} keyterms), key len=${token.length}...`);
+
+      // Sec-WebSocket-Protocol with raw API key (not temp token) — per Deepgram docs
+      const ws = new WebSocket(url, ['token', token]);
+      wsRef.current = ws;
+
+      ws.onopen = async () => {
+        dbg('Deepgram WS connected');
+        reconnectAttemptsRef.current = 0;
+        setError(null);
+
+        // Start streaming audio
+        await startAudioStream();
+        resetIdleTimer();
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data as string);
+
+          if (msg.type === 'Results') {
+            const transcript = msg.channel?.alternatives?.[0]?.transcript ?? '';
+            const isFinal = msg.is_final === true;
+
+            if (transcript) {
+              resetIdleTimer(); // Any speech resets idle timer
+            }
+
+            if (isFinal && transcript) {
+              processTranscript(transcript);
+            }
+          }
+
+          if (msg.type === 'UtteranceEnd') {
+            handleUtteranceEnd();
+          }
+
+        } catch (parseErr) {
+          console.error('[Handsfree] Failed to parse Deepgram message:', parseErr);
+        }
+      };
+
+      ws.onerror = (event) => {
+        console.error('[Handsfree] WebSocket error:', event);
+      };
+
+      ws.onclose = (event) => {
+        dbg(`WS closed: code=${event.code} reason="${event.reason}" chunks=${audioChunkCountRef.current}`);
+        wsRef.current = null;
+
+        // If still supposed to be active, try to reconnect
+        if (loopActiveRef.current && (stateRef.current === 'listening' || stateRef.current === 'confirming')) {
+          handleReconnect();
+        }
+      };
+
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Handsfree] startStreaming error:', msg);
+      setError(`Hands-free failed: ${msg}`);
+      loopActiveRef.current = false;
+      setState('paused');
+      stateRef.current = 'paused';
+    }
+  }
+
+  // ── Reconnection with exponential backoff ──
+  async function handleReconnect() {
+    reconnectAttemptsRef.current++;
+
+    if (reconnectAttemptsRef.current > MAX_RECONNECT_ATTEMPTS) {
+      console.log('[Handsfree] Max reconnect attempts reached — pausing');
+      reconnectAttemptsRef.current = 0;
+      loopActiveRef.current = false;
+      setError('Connection lost. Tap Resume to try again.');
+      setState('paused');
+      stateRef.current = 'paused';
+      await speakCue('I lost the connection. Tap Resume when ready.');
+      return;
+    }
+
+    const delay = 1000 * Math.pow(2, reconnectAttemptsRef.current); // 2s, 4s, 8s
+    console.log(`[Handsfree] Reconnecting in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS})...`);
+
+    await new Promise(resolve => setTimeout(resolve, delay));
+
+    if (loopActiveRef.current && (stateRef.current === 'listening' || stateRef.current === 'confirming')) {
+      loopActiveRef.current = false; // Reset so startStreaming can set it
+      await startStreaming();
+    }
+  }
+
+  // ── Stop everything ──
+  async function stopStreaming() {
+    loopActiveRef.current = false;
+    clearIdleTimer();
+    clearConfirmTimeout();
+    stopKeepAlive();
+
+    await stopAudioStream();
+
+    if (wsRef.current) {
+      try {
+        if (wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'CloseStream' }));
+        }
+        wsRef.current.close();
+      } catch (_) { /* ignore */ }
+      wsRef.current = null;
+    }
+  }
 
   // ── Watch orchestrator status: when it goes idle after 'waiting', resume listening ──
   useEffect(() => {
     if (!waitingForOrchestratorRef.current) return;
     if (orchestratorStatus === 'idle' && (stateRef.current === 'waiting' || stateRef.current === 'confirming')) {
       waitingForOrchestratorRef.current = false;
+      stopKeepAlive();
+      clearConfirmTimeout();
+
       // Delay before reopening mic (prevents picking up TTS audio)
-      setTimeout(() => {
+      setTimeout(async () => {
         if (stateRef.current === 'waiting' || stateRef.current === 'paused' || stateRef.current === 'confirming') {
           console.log('[Handsfree] Orchestrator done, resuming listening');
           pendingTextRef.current = '';
-          silenceCountRef.current = 0;
+
           setState('listening');
           stateRef.current = 'listening';
-          startRecordingLoop();
+
+          // If WebSocket is still open, just restart audio
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            await startAudioStream();
+            resetIdleTimer();
+          } else {
+            // WebSocket was closed during TTS — reconnect
+            loopActiveRef.current = false;
+            await startStreaming();
+          }
         }
       }, POST_TTS_DELAY_MS);
     }
   }, [orchestratorStatus]);
 
   // ── Watch for pending_confirm: enter confirming state after TTS finishes ──
-  const confirmLoopActiveRef = useRef(false);
   useEffect(() => {
-    // Only enter confirming if we're in hands-free mode and orchestrator needs confirmation
     if (orchestratorStatus !== 'pending_confirm') return;
     if (stateRef.current === 'inactive') return;
     if (stateRef.current === 'confirming') return; // already confirming
 
     console.log('[Handsfree] Orchestrator needs confirmation — entering confirming state');
     // Delay to let TTS finish before opening mic
-    setTimeout(() => {
+    setTimeout(async () => {
       if (stateRef.current === 'inactive') return;
       setState('confirming');
       stateRef.current = 'confirming';
-      startConfirmLoop();
+      startConfirmTimeout();
+
+      // If WebSocket is still open, just restart audio stream
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        await startAudioStream();
+      } else {
+        // Need to reconnect
+        loopActiveRef.current = false;
+        await startStreaming();
+      }
     }, POST_TTS_DELAY_MS);
   }, [orchestratorStatus]);
 
-  // ── Confirmation recording loop ──
-  async function startConfirmLoop() {
-    if (confirmLoopActiveRef.current) return;
-    confirmLoopActiveRef.current = true;
-    let confirmSilenceCount = 0;
-
-    console.log('[Handsfree] Confirm loop started');
-
-    try {
-      while (confirmLoopActiveRef.current && stateRef.current === 'confirming') {
-        const chunk = await recordChunk();
-
-        if (!confirmLoopActiveRef.current || stateRef.current !== 'confirming') break;
-
-        if (!chunk) {
-          confirmSilenceCount++;
-          if (confirmSilenceCount >= CONFIRM_SILENCE_CHUNKS) {
-            console.log('[Handsfree] Confirm timeout — auto-cancelling');
-            confirmLoopActiveRef.current = false;
-            waitingForOrchestratorRef.current = true;
-            setState('waiting');
-            stateRef.current = 'waiting';
-            onConfirmResponse?.('timeout');
-            break;
-          }
-          continue;
-        }
-
-        // Transcribe
-        const transcript = await transcribe(chunk.base64, chunk.mimeType);
-        if (!confirmLoopActiveRef.current || stateRef.current !== 'confirming') break;
-
-        if (!transcript) {
-          confirmSilenceCount++;
-          if (confirmSilenceCount >= CONFIRM_SILENCE_CHUNKS) {
-            console.log('[Handsfree] Confirm timeout — auto-cancelling');
-            confirmLoopActiveRef.current = false;
-            waitingForOrchestratorRef.current = true;
-            setState('waiting');
-            stateRef.current = 'waiting';
-            onConfirmResponse?.('timeout');
-            break;
-          }
-          continue;
-        }
-
-        // Got speech — classify it
-        confirmSilenceCount = 0;
-        console.log(`[Handsfree] Confirm transcript: "${transcript}"`);
-        const classification = classifyConfirmation(transcript);
-        console.log(`[Handsfree] Classification: ${classification}`);
-
-        confirmLoopActiveRef.current = false;
-
-        if (classification === 'confirm') {
-          waitingForOrchestratorRef.current = true;
-          setState('waiting');
-          stateRef.current = 'waiting';
-          onConfirmResponse?.('confirm');
-        } else if (classification === 'cancel') {
-          waitingForOrchestratorRef.current = true;
-          setState('waiting');
-          stateRef.current = 'waiting';
-          onConfirmResponse?.('cancel');
-        } else {
-          // Edit — send the transcript back as a free-form edit
-          waitingForOrchestratorRef.current = true;
-          setState('waiting');
-          stateRef.current = 'waiting';
-          onConfirmResponse?.('edit', transcript);
-        }
-        break;
-      }
-    } catch (loopErr) {
-      const msg = loopErr instanceof Error ? loopErr.message : String(loopErr);
-      console.error('[Handsfree] Confirm loop crashed:', msg);
-      setError(`Confirmation failed: ${msg}`);
-    } finally {
-      confirmLoopActiveRef.current = false;
-      if (recordingRef.current) {
-        try { await recordingRef.current.stopAndUnloadAsync(); } catch (_) { /* ignore */ }
-        recordingRef.current = null;
-      }
-      console.log('[Handsfree] Confirm loop ended');
-    }
-  }
-
-  // ── Record one 5-second chunk and return base64 ──
-  async function recordChunk(): Promise<{ base64: string; mimeType: string } | null> {
-    try {
-      // Clean up any leftover recording — Android only allows one at a time
-      if (recordingRef.current) {
-        try {
-          await recordingRef.current.stopAndUnloadAsync();
-        } catch (_) { /* already stopped */ }
-        recordingRef.current = null;
-      }
-
-      console.log('[Handsfree] Requesting mic permission...');
-      const { status } = await Audio.requestPermissionsAsync();
-      if (status !== 'granted') {
-        setError('Microphone permission denied.');
-        return null;
-      }
-
-      console.log('[Handsfree] Setting audio mode for recording...');
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        playThroughEarpieceAndroid: false,
-        staysActiveInBackground: false,
-      });
-
-      console.log('[Handsfree] Starting 5s recording...');
-      const { recording } = await Audio.Recording.createAsync({
-        android: {
-          extension: '.m4a',
-          outputFormat: 2,      // MPEG_4
-          audioEncoder: 3,      // AAC
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 64000,
-        },
-        ios: {
-          extension: '.m4a',
-          outputFormat: 'aac',
-          audioQuality: 32,
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 32000,
-          linearPCMBitDepth: 16,
-          linearPCMIsBigEndian: false,
-          linearPCMIsFloat: false,
-        },
-        web: { mimeType: 'audio/webm', bitsPerSecond: 32000 },
-      });
-
-      recordingRef.current = recording;
-
-      // Wait for chunk duration
-      await new Promise(resolve => setTimeout(resolve, CHUNK_DURATION_MS));
-
-      // Stop recording — check it's still the same recording (not deactivated)
-      if (recordingRef.current !== recording) {
-        console.log('[Handsfree] Recording was replaced during wait — skipping');
-        return null;
-      }
-
-      await recording.stopAndUnloadAsync();
-      recordingRef.current = null;
-
-      const uri = recording.getURI();
-      console.log('[Handsfree] Recording URI:', uri);
-      if (!uri) {
-        console.error('[Handsfree] No URI from recording');
-        return null;
-      }
-
-      if (isNative) {
-        const base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        console.log(`[Handsfree] Got base64 audio: ${base64.length} chars`);
-        return { base64, mimeType: 'audio/m4a' };
-      } else {
-        // Web fallback — not primary target but kept for testing
-        return null;
-      }
-
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[Handsfree] Record error:', msg);
-      setError(`Recording failed: ${msg}`);
-      // Debug alerts removed — errors show via setError() on screen
-      recordingRef.current = null;
-      return null;
-    }
-  }
-
-  // ── Send audio to Google Cloud STT ──
-  async function transcribe(base64: string, mimeType: string): Promise<string> {
-    try {
-      console.log(`[Handsfree] Sending ${base64.length} chars to transcribe-google...`);
-      const { data, error: fnError } = await supabase.functions.invoke('transcribe-google', {
-        body: { audio: base64, mimeType, language: 'en' },
-      });
-
-      if (fnError) {
-        console.error('[Handsfree] Transcribe error:', fnError.message);
-        setError(`Transcribe failed: ${fnError.message}`);
-        return '';
-      }
-
-      console.log('[Handsfree] Transcribe result:', JSON.stringify(data));
-      return data?.transcript ?? '';
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[Handsfree] Transcribe exception:', msg);
-      setError(`Transcribe exception: ${msg}`);
-      return '';
-    }
-  }
-
-  // ── Main recording loop ──
-  async function startRecordingLoop() {
-    if (loopActiveRef.current) return;
-    loopActiveRef.current = true;
-
-    console.log('[Handsfree] Recording loop started');
-
-    try {
-    while (loopActiveRef.current && stateRef.current === 'listening') {
-      const chunk = await recordChunk();
-
-      // Check if we were deactivated during recording
-      if (!loopActiveRef.current || stateRef.current !== 'listening') break;
-
-      if (!chunk) {
-        silenceCountRef.current++;
-        if (silenceCountRef.current >= SILENCE_COUNT_TO_PAUSE) {
-          console.log('[Handsfree] Idle timeout — pausing');
-          setState('paused');
-          stateRef.current = 'paused';
-          await speakCue("I'll be here when you need me. Say Hi Naavi to continue.");
-          break;
-        }
-        continue;
-      }
-
-      // Transcribe
-      setState('processing');
-      stateRef.current = 'processing';
-      const transcript = await transcribe(chunk.base64, chunk.mimeType);
-
-      // Check if deactivated during transcription
-      if (!loopActiveRef.current) break;
-
-      if (!transcript) {
-        // Silence — no hallucination, just record next chunk
-        silenceCountRef.current++;
-        if (silenceCountRef.current >= SILENCE_COUNT_TO_PAUSE) {
-          console.log('[Handsfree] Idle timeout — pausing');
-          setState('paused');
-          stateRef.current = 'paused';
-          await speakCue("I'll be here when you need me. Say Hi Naavi to continue.");
-          break;
-        }
-        setState('listening');
-        stateRef.current = 'listening';
-        continue;
-      }
-
-      // Got speech — reset silence counter
-      silenceCountRef.current = 0;
-      console.log(`[Handsfree] Transcript: "${transcript}"`);
-
-      // ── Keyword detection ──
-
-      // EXIT: goodbye
-      if (matchKeyword(transcript, KEYWORDS.EXIT)) {
-        console.log('[Handsfree] EXIT keyword detected');
-        loopActiveRef.current = false;
-        setState('inactive');
-        stateRef.current = 'inactive';
-        await speakCue('Goodbye Robert. Talk to you soon.');
-        break;
-      }
-
-      // SUBMIT: thanks / over
-      if (matchKeyword(transcript, KEYWORDS.SUBMIT)) {
-        // Add any speech before the keyword to pending
-        const cleaned = stripKeywords(transcript);
-        if (cleaned) pendingTextRef.current += (pendingTextRef.current ? ' ' : '') + cleaned;
-
-        const messageToSend = pendingTextRef.current.trim();
-        if (messageToSend) {
-          console.log(`[Handsfree] SUBMIT: "${messageToSend}"`);
-          setState('waiting');
-          stateRef.current = 'waiting';
-          waitingForOrchestratorRef.current = true;
-          loopActiveRef.current = false;
-          pendingTextRef.current = '';
-          await sendMessage(messageToSend);
-        } else {
-          // No accumulated text — keep listening
-          setState('listening');
-          stateRef.current = 'listening';
-        }
-        break;
-      }
-
-      // WAKE: hi naavi — reset and start fresh
-      if (matchKeyword(transcript, KEYWORDS.WAKE)) {
-        console.log('[Handsfree] WAKE keyword — starting fresh');
-        pendingTextRef.current = '';
-        const cleaned = stripKeywords(transcript);
-        if (cleaned) pendingTextRef.current = cleaned;
-        setState('listening');
-        stateRef.current = 'listening';
-        continue;
-      }
-
-      // Regular speech — accumulate
-      pendingTextRef.current += (pendingTextRef.current ? ' ' : '') + transcript;
-      console.log(`[Handsfree] Accumulated: "${pendingTextRef.current}"`);
-      setState('listening');
-      stateRef.current = 'listening';
-    }
-    } catch (loopErr) {
-      // Watchdog: any unexpected error in the loop should not leave the user stuck.
-      const msg = loopErr instanceof Error ? loopErr.message : String(loopErr);
-      console.error('[Handsfree] Loop crashed:', msg);
-      setError(`Hands-free stopped unexpectedly: ${msg}`);
-    } finally {
-      loopActiveRef.current = false;
-      // If the loop ended while still in an "active" state, reset to paused
-      // so the user can tap the button to restart. Don't override 'inactive', 'paused', or 'confirming'.
-      if (stateRef.current === 'listening' || stateRef.current === 'processing') {
-        console.log('[Handsfree] Loop ended in active state — resetting to paused');
-        setState('paused');
-        stateRef.current = 'paused';
-      }
-      // Clean up any leftover recording so the next activation starts clean
-      if (recordingRef.current) {
-        try { await recordingRef.current.stopAndUnloadAsync(); } catch (_) { /* ignore */ }
-        recordingRef.current = null;
-      }
-      console.log('[Handsfree] Recording loop ended');
-    }
-  }
-
   // ── Activate hands-free mode (self-healing) ──
-  // Always force-cleans any leftover state before starting fresh, so tapping
-  // the button always works even if the loop got stuck.
   const activate = useCallback(async () => {
     console.log('[Handsfree] Activate requested — current state:', stateRef.current);
 
-    // Force cleanup of any prior session (stuck loop, leftover recording, etc.)
-    loopActiveRef.current = false;
-    confirmLoopActiveRef.current = false;
+    // Force cleanup of any prior session
+    await stopStreaming();
     waitingForOrchestratorRef.current = false;
     pendingTextRef.current = '';
-    silenceCountRef.current = 0;
-
-    if (recordingRef.current) {
-      try {
-        await recordingRef.current.stopAndUnloadAsync();
-      } catch (_) { /* already stopped */ }
-      recordingRef.current = null;
-    }
+    reconnectAttemptsRef.current = 0;
 
     setError(null);
     setState('listening');
@@ -485,28 +574,23 @@ export function useHandsfreeMode(
 
     await speakCue("I'm listening.");
 
-    startRecordingLoop();
+    // Wait for speaker to release audio focus before opening the mic
+    await new Promise(resolve => setTimeout(resolve, POST_TTS_DELAY_MS));
+
+    await startStreaming();
   }, []);
 
   // ── Deactivate hands-free mode ──
   const deactivate = useCallback(async () => {
     console.log('[Handsfree] Deactivating');
-    loopActiveRef.current = false;
-    confirmLoopActiveRef.current = false;
+    await stopStreaming();
     waitingForOrchestratorRef.current = false;
     pendingTextRef.current = '';
 
-    // Stop any in-progress recording
-    if (recordingRef.current) {
-      try {
-        await recordingRef.current.stopAndUnloadAsync();
-      } catch {}
-      recordingRef.current = null;
-    }
-
+    setError(null);
     setState('inactive');
     stateRef.current = 'inactive';
   }, []);
 
-  return { state, error, activate, deactivate };
+  return { state, error, debugLog, activate, deactivate };
 }
