@@ -47,7 +47,7 @@ serve(async (req) => {
   const body = await req.json();
   const { title, content } = body;
 
-  if (!title || content === undefined || content === null) {
+  if (!title || !content) {
     return new Response(JSON.stringify({ error: 'Missing title or content' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
