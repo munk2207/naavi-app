@@ -183,9 +183,10 @@ export async function readList(listName: string): Promise<ListResult> {
   if (!list) return { success: false, error: `List "${listName}" not found` };
 
   const content = await readDriveFile(list.drive_file_id);
-  // Parse items — skip the first line (list name/title)
+  // Parse items — skip the first line only if it matches the list name (legacy lists had title as content)
   const allLines = content.split('\n').filter(l => l.trim());
-  const items = allLines.length > 1 ? allLines.slice(1) : [];
+  const firstLineIsTitle = allLines.length > 0 && allLines[0].toLowerCase().trim() === listName.toLowerCase().trim();
+  const items = firstLineIsTitle ? allLines.slice(1) : allLines;
 
   console.log(`[Lists] Read "${listName}" — ${items.length} items`);
   return { success: true, list, items };
