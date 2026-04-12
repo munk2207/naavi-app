@@ -75,7 +75,7 @@ export async function createList(name: string, category: string = 'other'): Prom
 
   // Create a Google Doc via save-to-drive
   const { data, error } = await supabase.functions.invoke('save-to-drive', {
-    body: { title: name, content: `${name}\n` },
+    body: { title: name, content: '' },
   });
   if (error || !data?.fileId) {
     return { success: false, error: error?.message ?? 'Failed to create Drive doc' };
@@ -174,9 +174,9 @@ export async function readList(listName: string): Promise<ListResult> {
   if (!list) return { success: false, error: `List "${listName}" not found` };
 
   const content = await readDriveFile(list.drive_file_id);
-  // Parse items — skip the first line (list name/title)
+  // Parse items — skip any line that matches the list name (legacy docs had title as first line)
   const allLines = content.split('\n').filter(l => l.trim());
-  const items = allLines.length > 1 ? allLines.slice(1) : [];
+  const items = allLines.filter(l => l.trim().toLowerCase() !== list.name.toLowerCase());
 
   console.log(`[Lists] Read "${listName}" — ${items.length} items`);
   return { success: true, list, items };
