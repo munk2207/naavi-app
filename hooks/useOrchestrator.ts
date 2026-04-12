@@ -26,7 +26,9 @@ import { registry } from '@/lib/adapters/registry';
 import { createList, addToList, removeFromList, readList } from '@/lib/lists';
 import type { StorageFile, NavigationResult } from '@/lib/types';
 
-export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'error';
+import { isConfirmable, buildActionSummary, SPEECH, type PendingAction } from '@/lib/voice-confirm';
+
+export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'pending_confirm' | 'error';
 
 export interface ConversationTurn {
   userMessage: string;
@@ -46,6 +48,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const [status, setStatus] = useState<OrchestratorStatus>('idle');
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const pendingActionRef = useRef<PendingAction | null>(null);
 
   // Always-current ref — send() reads this so it never uses a stale brief
   const briefRef = useRef(briefItems);
@@ -62,6 +66,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
   const send = useCallback(async (userMessage: string) => {
     if (status === 'thinking' || status === 'speaking') return;
+    // Clear any pending confirm when a new message comes in (edit flow)
+    if (pendingActionRef.current) {
+      pendingActionRef.current = null;
+      setPendingAction(null);
+    }
 
     _speechStopped = false;
     setStatus('thinking');
@@ -470,9 +479,78 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
       }
 
+      // Check if this turn has a confirmable action (Phase A: DRAFT_MESSAGE)
+      const confirmableDraft = turnDrafts.find(d => isConfirmable(d));
+      const turnIndex = turns.length; // index of the turn being added
+
+      if (confirmableDraft) {
+        // Build execute function that mirrors DraftCard's handleSend logic
+        const pending: PendingAction = {
+          id: `pending-${Date.now()}`,
+          action: confirmableDraft,
+          summary: buildActionSummary(confirmableDraft),
+          turnIndex,
+          execute: async () => {
+            const action = confirmableDraft;
+            const channel = String(action.channel ?? 'email').toLowerCase() as 'email' | 'sms' | 'whatsapp';
+            const to = String(action.to ?? '').trim();
+            const isMsg = channel === 'sms' || channel === 'whatsapp';
+
+            try {
+              if (isMsg) {
+                const stripped = to.replace(/[^+\d]/g, '');
+                let phone = stripped.startsWith('+') ? stripped
+                           : /^\d{10}$/.test(stripped) ? `+1${stripped}`
+                           : /^\d{7,15}$/.test(stripped) ? `+${stripped}`
+                           : null;
+                if (!phone) {
+                  const contact = await lookupContact(to);
+                  phone = contact?.phone ?? null;
+                }
+                if (!phone) return { ok: false, speech: SPEECH.GENERIC_ERROR };
+
+                const { data, error: fnErr } = await supabase.functions.invoke('send-sms', {
+                  body: { to: phone, body: String(action.body ?? ''), channel },
+                });
+                if (fnErr || !data?.success) return { ok: false, speech: SPEECH.GENERIC_ERROR };
+                return { ok: true, speech: SPEECH.SENT };
+              } else {
+                let email = to.includes('@') ? to : null;
+                if (!email) {
+                  const contact = await lookupContact(to);
+                  email = contact?.email ?? null;
+                }
+                if (!email) return { ok: false, speech: SPEECH.GENERIC_ERROR };
+
+                const result = await registry.email.send({
+                  to:      [{ name: email !== to ? to : '', email }],
+                  subject: String(action.subject ?? ''),
+                  body:    String(action.body    ?? ''),
+                });
+                return result.success
+                  ? { ok: true, speech: SPEECH.SENT }
+                  : { ok: false, speech: SPEECH.GENERIC_ERROR };
+              }
+            } catch {
+              return { ok: false, speech: SPEECH.GENERIC_ERROR };
+            }
+          },
+        };
+
+        pendingActionRef.current = pending;
+        setPendingAction(pending);
+      }
+
       // Speak concurrently — text appears and voice starts at the same time
       setStatus('speaking');
-      speakResponse(finalSpeech, language).then(() => setStatus('idle')).catch(() => setStatus('idle'));
+      speakResponse(finalSpeech, language).then(() => {
+        // If there's a confirmable action, wait for voice confirmation instead of going idle
+        if (pendingActionRef.current) {
+          setStatus('pending_confirm');
+        } else {
+          setStatus('idle');
+        }
+      }).catch(() => setStatus('idle'));
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -481,8 +559,64 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     }
   }, [status, language]);
 
+  // ── Voice-confirm actions ──────────────────────────────────────────────────
+
+  const confirmPending = useCallback(async () => {
+    const pending = pendingActionRef.current;
+    if (!pending) return;
+
+    pendingActionRef.current = null;
+    setPendingAction(null);
+    setStatus('speaking');
+
+    const result = await pending.execute();
+
+    // Mark the DraftCard as sent in the turn (update the turn's draft)
+    if (result.ok) {
+      setTurns(prev => {
+        const updated = [...prev];
+        const turn = updated[pending.turnIndex];
+        if (turn) {
+          // Mark draft as voice-confirmed so DraftCard shows "sent" state
+          const draftIndex = turn.drafts.indexOf(pending.action);
+          if (draftIndex >= 0) {
+            const updatedDraft = { ...turn.drafts[draftIndex], _voiceConfirmed: true };
+            const updatedDrafts = [...turn.drafts];
+            updatedDrafts[draftIndex] = updatedDraft;
+            updated[pending.turnIndex] = { ...turn, drafts: updatedDrafts };
+          }
+        }
+        return updated;
+      });
+    }
+
+    // Speak the outcome
+    await speakResponse(result.speech, language);
+    setStatus('idle');
+  }, [language]);
+
+  const cancelPending = useCallback(async (speechOverride?: string) => {
+    pendingActionRef.current = null;
+    setPendingAction(null);
+    const speech = speechOverride ?? SPEECH.CANCELLED;
+    if (speech) {
+      setStatus('speaking');
+      await speakResponse(speech, language);
+    }
+    setStatus('idle');
+  }, [language]);
+
+  const editPending = useCallback(async (editText: string) => {
+    pendingActionRef.current = null;
+    setPendingAction(null);
+    // Re-send to Claude as a follow-up message — Claude will re-draft
+    await send(editText);
+  }, [send]);
+
   const clearHistory = useCallback(() => {
     stopSpeaking();
+    pendingActionRef.current = null;
+    setPendingAction(null);
     setTurns([]);
     setError(null);
     setStatus('idle');
@@ -494,10 +628,17 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
   const stopAndReset = useCallback(() => {
     stopSpeaking();
+    pendingActionRef.current = null;
+    setPendingAction(null);
     setStatus('idle');
   }, []);
 
-  return { status, turns, error, send, clearHistory, loadHistory, stopSpeaking: stopAndReset };
+  return {
+    status, turns, error, send, clearHistory, loadHistory,
+    stopSpeaking: stopAndReset,
+    // Voice-confirm
+    pendingAction, confirmPending, cancelPending, editPending,
+  };
 }
 
 // ─── Speech sanitiser ─────────────────────────────────────────────────────────

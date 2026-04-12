@@ -10,7 +10,7 @@
  * Phase 7.5: voice recording via expo-av replaces the text input
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -270,9 +270,9 @@ async function enrichWithTravelTime(items: BriefItem[]): Promise<BriefItem[]> {
 
 // ─── Draft card component ─────────────────────────────────────────────────────
 
-function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviAction }) {
+function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-client').NaaviAction; onManualSend?: () => void }) {
   const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState(false);
+  const [sent, setSent] = useState((action as any)._voiceConfirmed === true);
   const [sendError, setSendError] = useState<string | null>(null);
   const [resolvedContact, setResolvedContact] = useState<string | null>(null);
 
@@ -293,6 +293,8 @@ function DraftCard({ action }: { action: import('@/lib/naavi-client').NaaviActio
   }, [action.to]);
 
   async function handleSend() {
+    // If voice-confirm is active for this draft, clear it (tap overrides voice)
+    onManualSend?.();
     setSending(true);
     setSendError(null);
 
@@ -581,7 +583,7 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [brief]);
 
-  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking } = useOrchestrator('en', brief, avoidHighwaysRef.current);
+  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, pendingAction, confirmPending, cancelPending, editPending } = useOrchestrator('en', brief, avoidHighwaysRef.current);
 
   // Re-check highway preference after each turn so DELETE_MEMORY takes effect immediately
   useEffect(() => {
@@ -643,7 +645,20 @@ export default function HomeScreen() {
     });
   });
 
-  const handsfree = useHandsfreeMode(status, send, speakCueRef.current);
+  // Voice-confirm callback: hands-free reports what Robert said during confirmation
+  const handleConfirmResponse = useCallback((response: 'confirm' | 'cancel' | 'timeout' | 'edit', editText?: string) => {
+    if (response === 'confirm') {
+      confirmPending();
+    } else if (response === 'cancel') {
+      cancelPending();
+    } else if (response === 'timeout') {
+      cancelPending("I didn't hear a confirmation. The draft is still here when you're ready.");
+    } else if (response === 'edit' && editText) {
+      editPending(editText);
+    }
+  }, [confirmPending, cancelPending, editPending]);
+
+  const handsfree = useHandsfreeMode(status, send, speakCueRef.current, handleConfirmResponse);
 
   // Auto-activate hands-free when app is opened via "Hey Google" (naavi:// deep link)
   const handsfreeActivatedRef = useRef(false);
@@ -765,10 +780,11 @@ export default function HomeScreen() {
   }
 
   const statusLabel = {
-    idle:       '',
-    thinking:   t('home.thinking'),
-    speaking:   '',
-    error:      error ?? t('errors.apiError'),
+    idle:            '',
+    thinking:        t('home.thinking'),
+    speaking:        '',
+    pending_confirm: '',
+    error:           error ?? t('errors.apiError'),
   }[status];
 
   return (
@@ -1023,7 +1039,11 @@ export default function HomeScreen() {
 
               {/* Draft emails */}
               {turn.drafts.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => (
-                <DraftCard key={i} action={action} />
+                <DraftCard
+                  key={i}
+                  action={action}
+                  onManualSend={pendingAction && pendingAction.action === action ? () => cancelPending('') : undefined}
+                />
               ))}
 
               {/* Contact saved */}
@@ -1278,6 +1298,15 @@ export default function HomeScreen() {
             <Text style={styles.handsfreeBannerText}>
               {status === 'thinking' ? 'Thinking…' : status === 'speaking' ? 'Speaking…' : 'Working…'}
             </Text>
+          </View>
+        )}
+        {handsfree.state === 'confirming' && (
+          <View style={[styles.handsfreeBanner, { backgroundColor: '#E67E22' }]}>
+            <View style={styles.handsfreePulse} />
+            <Text style={styles.handsfreeBannerText}>Say yes to send or no to cancel</Text>
+            <TouchableOpacity onPress={handsfree.deactivate} style={styles.handsfreeStopBtn}>
+              <Text style={styles.handsfreeStopText}>End</Text>
+            </TouchableOpacity>
           </View>
         )}
         {(handsfree.state === 'wake_listen' || handsfree.state === 'paused') && (
