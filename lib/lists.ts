@@ -75,7 +75,7 @@ export async function createList(name: string, category: string = 'other'): Prom
 
   // Create a Google Doc via save-to-drive
   const { data, error } = await supabase.functions.invoke('save-to-drive', {
-    body: { title: name, content: `${name}\n` },
+    body: { title: name, content: '' },
   });
   if (error || !data?.fileId) {
     return { success: false, error: error?.message ?? 'Failed to create Drive doc' };
@@ -95,6 +95,15 @@ export async function createList(name: string, category: string = 'other'): Prom
     console.error('[Lists] Insert failed:', insertError.message);
     return { success: false, error: insertError.message };
   }
+
+  // Also insert into naavi_notes so the list shows in Drive Notes tab
+  await supabase.from('naavi_notes').insert({
+    user_id: userId,
+    title: name,
+    web_view_link: webViewLink,
+  }).then(({ error: notesErr }) => {
+    if (notesErr) console.error('[Lists] naavi_notes insert failed:', notesErr.message);
+  });
 
   console.log(`[Lists] Created "${name}" — ${data.fileId}`);
   return {
