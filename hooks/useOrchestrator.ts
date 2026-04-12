@@ -125,7 +125,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       }
 
       // Check if this is a broad knowledge query — fetch memories directly
-      const isBroadQuery = /\b(all|list|everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
+      const isBroadQuery = /\b(all|list all|list everything|everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
 
       const [response, knowledgeResult] = await Promise.all([
         sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language),
@@ -461,9 +461,18 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       setTurns(prev => [...prev, newTurn]);
       saveConversationTurn(newTurn).catch(() => {});
 
+      // Build final speech — append list items for LIST_READ so Naavi reads them aloud
+      let finalSpeech = response.speech;
+      for (const lr of turnLists) {
+        if (lr.action === 'read' && lr.items && lr.items.length > 0) {
+          const itemsText = lr.items.map((item: string, i: number) => `${i + 1}. ${item}`).join('. ');
+          finalSpeech += ` Here are the items: ${itemsText}.`;
+        }
+      }
+
       // Speak concurrently — text appears and voice starts at the same time
       setStatus('speaking');
-      speakResponse(response.speech, language).then(() => setStatus('idle')).catch(() => setStatus('idle'));
+      speakResponse(finalSpeech, language).then(() => setStatus('idle')).catch(() => setStatus('idle'));
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
