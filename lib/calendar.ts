@@ -266,6 +266,7 @@ export async function fetchUpcomingEvents(days = 7, passedUserId?: string): Prom
       .from('calendar_events')
       .select('google_event_id, title, start_time, end_time, location, description, item_type')
       .eq('user_id', userId)
+      .neq('item_type', 'task')
       .gte('start_time', startOfDay.toISOString())
       .lte('start_time', future.toISOString())
       .order('start_time', { ascending: true })
