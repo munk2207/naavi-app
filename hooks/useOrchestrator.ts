@@ -125,7 +125,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       }
 
       // Check if this is a broad knowledge query — fetch memories directly
-      const isBroadQuery = /\b(list all|list everything|everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
+      const isBroadQuery = /\b(all|list|everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
 
       const [response, knowledgeResult] = await Promise.all([
         sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language),
@@ -282,10 +282,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             const result = await createList(name, category);
             if (result.success && result.list) {
               turnLists.push({ action: 'created', listName: name, webViewLink: result.list.web_view_link ?? undefined });
-              // Also save to naavi_notes so it shows in the Drive Notes tab
-              if (result.list.web_view_link) {
-                await saveDriveNote({ title: name, webViewLink: result.list.web_view_link });
-              }
             } else {
               console.error('[Orchestrator] LIST_CREATE failed:', result.error);
             }
@@ -448,14 +444,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
       }
 
-      // ── Build final speech — append list items for voice readback ───────────
-      let finalSpeech = response.speech;
-      for (const lr of turnLists) {
-        if (lr.action === 'read' && lr.items && lr.items.length > 0) {
-          finalSpeech += `. Your ${lr.listName} has: ${lr.items.join(', ')}.`;
-        }
-      }
-
       // ── Append turn with all its cards ────────────────────────────────────────
       const newTurn = {
         userMessage,
@@ -475,7 +463,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
       // Speak concurrently — text appears and voice starts at the same time
       setStatus('speaking');
-      speakResponse(finalSpeech, language).then(() => setStatus('idle')).catch(() => setStatus('idle'));
+      speakResponse(response.speech, language).then(() => setStatus('idle')).catch(() => setStatus('idle'));
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
