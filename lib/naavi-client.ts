@@ -294,7 +294,7 @@ Example 0b — Robert says "what time should I leave for my 2pm meeting at 100 Q
 
 Example 1 — Robert says "draft an email to Louise saying happy birthday":
 {
-  "speech": "Draft ready for your review.",
+  "speech": "I've drafted an email to Louise wishing her a happy birthday. Say yes to send, or tell me what to change.",
   "actions": [{ "type": "DRAFT_MESSAGE", "to": "Louise", "subject": "Happy Birthday", "body": "Hi Louise,\n\nWishing you a very happy birthday!\n\nRobert", "channel": "email" }],
   "pendingThreads": []
 }
@@ -308,7 +308,7 @@ Example 2 — Robert says "save John, his email is john@gmail.com":
 
 Example 3 — Robert says "send an email to Dr. Patel confirming tomorrow's appointment":
 {
-  "speech": "Draft ready — tap the card to open it in your email app.",
+  "speech": "I've drafted an email to Dr. Patel confirming your appointment tomorrow. Say yes to send, or tell me what to change.",
   "actions": [{ "type": "DRAFT_MESSAGE", "to": "Dr. Patel", "subject": "Appointment Confirmation", "body": "Dear Dr. Patel,\n\nI am writing to confirm my appointment tomorrow.\n\nThank you,\nRobert", "channel": "email" }],
   "pendingThreads": []
 }
@@ -397,7 +397,8 @@ Guardrails:
 - Never give medical advice. Flag health items and suggest contacting a doctor.
 - Never ask for or store passwords.
 - Never fabricate information not provided to you.
-- You cannot send emails. ALWAYS use DRAFT_MESSAGE and say "draft ready" — NEVER say "sent" or "I sent" or "email sent".
+- You cannot send emails directly. ALWAYS use DRAFT_MESSAGE — NEVER say "sent" or "I sent" or "email sent".
+- When you emit a DRAFT_MESSAGE action, your speech MUST end with a voice confirmation prompt. For email: "I've drafted an email to {name} about {subject}. Say yes to send, or tell me what to change." For SMS/WhatsApp: "I've drafted a {channel} to {name}. Say yes to send, or tell me what to change." This is critical for hands-free operation — Robert may not be looking at the screen.
 `.trim();
 }
 
@@ -470,10 +471,19 @@ function fixSentLanguage(speech: string, actions: NaaviAction[]): string {
   // If Claude said "sent" but there is a DRAFT_MESSAGE action, correct it
   const hasDraft = actions.some(a => a.type === 'DRAFT_MESSAGE');
   if (!hasDraft) return speech;
-  return speech
+
+  // Replace "sent" with "drafted" and ensure confirmation prompt is present
+  let fixed = speech
     .replace(/\b(I've sent|I have sent|email sent|message sent|sent the email|sent the message)\b/gi,
-      'Draft is ready for your review')
+      "I've drafted it for your review")
     .replace(/\bsent\b/gi, 'drafted');
+
+  // If speech doesn't end with a confirmation prompt, append one
+  if (!/say yes|say send|tell me what to change/i.test(fixed)) {
+    fixed = fixed.replace(/[.!]?\s*$/, '. Say yes to send, or tell me what to change.');
+  }
+
+  return fixed;
 }
 
 function buildFallback(rawText: string): NaaviResponse {

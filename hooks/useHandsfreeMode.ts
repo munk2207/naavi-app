@@ -17,15 +17,19 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '@/lib/supabase';
 import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
+import { classifyConfirmation, CONFIRM_SILENCE_CHUNKS } from '@/lib/voice-confirm';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+export type ConfirmResponse = 'confirm' | 'cancel' | 'timeout' | 'edit';
 
 export type HandsfreeState =
   | 'inactive'
   | 'listening'
   | 'processing'
   | 'waiting'
-  | 'paused';
+  | 'paused'
+  | 'confirming';
 
 export interface UseHandsfreeModeResult {
   state: HandsfreeState;
@@ -72,6 +76,7 @@ export function useHandsfreeMode(
   orchestratorStatus: OrchestratorStatus,
   sendMessage: (text: string) => Promise<void>,
   speakCue: (text: string) => Promise<void>,
+  onConfirmResponse?: (response: ConfirmResponse, editText?: string) => void,  // generic callback for voice confirmation
 ): UseHandsfreeModeResult {
   const [state, setState] = useState<HandsfreeState>('inactive');
   const [error, setError] = useState<string | null>(null);
@@ -89,11 +94,11 @@ export function useHandsfreeMode(
   // ── Watch orchestrator status: when it goes idle after 'waiting', resume listening ──
   useEffect(() => {
     if (!waitingForOrchestratorRef.current) return;
-    if (orchestratorStatus === 'idle' && stateRef.current === 'waiting') {
+    if (orchestratorStatus === 'idle' && (stateRef.current === 'waiting' || stateRef.current === 'confirming')) {
       waitingForOrchestratorRef.current = false;
       // Delay before reopening mic (prevents picking up TTS audio)
       setTimeout(() => {
-        if (stateRef.current === 'waiting' || stateRef.current === 'paused') {
+        if (stateRef.current === 'waiting' || stateRef.current === 'paused' || stateRef.current === 'confirming') {
           console.log('[Handsfree] Orchestrator done, resuming listening');
           pendingTextRef.current = '';
           silenceCountRef.current = 0;
@@ -104,6 +109,111 @@ export function useHandsfreeMode(
       }, POST_TTS_DELAY_MS);
     }
   }, [orchestratorStatus]);
+
+  // ── Watch for pending_confirm: enter confirming state after TTS finishes ──
+  const confirmLoopActiveRef = useRef(false);
+  useEffect(() => {
+    // Only enter confirming if we're in hands-free mode and orchestrator needs confirmation
+    if (orchestratorStatus !== 'pending_confirm') return;
+    if (stateRef.current === 'inactive') return;
+    if (stateRef.current === 'confirming') return; // already confirming
+
+    console.log('[Handsfree] Orchestrator needs confirmation — entering confirming state');
+    // Delay to let TTS finish before opening mic
+    setTimeout(() => {
+      if (stateRef.current === 'inactive') return;
+      setState('confirming');
+      stateRef.current = 'confirming';
+      startConfirmLoop();
+    }, POST_TTS_DELAY_MS);
+  }, [orchestratorStatus]);
+
+  // ── Confirmation recording loop ──
+  async function startConfirmLoop() {
+    if (confirmLoopActiveRef.current) return;
+    confirmLoopActiveRef.current = true;
+    let confirmSilenceCount = 0;
+
+    console.log('[Handsfree] Confirm loop started');
+
+    try {
+      while (confirmLoopActiveRef.current && stateRef.current === 'confirming') {
+        const chunk = await recordChunk();
+
+        if (!confirmLoopActiveRef.current || stateRef.current !== 'confirming') break;
+
+        if (!chunk) {
+          confirmSilenceCount++;
+          if (confirmSilenceCount >= CONFIRM_SILENCE_CHUNKS) {
+            console.log('[Handsfree] Confirm timeout — auto-cancelling');
+            confirmLoopActiveRef.current = false;
+            waitingForOrchestratorRef.current = true;
+            setState('waiting');
+            stateRef.current = 'waiting';
+            onConfirmResponse?.('timeout');
+            break;
+          }
+          continue;
+        }
+
+        // Transcribe
+        const transcript = await transcribe(chunk.base64, chunk.mimeType);
+        if (!confirmLoopActiveRef.current || stateRef.current !== 'confirming') break;
+
+        if (!transcript) {
+          confirmSilenceCount++;
+          if (confirmSilenceCount >= CONFIRM_SILENCE_CHUNKS) {
+            console.log('[Handsfree] Confirm timeout — auto-cancelling');
+            confirmLoopActiveRef.current = false;
+            waitingForOrchestratorRef.current = true;
+            setState('waiting');
+            stateRef.current = 'waiting';
+            onConfirmResponse?.('timeout');
+            break;
+          }
+          continue;
+        }
+
+        // Got speech — classify it
+        confirmSilenceCount = 0;
+        console.log(`[Handsfree] Confirm transcript: "${transcript}"`);
+        const classification = classifyConfirmation(transcript);
+        console.log(`[Handsfree] Classification: ${classification}`);
+
+        confirmLoopActiveRef.current = false;
+
+        if (classification === 'confirm') {
+          waitingForOrchestratorRef.current = true;
+          setState('waiting');
+          stateRef.current = 'waiting';
+          onConfirmResponse?.('confirm');
+        } else if (classification === 'cancel') {
+          waitingForOrchestratorRef.current = true;
+          setState('waiting');
+          stateRef.current = 'waiting';
+          onConfirmResponse?.('cancel');
+        } else {
+          // Edit — send the transcript back as a free-form edit
+          waitingForOrchestratorRef.current = true;
+          setState('waiting');
+          stateRef.current = 'waiting';
+          onConfirmResponse?.('edit', transcript);
+        }
+        break;
+      }
+    } catch (loopErr) {
+      const msg = loopErr instanceof Error ? loopErr.message : String(loopErr);
+      console.error('[Handsfree] Confirm loop crashed:', msg);
+      setError(`Confirmation failed: ${msg}`);
+    } finally {
+      confirmLoopActiveRef.current = false;
+      if (recordingRef.current) {
+        try { await recordingRef.current.stopAndUnloadAsync(); } catch (_) { /* ignore */ }
+        recordingRef.current = null;
+      }
+      console.log('[Handsfree] Confirm loop ended');
+    }
+  }
 
   // ── Record one 5-second chunk and return base64 ──
   async function recordChunk(): Promise<{ base64: string; mimeType: string } | null> {
@@ -333,8 +443,8 @@ export function useHandsfreeMode(
       setError(`Hands-free stopped unexpectedly: ${msg}`);
     } finally {
       loopActiveRef.current = false;
-      // If the loop ended while still in an "active" state (listening/processing), reset to paused
-      // so the user can tap the button to restart. Don't override 'inactive' or 'paused' set elsewhere.
+      // If the loop ended while still in an "active" state, reset to paused
+      // so the user can tap the button to restart. Don't override 'inactive', 'paused', or 'confirming'.
       if (stateRef.current === 'listening' || stateRef.current === 'processing') {
         console.log('[Handsfree] Loop ended in active state — resetting to paused');
         setState('paused');
@@ -357,6 +467,7 @@ export function useHandsfreeMode(
 
     // Force cleanup of any prior session (stuck loop, leftover recording, etc.)
     loopActiveRef.current = false;
+    confirmLoopActiveRef.current = false;
     waitingForOrchestratorRef.current = false;
     pendingTextRef.current = '';
     silenceCountRef.current = 0;
@@ -381,6 +492,7 @@ export function useHandsfreeMode(
   const deactivate = useCallback(async () => {
     console.log('[Handsfree] Deactivating');
     loopActiveRef.current = false;
+    confirmLoopActiveRef.current = false;
     waitingForOrchestratorRef.current = false;
     pendingTextRef.current = '';
 

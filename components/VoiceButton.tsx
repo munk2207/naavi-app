@@ -45,24 +45,27 @@ export function VoiceButton({ status, onPress, disabled }: Props) {
   }, [isActive, pulseAnim]);
 
   const backgroundColor = {
-    idle:       Colors.voiceIdle,
-    thinking:   Colors.voiceProcessing,
-    speaking:   Colors.voiceSpeaking,
-    error:      Colors.voiceError,
+    idle:            Colors.voiceIdle,
+    thinking:        Colors.voiceProcessing,
+    speaking:        Colors.voiceSpeaking,
+    pending_confirm: Colors.voiceIdle,
+    error:           Colors.voiceError,
   }[status];
 
   const icon = {
-    idle:       '🎙',
-    thinking:   '💭',
-    speaking:   '🔊',
-    error:      '⚠',
+    idle:            '🎙',
+    thinking:        '💭',
+    speaking:        '🔊',
+    pending_confirm: '🎙',
+    error:           '⚠',
   }[status];
 
   const accessibilityLabel = {
-    idle:       'Speak to MyNaavi',
-    thinking:   'MyNaavi is thinking',
-    speaking:   'MyNaavi is speaking',
-    error:      'Error — tap to retry',
+    idle:            'Speak to MyNaavi',
+    thinking:        'MyNaavi is thinking',
+    speaking:        'MyNaavi is speaking',
+    pending_confirm: 'Waiting for confirmation',
+    error:           'Error — tap to retry',
   }[status];
 
   async function handlePress() {
