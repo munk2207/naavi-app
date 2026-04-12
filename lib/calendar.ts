@@ -60,6 +60,7 @@ export async function connectGoogleCalendar(): Promise<void> {
         'https://www.googleapis.com/auth/drive.file',
         'https://www.googleapis.com/auth/contacts.readonly',
         'https://www.googleapis.com/auth/contacts.other.readonly',
+        'https://www.googleapis.com/auth/tasks.readonly',
       ].join(' '),
       queryParams: {
         access_type: 'offline',
