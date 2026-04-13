@@ -4,7 +4,7 @@
  */
 
 import { useEffect } from 'react';
-import { Platform, View, Text, Image, StyleSheet } from 'react-native';
+import { Platform, View, Text, StyleSheet } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -105,7 +105,6 @@ export default function RootLayout() {
             headerShown: true,
             headerTitle: () => (
               <View style={headerStyles.container}>
-                <Image source={require('@/assets/mynaavi-logo.png')} style={headerStyles.logo} />
                 <Text style={headerStyles.title}>
                   <Text style={headerStyles.white}>My</Text>
                   <Text style={headerStyles.teal}>Naavi</Text>
@@ -136,10 +135,6 @@ const headerStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  logo: {
-    width: 28,
-    height: 28,
   },
   title: {
     fontWeight: '600',

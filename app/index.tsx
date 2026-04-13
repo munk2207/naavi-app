@@ -660,7 +660,7 @@ export default function HomeScreen() {
     }
   }, [confirmPending, cancelPending, editPending]);
 
-  const handsfree = useHandsfreeMode(status, send, speakCueRef.current, handleConfirmResponse);
+  const handsfree = useHandsfreeMode(status, send, speakCueRef.current, handleConfirmResponse, !!pendingAction);
 
   // Auto-activate hands-free when app is opened via "Hey Google" (naavi:// deep link)
   const handsfreeActivatedRef = useRef(false);

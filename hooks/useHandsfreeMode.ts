@@ -108,6 +108,7 @@ export function useHandsfreeMode(
   sendMessage: (text: string, options?: { isHandsfree?: boolean }) => Promise<void>,
   speakCue: (text: string) => Promise<void>,
   onConfirmResponse?: (response: ConfirmResponse, editText?: string) => void,
+  hasPendingAction?: boolean,
 ): UseHandsfreeModeResult {
   const [state, setState] = useState<HandsfreeState>('inactive');
   const [error, setError] = useState<string | null>(null);
@@ -133,10 +134,12 @@ export function useHandsfreeMode(
   const confirmHandledRef = useRef(false);  // guard: only process one confirmation
   const pendingConfirmTransitionRef = useRef(false);  // true during the delay before entering confirming
   const orchestratorStatusRef = useRef(orchestratorStatus);
+  const hasPendingActionRef = useRef(hasPendingAction ?? false);
 
   // Keep refs in sync
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => { orchestratorStatusRef.current = orchestratorStatus; }, [orchestratorStatus]);
+  useEffect(() => { hasPendingActionRef.current = hasPendingAction ?? false; }, [hasPendingAction]);
 
   // ── Idle timer management ──
   function resetIdleTimer() {
@@ -293,8 +296,8 @@ export function useHandsfreeMode(
     console.log(`[Handsfree] Final transcript: "${transcript}" | state=${stateRef.current} | orchStatus=${orchestratorStatusRef.current}`);
     resetIdleTimer();
 
-    // ── If orchestrator is waiting for confirmation (pending_confirm) OR we're in confirming state ──
-    if (orchestratorStatusRef.current === 'pending_confirm' || stateRef.current === 'confirming') {
+    // ── If there's a pending action waiting for confirmation ──
+    if (hasPendingActionRef.current || orchestratorStatusRef.current === 'pending_confirm' || stateRef.current === 'confirming') {
       // Guard: only process one confirmation to prevent looping
       if (confirmHandledRef.current) {
         console.log('[Handsfree] Confirm already handled — ignoring transcript');
@@ -365,8 +368,8 @@ export function useHandsfreeMode(
   function handleUtteranceEnd() {
     // During confirm transition, ignore
     if (pendingConfirmTransitionRef.current) return;
-    // If orchestrator is pending_confirm or we're in confirming state, don't auto-submit
-    if (orchestratorStatusRef.current === 'pending_confirm' || stateRef.current === 'confirming') return;
+    // If there's a pending action or we're confirming, don't auto-submit
+    if (hasPendingActionRef.current || orchestratorStatusRef.current === 'pending_confirm' || stateRef.current === 'confirming') return;
     // If orchestrator is busy, ignore
     if (orchestratorStatusRef.current === 'thinking' || orchestratorStatusRef.current === 'speaking') return;
 
