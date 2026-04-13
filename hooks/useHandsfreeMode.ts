@@ -25,6 +25,7 @@ import { ExpoPlayAudioStream } from '@mykin-ai/expo-audio-stream';
 import { supabase } from '@/lib/supabase';
 import { loadKeyterms } from '@/lib/loadKeyterms';
 import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
+import { isPendingConfirmActive } from '@/hooks/useOrchestrator';
 import { classifyConfirmation, CONFIRM_TIMEOUT_MS } from '@/lib/voice-confirm';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -296,8 +297,8 @@ export function useHandsfreeMode(
     console.log(`[Handsfree] Final transcript: "${transcript}" | state=${stateRef.current} | orchStatus=${orchestratorStatusRef.current}`);
     resetIdleTimer();
 
-    // ── If there's a pending action waiting for confirmation ──
-    if (hasPendingActionRef.current || orchestratorStatusRef.current === 'pending_confirm' || stateRef.current === 'confirming') {
+    // ── If there's a pending action waiting for confirmation (synchronous check — no React delay) ──
+    if (isPendingConfirmActive() || stateRef.current === 'confirming') {
       // Guard: only process one confirmation to prevent looping
       if (confirmHandledRef.current) {
         console.log('[Handsfree] Confirm already handled — ignoring transcript');
@@ -369,7 +370,7 @@ export function useHandsfreeMode(
     // During confirm transition, ignore
     if (pendingConfirmTransitionRef.current) return;
     // If there's a pending action or we're confirming, don't auto-submit
-    if (hasPendingActionRef.current || orchestratorStatusRef.current === 'pending_confirm' || stateRef.current === 'confirming') return;
+    if (isPendingConfirmActive() || stateRef.current === 'confirming') return;
     // If orchestrator is busy, ignore
     if (orchestratorStatusRef.current === 'thinking' || orchestratorStatusRef.current === 'speaking') return;
 

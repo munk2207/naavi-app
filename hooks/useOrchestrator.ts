@@ -28,6 +28,15 @@ import type { StorageFile, NavigationResult } from '@/lib/types';
 
 import { isConfirmable, buildActionSummary, SPEECH, type PendingAction } from '@/lib/voice-confirm';
 
+// ── Module-level synchronous flag for Voice-Confirm ──────────────────────────
+// This is set SYNCHRONOUSLY when a pending action is created, and cleared when
+// confirm/cancel/edit fires. Deepgram's WebSocket onmessage runs synchronously
+// in the JS event loop, so React state/refs (which update async after render)
+// are always stale when the transcript arrives. This module-level variable
+// bypasses React's async batching entirely.
+let pendingConfirmActive = false;
+export function isPendingConfirmActive(): boolean { return pendingConfirmActive; }
+
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'pending_confirm' | 'error';
 
 export interface ConversationTurn {
@@ -573,6 +582,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
           pendingActionRef.current = pending;
           setPendingAction(pending);
+          pendingConfirmActive = true;  // synchronous — visible immediately to Deepgram callbacks
+          console.log('[VoiceConfirm] pendingConfirmActive = true');
         }
       }
 
@@ -606,6 +617,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     const pending = pendingActionRef.current;
     if (!pending) return;
 
+    pendingConfirmActive = false;  // synchronous clear
     pendingActionRef.current = null;
     setPendingAction(null);
     setStatus('speaking');
@@ -637,6 +649,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   }, [language]);
 
   const cancelPending = useCallback(async (speechOverride?: string) => {
+    pendingConfirmActive = false;  // synchronous clear
     pendingActionRef.current = null;
     setPendingAction(null);
     const speech = speechOverride ?? SPEECH.CANCELLED;
@@ -648,6 +661,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   }, [language]);
 
   const editPending = useCallback(async (editText: string) => {
+    pendingConfirmActive = false;  // synchronous clear
     pendingActionRef.current = null;
     setPendingAction(null);
     // Re-send to Claude as a follow-up message — Claude will re-draft
@@ -656,6 +670,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
   const clearHistory = useCallback(() => {
     stopSpeaking();
+    pendingConfirmActive = false;  // synchronous clear
     pendingActionRef.current = null;
     setPendingAction(null);
     setTurns([]);
@@ -669,6 +684,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
   const stopAndReset = useCallback(() => {
     stopSpeaking();
+    pendingConfirmActive = false;  // synchronous clear
     pendingActionRef.current = null;
     setPendingAction(null);
     setStatus('idle');
