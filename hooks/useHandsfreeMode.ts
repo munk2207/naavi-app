@@ -25,7 +25,6 @@ import { ExpoPlayAudioStream } from '@mykin-ai/expo-audio-stream';
 import { supabase } from '@/lib/supabase';
 import { loadKeyterms } from '@/lib/loadKeyterms';
 import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
-import { isPendingConfirmActive } from '@/hooks/useOrchestrator';
 import { classifyConfirmation, CONFIRM_TIMEOUT_MS } from '@/lib/voice-confirm';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -106,10 +105,9 @@ function buildDeepgramUrl(keyterms: string[]): string {
 
 export function useHandsfreeMode(
   orchestratorStatus: OrchestratorStatus,
-  sendMessage: (text: string, options?: { isHandsfree?: boolean }) => Promise<void>,
+  sendMessage: (text: string) => Promise<void>,
   speakCue: (text: string) => Promise<void>,
   onConfirmResponse?: (response: ConfirmResponse, editText?: string) => void,
-  hasPendingAction?: boolean,
 ): UseHandsfreeModeResult {
   const [state, setState] = useState<HandsfreeState>('inactive');
   const [error, setError] = useState<string | null>(null);
@@ -134,13 +132,9 @@ export function useHandsfreeMode(
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const confirmHandledRef = useRef(false);  // guard: only process one confirmation
   const pendingConfirmTransitionRef = useRef(false);  // true during the delay before entering confirming
-  const orchestratorStatusRef = useRef(orchestratorStatus);
-  const hasPendingActionRef = useRef(hasPendingAction ?? false);
 
-  // Keep refs in sync
+  // Keep stateRef in sync
   useEffect(() => { stateRef.current = state; }, [state]);
-  useEffect(() => { orchestratorStatusRef.current = orchestratorStatus; }, [orchestratorStatus]);
-  useEffect(() => { hasPendingActionRef.current = hasPendingAction ?? false; }, [hasPendingAction]);
 
   // ── Idle timer management ──
   function resetIdleTimer() {
@@ -294,11 +288,17 @@ export function useHandsfreeMode(
   function processTranscript(transcript: string) {
     if (!transcript.trim()) return;
 
-    console.log(`[Handsfree] Final transcript: "${transcript}" | state=${stateRef.current} | orchStatus=${orchestratorStatusRef.current}`);
+    // If we're transitioning to confirm state, ignore any leftover transcripts
+    if (pendingConfirmTransitionRef.current) {
+      console.log(`[Handsfree] Ignoring transcript during confirm transition: "${transcript}"`);
+      return;
+    }
+
+    console.log(`[Handsfree] Final transcript: "${transcript}"`);
     resetIdleTimer();
 
-    // ── If there's a pending action waiting for confirmation (synchronous check — no React delay) ──
-    if (isPendingConfirmActive() || stateRef.current === 'confirming') {
+    // ── If in confirming state, classify the response ──
+    if (stateRef.current === 'confirming') {
       // Guard: only process one confirmation to prevent looping
       if (confirmHandledRef.current) {
         console.log('[Handsfree] Confirm already handled — ignoring transcript');
@@ -317,12 +317,6 @@ export function useHandsfreeMode(
       } else {
         exitConfirmState('edit', transcript);
       }
-      return;
-    }
-
-    // If orchestrator is busy (thinking/speaking), ignore transcript
-    if (orchestratorStatusRef.current === 'thinking' || orchestratorStatusRef.current === 'speaking') {
-      console.log(`[Handsfree] Orchestrator busy (${orchestratorStatusRef.current}) — ignoring transcript`);
       return;
     }
 
@@ -369,10 +363,9 @@ export function useHandsfreeMode(
   function handleUtteranceEnd() {
     // During confirm transition, ignore
     if (pendingConfirmTransitionRef.current) return;
-    // If there's a pending action or we're confirming, don't auto-submit
-    if (isPendingConfirmActive() || stateRef.current === 'confirming') return;
-    // If orchestrator is busy, ignore
-    if (orchestratorStatusRef.current === 'thinking' || orchestratorStatusRef.current === 'speaking') return;
+    // In confirming state, UtteranceEnd after speech is handled by processTranscript
+    // (classification already fired). Nothing extra needed here.
+    if (stateRef.current === 'confirming') return;
 
     // Normal mode — auto-submit accumulated text
     const messageToSend = pendingTextRef.current.trim();
@@ -396,7 +389,7 @@ export function useHandsfreeMode(
     waitingForOrchestratorRef.current = true;
     pendingTextRef.current = '';
 
-    await sendMessage(text, { isHandsfree: true });
+    await sendMessage(text);
   }
 
   // ── Start Deepgram WebSocket streaming ──

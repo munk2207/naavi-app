@@ -28,7 +28,7 @@ import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import * as Linking from 'expo-linking';
 
-import { getUserName, getUserNameAsync } from '@/lib/naavi-client';
+import { getUserName } from '@/lib/naavi-client';
 import { useOrchestrator } from '@/hooks/useOrchestrator';
 import { useVoice } from '@/hooks/useVoice';
 import { useWhisperMemo } from '@/hooks/useWhisperMemo';
@@ -319,11 +319,9 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
       }
 
       try {
-        const senderName = await getUserNameAsync() || 'Robert';
-        const recipientName = String(action.to ?? '').trim();
-        console.log(`[Send] ${channelLabel} to ${phone}, sender: ${senderName}, body: ${String(action.body ?? '').slice(0, 30)}`);
+        console.log(`[Send] ${channelLabel} to ${phone}, body: ${String(action.body ?? '').slice(0, 30)}`);
         const { data, error } = await supabase.functions.invoke('send-sms', {
-          body: { to: phone, body: String(action.body ?? ''), channel, recipientName, senderName },
+          body: { to: phone, body: String(action.body ?? ''), channel },
         });
         console.log('[Send] Response:', JSON.stringify({ data, error: error?.message }));
         setSending(false);
@@ -585,7 +583,8 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [brief]);
 
-  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, pendingAction, confirmPending, cancelPending, editPending } = useOrchestrator('en', brief, avoidHighwaysRef.current);
+  const [handsfreeActive, setHandsfreeActive] = useState(false);
+  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, pendingAction, confirmPending, cancelPending, editPending } = useOrchestrator('en', brief, avoidHighwaysRef.current, handsfreeActive);
 
   // Re-check highway preference after each turn so DELETE_MEMORY takes effect immediately
   useEffect(() => {
@@ -660,7 +659,12 @@ export default function HomeScreen() {
     }
   }, [confirmPending, cancelPending, editPending]);
 
-  const handsfree = useHandsfreeMode(status, send, speakCueRef.current, handleConfirmResponse, !!pendingAction);
+  const handsfree = useHandsfreeMode(status, send, speakCueRef.current, handleConfirmResponse);
+
+  // Track hands-free active state for orchestrator (Voice-Confirm only in hands-free)
+  useEffect(() => {
+    setHandsfreeActive(handsfree.state !== 'inactive');
+  }, [handsfree.state]);
 
   // Auto-activate hands-free when app is opened via "Hey Google" (naavi:// deep link)
   const handsfreeActivatedRef = useRef(false);
