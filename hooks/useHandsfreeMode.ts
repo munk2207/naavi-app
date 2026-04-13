@@ -105,7 +105,7 @@ function buildDeepgramUrl(keyterms: string[]): string {
 
 export function useHandsfreeMode(
   orchestratorStatus: OrchestratorStatus,
-  sendMessage: (text: string) => Promise<void>,
+  sendMessage: (text: string, options?: { isHandsfree?: boolean }) => Promise<void>,
   speakCue: (text: string) => Promise<void>,
   onConfirmResponse?: (response: ConfirmResponse, editText?: string) => void,
 ): UseHandsfreeModeResult {
@@ -389,7 +389,7 @@ export function useHandsfreeMode(
     waitingForOrchestratorRef.current = true;
     pendingTextRef.current = '';
 
-    await sendMessage(text);
+    await sendMessage(text, { isHandsfree: true });
   }
 
   // ── Start Deepgram WebSocket streaming ──
