@@ -25,6 +25,7 @@ import { ExpoPlayAudioStream } from '@mykin-ai/expo-audio-stream';
 import { supabase } from '@/lib/supabase';
 import { loadKeyterms } from '@/lib/loadKeyterms';
 import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
+import { isPendingConfirmActive } from '@/hooks/useOrchestrator';
 import { classifyConfirmation, CONFIRM_TIMEOUT_MS } from '@/lib/voice-confirm';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -297,8 +298,8 @@ export function useHandsfreeMode(
     console.log(`[Handsfree] Final transcript: "${transcript}"`);
     resetIdleTimer();
 
-    // ── If in confirming state, classify the response ──
-    if (stateRef.current === 'confirming') {
+    // ── If confirming (module-level switch OR React state), classify the response ──
+    if (stateRef.current === 'confirming' || isPendingConfirmActive()) {
       // Guard: only process one confirmation to prevent looping
       if (confirmHandledRef.current) {
         console.log('[Handsfree] Confirm already handled — ignoring transcript');
@@ -363,9 +364,8 @@ export function useHandsfreeMode(
   function handleUtteranceEnd() {
     // During confirm transition, ignore
     if (pendingConfirmTransitionRef.current) return;
-    // In confirming state, UtteranceEnd after speech is handled by processTranscript
-    // (classification already fired). Nothing extra needed here.
-    if (stateRef.current === 'confirming') return;
+    // In confirming state (React or module-level switch), UtteranceEnd is handled by processTranscript
+    if (stateRef.current === 'confirming' || isPendingConfirmActive()) return;
 
     // Normal mode — auto-submit accumulated text
     const messageToSend = pendingTextRef.current.trim();

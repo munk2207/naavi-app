@@ -28,6 +28,12 @@ import type { StorageFile, NavigationResult } from '@/lib/types';
 
 import { isConfirmable, buildActionSummary, SPEECH, type PendingAction } from '@/lib/voice-confirm';
 
+// ─── Module-level sync switch for voice confirm ────────────────────────────
+// This lives OUTSIDE React so the handsfree listener can read it instantly,
+// without waiting for React state to update.
+let pendingConfirmActive = false;
+export function isPendingConfirmActive() { return pendingConfirmActive; }
+
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'pending_confirm' | 'error';
 
 export interface ConversationTurn {
@@ -580,6 +586,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         // Only enter voice-confirm flow if hands-free is active
         // In tap-to-talk mode, Robert uses the Send button on the DraftCard
         if (pendingActionRef.current && handsfreeRef.current) {
+          pendingConfirmActive = true;
           setStatus('pending_confirm');
         } else {
           // Clear pending action if not in hands-free — DraftCard handles sending
@@ -604,6 +611,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     const pending = pendingActionRef.current;
     if (!pending) return;
 
+    pendingConfirmActive = false;
     pendingActionRef.current = null;
     setPendingAction(null);
     setStatus('speaking');
@@ -635,6 +643,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   }, [language]);
 
   const cancelPending = useCallback(async (speechOverride?: string) => {
+    pendingConfirmActive = false;
     pendingActionRef.current = null;
     setPendingAction(null);
     const speech = speechOverride ?? SPEECH.CANCELLED;
@@ -646,6 +655,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   }, [language]);
 
   const editPending = useCallback(async (editText: string) => {
+    pendingConfirmActive = false;
     pendingActionRef.current = null;
     setPendingAction(null);
     // Re-send to Claude as a follow-up message — Claude will re-draft
@@ -654,6 +664,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
   const clearHistory = useCallback(() => {
     stopSpeaking();
+    pendingConfirmActive = false;
     pendingActionRef.current = null;
     setPendingAction(null);
     setTurns([]);
@@ -667,6 +678,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
   const stopAndReset = useCallback(() => {
     stopSpeaking();
+    pendingConfirmActive = false;
     pendingActionRef.current = null;
     setPendingAction(null);
     setStatus('idle');
