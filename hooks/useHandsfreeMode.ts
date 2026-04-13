@@ -130,6 +130,7 @@ export function useHandsfreeMode(
   const waitingForOrchestratorRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const confirmHandledRef = useRef(false);  // guard: only process one confirmation
 
   // Keep stateRef in sync
   useEffect(() => { stateRef.current = state; }, [state]);
@@ -291,6 +292,13 @@ export function useHandsfreeMode(
 
     // ── If in confirming state, classify the response ──
     if (stateRef.current === 'confirming') {
+      // Guard: only process one confirmation to prevent looping
+      if (confirmHandledRef.current) {
+        console.log('[Handsfree] Confirm already handled — ignoring transcript');
+        return;
+      }
+      confirmHandledRef.current = true;
+
       console.log(`[Handsfree] Confirm transcript: "${transcript}"`);
       const classification = classifyConfirmation(transcript);
       console.log(`[Handsfree] Classification: ${classification}`);
@@ -551,6 +559,7 @@ export function useHandsfreeMode(
     setTimeout(async () => {
       if (stateRef.current === 'inactive') return;
       stopKeepAlive();
+      confirmHandledRef.current = false;  // reset guard for new confirmation
       setState('confirming');
       stateRef.current = 'confirming';
       startConfirmTimeout();

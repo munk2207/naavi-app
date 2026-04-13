@@ -583,7 +583,8 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [brief]);
 
-  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, pendingAction, confirmPending, cancelPending, editPending } = useOrchestrator('en', brief, avoidHighwaysRef.current);
+  const [handsfreeActive, setHandsfreeActive] = useState(false);
+  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, pendingAction, confirmPending, cancelPending, editPending } = useOrchestrator('en', brief, avoidHighwaysRef.current, handsfreeActive);
 
   // Re-check highway preference after each turn so DELETE_MEMORY takes effect immediately
   useEffect(() => {
@@ -659,6 +660,11 @@ export default function HomeScreen() {
   }, [confirmPending, cancelPending, editPending]);
 
   const handsfree = useHandsfreeMode(status, send, speakCueRef.current, handleConfirmResponse);
+
+  // Track hands-free active state for orchestrator (Voice-Confirm only in hands-free)
+  useEffect(() => {
+    setHandsfreeActive(handsfree.state !== 'inactive');
+  }, [handsfree.state]);
 
   // Auto-activate hands-free when app is opened via "Hey Google" (naavi:// deep link)
   const handsfreeActivatedRef = useRef(false);

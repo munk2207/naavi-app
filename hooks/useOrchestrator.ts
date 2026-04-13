@@ -44,7 +44,7 @@ export interface ConversationTurn {
   timestamp?: string;
 }
 
-export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefItem[] = [], avoidHighways = false) {
+export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefItem[] = [], avoidHighways = false, isHandsfree = false) {
   const [status, setStatus] = useState<OrchestratorStatus>('idle');
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -479,75 +479,105 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
       }
 
+      // Strip "Say yes to send" prompt when not in hands-free (Robert uses the Send button)
+      if (!isHandsfree && turnDrafts.some(d => isConfirmable(d))) {
+        finalSpeech = finalSpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
+      }
+
       // Check if this turn has a confirmable action (Phase A: DRAFT_MESSAGE)
       const confirmableDraft = turnDrafts.find(d => isConfirmable(d));
       const turnIndex = turns.length; // index of the turn being added
 
-      if (confirmableDraft) {
-        // Build execute function that mirrors DraftCard's handleSend logic
-        const pending: PendingAction = {
-          id: `pending-${Date.now()}`,
-          action: confirmableDraft,
-          summary: buildActionSummary(confirmableDraft),
-          turnIndex,
-          execute: async () => {
-            const action = confirmableDraft;
-            const channel = String(action.channel ?? 'email').toLowerCase() as 'email' | 'sms' | 'whatsapp';
-            const to = String(action.to ?? '').trim();
-            const isMsg = channel === 'sms' || channel === 'whatsapp';
+      if (confirmableDraft && isHandsfree) {
+        // Pre-resolve contact info so we can verify before asking Robert to confirm
+        const action = confirmableDraft;
+        const channel = String(action.channel ?? 'email').toLowerCase() as 'email' | 'sms' | 'whatsapp';
+        const to = String(action.to ?? '').trim();
+        const isMsg = channel === 'sms' || channel === 'whatsapp';
 
-            try {
-              if (isMsg) {
-                const stripped = to.replace(/[^+\d]/g, '');
-                let phone = stripped.startsWith('+') ? stripped
-                           : /^\d{10}$/.test(stripped) ? `+1${stripped}`
-                           : /^\d{7,15}$/.test(stripped) ? `+${stripped}`
-                           : null;
-                if (!phone) {
-                  const contact = await lookupContact(to);
-                  phone = contact?.phone ?? null;
+        let resolvedPhone: string | null = null;
+        let resolvedEmail: string | null = null;
+
+        if (isMsg) {
+          const stripped = to.replace(/[^+\d]/g, '');
+          resolvedPhone = stripped.startsWith('+') ? stripped
+                        : /^\d{10}$/.test(stripped) ? `+1${stripped}`
+                        : /^\d{7,15}$/.test(stripped) ? `+${stripped}`
+                        : null;
+          if (!resolvedPhone) {
+            const contact = await lookupContact(to);
+            resolvedPhone = contact?.phone ?? null;
+          }
+        } else {
+          resolvedEmail = to.includes('@') ? to : null;
+          if (!resolvedEmail) {
+            const contact = await lookupContact(to);
+            resolvedEmail = contact?.email ?? null;
+          }
+        }
+
+        // If we can't resolve the recipient, don't enter confirm flow — tell Robert
+        if (isMsg && !resolvedPhone) {
+          console.log(`[VoiceConfirm] No phone found for "${to}" — skipping confirm`);
+          finalSpeech += ` But I don't have a phone number for ${to}. Try saying "Remember ${to}'s phone is plus followed by the number" first.`;
+          // Don't create pending action — fall through to idle
+        } else if (!isMsg && !resolvedEmail) {
+          console.log(`[VoiceConfirm] No email found for "${to}" — skipping confirm`);
+          finalSpeech += ` But I don't have an email address for ${to}.`;
+        } else {
+          // Build execute function with pre-resolved contact
+          const pending: PendingAction = {
+            id: `pending-${Date.now()}`,
+            action: confirmableDraft,
+            summary: buildActionSummary(confirmableDraft),
+            turnIndex,
+            execute: async () => {
+              try {
+                if (isMsg) {
+                  console.log(`[VoiceConfirm] Sending ${channel} to ${resolvedPhone}, body: "${String(action.body ?? '').slice(0, 30)}"`);
+                  const { data, error: fnErr } = await supabase.functions.invoke('send-sms', {
+                    body: { to: resolvedPhone, body: String(action.body ?? ''), channel },
+                  });
+                  console.log(`[VoiceConfirm] send-sms result:`, JSON.stringify({ data, error: fnErr?.message }));
+                  if (fnErr || !data?.success) return { ok: false, speech: SPEECH.GENERIC_ERROR };
+                  return { ok: true, speech: SPEECH.SENT };
+                } else {
+                  console.log(`[VoiceConfirm] Sending email to ${resolvedEmail}`);
+                  const result = await registry.email.send({
+                    to:      [{ name: resolvedEmail !== to ? to : '', email: resolvedEmail! }],
+                    subject: String(action.subject ?? ''),
+                    body:    String(action.body    ?? ''),
+                  });
+                  console.log(`[VoiceConfirm] email result:`, JSON.stringify(result));
+                  return result.success
+                    ? { ok: true, speech: SPEECH.SENT }
+                    : { ok: false, speech: SPEECH.GENERIC_ERROR };
                 }
-                if (!phone) return { ok: false, speech: SPEECH.GENERIC_ERROR };
-
-                const { data, error: fnErr } = await supabase.functions.invoke('send-sms', {
-                  body: { to: phone, body: String(action.body ?? ''), channel },
-                });
-                if (fnErr || !data?.success) return { ok: false, speech: SPEECH.GENERIC_ERROR };
-                return { ok: true, speech: SPEECH.SENT };
-              } else {
-                let email = to.includes('@') ? to : null;
-                if (!email) {
-                  const contact = await lookupContact(to);
-                  email = contact?.email ?? null;
-                }
-                if (!email) return { ok: false, speech: SPEECH.GENERIC_ERROR };
-
-                const result = await registry.email.send({
-                  to:      [{ name: email !== to ? to : '', email }],
-                  subject: String(action.subject ?? ''),
-                  body:    String(action.body    ?? ''),
-                });
-                return result.success
-                  ? { ok: true, speech: SPEECH.SENT }
-                  : { ok: false, speech: SPEECH.GENERIC_ERROR };
+              } catch (execErr) {
+                console.error(`[VoiceConfirm] execute error:`, execErr);
+                return { ok: false, speech: SPEECH.GENERIC_ERROR };
               }
-            } catch {
-              return { ok: false, speech: SPEECH.GENERIC_ERROR };
-            }
-          },
-        };
+            },
+          };
 
-        pendingActionRef.current = pending;
-        setPendingAction(pending);
+          pendingActionRef.current = pending;
+          setPendingAction(pending);
+        }
       }
 
       // Speak concurrently — text appears and voice starts at the same time
       setStatus('speaking');
       speakResponse(finalSpeech, language).then(() => {
-        // If there's a confirmable action, wait for voice confirmation instead of going idle
-        if (pendingActionRef.current) {
+        // Only enter voice-confirm flow if hands-free is active
+        // In tap-to-talk mode, Robert uses the Send button on the DraftCard
+        if (pendingActionRef.current && isHandsfree) {
           setStatus('pending_confirm');
         } else {
+          // Clear pending action if not in hands-free — DraftCard handles sending
+          if (pendingActionRef.current && !isHandsfree) {
+            pendingActionRef.current = null;
+            setPendingAction(null);
+          }
           setStatus('idle');
         }
       }).catch(() => setStatus('idle'));
