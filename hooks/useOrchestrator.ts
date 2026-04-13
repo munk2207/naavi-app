@@ -55,6 +55,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const briefRef = useRef(briefItems);
   useEffect(() => { briefRef.current = briefItems; }, [briefItems]);
 
+  // Always-current ref for hands-free state
+  const handsfreeRef = useRef(isHandsfree);
+  useEffect(() => { handsfreeRef.current = isHandsfree; }, [isHandsfree]);
+
   // Derive history for Claude context from turns
   const historyRef = useRef<NaaviMessage[]>([]);
   useEffect(() => {
@@ -480,7 +484,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       }
 
       // Strip "Say yes to send" prompt when not in hands-free (Robert uses the Send button)
-      if (!isHandsfree && turnDrafts.some(d => isConfirmable(d))) {
+      if (!handsfreeRef.current && turnDrafts.some(d => isConfirmable(d))) {
         finalSpeech = finalSpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
       }
 
@@ -488,7 +492,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       const confirmableDraft = turnDrafts.find(d => isConfirmable(d));
       const turnIndex = turns.length; // index of the turn being added
 
-      if (confirmableDraft && isHandsfree) {
+      if (confirmableDraft && handsfreeRef.current) {
         // Pre-resolve contact info so we can verify before asking Robert to confirm
         const action = confirmableDraft;
         const channel = String(action.channel ?? 'email').toLowerCase() as 'email' | 'sms' | 'whatsapp';
@@ -570,11 +574,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       speakResponse(finalSpeech, language).then(() => {
         // Only enter voice-confirm flow if hands-free is active
         // In tap-to-talk mode, Robert uses the Send button on the DraftCard
-        if (pendingActionRef.current && isHandsfree) {
+        if (pendingActionRef.current && handsfreeRef.current) {
           setStatus('pending_confirm');
         } else {
           // Clear pending action if not in hands-free — DraftCard handles sending
-          if (pendingActionRef.current && !isHandsfree) {
+          if (pendingActionRef.current && !handsfreeRef.current) {
             pendingActionRef.current = null;
             setPendingAction(null);
           }
