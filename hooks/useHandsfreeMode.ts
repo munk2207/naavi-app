@@ -131,6 +131,7 @@ export function useHandsfreeMode(
   const reconnectAttemptsRef = useRef(0);
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const confirmHandledRef = useRef(false);  // guard: only process one confirmation
+  const pendingConfirmTransitionRef = useRef(false);  // true during the delay before entering confirming
 
   // Keep stateRef in sync
   useEffect(() => { stateRef.current = state; }, [state]);
@@ -287,6 +288,12 @@ export function useHandsfreeMode(
   function processTranscript(transcript: string) {
     if (!transcript.trim()) return;
 
+    // If we're transitioning to confirm state, ignore any leftover transcripts
+    if (pendingConfirmTransitionRef.current) {
+      console.log(`[Handsfree] Ignoring transcript during confirm transition: "${transcript}"`);
+      return;
+    }
+
     console.log(`[Handsfree] Final transcript: "${transcript}"`);
     resetIdleTimer();
 
@@ -354,6 +361,8 @@ export function useHandsfreeMode(
 
   // ── Handle UtteranceEnd — auto-submit or timeout confirm ──
   function handleUtteranceEnd() {
+    // During confirm transition, ignore
+    if (pendingConfirmTransitionRef.current) return;
     // In confirming state, UtteranceEnd after speech is handled by processTranscript
     // (classification already fired). Nothing extra needed here.
     if (stateRef.current === 'confirming') return;
@@ -551,6 +560,7 @@ export function useHandsfreeMode(
     if (stateRef.current === 'confirming') return; // already confirming
 
     console.log('[Handsfree] Orchestrator needs confirmation — stopping mic until TTS finishes');
+    pendingConfirmTransitionRef.current = true;
     // Stop mic immediately so it doesn't pick up Naavi's own confirmation prompt
     stopAudioStream();
     startKeepAlive();
@@ -559,6 +569,7 @@ export function useHandsfreeMode(
     setTimeout(async () => {
       if (stateRef.current === 'inactive') return;
       stopKeepAlive();
+      pendingConfirmTransitionRef.current = false;
       confirmHandledRef.current = false;  // reset guard for new confirmation
       setState('confirming');
       stateRef.current = 'confirming';
@@ -582,6 +593,8 @@ export function useHandsfreeMode(
     // Force cleanup of any prior session
     await stopStreaming();
     waitingForOrchestratorRef.current = false;
+    pendingConfirmTransitionRef.current = false;
+    confirmHandledRef.current = false;
     pendingTextRef.current = '';
     reconnectAttemptsRef.current = 0;
 
