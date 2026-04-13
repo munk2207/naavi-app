@@ -54,7 +54,7 @@ const CANCEL_WORDS = [
 export function classifyConfirmation(
   transcript: string,
 ): 'confirm' | 'cancel' | 'edit' {
-  const lower = transcript.toLowerCase().trim();
+  const lower = transcript.toLowerCase().replace(/[.,!?;:]+$/g, '').trim();
   if (!lower) return 'cancel'; // empty = silence, treat as timeout elsewhere
 
   // Check cancel first — "no" is shorter and more likely to be accidental
