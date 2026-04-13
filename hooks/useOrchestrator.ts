@@ -582,8 +582,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
           pendingActionRef.current = pending;
           setPendingAction(pending);
-          pendingConfirmActive = true;  // synchronous — visible immediately to Deepgram callbacks
-          console.log('[VoiceConfirm] pendingConfirmActive = true');
         }
       }
 
@@ -593,6 +591,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         // Only enter voice-confirm flow if hands-free is active
         // In tap-to-talk mode, Robert uses the Send button on the DraftCard
         if (pendingActionRef.current && isHandsfree) {
+          pendingConfirmActive = true;  // synchronous — set AFTER TTS finishes
+          console.log('[VoiceConfirm] pendingConfirmActive = true (TTS done)');
           setStatus('pending_confirm');
         } else {
           // Clear pending action if not in hands-free — DraftCard handles sending
