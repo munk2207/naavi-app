@@ -637,6 +637,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       });
     }
 
+    // Wait for audio system to switch from mic to speaker mode
+    await new Promise(resolve => setTimeout(resolve, 1500));
     // Speak the outcome
     await speakResponse(result.speech, language);
     setStatus('idle');
@@ -649,6 +651,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     const speech = speechOverride ?? SPEECH.CANCELLED;
     if (speech) {
       setStatus('speaking');
+      await new Promise(resolve => setTimeout(resolve, 1500));
       await speakResponse(speech, language);
     }
     setStatus('idle');
