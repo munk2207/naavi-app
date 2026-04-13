@@ -16,7 +16,7 @@ import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
-import { sendToNaavi, getUserNameAsync, type NaaviMessage, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
+import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
 import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
 import { sendPushNotification } from '@/lib/push';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
@@ -27,15 +27,6 @@ import { createList, addToList, removeFromList, readList } from '@/lib/lists';
 import type { StorageFile, NavigationResult } from '@/lib/types';
 
 import { isConfirmable, buildActionSummary, SPEECH, type PendingAction } from '@/lib/voice-confirm';
-
-// ── Module-level synchronous flag for Voice-Confirm ──────────────────────────
-// This is set SYNCHRONOUSLY when a pending action is created, and cleared when
-// confirm/cancel/edit fires. Deepgram's WebSocket onmessage runs synchronously
-// in the JS event loop, so React state/refs (which update async after render)
-// are always stale when the transcript arrives. This module-level variable
-// bypasses React's async batching entirely.
-let pendingConfirmActive = false;
-export function isPendingConfirmActive(): boolean { return pendingConfirmActive; }
 
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'pending_confirm' | 'error';
 
@@ -53,7 +44,7 @@ export interface ConversationTurn {
   timestamp?: string;
 }
 
-export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefItem[] = [], avoidHighways = false) {
+export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefItem[] = [], avoidHighways = false, isHandsfree = false) {
   const [status, setStatus] = useState<OrchestratorStatus>('idle');
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -64,9 +55,9 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const briefRef = useRef(briefItems);
   useEffect(() => { briefRef.current = briefItems; }, [briefItems]);
 
-  // Always-current ref for status — prevents stale closure in send()
-  const statusRef = useRef(status);
-  useEffect(() => { statusRef.current = status; }, [status]);
+  // Always-current ref for hands-free state
+  const handsfreeRef = useRef(isHandsfree);
+  useEffect(() => { handsfreeRef.current = isHandsfree; }, [isHandsfree]);
 
   // Derive history for Claude context from turns
   const historyRef = useRef<NaaviMessage[]>([]);
@@ -77,9 +68,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     ]);
   }, [turns]);
 
-  const send = useCallback(async (userMessage: string, options?: { isHandsfree?: boolean }) => {
-    const isHandsfree = options?.isHandsfree ?? false;
-    if (statusRef.current === 'thinking' || statusRef.current === 'speaking' || statusRef.current === 'pending_confirm') return;
+  const send = useCallback(async (userMessage: string) => {
+    if (status === 'thinking' || status === 'speaking' || status === 'pending_confirm') return;
     // Clear any pending confirm when a new message comes in (edit flow)
     if (pendingActionRef.current) {
       pendingActionRef.current = null;
@@ -470,7 +460,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       // ── Append turn with all its cards ────────────────────────────────────────
       // Strip "Say yes to send" from displayed text when not in hands-free
       let displaySpeech = response.speech;
-      if (!isHandsfree && turnDrafts.some(d => isConfirmable(d))) {
+      if (!handsfreeRef.current && turnDrafts.some(d => isConfirmable(d))) {
         displaySpeech = displaySpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
       }
       const newTurn = {
@@ -499,7 +489,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       }
 
       // Strip "Say yes to send" prompt when not in hands-free (Robert uses the Send button)
-      if (!isHandsfree && turnDrafts.some(d => isConfirmable(d))) {
+      if (!handsfreeRef.current && turnDrafts.some(d => isConfirmable(d))) {
         finalSpeech = finalSpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
       }
 
@@ -507,7 +497,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       const confirmableDraft = turnDrafts.find(d => isConfirmable(d));
       const turnIndex = turns.length; // index of the turn being added
 
-      if (confirmableDraft && isHandsfree) {
+      if (confirmableDraft && handsfreeRef.current) {
         // Pre-resolve contact info so we can verify before asking Robert to confirm
         const action = confirmableDraft;
         const channel = String(action.channel ?? 'email').toLowerCase() as 'email' | 'sms' | 'whatsapp';
@@ -553,10 +543,9 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             execute: async () => {
               try {
                 if (isMsg) {
-                  const senderName = await getUserNameAsync() || 'Robert';
-                  console.log(`[VoiceConfirm] Sending ${channel} to ${resolvedPhone}, sender: ${senderName}, body: "${String(action.body ?? '').slice(0, 30)}"`);
+                  console.log(`[VoiceConfirm] Sending ${channel} to ${resolvedPhone}, body: "${String(action.body ?? '').slice(0, 30)}"`);
                   const { data, error: fnErr } = await supabase.functions.invoke('send-sms', {
-                    body: { to: resolvedPhone, body: String(action.body ?? ''), channel, recipientName: to, senderName },
+                    body: { to: resolvedPhone, body: String(action.body ?? ''), channel },
                   });
                   console.log(`[VoiceConfirm] send-sms result:`, JSON.stringify({ data, error: fnErr?.message }));
                   if (fnErr || !data?.success) return { ok: false, speech: SPEECH.GENERIC_ERROR };
@@ -590,13 +579,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       speakResponse(finalSpeech, language).then(() => {
         // Only enter voice-confirm flow if hands-free is active
         // In tap-to-talk mode, Robert uses the Send button on the DraftCard
-        if (pendingActionRef.current && isHandsfree) {
-          pendingConfirmActive = true;  // synchronous — set AFTER TTS finishes
-          console.log('[VoiceConfirm] pendingConfirmActive = true (TTS done)');
+        if (pendingActionRef.current && handsfreeRef.current) {
           setStatus('pending_confirm');
         } else {
           // Clear pending action if not in hands-free — DraftCard handles sending
-          if (pendingActionRef.current && !isHandsfree) {
+          if (pendingActionRef.current && !handsfreeRef.current) {
             pendingActionRef.current = null;
             setPendingAction(null);
           }
@@ -617,7 +604,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     const pending = pendingActionRef.current;
     if (!pending) return;
 
-    pendingConfirmActive = false;  // synchronous clear
     pendingActionRef.current = null;
     setPendingAction(null);
     setStatus('speaking');
@@ -649,7 +635,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   }, [language]);
 
   const cancelPending = useCallback(async (speechOverride?: string) => {
-    pendingConfirmActive = false;  // synchronous clear
     pendingActionRef.current = null;
     setPendingAction(null);
     const speech = speechOverride ?? SPEECH.CANCELLED;
@@ -661,7 +646,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   }, [language]);
 
   const editPending = useCallback(async (editText: string) => {
-    pendingConfirmActive = false;  // synchronous clear
     pendingActionRef.current = null;
     setPendingAction(null);
     // Re-send to Claude as a follow-up message — Claude will re-draft
@@ -670,7 +654,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
   const clearHistory = useCallback(() => {
     stopSpeaking();
-    pendingConfirmActive = false;  // synchronous clear
     pendingActionRef.current = null;
     setPendingAction(null);
     setTurns([]);
@@ -684,7 +667,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
   const stopAndReset = useCallback(() => {
     stopSpeaking();
-    pendingConfirmActive = false;  // synchronous clear
     pendingActionRef.current = null;
     setPendingAction(null);
     setStatus('idle');
