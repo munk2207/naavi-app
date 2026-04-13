@@ -69,7 +69,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   }, [turns]);
 
   const send = useCallback(async (userMessage: string) => {
-    if (status === 'thinking' || status === 'speaking') return;
+    if (status === 'thinking' || status === 'speaking' || status === 'pending_confirm') return;
     // Clear any pending confirm when a new message comes in (edit flow)
     if (pendingActionRef.current) {
       pendingActionRef.current = null;
@@ -458,9 +458,14 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       }
 
       // ── Append turn with all its cards ────────────────────────────────────────
+      // Strip "Say yes to send" from displayed text when not in hands-free
+      let displaySpeech = response.speech;
+      if (!handsfreeRef.current && turnDrafts.some(d => isConfirmable(d))) {
+        displaySpeech = displaySpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
+      }
       const newTurn = {
         userMessage,
-        assistantSpeech: response.speech,
+        assistantSpeech: displaySpeech,
         drafts:           turnDrafts,
         createdEvents:    turnEvents,
         deletedEvents:    turnDeleted,

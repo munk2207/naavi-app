@@ -51,7 +51,65 @@ export async function lookupContact(name: string): Promise<Contact | null> {
 
   const nameLower = name.toLowerCase().trim();
 
-  // 1. Search Naavi's own contacts table
+  // 1. Search people table (saved via ADD_CONTACT — has phone numbers)
+  try {
+    const { data } = await supabase
+      .from('people')
+      .select('name, phone, email')
+      .ilike('name', `%${nameLower}%`)
+      .limit(1);
+
+    if (data && data.length > 0 && (data[0].phone || data[0].email)) {
+      console.log('[contacts] Found in people table:', data[0].name);
+      return { name: data[0].name, email: data[0].email ?? null, phone: data[0].phone ?? null };
+    }
+  } catch { /* continue */ }
+
+  // 2. Search knowledge_fragments for phone numbers (e.g. "Wael's phone is +16137697957")
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user?.id) {
+      const { data } = await supabase
+        .from('knowledge_fragments')
+        .select('content')
+        .eq('user_id', session.user.id)
+        .ilike('content', `%${nameLower}%phone%`)
+        .limit(5);
+
+      if (data && data.length > 0) {
+        // Extract phone number from content like "Wael's phone is +16137697957"
+        for (const row of data) {
+          const phoneMatch = row.content.match(/(\+?\d[\d\s\-()]{7,})/);
+          if (phoneMatch) {
+            const phone = phoneMatch[1].replace(/[\s\-()]/g, '');
+            console.log('[contacts] Found phone in knowledge:', phone);
+            return { name, email: null, phone: phone.startsWith('+') ? phone : `+${phone}` };
+          }
+        }
+      }
+
+      // Also try reverse pattern: content has phone and name
+      const { data: data2 } = await supabase
+        .from('knowledge_fragments')
+        .select('content')
+        .eq('user_id', session.user.id)
+        .ilike('content', `%${nameLower}%`)
+        .limit(10);
+
+      if (data2 && data2.length > 0) {
+        for (const row of data2) {
+          const phoneMatch = row.content.match(/(\+?\d[\d\s\-()]{7,})/);
+          if (phoneMatch) {
+            const phone = phoneMatch[1].replace(/[\s\-()]/g, '');
+            console.log('[contacts] Found phone in knowledge (broad):', phone);
+            return { name, email: null, phone: phone.startsWith('+') ? phone : `+${phone}` };
+          }
+        }
+      }
+    }
+  } catch { /* continue */ }
+
+  // 3. Search Naavi's own contacts table
   try {
     const { data } = await supabase
       .from('contacts')
@@ -64,7 +122,7 @@ export async function lookupContact(name: string): Promise<Contact | null> {
     }
   } catch { /* continue */ }
 
-  // 2. Search Gmail sender cache
+  // 4. Search Gmail sender cache
   try {
     const { data } = await supabase
       .from('gmail_messages')
@@ -78,7 +136,7 @@ export async function lookupContact(name: string): Promise<Contact | null> {
     }
   } catch { /* continue */ }
 
-  // 3. Google People API via Edge Function
+  // 5. Google People API via Edge Function
   try {
     const { data, error } = await supabase.functions.invoke('lookup-contact', {
       body: { name },

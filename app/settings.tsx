@@ -470,7 +470,7 @@ export default function SettingsScreen() {
         <View style={styles.divider} />
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V50 (build 74)</Text>
+        <Text style={styles.version}>MyNaavi — V50 (build 75)</Text>
 
       </ScrollView>
     </SafeAreaView>

@@ -1306,10 +1306,11 @@ export default function HomeScreen() {
             </Text>
           </View>
         )}
+        {/* Confirming state shows the normal listening banner — Naavi already said the prompt */}
         {handsfree.state === 'confirming' && (
-          <View style={[styles.handsfreeBanner, { backgroundColor: '#E67E22' }]}>
+          <View style={styles.handsfreeBanner}>
             <View style={styles.handsfreePulse} />
-            <Text style={styles.handsfreeBannerText}>Say yes to send or no to cancel</Text>
+            <Text style={styles.handsfreeBannerText}>Listening...</Text>
             <TouchableOpacity onPress={handsfree.deactivate} style={styles.handsfreeStopBtn}>
               <Text style={styles.handsfreeStopText}>End</Text>
             </TouchableOpacity>
