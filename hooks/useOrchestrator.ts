@@ -55,6 +55,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const briefRef = useRef(briefItems);
   useEffect(() => { briefRef.current = briefItems; }, [briefItems]);
 
+  // Always-current ref for status — prevents stale closure in send()
+  const statusRef = useRef(status);
+  useEffect(() => { statusRef.current = status; }, [status]);
+
   // Derive history for Claude context from turns
   const historyRef = useRef<NaaviMessage[]>([]);
   useEffect(() => {
@@ -66,7 +70,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
   const send = useCallback(async (userMessage: string, options?: { isHandsfree?: boolean }) => {
     const isHandsfree = options?.isHandsfree ?? false;
-    if (status === 'thinking' || status === 'speaking' || status === 'pending_confirm') return;
+    if (statusRef.current === 'thinking' || statusRef.current === 'speaking' || statusRef.current === 'pending_confirm') return;
     // Clear any pending confirm when a new message comes in (edit flow)
     if (pendingActionRef.current) {
       pendingActionRef.current = null;

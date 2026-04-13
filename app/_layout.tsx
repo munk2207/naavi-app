@@ -4,7 +4,7 @@
  */
 
 import { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Platform, View, Text, Image, StyleSheet } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -101,7 +101,18 @@ export default function RootLayout() {
       >
         <Stack.Screen
           name="index"
-          options={{ title: 'MyNaavi', headerShown: true }}
+          options={{
+            headerShown: true,
+            headerTitle: () => (
+              <View style={headerStyles.container}>
+                <Image source={require('@/assets/mynaavi-logo.png')} style={headerStyles.logo} />
+                <Text style={headerStyles.title}>
+                  <Text style={headerStyles.white}>My</Text>
+                  <Text style={headerStyles.teal}>Naavi</Text>
+                </Text>
+              </View>
+            ),
+          }}
         />
         <Stack.Screen
           name="settings"
@@ -119,3 +130,25 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+const headerStyles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  logo: {
+    width: 28,
+    height: 28,
+  },
+  title: {
+    fontWeight: '600',
+    fontSize: 17,
+  },
+  white: {
+    color: Colors.textPrimary,
+  },
+  teal: {
+    color: '#5DCAA5',
+  },
+});
