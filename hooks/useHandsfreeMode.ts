@@ -271,8 +271,11 @@ export function useHandsfreeMode(
   }
 
   // ── Exit confirm state and fire callback ──
-  function exitConfirmState(response: ConfirmResponse, editText?: string) {
+  async function exitConfirmState(response: ConfirmResponse, editText?: string) {
     clearConfirmTimeout();
+    // Stop mic immediately so it doesn't pick up the TTS response ("Sent.", "Cancelled.", etc.)
+    await stopAudioStream();
+    startKeepAlive();
     waitingForOrchestratorRef.current = true;
     setState('waiting');
     stateRef.current = 'waiting';
@@ -539,15 +542,20 @@ export function useHandsfreeMode(
     if (stateRef.current === 'inactive') return;
     if (stateRef.current === 'confirming') return; // already confirming
 
-    console.log('[Handsfree] Orchestrator needs confirmation — entering confirming state');
-    // Delay to let TTS finish before opening mic
+    console.log('[Handsfree] Orchestrator needs confirmation — stopping mic until TTS finishes');
+    // Stop mic immediately so it doesn't pick up Naavi's own confirmation prompt
+    stopAudioStream();
+    startKeepAlive();
+
+    // Wait longer for TTS to fully finish before reopening mic (confirmation prompts are longer)
     setTimeout(async () => {
       if (stateRef.current === 'inactive') return;
+      stopKeepAlive();
       setState('confirming');
       stateRef.current = 'confirming';
       startConfirmTimeout();
 
-      // If WebSocket is still open, just restart audio stream
+      // Restart audio stream for confirmation listening
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         await startAudioStream();
       } else {
@@ -555,7 +563,7 @@ export function useHandsfreeMode(
         loopActiveRef.current = false;
         await startStreaming();
       }
-    }, POST_TTS_DELAY_MS);
+    }, POST_TTS_DELAY_MS * 3);
   }, [orchestratorStatus]);
 
   // ── Activate hands-free mode (self-healing) ──
