@@ -132,9 +132,11 @@ export function useHandsfreeMode(
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const confirmHandledRef = useRef(false);  // guard: only process one confirmation
   const pendingConfirmTransitionRef = useRef(false);  // true during the delay before entering confirming
+  const orchestratorStatusRef = useRef(orchestratorStatus);
 
-  // Keep stateRef in sync
+  // Keep refs in sync
   useEffect(() => { stateRef.current = state; }, [state]);
+  useEffect(() => { orchestratorStatusRef.current = orchestratorStatus; }, [orchestratorStatus]);
 
   // ── Idle timer management ──
   function resetIdleTimer() {
@@ -288,17 +290,11 @@ export function useHandsfreeMode(
   function processTranscript(transcript: string) {
     if (!transcript.trim()) return;
 
-    // If we're transitioning to confirm state, ignore any leftover transcripts
-    if (pendingConfirmTransitionRef.current) {
-      console.log(`[Handsfree] Ignoring transcript during confirm transition: "${transcript}"`);
-      return;
-    }
-
-    console.log(`[Handsfree] Final transcript: "${transcript}"`);
+    console.log(`[Handsfree] Final transcript: "${transcript}" | state=${stateRef.current} | orchStatus=${orchestratorStatusRef.current}`);
     resetIdleTimer();
 
-    // ── If in confirming state, classify the response ──
-    if (stateRef.current === 'confirming') {
+    // ── If orchestrator is waiting for confirmation (pending_confirm) OR we're in confirming state ──
+    if (orchestratorStatusRef.current === 'pending_confirm' || stateRef.current === 'confirming') {
       // Guard: only process one confirmation to prevent looping
       if (confirmHandledRef.current) {
         console.log('[Handsfree] Confirm already handled — ignoring transcript');
@@ -317,6 +313,12 @@ export function useHandsfreeMode(
       } else {
         exitConfirmState('edit', transcript);
       }
+      return;
+    }
+
+    // If orchestrator is busy (thinking/speaking), ignore transcript
+    if (orchestratorStatusRef.current === 'thinking' || orchestratorStatusRef.current === 'speaking') {
+      console.log(`[Handsfree] Orchestrator busy (${orchestratorStatusRef.current}) — ignoring transcript`);
       return;
     }
 
@@ -363,9 +365,10 @@ export function useHandsfreeMode(
   function handleUtteranceEnd() {
     // During confirm transition, ignore
     if (pendingConfirmTransitionRef.current) return;
-    // In confirming state, UtteranceEnd after speech is handled by processTranscript
-    // (classification already fired). Nothing extra needed here.
-    if (stateRef.current === 'confirming') return;
+    // If orchestrator is pending_confirm or we're in confirming state, don't auto-submit
+    if (orchestratorStatusRef.current === 'pending_confirm' || stateRef.current === 'confirming') return;
+    // If orchestrator is busy, ignore
+    if (orchestratorStatusRef.current === 'thinking' || orchestratorStatusRef.current === 'speaking') return;
 
     // Normal mode — auto-submit accumulated text
     const messageToSend = pendingTextRef.current.trim();
