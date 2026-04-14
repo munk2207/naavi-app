@@ -10,6 +10,7 @@ import {
 } from '../../../lib/contacts';
 import {
   saveContact as supabaseSave,
+  supabase,
 } from '../../../lib/supabase';
 
 import type { ContactAdapter } from '../interfaces';
@@ -42,12 +43,34 @@ export class GoogleContactAdapter implements ContactAdapter {
   }
 
   async save(contact: Partial<Contact>): Promise<Contact> {
+    // Save to Naavi's own database
     await supabaseSave({
       name:         contact.name         ?? '',
       email:        contact.email        ?? '',
       phone:        contact.phone        ?? '',
       relationship: contact.relationship ?? '',
     });
+
+    // Also save to Google Contacts via Edge Function
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.functions.invoke('create-contact', {
+          body: {
+            name:  contact.name  ?? '',
+            email: contact.email ?? '',
+            phone: contact.phone ?? '',
+          },
+        });
+        if (error) {
+          console.error('[GoogleContactAdapter] Failed to create Google Contact:', error.message);
+        } else {
+          console.log('[GoogleContactAdapter] Google Contact created:', data?.resourceName);
+        }
+      } catch (err) {
+        console.error('[GoogleContactAdapter] create-contact error:', err);
+      }
+    }
+
     return {
       id:           `contact_${Date.now()}`,
       name:         contact.name  ?? '',

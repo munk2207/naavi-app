@@ -58,7 +58,7 @@ export async function connectGoogleCalendar(): Promise<void> {
         'https://www.googleapis.com/auth/gmail.send',
         'https://www.googleapis.com/auth/drive.readonly',
         'https://www.googleapis.com/auth/drive.file',
-        'https://www.googleapis.com/auth/contacts.readonly',
+        'https://www.googleapis.com/auth/contacts',
         'https://www.googleapis.com/auth/contacts.other.readonly',
         'https://www.googleapis.com/auth/tasks.readonly',
       ].join(' '),
