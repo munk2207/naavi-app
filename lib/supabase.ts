@@ -101,14 +101,15 @@ export async function saveContact(contact: {
     console.error('[Supabase] Cannot save contact — no user session');
     return;
   }
-  // Only insert columns that definitely exist in the contacts table
-  const { error } = await supabase.from('contacts').insert({
+  const row: Record<string, string> = {
     user_id: userId,
     name: contact.name,
     email: contact.email,
-  });
+  };
+  if (contact.phone) row.phone = contact.phone;
+  const { error } = await supabase.from('contacts').insert(row);
   if (error) console.error('[Supabase] Failed to save contact:', error.message);
-  else console.log('[Supabase] Contact saved:', contact.name);
+  else console.log('[Supabase] Contact saved:', contact.name, contact.phone ?? '');
 }
 
 export async function saveReminder(reminder: {

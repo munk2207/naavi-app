@@ -12,7 +12,7 @@
 import { supabase } from './supabase';
 
 export async function loadKeyterms(): Promise<string[]> {
-  const fixed = ['Naavi', 'MyNaavi', 'Robert'];
+  const fixed = ['Naavi', 'MyNaavi', 'Robert', 'end', 'goodbye', 'cancel', 'change'];
 
   if (!supabase) return fixed;
 

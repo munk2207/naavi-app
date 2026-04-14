@@ -207,6 +207,13 @@ export async function savePerson(person: {
 }): Promise<void> {
   if (!supabase) return;
 
+  const { data: { session } } = await supabase.auth.getSession();
+  const userId = session?.user?.id;
+  if (!userId) {
+    console.error('[Memory] Cannot save person — no user session');
+    return;
+  }
+
   // Upsert — update if exists, insert if not
   const { data: existing } = await supabase
     .from('people')
@@ -215,12 +222,16 @@ export async function savePerson(person: {
     .limit(1);
 
   if (existing && existing.length > 0) {
-    await supabase
+    const { error } = await supabase
       .from('people')
       .update({ ...person, updated_at: new Date().toISOString() })
       .eq('id', existing[0].id);
+    if (error) console.error('[Memory] Failed to update person:', error.message);
+    else console.log('[Memory] Person updated:', person.name);
   } else {
-    await supabase.from('people').insert(person);
+    const { error } = await supabase.from('people').insert({ ...person, user_id: userId });
+    if (error) console.error('[Memory] Failed to save person:', error.message);
+    else console.log('[Memory] Person saved:', person.name);
   }
 }
 

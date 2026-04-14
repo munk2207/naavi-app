@@ -119,7 +119,7 @@ export async function hasApiKey(): Promise<boolean> {
 
 // ─── System prompt builder ────────────────────────────────────────────────────
 
-function buildSystemPrompt(language: 'en' | 'fr', briefItems: BriefItem[], healthContext = '', knowledgeContext = ''): string {
+function buildSystemPrompt(language: 'en' | 'fr', briefItems: BriefItem[], healthContext = '', knowledgeContext = '', userName = 'Robert'): string {
   const now = new Date();
   const todayISO = now.toISOString().split('T')[0];
 
@@ -154,7 +154,7 @@ function buildSystemPrompt(language: 'en' | 'fr', briefItems: BriefItem[], healt
   const torontoOffset = `${offsetSign}${String(Math.floor(offsetAbs / 60)).padStart(2,'0')}:${String(offsetAbs % 60).padStart(2,'0')}`;
   const nowToronto = `${torontoStr}${torontoOffset}`;
 
-  return `
+  const prompt = `
 Today is ${todayISO}. Current date-time in Toronto is ${nowToronto}. Upcoming days: ${upcomingDays}. Always use these exact dates and times — never guess. When Robert says "in X minutes/hours", compute the datetime by adding to ${nowToronto} and keep the same timezone offset in the result.
 
 You are Naavi, a life orchestration companion for Robert, 68, Ottawa.
@@ -400,12 +400,18 @@ Guardrails:
 - You cannot send emails directly. ALWAYS use DRAFT_MESSAGE — NEVER say "sent" or "I sent" or "email sent".
 - When you emit a DRAFT_MESSAGE action, your speech MUST end with a voice confirmation prompt. For email: "I've drafted an email to {name} about {subject}. Say yes to send, or tell me what to change." For SMS/WhatsApp: "I've drafted a {channel} to {name}. Say yes to send, or tell me what to change." This is critical for hands-free operation — Robert may not be looking at the screen.
 `.trim();
+
+  // Replace "Robert" with the configured user name throughout the prompt
+  if (userName !== 'Robert') {
+    return prompt.replace(/\bRobert\b/g, userName);
+  }
+  return prompt;
 }
 
 // ─── Main send function ───────────────────────────────────────────────────────
 
 /**
- * Sends Robert's message to Claude and returns Naavi's response.
+ * Sends the user's message to Claude and returns Naavi's response.
  * Called from the useOrchestrator hook on every conversation turn.
  */
 export async function sendToNaavi(
@@ -430,7 +436,8 @@ export async function sendToNaavi(
     isBroadQuery ? fetchAllKnowledge(100) : searchKnowledge(userMessage, 5),
   ]);
   const knowledgeContext = formatFragmentsForContext(knowledgeFragments, isBroadQuery);
-  const system = buildSystemPrompt(language, briefItems, healthContext, knowledgeContext);
+  const userName = await getUserNameAsync() || 'Robert';
+  const system = buildSystemPrompt(language, briefItems, healthContext, knowledgeContext, userName);
 
   // For broad knowledge queries inject the list directly into the user message so
   // Claude is explicitly instructed to read every item aloud — not reference "above".

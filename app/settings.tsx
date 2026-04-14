@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserName } from '@/lib/naavi-client';
+import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserNameAsync } from '@/lib/naavi-client';
 import { signOut, supabase } from '@/lib/supabase';
 import { isCalendarConnected, connectGoogleCalendar, disconnectGoogleCalendar } from '@/lib/calendar';
 import { saveNotionToken, getNotionToken, removeNotionToken, hasNotionToken } from '@/lib/notion';
@@ -119,8 +119,9 @@ export default function SettingsScreen() {
     isCalendarConnected().then(setCalendarConnected);
     hasNotionToken().then(setNotionConnected);
     isEpicConnected().then(setEpicConnected);
-    const saved = getUserName();
-    if (saved) { setUserName(saved); setUserNameSaved(true); }
+    getUserNameAsync().then(saved => {
+      if (saved) { setUserName(saved); setUserNameSaved(true); }
+    });
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setPushEnabled(Notification.permission === 'granted');
     }
@@ -470,7 +471,7 @@ export default function SettingsScreen() {
         <View style={styles.divider} />
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V50 (build 85)</Text>
+        <Text style={styles.version}>MyNaavi — V50 (build 86)</Text>
 
       </ScrollView>
     </SafeAreaView>

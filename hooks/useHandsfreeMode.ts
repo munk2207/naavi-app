@@ -52,7 +52,7 @@ export interface UseHandsfreeModeResult {
 
 export const KEYWORDS = {
   SUBMIT: ['thank you', 'thank you naavi', 'thanks', 'thanks naavi', 'over'],
-  EXIT: ['goodbye', 'goodbye naavi', 'stop listening', "that's all", 'thats all'],
+  EXIT: ['goodbye', 'goodbye naavi', 'stop listening', "that's all", 'thats all', 'end', 'end listening'],
   WAKE: ['hi naavi', 'hey naavi', 'hello naavi', 'naavi'],
 };
 
