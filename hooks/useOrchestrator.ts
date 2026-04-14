@@ -373,8 +373,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
         if (action.type === 'ADD_CONTACT') {
           const name = String(action.name ?? '');
-          await saveContact({ name, email: String(action.email ?? ''), phone: String(action.phone ?? ''), relationship: String(action.relationship ?? '') });
-          await savePerson({ name, email: String(action.email ?? ''), phone: String(action.phone ?? ''), relationship: String(action.relationship ?? '') });
+          // Normalize phone: strip non-digits, add +1 if 10 digits (North American)
+          let phone = String(action.phone ?? '').replace(/[^+\d]/g, '');
+          if (phone && !phone.startsWith('+')) {
+            if (/^\d{10}$/.test(phone)) phone = `+1${phone}`;
+            else if (/^1\d{10}$/.test(phone)) phone = `+${phone}`;
+            else if (/^\d{7}$/.test(phone)) phone = `+1613${phone}`; // local Ottawa default
+            else phone = `+${phone}`;
+          }
+          await saveContact({ name, email: String(action.email ?? ''), phone, relationship: String(action.relationship ?? '') });
+          await savePerson({ name, email: String(action.email ?? ''), phone, relationship: String(action.relationship ?? '') });
         } else if (action.type === 'SET_REMINDER') {
           const reminderTitle = String(action.title ?? '');
           const reminderDatetime = String(action.datetime ?? '');

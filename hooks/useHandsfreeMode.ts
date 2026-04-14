@@ -58,7 +58,7 @@ export const KEYWORDS = {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const IDLE_TIMEOUT_MS = 60000;         // 60s no speech → pause
+const IDLE_TIMEOUT_MS = 120000;        // 120s no speech → pause
 const POST_TTS_DELAY_MS = 1500;        // wait after TTS before reopening mic
 const KEEPALIVE_INTERVAL_MS = 4000;    // send keepalive every 4s during TTS
 const MAX_RECONNECT_ATTEMPTS = 3;
@@ -328,7 +328,7 @@ export function useHandsfreeMode(
       stopStreaming().then(() => {
         setState('inactive');
         stateRef.current = 'inactive';
-        speakCue('Goodbye Robert. Talk to you soon.');
+        speakCue('Goodbye. Talk to you soon.');
       });
       return;
     }
@@ -461,7 +461,7 @@ export function useHandsfreeMode(
         wsRef.current = null;
 
         // If still supposed to be active, try to reconnect
-        if (loopActiveRef.current && (stateRef.current === 'listening' || stateRef.current === 'confirming')) {
+        if (loopActiveRef.current && (stateRef.current === 'listening' || stateRef.current === 'confirming' || stateRef.current === 'waiting')) {
           handleReconnect();
         }
       };
@@ -496,7 +496,7 @@ export function useHandsfreeMode(
 
     await new Promise(resolve => setTimeout(resolve, delay));
 
-    if (loopActiveRef.current && (stateRef.current === 'listening' || stateRef.current === 'confirming')) {
+    if (loopActiveRef.current && (stateRef.current === 'listening' || stateRef.current === 'confirming' || stateRef.current === 'waiting')) {
       loopActiveRef.current = false; // Reset so startStreaming can set it
       await startStreaming();
     }
