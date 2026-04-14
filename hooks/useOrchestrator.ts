@@ -383,6 +383,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           }
           await saveContact({ name, email: String(action.email ?? ''), phone, relationship: String(action.relationship ?? '') });
           await savePerson({ name, email: String(action.email ?? ''), phone, relationship: String(action.relationship ?? '') });
+          // Also save to Google Contacts
+          try {
+            const { data, error: fnErr } = await supabase.functions.invoke('create-contact', {
+              body: { name, email: String(action.email ?? ''), phone },
+            });
+            if (fnErr) console.error('[Orchestrator] Google Contact save failed:', fnErr.message);
+            else console.log('[Orchestrator] Google Contact created:', data?.resourceName);
+          } catch (gcErr) {
+            console.error('[Orchestrator] Google Contact error:', gcErr);
+          }
         } else if (action.type === 'SET_REMINDER') {
           const reminderTitle = String(action.title ?? '');
           const reminderDatetime = String(action.datetime ?? '');
@@ -646,7 +656,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     }
 
     // Wait for audio system to switch from mic to speaker mode
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    await new Promise(resolve => setTimeout(resolve, 2500));
     // Speak the outcome
     await speakResponse(result.speech, language);
     setStatus('idle');
@@ -659,7 +669,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     const speech = speechOverride ?? SPEECH.CANCELLED;
     if (speech) {
       setStatus('speaking');
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 2500));
       await speakResponse(speech, language);
     }
     setStatus('idle');
