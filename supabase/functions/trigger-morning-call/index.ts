@@ -2,7 +2,12 @@
  * trigger-morning-call Edge Function
  *
  * Called by pg_cron every minute. Checks if it's time for Robert's
- * morning brief call, then initiates an outbound Twilio call.
+ * daily briefing call, then initiates an outbound Twilio call.
+ *
+ * Retry logic:
+ * - First attempt at scheduled time
+ * - If missed, retries every 5 minutes up to 3 attempts
+ * - After 3 failed attempts, voice server sends SMS + WhatsApp + push alert
  *
  * Required Supabase secrets:
  *   TWILIO_ACCOUNT_SID
@@ -26,52 +31,77 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    // Get all users with morning call enabled
     const { data: settings, error } = await supabase
       .from('user_settings')
-      .select('user_id, morning_call_time, morning_call_phone, timezone, last_morning_call_date')
+      .select('user_id, morning_call_time, morning_call_phone, timezone, last_morning_call_date, morning_call_status, morning_call_attempts, morning_call_last_attempt')
       .eq('morning_call_enabled', true);
 
     if (error || !settings?.length) {
-      console.log('[morning-call] No enabled settings found');
       return new Response(JSON.stringify({ triggered: 0 }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     let triggered = 0;
+    const now = new Date();
 
     for (const s of settings) {
-      // Get current time in user's timezone
-      const now = new Date();
+      const tz = s.timezone || 'America/Toronto';
+      const todayStr = now.toLocaleDateString('sv-SE', { timeZone: tz });
       const currentTime = now.toLocaleTimeString('en-GB', {
-        timeZone: s.timezone || 'America/Toronto',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }); // returns "08:00" format
-
-      // Get configured call time (stored as "08:00:00", trim seconds)
+        timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false,
+      });
       const callTime = String(s.morning_call_time).substring(0, 5);
 
-      if (currentTime !== callTime) continue;
+      // New day — reset attempts
+      if (s.last_morning_call_date !== todayStr) {
+        if (s.morning_call_attempts > 0 || s.morning_call_status !== 'pending') {
+          await supabase.from('user_settings').update({
+            morning_call_attempts: 0,
+            morning_call_status: 'pending',
+            morning_call_last_attempt: null,
+          }).eq('user_id', s.user_id);
+          s.morning_call_attempts = 0;
+          s.morning_call_status = 'pending';
+          s.morning_call_last_attempt = null;
+        }
+      }
 
-      // Check if already called today (dedup)
-      const todayStr = now.toLocaleDateString('sv-SE', {
-        timeZone: s.timezone || 'America/Toronto',
-      }); // returns "2026-04-15" format
-
-      if (s.last_morning_call_date === todayStr) {
-        console.log(`[morning-call] Already called today (${todayStr})`);
+      // Already answered today — skip
+      if (s.last_morning_call_date === todayStr && s.morning_call_status === 'answered') {
         continue;
+      }
+
+      // Already exhausted retries today — skip
+      if (s.last_morning_call_date === todayStr && s.morning_call_status === 'missed') {
+        continue;
+      }
+
+      // Max 3 attempts — skip (voice server handles fallback alerts)
+      if (s.morning_call_attempts >= 3) {
+        continue;
+      }
+
+      // Check if it's time for first attempt or retry
+      const attempts = s.morning_call_attempts || 0;
+
+      if (attempts === 0) {
+        // First attempt — only at scheduled time
+        if (currentTime !== callTime) continue;
+      } else {
+        // Retry — wait 5 minutes since last attempt
+        if (s.morning_call_last_attempt) {
+          const lastAttempt = new Date(s.morning_call_last_attempt);
+          const minutesSince = (now.getTime() - lastAttempt.getTime()) / 60000;
+          if (minutesSince < 5) continue;
+        }
       }
 
       // Initiate Twilio outbound call
       const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID')!;
       const authToken = Deno.env.get('TWILIO_AUTH_TOKEN')!;
       const voiceServerUrl = Deno.env.get('VOICE_SERVER_URL')!;
-      const twilioNumber = '+12495235394'; // Naavi's Twilio number
-
+      const twilioNumber = '+12495235394';
       const credentials = btoa(`${accountSid}:${authToken}`);
 
       const callRes = await fetch(
@@ -87,6 +117,9 @@ Deno.serve(async (req) => {
             From: twilioNumber,
             Url: `${voiceServerUrl}/outbound-voice`,
             Method: 'POST',
+            StatusCallback: `${voiceServerUrl}/call-status`,
+            StatusCallbackMethod: 'POST',
+            StatusCallbackEvent: 'completed',
           }),
         }
       );
@@ -94,17 +127,18 @@ Deno.serve(async (req) => {
       const callData = await callRes.json();
 
       if (!callRes.ok) {
-        console.error('[morning-call] Twilio call error:', callData);
+        console.error('[morning-call] Twilio error:', callData);
         continue;
       }
 
-      console.log(`[morning-call] Call initiated — SID: ${callData.sid}, To: ${s.morning_call_phone}`);
+      console.log(`[morning-call] Call initiated — SID: ${callData.sid}, attempt ${attempts + 1}`);
 
-      // Mark as called today
-      await supabase
-        .from('user_settings')
-        .update({ last_morning_call_date: todayStr })
-        .eq('user_id', s.user_id);
+      // Update attempts
+      await supabase.from('user_settings').update({
+        morning_call_attempts: attempts + 1,
+        morning_call_last_attempt: now.toISOString(),
+        last_morning_call_date: todayStr,
+      }).eq('user_id', s.user_id);
 
       triggered++;
     }
