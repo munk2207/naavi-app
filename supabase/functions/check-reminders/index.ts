@@ -113,21 +113,29 @@ serve(async (req) => {
           }
         }
       } else {
-        // Normal reminder — send SMS
-        const smsRes = await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${interFnKey}`,
-          },
-          body: JSON.stringify({ to: reminder.phone_number, body: smsBody }),
-        });
+        // Normal reminder — send SMS + WhatsApp + push
+        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-        if (!smsRes.ok) {
-          const errData = await smsRes.json().catch(() => ({}));
-          errors.push(`Reminder ${reminder.id}: ${errData.error ?? smsRes.status}`);
-          continue;
-        }
+        // SMS
+        fetch(`${supabaseUrl}/functions/v1/send-sms`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+          body: JSON.stringify({ to: reminder.phone_number, body: smsBody }),
+        }).catch(err => console.error(`[check-reminders] SMS failed:`, err));
+
+        // WhatsApp
+        fetch(`${supabaseUrl}/functions/v1/send-sms`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+          body: JSON.stringify({ to: reminder.phone_number, body: smsBody, channel: 'whatsapp' }),
+        }).catch(err => console.error(`[check-reminders] WhatsApp failed:`, err));
+
+        // Push notification
+        fetch(`${supabaseUrl}/functions/v1/send-push`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+          body: JSON.stringify({ userId: reminder.user_id, title: 'Naavi Reminder', body: smsBody }),
+        }).catch(err => console.error(`[check-reminders] Push failed:`, err));
       }
 
       // Mark as fired
