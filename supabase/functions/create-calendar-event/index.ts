@@ -71,13 +71,13 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
-  // Fallback: find user from gmail_messages (voice server uses service role key)
+  // Fallback: find user from user_tokens (voice server uses service role key)
   if (!userId) {
     try {
       const { data } = await adminClient
-        .from('gmail_messages')
+        .from('user_tokens')
         .select('user_id')
-        .order('received_at', { ascending: false })
+        .eq('provider', 'google')
         .limit(1)
         .single();
       if (data) userId = data.user_id;

@@ -140,12 +140,12 @@ async function resolveUserId(supabase: ReturnType<typeof createClient>, token: s
     if (user) return user.id;
   } catch (_) { /* ignore */ }
 
-  // Attempt 2: find user who has Gmail messages (most reliable for single-user app)
+  // Attempt 2: find user from user_tokens (matches calendar sync user_id)
   try {
     const { data } = await supabase
-      .from('gmail_messages')
+      .from('user_tokens')
       .select('user_id')
-      .order('received_at', { ascending: false })
+      .eq('provider', 'google')
       .limit(1)
       .single();
     if (data) return data.user_id;
