@@ -22,6 +22,7 @@ interface Reminder {
   title: string;
   datetime: string;
   phone_number: string;
+  is_priority?: boolean;
 }
 
 serve(async (req) => {
@@ -40,7 +41,7 @@ serve(async (req) => {
   // Find all due reminders not yet fired
   const { data: reminders, error } = await adminClient
     .from('reminders')
-    .select('id, user_id, title, datetime, phone_number')
+    .select('id, user_id, title, datetime, phone_number, is_priority')
     .eq('fired', false)
     .not('phone_number', 'is', null)
     .lte('datetime', now);
@@ -72,19 +73,61 @@ serve(async (req) => {
 
       const smsBody = `🔔 Reminder: ${reminder.title}\n🕐 ${alertTime}\n— MyNaavi`;
 
-      const smsRes = await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${interFnKey}`,
-        },
-        body: JSON.stringify({ to: reminder.phone_number, body: smsBody }),
-      });
+      if (reminder.is_priority) {
+        // Priority reminder — initiate a phone call instead of SMS
+        const voiceServerUrl = Deno.env.get('VOICE_SERVER_URL');
+        const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID')!;
+        const authToken = Deno.env.get('TWILIO_AUTH_TOKEN')!;
+        const twilioNumber = '+12495235394';
+        const credentials = btoa(`${accountSid}:${authToken}`);
 
-      if (!smsRes.ok) {
-        const errData = await smsRes.json().catch(() => ({}));
-        errors.push(`Reminder ${reminder.id}: ${errData.error ?? smsRes.status}`);
-        continue;
+        if (voiceServerUrl) {
+          const callRes = await fetch(
+            `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Basic ${credentials}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: new URLSearchParams({
+                To: reminder.phone_number,
+                From: twilioNumber,
+                Url: `${voiceServerUrl}/reminder-call?title=${encodeURIComponent(reminder.title)}`,
+                Method: 'POST',
+              }),
+            }
+          );
+
+          if (!callRes.ok) {
+            const errData = await callRes.json().catch(() => ({}));
+            console.error(`[check-reminders] Priority call failed:`, errData);
+            // Fall back to SMS
+            await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${interFnKey}` },
+              body: JSON.stringify({ to: reminder.phone_number, body: smsBody }),
+            });
+          } else {
+            console.log(`[check-reminders] Priority call initiated for "${reminder.title}"`);
+          }
+        }
+      } else {
+        // Normal reminder — send SMS
+        const smsRes = await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${interFnKey}`,
+          },
+          body: JSON.stringify({ to: reminder.phone_number, body: smsBody }),
+        });
+
+        if (!smsRes.ok) {
+          const errData = await smsRes.json().catch(() => ({}));
+          errors.push(`Reminder ${reminder.id}: ${errData.error ?? smsRes.status}`);
+          continue;
+        }
       }
 
       // Mark as fired

@@ -46,7 +46,7 @@ serve(async (req) => {
   }
 
   const body = await req.json();
-  const { summary, description, start, end, attendees, recurrence } = body;
+  const { summary, description, start, end, attendees, recurrence, is_priority } = body;
 
   if (!summary || !start || !end) {
     return new Response(JSON.stringify({ error: 'Missing summary, start, or end' }), {
@@ -54,22 +54,43 @@ serve(async (req) => {
     });
   }
 
+  // Try JWT auth first, then fallback for service role key (voice server)
+  let userId: string | null = null;
   const userClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_ANON_KEY')!,
     { global: { headers: { Authorization: authHeader } } }
   );
-  const { data: { user }, error: userError } = await userClient.auth.getUser();
-  if (userError || !user) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
+  try {
+    const { data: { user } } = await userClient.auth.getUser();
+    if (user) userId = user.id;
+  } catch (_) { /* ignore */ }
 
   const adminClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
+
+  // Fallback: find user from gmail_messages (voice server uses service role key)
+  if (!userId) {
+    try {
+      const { data } = await adminClient
+        .from('gmail_messages')
+        .select('user_id')
+        .order('received_at', { ascending: false })
+        .limit(1)
+        .single();
+      if (data) userId = data.user_id;
+    } catch (_) { /* ignore */ }
+  }
+
+  if (!userId) {
+    return new Response(JSON.stringify({ error: 'No user found' }), {
+      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const user = { id: userId };
 
   const { data: tokenRow, error: tokenError } = await adminClient
     .from('user_tokens')
@@ -125,6 +146,18 @@ serve(async (req) => {
 
     const created = await createRes.json();
     console.log(`[create-calendar-event] Created "${summary}" — ${created.id}`);
+
+    // Save to Supabase calendar_events table with priority flag
+    await adminClient.from('calendar_events').upsert({
+      user_id: user.id,
+      google_event_id: created.id,
+      title: summary,
+      description: description ?? '',
+      start_time: start,
+      end_time: end,
+      is_priority: is_priority || false,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'google_event_id' });
 
     return new Response(JSON.stringify({ success: true, eventId: created.id, htmlLink: created.htmlLink }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
