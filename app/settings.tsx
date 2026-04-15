@@ -101,6 +101,9 @@ export default function SettingsScreen() {
   const [epicLoading, setEpicLoading]             = useState(false);
   const [pushEnabled, setPushEnabled]             = useState(false);
   const [pushLoading, setPushLoading]             = useState(false);
+  const [morningCallEnabled, setMorningCallEnabled] = useState(true);
+  const [morningCallTime, setMorningCallTime]       = useState('08:00');
+  const [morningCallLoading, setMorningCallLoading] = useState(false);
 
   // Provider selections — all default to Google for Phase 7
   const [calendarProvider, setCalendarProvider] =
@@ -123,6 +126,16 @@ export default function SettingsScreen() {
     if (saved) { setUserName(saved); setUserNameSaved(true); }
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setPushEnabled(Notification.permission === 'granted');
+    }
+    // Load morning call settings from Supabase
+    if (supabase) {
+      supabase.from('user_settings').select('morning_call_enabled, morning_call_time').limit(1).single()
+        .then(({ data }) => {
+          if (data) {
+            setMorningCallEnabled(data.morning_call_enabled);
+            setMorningCallTime(String(data.morning_call_time).substring(0, 5));
+          }
+        });
     }
   }, []);
 
@@ -152,6 +165,25 @@ export default function SettingsScreen() {
     setApiKeySet(true);
     setApiKey('');
     Alert.alert('Saved', 'API key saved securely.');
+  }
+
+  async function handleSaveMorningCall() {
+    if (!supabase) return;
+    setMorningCallLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setMorningCallLoading(false); return; }
+      await supabase.from('user_settings').upsert({
+        user_id: user.id,
+        morning_call_enabled: morningCallEnabled,
+        morning_call_time: morningCallTime,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+      Alert.alert('Saved', `Morning call ${morningCallEnabled ? `set for ${morningCallTime}` : 'disabled'}.`);
+    } catch (err) {
+      Alert.alert('Error', 'Could not save morning call settings.');
+    }
+    setMorningCallLoading(false);
   }
 
   async function handleSaveNotionToken() {
@@ -419,6 +451,60 @@ export default function SettingsScreen() {
               <Text style={styles.comingSoon}>Phase 8</Text>
             </View>
           ))}
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* Morning Call */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Morning Brief Call</Text>
+          <Text style={styles.sectionNote}>
+            Naavi calls you every morning with your schedule, weather, reminders, and emails.
+          </Text>
+
+          <View style={styles.toolRow}>
+            <View>
+              <Text style={styles.toolLabel}>Morning Call</Text>
+              <Text style={styles.toolStatus}>
+                {morningCallEnabled ? `Enabled — ${morningCallTime} daily` : 'Disabled'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.connectBtn, morningCallEnabled && styles.connectBtnActive]}
+              onPress={() => {
+                setMorningCallEnabled(!morningCallEnabled);
+              }}
+            >
+              <Text style={[styles.connectBtnText, morningCallEnabled && styles.connectBtnTextActive]}>
+                {morningCallEnabled ? 'On' : 'Off'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {morningCallEnabled && (
+            <View style={{ marginTop: 12 }}>
+              <Text style={styles.toolLabel}>Call Time (24h format)</Text>
+              <TextInput
+                style={styles.keyInput}
+                value={morningCallTime}
+                onChangeText={setMorningCallTime}
+                placeholder="08:00"
+                placeholderTextColor={Colors.textMuted}
+                keyboardType="numbers-and-punctuation"
+                maxLength={5}
+                accessibilityLabel="Morning call time"
+              />
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={[styles.saveBtn, morningCallLoading && styles.saveBtnDisabled]}
+            onPress={handleSaveMorningCall}
+            disabled={morningCallLoading}
+            accessibilityRole="button"
+          >
+            <Text style={styles.saveBtnText}>{morningCallLoading ? 'Saving...' : 'Save'}</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.divider} />
