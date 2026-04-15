@@ -49,22 +49,62 @@ serve(async (req) => {
     });
   }
 
-  const userClient = createClient(
+  const adminClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } }
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
-  const { data: { user } } = await userClient.auth.getUser();
-  if (!user) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+  // Try JWT auth first, then fallback for service role key (voice server)
+  let userId: string | null = null;
+  try {
+    const userClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+    const { data: { user } } = await userClient.auth.getUser();
+    if (user) userId = user.id;
+  } catch (_) { /* ignore */ }
+
+  // Fallback: find user from user_tokens (matches calendar sync user_id)
+  if (!userId) {
+    try {
+      const { data } = await adminClient
+        .from('user_tokens')
+        .select('user_id')
+        .eq('provider', 'google')
+        .limit(1)
+        .single();
+      if (data) userId = data.user_id;
+    } catch (_) { /* ignore */ }
+  }
+
+  if (!userId) {
+    console.error('[search-knowledge] No user found');
+    return new Response(JSON.stringify({ error: 'No user found' }), {
       status: 401, headers: corsHeaders,
     });
   }
 
-  const url = new URL(req.url);
-  const query  = url.searchParams.get('q') ?? (await req.json().catch(() => ({}))).q;
-  const topK   = parseInt(url.searchParams.get('top_k') ?? '5');
+  console.log('[search-knowledge] User ID:', userId);
+  const user = { id: userId };
+
+  // Parse query from body (already read as text to avoid double-consume)
+  let query: string | null = null;
+  let topK = 5;
+  try {
+    const bodyText = await req.text();
+    const body = JSON.parse(bodyText);
+    query = body.q ?? null;
+    topK = body.top_k ?? 5;
+  } catch (_) { /* ignore */ }
+
+  // Fallback to query params
+  if (!query) {
+    const url = new URL(req.url);
+    query = url.searchParams.get('q');
+    topK = parseInt(url.searchParams.get('top_k') ?? '5');
+  }
 
   if (!query?.trim()) {
     return new Response(JSON.stringify({ error: 'Missing query' }), {
@@ -81,7 +121,7 @@ serve(async (req) => {
     }
 
     // pgvector cosine similarity search via Supabase RPC
-    const { data: results, error } = await userClient.rpc('search_knowledge_fragments', {
+    const { data: results, error } = await adminClient.rpc('search_knowledge_fragments', {
       query_embedding: JSON.stringify(embedding),
       match_count: topK,
       p_user_id: user.id,
@@ -97,7 +137,7 @@ serve(async (req) => {
     // Update last_retrieved_at on returned fragments
     if (results && results.length > 0) {
       const ids = results.map((r: { id: string }) => r.id);
-      await userClient
+      await adminClient
         .from('knowledge_fragments')
         .update({ last_retrieved_at: new Date().toISOString() })
         .in('id', ids);

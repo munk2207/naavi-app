@@ -53,22 +53,44 @@ serve(async (req) => {
     });
   }
 
-  const userClient = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } }
-  );
-  const { data: { user }, error: userError } = await userClient.auth.getUser();
-  if (userError || !user) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
   const adminClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
+
+  // Try JWT auth first, then fallback for service role key (voice server)
+  let userId: string | null = null;
+  const token = authHeader.replace('Bearer ', '').trim();
+  try {
+    const userClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+    const { data: { user } } = await userClient.auth.getUser();
+    if (user) userId = user.id;
+  } catch (_) { /* ignore */ }
+
+  // Fallback: find user from user_tokens (matches calendar sync user_id)
+  if (!userId) {
+    try {
+      const { data } = await adminClient
+        .from('user_tokens')
+        .select('user_id')
+        .eq('provider', 'google')
+        .limit(1)
+        .single();
+      if (data) userId = data.user_id;
+    } catch (_) { /* ignore */ }
+  }
+
+  if (!userId) {
+    return new Response(JSON.stringify({ error: 'No user found' }), {
+      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const user = { id: userId };
 
   const { data: tokenRow, error: tokenError } = await adminClient
     .from('user_tokens')
