@@ -77,8 +77,8 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Max 3 attempts — skip (voice server handles fallback alerts)
-      if (s.morning_call_attempts >= 3) {
+      // Max 10 attempts — skip (voice server sends final alert at 10)
+      if (s.morning_call_attempts >= 10) {
         continue;
       }
 
