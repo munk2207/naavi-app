@@ -13,7 +13,9 @@ You are working on MyNaavi, an AI life orchestration companion for active senior
 
 **Build clone:** `C:\Users\waela\naavi-mobile` (branch: `main`) — **DO NOT EDIT CODE HERE.** Exists only for `eas build`. Sync via `git fetch origin && git merge origin/main`. Never `cp -f`.
 
-**Voice server repo:** `C:\Users\waela\OneDrive\Desktop\Naavi\naavi-voice-server` (separate GitHub repo, branch: `main`). Single-branch, no worktrees.
+**Voice server repo:** `C:\Users\waela\OneDrive\Desktop\Naavi\naavi-voice-server` (separate GitHub repo `munk2207/naavi-voice-server`, branch: `main`). Single-branch, no worktrees.
+
+**Web marketing site:** `C:\Users\waela\OneDrive\Desktop\Naavi\mynaavi-website` (separate GitHub repo `munk2207/mynaavi-website`, branch: `main`). Vercel auto-deploys `origin/main` root files to https://mynaavi.com. Static HTML only — no Supabase, no auth, no API. Rules 1-6 of "CONFIGURATION DISCIPLINE" do NOT apply (no crons, no Edge Functions, no user sessions). Only relevant rule: 7 (sync via `git pull origin main`, never `cp -f`). **Known legacy duplicate:** the repo has an old `my-naavi-site/` subfolder committed alongside the newer root files. Vercel only serves the root. Do not edit the subfolder — edit files at the repo root.
 
 Before any code edit, run `git worktree list` and `git branch -a` and confirm you're in the right place. If you're not sure, ASK.
 
@@ -54,7 +56,11 @@ The app has ONE canonical place for each type of configuration. Never create par
 
 7. **One repository, many clones.** Mobile app lives in one GitHub repo (`munk2207/naavi-app`). Clones stay in sync via `git merge origin/main` ONLY. Never `cp -f` between clones — that bypasses git and silently diverges them (builds 83-90 diverged that way).
 
-8. **Two repos — different hygiene.** The mobile repo and the voice-server repo are separate. Don't mix work between them. But they share the Supabase backend, so rules 1-5 apply to both.
+8. **Three repos — different hygiene.** Three separate GitHub repos exist:
+   - `munk2207/naavi-app` (mobile app + Edge Functions source)
+   - `munk2207/naavi-voice-server` (Twilio voice server on Railway)
+   - `munk2207/mynaavi-website` (static marketing site on Vercel)
+   Don't mix work between them. Mobile and voice share the Supabase backend, so rules 1-5 apply to both. The website has no backend — skip rules 1-6 for it.
 
 ### CHECKS BEFORE ANY NEW CONFIG
 
