@@ -65,6 +65,34 @@ async function syncUserNameToSupabase(name: string): Promise<void> {
     );
 }
 
+/**
+ * Fetch the canonical Claude system prompt from the get-naavi-prompt Edge Function.
+ * Returns null on any failure — caller should fall back to local buildSystemPrompt.
+ *
+ * This is the "shared source of truth" path. Voice server does the same.
+ */
+async function fetchSharedPrompt(userName: string, userPhone: string): Promise<string | null> {
+  try {
+    const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
+    const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key) return null;
+    const res = await fetch(`${url}/functions/v1/get-naavi-prompt`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`,
+      },
+      body: JSON.stringify({ channel: 'app', userName, userPhone }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data?.prompt === 'string' && data.prompt.length > 100 ? data.prompt : null;
+  } catch (err) {
+    console.warn('[fetchSharedPrompt] failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 /** Fetch user's name + phone from Supabase, with local cache fallback for name */
 async function getUserProfile(): Promise<{ userName: string; userPhone: string }> {
   let userName = 'there';
@@ -476,12 +504,35 @@ export async function sendToNaavi(
   const { userName, userPhone } = await getUserProfile();
 
   const isBroadQuery = /\b(all|list all|list everything|everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
-  const [healthContext, knowledgeFragments] = await Promise.all([
+  const [healthContext, knowledgeFragments, sharedBase] = await Promise.all([
     getEpicHealthContext(),
     isBroadQuery ? fetchAllKnowledge(100) : searchKnowledge(userMessage, 5),
+    fetchSharedPrompt(userName, userPhone),
   ]);
   const knowledgeContext = formatFragmentsForContext(knowledgeFragments, isBroadQuery);
-  const system = buildSystemPrompt(language, briefItems, healthContext, knowledgeContext, userName, userPhone);
+
+  // Build system prompt: prefer shared Edge Function (single source of truth),
+  // fall back to local buildSystemPrompt on error. Mobile-specific context
+  // (brief items, health, knowledge, language note) is appended either way.
+  let system: string;
+  if (sharedBase) {
+    const languageNote = language === 'fr'
+      ? `\n${userName} speaks French. Respond in Canadian French.`
+      : '';
+    const briefContext = briefItems.length > 0
+      ? `\n\n## ${userName}'s upcoming schedule (next 7 days)\n${briefItems
+          .map(item => `- [${item.category}] ${item.title}${item.detail ? ` — ${item.detail}` : ''}`)
+          .join('\n')}`
+      : `\n\n## ${userName}'s upcoming schedule (next 7 days)\n- No events found for the next 7 days.`;
+    system = sharedBase
+      + languageNote
+      + briefContext
+      + (healthContext ? `\n\n${healthContext}` : '')
+      + (knowledgeContext ? `\n\n${knowledgeContext}` : '');
+  } else {
+    console.warn('[sendToNaavi] Using local prompt fallback (get-naavi-prompt unavailable)');
+    system = buildSystemPrompt(language, briefItems, healthContext, knowledgeContext, userName, userPhone);
+  }
 
   // For broad knowledge queries inject the list directly into the user message so
   // Claude is explicitly instructed to read every item aloud — not reference "above".

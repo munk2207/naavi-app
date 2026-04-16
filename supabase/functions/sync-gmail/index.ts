@@ -154,16 +154,17 @@ serve(async (req) => {
       results.push({ user_id, messages: count });
       console.log(`[sync-gmail] Synced ${count} messages for user ${user_id}`);
 
-      // Trigger email alert check immediately after new messages arrive
+      // Trigger the unified rule evaluator immediately after new messages arrive
+      // (evaluate-rules reads action_rules — the consolidated rule store)
       if (count > 0) {
-        fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/check-email-alerts`, {
+        fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/evaluate-rules`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${Deno.env.get('NAAVI_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY')}`,
           },
           body: JSON.stringify({ user_id }),
-        }).catch(err => console.error('[sync-gmail] Alert check trigger failed:', err));
+        }).catch(err => console.error('[sync-gmail] evaluate-rules trigger failed:', err));
       }
 
     } catch (err) {

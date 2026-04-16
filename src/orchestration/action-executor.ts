@@ -238,12 +238,13 @@ async function logConcern(action: LogConcernAction): Promise<void> {
 }
 
 /**
- * Saves an email watch rule to Supabase so check-email-alerts can match
- * incoming emails and SMS Robert when a rule fires.
+ * DEPRECATED / ORPHAN — this file is not imported by the live mobile runtime
+ * (hooks/useOrchestrator.ts is the current path). Kept for reference only.
  *
- * Calls the naavi-chat Edge Function's Supabase client indirectly — in the
- * mobile app this will call the Supabase JS client directly with the user's
- * auth session.
+ * If you reactivate this code, note:
+ *  - email_watch_rules was retired in favor of action_rules (unified framework)
+ *  - evaluate-rules Edge Function reads action_rules and fires via send-sms
+ *  - Writes should insert into action_rules with trigger_type='email'
  */
 async function setEmailAlert(action: SetEmailAlertAction): Promise<void> {
   // The Supabase URL and anon key are injected at build time via env vars.

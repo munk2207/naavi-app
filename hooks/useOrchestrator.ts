@@ -404,19 +404,32 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         } else if (action.type === 'UPDATE_PROFILE') {
           await saveTopic({ subject: String(action.key ?? 'preference'), note: String(action.value ?? ''), category: 'preference' });
         } else if (action.type === 'SET_EMAIL_ALERT') {
+          // Writes go to action_rules (unified trigger/action framework).
+          // email_watch_rules has been retired; evaluate-rules reads action_rules.
           if (supabase) {
             const { data: { session } } = await supabase.auth.getSession();
             if (session?.user) {
-              const { error } = await supabase.from('email_watch_rules').insert({
-                user_id:         session.user.id,
-                from_name:       action.fromName       ? String(action.fromName)       : null,
-                from_email:      action.fromEmail      ? String(action.fromEmail)      : null,
-                subject_keyword: action.subjectKeyword ? String(action.subjectKeyword) : null,
-                phone_number:    String(action.phoneNumber ?? '+16137697957'),
-                label:           String(action.label ?? 'Email alert'),
+              const triggerConfig: Record<string, string> = {};
+              if (action.fromName)       triggerConfig.from_name = String(action.fromName);
+              if (action.fromEmail)      triggerConfig.from_email = String(action.fromEmail);
+              if (action.subjectKeyword) triggerConfig.subject_keyword = String(action.subjectKeyword);
+
+              const label = String(action.label ?? 'Email alert');
+              const { error } = await supabase.from('action_rules').insert({
+                user_id:        session.user.id,
+                trigger_type:   'email',
+                trigger_config: triggerConfig,
+                action_type:    'sms',
+                action_config:  {
+                  to_phone: String(action.phoneNumber ?? '+16137697957'),
+                  body:     `New email alert: ${label}`,
+                },
+                label,
+                one_shot:       false,
+                enabled:        true,
               });
               if (error) console.error('[Orchestrator] SET_EMAIL_ALERT failed:', error.message);
-              else console.log('[Orchestrator] SET_EMAIL_ALERT saved:', action.label);
+              else console.log('[Orchestrator] SET_EMAIL_ALERT saved to action_rules:', label);
             }
           }
         } else if (action.type === 'SET_ACTION_RULE') {
