@@ -45,7 +45,7 @@ serve(async (req) => {
   }
 
   const body = await req.json();
-  const { name } = body;
+  const { name, user_id: bodyUserId } = body;
 
   if (!name?.trim()) {
     return new Response(JSON.stringify({ error: 'Missing name' }), {
@@ -58,9 +58,9 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
-  // Try JWT auth first, then fallback for service role key (voice server)
+  // Standard 3-step user_id resolution (CLAUDE.md rule 4):
+  // (a) JWT auth (mobile app), (b) body.user_id (voice server), (c) user_tokens fallback
   let userId: string | null = null;
-  const token = authHeader.replace('Bearer ', '').trim();
   try {
     const userClient = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -71,7 +71,8 @@ serve(async (req) => {
     if (user) userId = user.id;
   } catch (_) { /* ignore */ }
 
-  // Fallback: find user from user_tokens (matches calendar sync user_id)
+  if (!userId && bodyUserId) userId = bodyUserId;
+
   if (!userId) {
     try {
       const { data } = await adminClient
