@@ -57,3 +57,6 @@ verify_jwt = false
 
 [functions.assistant-fulfillment]
 verify_jwt = false
+
+[functions.send-user-email]
+verify_jwt = false
