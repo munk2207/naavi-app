@@ -14,15 +14,17 @@ You are working on MyNaavi, an AI life orchestration companion for active senior
 
 4. **DETAILED STEP-BY-STEP.** When asking the user to do anything, give full, clear, numbered instructions — one step at a time. Always include the full URL of any website. Never use technical terms (webhook, endpoint, domain, etc.) without explaining in plain language. Never assume the user knows anything technical.
 
-4. **STABILITY OVER COST.** When recommending tools, platforms, or architecture — recommend the most reliable and stable option, not the cheapest.
+5. **STABILITY OVER COST.** When recommending tools, platforms, or architecture — recommend the most reliable and stable option, not the cheapest.
 
-5. **DON'T ASSUME.** When the user reports a problem, investigate the actual code. Don't assume they missed a step.
+6. **DON'T ASSUME.** When the user reports a problem, investigate the actual code. Don't assume they missed a step.
 
-6. **CHECK CODE, NOT MEMORY.** When asked "is X built?" — search the code first, never answer from memory alone. Memory files may be outdated.
+7. **CHECK CODE, NOT MEMORY.** When asked "is X built?" — search the code first, never answer from memory alone. Memory files may be outdated.
 
-7. **NO TRIAL AND ERROR.** Trace the full chain before changing code. Fix server before client.
+8. **NO TRIAL AND ERROR.** Trace the full chain before changing code. Fix server before client.
 
-8. **WAIT FOR "DONE."** Don't give the next instruction until the user confirms the current one is complete.
+9. **WAIT FOR "DONE."** Don't give the next instruction until the user confirms the current one is complete.
+
+10. **MULTI-USER SAFETY.** Naavi has multiple users (wael.aggan@gmail.com = Wael, heaggan@gmail.com = Huss). Never write code that does `.limit(1)` or "oldest user wins" on tables shared across users (`user_tokens`, `user_settings`, `calendar_events`, `reminders`, `knowledge_fragments`, `lists`). Always resolve the specific user by JWT (mobile app), caller phone number (voice server), or explicit `user_id` in request body (Edge Functions called from voice server).
 
 ### WHERE TO START
 
@@ -36,22 +38,21 @@ Detailed session reports: `C:\Users\waela\OneDrive\Desktop\Naavi\docs\` (SESSION
 
 **Part 1: Mobile App (Android)**
 - Expo React Native app
-- Code: `C:\Users\waela\OneDrive\Desktop\Naavi` (worktree: `.claude\worktrees\gifted-volhard`)
-- Build from: `C:\Users\waela\naavi-mobile` (clean clone outside OneDrive)
-- Always use `--profile production` for AAB (Google Play)
+- Edit in: `C:\Users\waela\OneDrive\Desktop\Naavi` (main repo) — current active worktree varies, check with `git worktree list`
+- Build from: `C:\Users\waela\naavi-mobile` (separate clone outside OneDrive — EAS fails inside OneDrive)
+- Always use `--profile production` for AAB (Google Play — see "MUST USE GOOGLE PLAY" section)
 - Always bump versionCode in `app.json` AND version text in `app/settings.tsx`
-- Always force-copy changed files with `cp -f` (robocopy is unreliable)
-- Current: V50 build 90, versionCode 90, next: 91
+- Build sync is via `git merge`, NOT `cp -f` — see "HOW BUILDS WORK" for the correct workflow
 
-**Part 2: Twilio Voice Call Server (NEW)**
+**Part 2: Twilio Voice Call Server**
 - Node.js server on Railway
 - Code: `C:\Users\waela\OneDrive\Desktop\Naavi\naavi-voice-server`
-- GitHub: github.com/munk2207/naavi-voice-server (private)
-- Railway: naavi-voice-server-production.up.railway.app
+- GitHub: github.com/munk2207/naavi-voice-server (private, separate repo from mobile)
+- Railway: naavi-voice-server-production.up.railway.app (auto-deploys from main branch)
 - Twilio number: +1 249 523 5394
-- Full loop PROVEN WORKING: Phone → Twilio → Deepgram STT → Claude → Deepgram TTS → Phone
-- All 6 Railway env vars working (ANTHROPIC_API_KEY, DEEPGRAM_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-- CURRENT ISSUE: Call reliability broken — calls fail 2-4 times before connecting. Revert to commit `0eaadc6` first.
+- Stack: Phone → Twilio → Deepgram STT → Claude → Deepgram TTS → Phone
+- Railway env vars required: ANTHROPIC_API_KEY, DEEPGRAM_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN
+- Multi-user: caller phone → `user_settings.phone` lookup → user_id. Always pass `user_id` through to Edge Functions.
 
 ### BACKEND
 
@@ -89,16 +90,27 @@ Detailed session reports: `C:\Users\waela\OneDrive\Desktop\Naavi\docs\` (SESSION
 
 The old Anthropic API key leaked in session 8 was deleted in session 9. A new key was created and set as Railway env var. No action needed.
 
-### HOW BUILDS WORK
+### HOW BUILDS WORK (correct workflow as of build 91)
 
-1. Edit code in worktree (`C:\Users\waela\OneDrive\Desktop\Naavi\.claude\worktrees\gifted-volhard`)
-2. Commit in worktree
-3. Force-copy files to build dir: `cp -f <source> C:\Users\waela\naavi-mobile/<target>`
-4. Verify versionCode: `grep versionCode C:\Users\waela\naavi-mobile\app.json`
-5. Commit in build dir: `git add -A && git commit -m "build N sync"`
-6. Build: `npx eas build --platform android --profile production --non-interactive`
-7. Upload AAB to Google Play Internal Testing
-8. User installs from Google Play on phone
+**NEVER use `cp -f` to sync files between repos.** This caused builds 83-90 to silently diverge from GitHub main because sync-by-copy skipped git entirely. Use git merge instead.
+
+1. Edit code in the active worktree (check with `git worktree list`) or main repo
+2. Commit changes in the main repo / worktree
+3. Bump versionCode in `app.json` AND version text in `app/settings.tsx` — must match the next available Google Play versionCode (higher than anything uploaded)
+4. Push to GitHub main: `git push origin main`
+5. In `C:\Users\waela\naavi-mobile`: `git fetch origin && git merge origin/main`
+6. Resolve any merge conflicts (usually version-bump files — keep the newer version)
+7. `npm install` (picks up any package.json changes)
+8. Build: `npx eas build --platform android --profile production --non-interactive`
+9. Download the AAB when EAS finishes
+10. Upload AAB to Google Play Console → Internal Testing
+11. User installs from Google Play on phone
+
+### MUST USE GOOGLE PLAY (not direct APK)
+
+Google Sign-In requires the app to be signed with the certificate registered in Google Cloud OAuth. Direct-install APKs (EAS preview profile, sideload) are signed with a different key → Google refuses sign-in. Only AABs distributed through Google Play (Internal Testing or higher) get re-signed with the registered certificate.
+
+Never suggest direct APK installs or preview builds for testing sign-in.
 
 ### HOW THE VOICE SERVER DEPLOYS
 
@@ -120,3 +132,20 @@ He does NOT care about: code architecture explanations, npm internals, React lif
 ### VOICE CALL — NO SILENCE ALLOWED
 
 This system is built for a senior citizen. Complete silence during processing or waiting makes him feel the call dropped. A soft ticking sound MUST play during all silent gaps (between greeting and first input, during thinking/processing). Never remove or disable the thinking music without replacing it with another audio cue. If debugging call issues, keep the tick sound — it is a core UX requirement, not a nice-to-have.
+
+### MULTI-USER ARCHITECTURE (do not break)
+
+Voice server resolves user by caller phone:
+- `+16137697957` → wael.aggan@gmail.com (user_id `788fe85c-b6be-4506-87e8-a8736ec8e1d1`) = "Wael"
+- `+13435750023` → heaggan@gmail.com (user_id `381b0833-fe74-410a-8574-d0d750a03b3b`) = "Huss"
+
+Name lookup: `user_settings.name` (synced from mobile app's Settings → Your Name field)
+Phone lookup: `user_settings.phone`
+
+Edge Functions that accept `user_id` from request body (multi-user safe):
+- `create-calendar-event`, `ingest-note`, `search-knowledge`, `manage-list`, `lookup-contact`, `naavi-chat`
+
+Never add a new Edge Function that picks "first user" from a shared table. Always:
+1. Try JWT auth (mobile app)
+2. Accept `user_id` from request body (voice server)
+3. Fall back to `user_tokens` lookup (single-user apps only)
