@@ -46,7 +46,7 @@ serve(async (req) => {
   }
 
   const body = await req.json();
-  const { summary, description, start, end, attendees, recurrence, is_priority, user_id: bodyUserId } = body;
+  const { summary, description, start, end, attendees, recurrence, is_priority } = body;
 
   if (!summary || !start || !end) {
     return new Response(JSON.stringify({ error: 'Missing summary, start, or end' }), {
@@ -71,13 +71,7 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
-  // Voice server passes user_id in body (service role key — multi-user safe)
-  if (!userId && bodyUserId) {
-    userId = bodyUserId;
-    console.log('[create-calendar-event] Using user_id from request body:', userId);
-  }
-
-  // Final fallback — only safe when a single user exists in the DB
+  // Fallback: find user from user_tokens (voice server uses service role key)
   if (!userId) {
     try {
       const { data } = await adminClient
