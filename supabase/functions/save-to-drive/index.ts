@@ -45,7 +45,7 @@ serve(async (req) => {
   }
 
   const body = await req.json();
-  const { title, content } = body;
+  const { title, content, user_id: bodyUserId } = body;
 
   if (!title || content === undefined || content === null) {
     return new Response(JSON.stringify({ error: 'Missing title or content' }), {
@@ -58,27 +58,35 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_ANON_KEY')!,
     { global: { headers: { Authorization: authHeader } } }
   );
-  const { data: { user }, error: userError } = await userClient.auth.getUser();
-  if (userError || !user) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
 
   const adminClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
+  // Standard 3-step user_id resolution (CLAUDE.md rule 4)
+  let userId: string | null = null;
+  try {
+    const { data: { user } } = await userClient.auth.getUser();
+    if (user) userId = user.id;
+  } catch (_) { /* ignore */ }
+  if (!userId && bodyUserId) userId = bodyUserId;
+
+  if (!userId) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   const { data: tokenRow, error: tokenError } = await adminClient
     .from('user_tokens')
     .select('refresh_token')
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .eq('provider', 'google')
     .single();
 
   if (tokenError || !tokenRow?.refresh_token) {
-    console.error('[save-to-drive] Token lookup failed for user:', user.id, tokenError?.message);
+    console.error('[save-to-drive] Token lookup failed for user:', userId, tokenError?.message);
     return new Response(JSON.stringify({ error: 'No Google token found' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
