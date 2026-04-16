@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npx expo export --platform web --clear",
+  "buildCommand": "node scripts/check-native-imports.js && npx expo export --platform web --clear",
   "outputDirectory": "dist",
   "framework": null,
   "trailingSlash": false,
