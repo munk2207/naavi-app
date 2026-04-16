@@ -482,4 +482,127 @@ Things I cannot guarantee are captured:
 
 ---
 
-*End of SESSION_9_COMPLETE_HANDOFF.md — 418 lines, April 16, 2026*
+---
+
+## 16. Institutional knowledge — stuff not in commits or code comments
+
+This is the "why" behind decisions + hard-won lessons. More valuable than the commit list for onboarding.
+
+### 16.1 The Deepgram echo problem
+Naavi's own TTS audio bleeds back into Deepgram STT because the Twilio media stream is bidirectional — outbound TTS frames and inbound caller audio share the same channel from Deepgram's perspective. Deepgram transcribes Naavi saying "Okay recording now" as user speech, which then hits `processUserMessage`. Symptom: phantom user messages that match Naavi's own confirmation phrases.
+
+**Fix pattern:** `awaitingRecordingStart` flag set the moment we decide to play TTS; Deepgram handler swallows all transcripts while flag is true; flag cleared after the operation completes (or after a fixed delay past TTS end).
+
+**This will recur** for any future feature that plays TTS and expects the next user input to be clean. Same pattern applies.
+
+### 16.2 Claude rule priority is unreliable
+When you add a new Claude action RULE that shares a trigger word with an existing rule, Claude will often pick the more established one regardless of priority hints. "TAKES PRIORITY OVER" in the prompt helps but doesn't fix it 100%.
+
+**Rule:** if an action is a binary routing decision (did user say X → do Y), **don't trust Claude.** Use server-side regex in voice server or hook code. Claude is good for content generation, unreliable for classification.
+
+**Real example in session:** RULE 18 (START_CALL_RECORDING) had "record my visit" as trigger. RULE 9 (SAVE_TO_DRIVE) had "record" as trigger. Claude picked RULE 9 even after adding exception language. Fix was direct regex bypass in voice server.
+
+### 16.3 The 3.5s TTS-to-recording delay
+Confirmation TTS "Okay, recording now. Put me on speaker..." is ~4 seconds of speech. Twilio plays it sequentially. If `startTwilioRecording` fires too early, Naavi's own voice is captured in the recording start. If too late, the user starts talking before recording begins and loses first words.
+
+**3.5s is empirical.** Adjust if you change the confirmation phrase length.
+
+### 16.4 Twilio recording API quirks
+- Requires an `https://` callback URL (not http or bare domain)
+- Uses Basic Auth with `TWILIO_ACCOUNT_SID:TWILIO_AUTH_TOKEN`
+- `RecordingChannels=dual` gives better diarization downstream
+- `RecordingStatusCallbackEvent=completed` — you only want the final event, not in-progress
+- Recording URL format: `https://api.twilio.com/.../Recordings/RE<sid>` — append `.mp3` for MP3 download
+- Recording auto-ends on call hangup; you still get the callback
+- Twilio keeps recording for ~30 days by default
+
+### 16.5 AssemblyAI pipeline timings
+- 70-second recording: ~15s to transcribe
+- 30-minute recording: ~2-5 min
+- Poll every 5s; max 15 min timeout (generous)
+- `speech_models: ['universal-2']` + `language_detection: true` handles Arabic/French/English automatically
+- Returns speakers as letters (A, B, C...). Voice server defaults: A→userName, B→"Them", C+→"Speaker X"
+
+### 16.6 send-email vs send-user-email — do not merge
+- `send-email` — requires user JWT in Authorization header. Used by mobile app for user-initiated sends to third parties.
+- `send-user-email` — uses service role. Sends through user's own Gmail TO themselves or an override address. Used by server-side summaries.
+
+They LOOK similar but have different auth models. Don't "consolidate" them without understanding this split.
+
+### 16.7 Email deliverability quirk
+Email sent via `send-user-email` goes FROM the user's own Gmail TO the same user. Gmail sometimes filters "sent to self" emails into specific labels (not inbox). Check:
+- All Mail
+- Spam
+- Filters / "from:me" behavior
+
+If user insists emails aren't arriving, test with `to` override (send to a different address you control) to confirm EF is sending.
+
+### 16.8 Mobile Conversation Recorder auto-skip is pre-existing
+File: `app/index.tsx:720-734`. When AssemblyAI returns 1 speaker, the title/speaker modal is skipped and `confirmSpeakers({[s]: userName}, '')` runs immediately. This was added in an earlier session for UX (saves a tap when recording yourself alone). Current user expectation is different — they want to always set a title.
+
+**Do NOT "just remove the skip"** — confirm with user first whether they want: (a) always show modal, (b) title-only modal for 1-speaker case, (c) something else.
+
+### 16.9 registry.calendar.createEvent — trace before changing
+`hooks/useOrchestrator.ts:233+` calls `registry.calendar.createEvent(...)`. The registry is in `lib/adapters/` — exact file not confirmed this session. Before changing SCHEDULE_MEDICATION logic, verify:
+1. Does it write to LOCAL `calendar_events` table? Or call Google Calendar API directly?
+2. Does it call `create-calendar-event` Edge Function?
+3. Are failures caught + silenced? (try/catch at line 284)
+
+User reports UI shows success cards but Google Calendar is empty. Likely adapter is local-only. Could be intentional (two-tier: local for fast UI, sync job pushes to Google) OR broken.
+
+### 16.10 Active worktree vs main checkout — I broke the rule
+CLAUDE.md says edit in `.claude/worktrees/cranky-hoover`. This session I edited in the main checkout at `C:\Users\waela\OneDrive\Desktop\Naavi`. Changes committed to `main` directly. Worktree branch `claude/cranky-hoover` is STALE.
+
+**If next Claude follows CLAUDE.md strictly:** they'll find the worktree empty of session 9 work and be confused. Reconcile by `git fetch origin && git reset --hard origin/main` in the worktree after user confirms.
+
+### 16.11 Railway deploy timing
+Push to GitHub → Railway build → Deploy. Typically 1-3 min. If user reports a test failure <2 min after your push, first check if the deploy finished. Railway dashboard shows deploy status. You can't query Railway from this session; ask user to check.
+
+### 16.12 Supabase EF deploy is instant-ish
+`npx supabase functions deploy <name>` takes ~10s. No propagation delay. Verification: curl the function immediately after.
+
+### 16.13 Curl-to-EF auth requirements
+EF requires `Authorization: Bearer <key>`. Valid keys:
+- Anon key (from `.env.local`) — works for functions with `verify_jwt=false`
+- Service role key — works for everything
+- User JWT from Supabase auth — works for user-scoped functions
+
+Missing header returns `{"code":"UNAUTHORIZED_NO_AUTH_HEADER"}`.
+
+### 16.14 The prompt is hot-loaded
+Voice server calls `get-naavi-prompt` EF at EVERY user message. No cache. Any prompt change is live on the next user turn. No need to restart anything.
+
+### 16.15 Local fallback prompt in voice server is STALE
+`naavi-voice-server/src/index.js` has `buildVoiceSystemPrompt()` as fallback when the EF call fails. This fallback is MANUALLY maintained and currently has RULE 8a/8b/8c numbering (old), not RULE 9/10/etc (new), and LACKS RULE 18 entirely. If the EF call ever fails in production, users get the old behavior.
+
+**Either:** delete the fallback (fail hard), or periodically sync it from the EF (manual task).
+
+### 16.16 Debugging playbook
+
+| Symptom | First check | Second check |
+|---|---|---|
+| "Record my visit" does wrong thing | Railway deployed latest? (check voice server commit hash) | Prompt EF version: `2026-04-16-v4-record-disambig`? |
+| Naavi asks "what to record" | Voice server running pre-regex-bypass code | Deploy latest voice server |
+| Recording starts but audio cuts mid-first-word | 3.5s delay not enough for the TTS length | Lengthen to 4s |
+| "Are you there" fires during recording | Idle timer not guarded | Check `startIdleTimer()` has `if (isRecording) return` |
+| Email not arriving | Gmail spam / "from self" filters | Direct curl test of `send-user-email` EF |
+| Drive link null | save-to-drive EF failed silently | Check Supabase EF logs for `save-to-drive` |
+| 0 calendar events | Action types not in calendarTypes set | Log action types — widen set if needed |
+| Priority items trigger on unrelated phrase | Priority regex false positive | Check `lower` contains priority keyword literally |
+| WebSocket echoes | Deepgram echo pattern | Set `awaitingRecordingStart` or equivalent suppression flag |
+
+### 16.17 User mental model (how to explain things)
+User is non-technical but sharp. Effective framings:
+- "Naavi" = the app, "Nahvee" = how it's pronounced out loud
+- "Voice server" / "Railway server" = the Twilio phone server
+- "The prompt" = the instructions Claude reads every message
+- "Edge Functions" / "EFs" = Supabase serverless functions (the backend)
+- "Action" = what Claude decides to do (create event, send message, etc.)
+- "Multi-user" = Wael vs Huss safety (each sees only their own data)
+
+Avoid: webhook, endpoint, JWT, OAuth, service role, adapter, orchestrator — unless explained.
+
+---
+
+*End of SESSION_9_COMPLETE_HANDOFF.md — April 16, 2026*
+
