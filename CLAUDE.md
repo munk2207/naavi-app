@@ -204,6 +204,29 @@ He does NOT care about: code architecture explanations, npm internals, React lif
 
 This system is built for a senior citizen. Complete silence during processing or waiting makes him feel the call dropped. A soft ticking sound MUST play during all silent gaps (between greeting and first input, during thinking/processing). Never remove or disable the thinking music without replacing it with another audio cue. If debugging call issues, keep the tick sound — it is a core UX requirement, not a nice-to-have.
 
+### CLAUDE PROMPT — SHARED SOURCE OF TRUTH
+
+The Naavi Claude system prompt lives in ONE place: the `get-naavi-prompt` Edge Function (`supabase/functions/get-naavi-prompt/index.ts`). Both the voice server and (eventually) the mobile app fetch the prompt from this function at session start.
+
+**When adding/editing a RULE:**
+1. Edit `supabase/functions/get-naavi-prompt/index.ts`
+2. Deploy: `npx supabase functions deploy get-naavi-prompt --no-verify-jwt --project-ref hhgyppbxgmjrwdpdubcx`
+3. Voice server picks it up on next call automatically
+4. Bump `PROMPT_VERSION` constant inside the function for change tracking
+
+**Current wiring:**
+- ✅ Voice server: fetches shared prompt, falls back to local `buildVoiceSystemPrompt` on error
+- ❌ Mobile app: still uses local `buildSystemPrompt` in `lib/naavi-client.ts` (mobile has unique rules — SCHEDULE_MEDICATION, SET_EMAIL_ALERT, SET_ACTION_RULE — not yet ported. Do NOT wire mobile to the Edge Function until these rules are added to `get-naavi-prompt`.)
+
+**TODO for a future session:**
+1. Port mobile-only rules into `get-naavi-prompt` as channel='app' additions
+2. Remove `buildSystemPrompt` from `lib/naavi-client.ts`
+3. Make mobile call the Edge Function with same fallback pattern as voice
+
+**Critical — when debugging prompt behavior:**
+- Check Supabase deploy log for `get-naavi-prompt` — if the function is broken, voice falls back silently to the local copy, and behavior diverges
+- Both copies (Edge Function + local fallback in voice server) must stay in sync for now
+
 ### MULTI-USER ARCHITECTURE (do not break)
 
 Voice server resolves user by caller phone:
