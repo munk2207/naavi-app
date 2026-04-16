@@ -414,16 +414,24 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               if (action.fromEmail)      triggerConfig.from_email = String(action.fromEmail);
               if (action.subjectKeyword) triggerConfig.subject_keyword = String(action.subjectKeyword);
 
+              // Resolve phone dynamically from user_settings — never hardcode.
+              let toPhone = action.phoneNumber ? String(action.phoneNumber) : '';
+              if (!toPhone) {
+                const { data: settings } = await supabase
+                  .from('user_settings')
+                  .select('phone')
+                  .eq('user_id', session.user.id)
+                  .single();
+                toPhone = settings?.phone ?? '';
+              }
+
               const label = String(action.label ?? 'Email alert');
               const { error } = await supabase.from('action_rules').insert({
                 user_id:        session.user.id,
                 trigger_type:   'email',
                 trigger_config: triggerConfig,
                 action_type:    'sms',
-                action_config:  {
-                  to_phone: String(action.phoneNumber ?? '+16137697957'),
-                  body:     `New email alert: ${label}`,
-                },
+                action_config:  { to_phone: toPhone, body: `New email alert: ${label}` },
                 label,
                 one_shot:       false,
                 enabled:        true,
