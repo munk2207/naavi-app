@@ -1,0 +1,10 @@
+# Ephemeral per-run logs — regenerated every test, not worth committing
+*.log
+
+# But keep:
+# - this .gitignore (so the folder exists on fresh clone)
+# - README.md (explains the folder)
+# - history.csv (single-line trend; useful across sessions)
+!.gitignore
+!README.md
+!history.csv

@@ -25,6 +25,7 @@
 const { execSync } = require('child_process');
 const path = require('path');
 const https = require('https');
+const fs = require('fs');
 
 const SUPABASE_URL = 'https://hhgyppbxgmjrwdpdubcx.supabase.co';
 const PROJECT_REF  = 'hhgyppbxgmjrwdpdubcx';
@@ -403,6 +404,49 @@ function checkRepoState() {
 // Main
 // ──────────────────────────────────────────────────────────────────────────
 
+// Capture everything written to stdout so we can save the same output to a log file.
+const logLines = [];
+const origLog = console.log.bind(console);
+console.log = (...args) => {
+  const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  logLines.push(line);
+  origLog(...args);
+};
+
+function saveResultLog(summary) {
+  try {
+    const logsDir = path.resolve(__dirname, '..', 'docs', 'smoke-test-results');
+    fs.mkdirSync(logsDir, { recursive: true });
+
+    // Timestamped file for history
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19); // 2026-04-16T14-23-45
+    const datedPath  = path.join(logsDir, `${ts}.log`);
+    const latestPath = path.join(logsDir, 'latest.log');
+
+    const header =
+      `MyNaavi smoke test — ${new Date().toISOString()}\n` +
+      `Result: ${summary.passed} passed, ${summary.failed} failed, ${summary.warned} warnings (${summary.elapsed}s)\n` +
+      `${'-'.repeat(60)}\n`;
+    const content = header + logLines.join('\n') + '\n';
+
+    fs.writeFileSync(datedPath, content, 'utf8');
+    fs.writeFileSync(latestPath, content, 'utf8');
+
+    // Also write a single-line summary that appends to history.csv for quick trend
+    const historyPath = path.join(logsDir, 'history.csv');
+    const isNew = !fs.existsSync(historyPath);
+    const header2 = 'timestamp,passed,failed,warned,elapsed_s\n';
+    const row = `${new Date().toISOString()},${summary.passed},${summary.failed},${summary.warned},${summary.elapsed}\n`;
+    fs.appendFileSync(historyPath, (isNew ? header2 : '') + row);
+
+    origLog(`\n  Log saved:    ${path.relative(process.cwd(), datedPath)}`);
+    origLog(`  Latest log:   ${path.relative(process.cwd(), latestPath)}`);
+    origLog(`  History CSV:  ${path.relative(process.cwd(), historyPath)}`);
+  } catch (err) {
+    origLog(`  (could not save log: ${err.message})`);
+  }
+}
+
 (async () => {
   console.log('=== MyNaavi smoke test ===');
   const started = Date.now();
@@ -430,6 +474,9 @@ function checkRepoState() {
       console.log(`   - [${r.section}] ${r.msg}${r.detail ? ' | ' + r.detail : ''}`);
     }
   }
+
+  saveResultLog({ passed, failed, warned, elapsed });
+
   process.exit(failed === 0 ? 0 : 1);
 })().catch(err => {
   console.error('\nSmoke test crashed:', err);
