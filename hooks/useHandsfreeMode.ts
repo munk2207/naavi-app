@@ -21,7 +21,17 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
-import { ExpoPlayAudioStream } from '@mykin-ai/expo-audio-stream';
+// Guard: @mykin-ai/expo-audio-stream is native-only. Its module-level code
+// throws "Cannot find native module 'ExpoPlayAudioStream'" on web, which
+// crashes the entire React tree before it mounts. Load it lazily on native only.
+const ExpoPlayAudioStream: any = Platform.OS === 'web'
+  ? {
+      startRecording: () => {
+        throw new Error('Hands-free mode is not supported on web');
+      },
+      stopRecording: () => Promise.resolve(),
+    }
+  : require('@mykin-ai/expo-audio-stream').ExpoPlayAudioStream;
 import { supabase } from '@/lib/supabase';
 import { loadKeyterms } from '@/lib/loadKeyterms';
 import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
@@ -588,6 +598,12 @@ export function useHandsfreeMode(
 
   // ── Activate hands-free mode (self-healing) ──
   const activate = useCallback(async () => {
+    // Hands-free is native-only — no-op on web (@mykin-ai/expo-audio-stream has no web impl)
+    if (Platform.OS === 'web') {
+      setError('Hands-free mode is only available on the mobile app.');
+      return;
+    }
+
     console.log('[Handsfree] Activate requested — current state:', stateRef.current);
 
     // Force cleanup of any prior session
