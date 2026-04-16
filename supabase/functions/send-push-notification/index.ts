@@ -143,24 +143,40 @@ serve(async (req) => {
     { global: { headers: { Authorization: authHeader } } }
   );
 
-  const { data: { user } } = await userClient.auth.getUser();
-  if (!user) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401, headers: corsHeaders,
-    });
-  }
+  const adminClient = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  );
 
-  const { title, body, url = '/' } = await req.json();
+  // Parse body first — may contain user_id for server-side callers
+  const { title, body, url = '/', user_id: bodyUserId } = await req.json();
   if (!title || !body) {
     return new Response(JSON.stringify({ error: 'Missing title or body' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  const { data: subs } = await userClient
+  // Standard 3-step user_id resolution (see CLAUDE.md rule 4):
+  // (a) JWT auth (mobile app), (b) body.user_id (voice server), (c) user_tokens fallback
+  let userId: string | null = null;
+  try {
+    const { data: { user } } = await userClient.auth.getUser();
+    if (user) userId = user.id;
+  } catch (_) { /* ignore */ }
+
+  if (!userId && bodyUserId) userId = bodyUserId;
+
+  if (!userId) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401, headers: corsHeaders,
+    });
+  }
+
+  // Use adminClient to read subs (service role key bypasses RLS — fine, we just checked auth)
+  const { data: subs } = await adminClient
     .from('push_subscriptions')
     .select('platform, endpoint, p256dh, auth, fcm_token')
-    .eq('user_id', user.id);
+    .eq('user_id', userId);
 
   if (!subs?.length) {
     return new Response(JSON.stringify({ sent: 0, message: 'No subscriptions found' }), {
