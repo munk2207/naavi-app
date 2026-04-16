@@ -99,18 +99,23 @@ serve(async (req) => {
       });
     }
 
-    // Determine recipient email — override or user's own Google email
+    // Determine recipient email: override → user_settings.email → auth.users.email
     let toEmail = toOverride;
     if (!toEmail) {
       const { data: settings } = await adminClient
         .from('user_settings')
         .select('email')
         .eq('user_id', user_id)
-        .single();
-      toEmail = settings?.email;
+        .maybeSingle();
+      toEmail = settings?.email ?? null;
     }
     if (!toEmail) {
-      return new Response(JSON.stringify({ error: 'No email address for user' }), {
+      // Fallback: Supabase auth email (their login email, always populated)
+      const { data: authData } = await adminClient.auth.admin.getUserById(user_id);
+      toEmail = authData?.user?.email ?? null;
+    }
+    if (!toEmail) {
+      return new Response(JSON.stringify({ error: 'No email address for user (checked user_settings.email and auth.users.email)' }), {
         status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
