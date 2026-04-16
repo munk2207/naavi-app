@@ -4,6 +4,71 @@
 
 You are working on MyNaavi, an AI life orchestration companion for active seniors. The founder (Wael) is non-technical. He builds the product vision; you build the code.
 
+### ACTIVE WORKTREE / BRANCH — CHECK BEFORE ANY EDIT
+
+**Main repo (mobile app) canonical active worktree:**
+`C:\Users\waela\OneDrive\Desktop\Naavi\.claude\worktrees\cranky-hoover` (branch: `claude/cranky-hoover`)
+
+**Main repo base:** `C:\Users\waela\OneDrive\Desktop\Naavi` (branch: `main`)
+
+**Build clone:** `C:\Users\waela\naavi-mobile` (branch: `main`) — **DO NOT EDIT CODE HERE.** Exists only for `eas build`. Sync via `git fetch origin && git merge origin/main`. Never `cp -f`.
+
+**Voice server repo:** `C:\Users\waela\OneDrive\Desktop\Naavi\naavi-voice-server` (separate GitHub repo, branch: `main`). Single-branch, no worktrees.
+
+Before any code edit, run `git worktree list` and `git branch -a` and confirm you're in the right place. If you're not sure, ASK.
+
+### BRANCHES — archive/ IS HISTORY, DO NOT TOUCH
+
+Branches prefixed `archive/` are read-only snapshots of past work kept for reference:
+- `archive/v50-build-90` — last state before multi-user session (build 91)
+- `archive/v48-drive-notes` — V48 Drive Notes feature
+- `archive/v46-build-45` — V46 Deepgram auth fix + expo-contacts
+- `archive/remember-card-fix` — REMEMBER card fixes, OAuth fixes
+
+Never edit, merge, or rebase these. If a new historical snapshot is needed, create `archive/<short-description>` and push it.
+
+Never accumulate many `claude/<random-name>` feature branches. If one exists and is merged/abandoned, delete it. If it has unique useful work, rename it to `archive/<description>` and push.
+
+### CONFIGURATION DISCIPLINE — NO DUPLICATE CONFIG
+
+The app has ONE canonical place for each type of configuration. Never create parallel or alternate config paths. If one exists already, extend it — do not make a second.
+
+**Rules (hard-won from real confusion, enforce strictly):**
+
+1. **One cron job per purpose.** Before adding a cron job, run `SELECT jobname, schedule FROM cron.job` and check nothing already covers that purpose. If an older job exists with a hardcoded JWT, REPLACE it — do not run both in parallel.
+
+2. **One rule storage per domain.** The canonical table for triggers/actions is `action_rules` (generic trigger_type + action_type framework). Do not create a new "alerts" or "watches" or "rules" table. Email-only paths like `email_watch_rules` must not be reintroduced.
+
+3. **One Edge Function per job.** Before adding a new function, run `npx supabase functions list --project-ref hhgyppbxgmjrwdpdubcx` and check nothing already does this job. If a legacy function (e.g. `voice-call`) exists alongside a new one (e.g. `trigger-morning-call`), delete the legacy one.
+
+4. **One user_id resolution pattern, everywhere.** Every Edge Function that may be called by the voice server OR the mobile app MUST use this fallback chain in this order:
+   - (a) JWT auth — `getUser()` from Authorization header (mobile app path)
+   - (b) Request body `user_id` (voice server / server-side call path)
+   - (c) `user_tokens` lookup where `provider='google'` (last resort only)
+
+   NEVER use `gmail_messages` for user resolution. NEVER use `auth.admin.listUsers().sort(oldest first)`. NEVER use `.limit(1)` on multi-user tables as a shortcut.
+
+5. **Unique constraints on config tables.** Any table storing user configuration (rules, contacts, alerts, settings) must have a UNIQUE constraint preventing duplicate rows for the same logical key. When Claude's action system produces repeated writes, the constraint blocks duplicates instead of silently accumulating them.
+
+6. **One TTS confirmation, one path.** Tap-to-send and voice-confirm-to-send must share the same TTS helpers (`SPEECH.SENT`, `SPEECH.CANCELLED`) and emit the same audio feedback. If a new "send" pathway is added, wire it to the same speak() function — never add a silent alternative.
+
+7. **One repository, many clones.** Mobile app lives in one GitHub repo (`munk2207/naavi-app`). Clones stay in sync via `git merge origin/main` ONLY. Never `cp -f` between clones — that bypasses git and silently diverges them (builds 83-90 diverged that way).
+
+8. **Two repos — different hygiene.** The mobile repo and the voice-server repo are separate. Don't mix work between them. But they share the Supabase backend, so rules 1-5 apply to both.
+
+### CHECKS BEFORE ANY NEW CONFIG
+
+| Adding | Check |
+|---|---|
+| A cron job | `SELECT * FROM cron.job` — already covered? |
+| An Edge Function | `npx supabase functions list` — already exists? |
+| A rule/alert type | Does `action_rules` handle it via trigger_type? |
+| A new table | Is there an existing table we can extend instead? |
+| A user-resolution fallback | Use the 3-step chain in Rule 4 — don't invent a new one |
+| A feature branch | Is there already a worktree for this? Use it. |
+
+If in doubt, ASK before creating parallel config.
+
 ### ABSOLUTE RULES — NEVER BREAK THESE
 
 1. **NO ACTION WITHOUT EXPLICIT APPROVAL.** Do not edit files, run commands, commit, push, build, or take any action until the user says "yes" or "go ahead." Even if the user provides a detailed plan, that is context — NOT permission to execute.
