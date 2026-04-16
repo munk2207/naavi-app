@@ -21,6 +21,10 @@ export interface ConversationAction {
   suggested_by: string;     // speaker name e.g. "Dr. Ahmed"
   calendar_title?: string;  // pre-filled calendar event title
   email_draft?: string;     // pre-filled email draft text
+  // Structured scheduling fields — used for type='prescription' to expand into daily events.
+  start_date?: string;      // ISO date "YYYY-MM-DD"
+  duration_days?: number;   // total days the medication is taken
+  dose_times?: string[];    // HH:MM times per day, e.g. ["09:00","21:00"]
 }
 
 serve(async (req) => {
@@ -65,6 +69,11 @@ Each object must have:
 - suggested_by: the name of who suggested or committed to it (use "Unknown" if unclear)
 - calendar_title: a ready-to-use calendar event title (for appointments/meetings/calls)
 - email_draft: optional short email text to follow up on this action
+
+For type="prescription" ONLY, also include these structured scheduling fields so a calendar can auto-create daily dose events:
+- start_date: ISO date "YYYY-MM-DD" when the medication starts. Default to today if the transcript says "starting today"/"now". If it says "starting tomorrow", use tomorrow's date. If unclear, omit.
+- duration_days: integer total number of days the medication is taken (e.g. "for 10 days" → 10, "for two weeks" → 14, "for a month" → 30). Omit if unclear.
+- dose_times: array of HH:MM 24-hour strings for each dose per day. Examples: "once daily" → ["09:00"], "twice a day" → ["09:00","21:00"], "three times a day" → ["08:00","14:00","20:00"], "every 4 hours" → ["08:00","12:00","16:00","20:00"]. Omit if unclear.
 
 Use these types:
 - appointment / meeting → any scheduled get-together, visit, or session
