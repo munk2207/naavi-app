@@ -22,7 +22,26 @@ function jsonResponse(data: unknown, status = 200) {
   });
 }
 
-async function resolveUserId(supabase: ReturnType<typeof createClient>): Promise<string | null> {
+// Standard 3-step user_id resolution per CLAUDE.md rule:
+// (a) JWT auth, (b) body.user_id, (c) user_tokens fallback
+async function resolveUserId(
+  supabase: ReturnType<typeof createClient>,
+  authHeader: string | null,
+  bodyUserId: string | null
+): Promise<string | null> {
+  // Attempt 1: JWT auth (mobile app)
+  if (authHeader) {
+    try {
+      const token = authHeader.replace(/^Bearer\s+/i, '');
+      const { data: { user } } = await supabase.auth.getUser(token);
+      if (user) return user.id;
+    } catch (_) { /* ignore */ }
+  }
+
+  // Attempt 2: explicit user_id from request body (voice server / server-side)
+  if (bodyUserId) return bodyUserId;
+
+  // Attempt 3: single-user fallback via user_tokens
   try {
     const { data } = await supabase
       .from('user_tokens')
@@ -31,11 +50,6 @@ async function resolveUserId(supabase: ReturnType<typeof createClient>): Promise
       .limit(1)
       .single();
     if (data) return data.user_id;
-  } catch (_) { /* ignore */ }
-
-  try {
-    const { data: { users } } = await supabase.auth.admin.listUsers({ perPage: 1 });
-    if (users?.length) return users[0].id;
   } catch (_) { /* ignore */ }
 
   return null;
@@ -124,12 +138,13 @@ Deno.serve(async (req) => {
   try {
     const action = await req.json();
     const type = action.type;
+    const authHeader = req.headers.get('Authorization');
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, serviceKey);
 
-    const userId = await resolveUserId(supabase);
+    const userId = await resolveUserId(supabase, authHeader, action.user_id ?? null);
     if (!userId) return jsonResponse({ success: false, error: 'No user found' }, 400);
 
     const accessToken = await getGoogleAccessToken(supabase, userId);
