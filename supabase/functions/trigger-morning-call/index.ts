@@ -123,6 +123,12 @@ Deno.serve(async (req) => {
             // 'completed' fires on terminal states (completed/busy/no-answer/failed/canceled).
             // Both are needed so retries stop at pickup, not when the call ends.
             StatusCallbackEvent: 'answered completed',
+            // Enable Twilio Answering Machine Detection. Adds ~2-3s latency at connect.
+            // Twilio passes AnsweredBy=(human|machine_start|machine_end_*|fax|unknown) in
+            // both the /outbound-voice webhook and the /call-status callback, letting the
+            // voice server hang up machine answers and keep retrying instead of treating
+            // voicemail pickups as answered.
+            MachineDetection: 'Enable',
           }),
         }
       );
