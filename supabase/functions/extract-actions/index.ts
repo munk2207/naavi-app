@@ -21,8 +21,13 @@ export interface ConversationAction {
   suggested_by: string;     // speaker name e.g. "Dr. Ahmed"
   calendar_title?: string;  // pre-filled calendar event title
   email_draft?: string;     // pre-filled email draft text
-  // Structured scheduling fields — used for type='prescription' to expand into daily events.
+  // Structured scheduling fields for the calendar pipeline.
+  // start_date + start_time: used for all event-like types (appointment, meeting, call,
+  //   test, follow_up, task, reminder, prescription) when the transcript mentions a
+  //   resolvable date/time. Callers fall back to defaults when missing.
+  // duration_days + dose_times: prescription-only; used to expand into daily dose events.
   start_date?: string;      // ISO date "YYYY-MM-DD"
+  start_time?: string;      // HH:MM 24-hour
   duration_days?: number;   // total days the medication is taken
   dose_times?: string[];    // HH:MM times per day, e.g. ["09:00","21:00"]
 }
@@ -52,6 +57,19 @@ serve(async (req) => {
 
     const client = new Anthropic({ apiKey });
 
+    // Inject today's date so Claude can resolve relative timings like "in 3 weeks"
+    // into concrete ISO dates. Use America/Toronto (user's home timezone).
+    const todayTorontoParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Toronto',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      weekday: 'long',
+    }).formatToParts(new Date());
+    const todayYear = todayTorontoParts.find(p => p.type === 'year')!.value;
+    const todayMonth = todayTorontoParts.find(p => p.type === 'month')!.value;
+    const todayDay = todayTorontoParts.find(p => p.type === 'day')!.value;
+    const todayWeekday = todayTorontoParts.find(p => p.type === 'weekday')!.value;
+    const todayISO = `${todayYear}-${todayMonth}-${todayDay}`;
+
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1024,
@@ -59,19 +77,24 @@ serve(async (req) => {
         role: 'user',
         content: `You are a conversation analyst. Extract ALL action items, commitments, and next steps from this conversation transcript — regardless of topic (medical, business, personal, legal, etc.).
 
+Today's date is ${todayISO} (${todayWeekday}, America/Toronto timezone). Use this as the reference point for resolving relative timing phrases like "tomorrow", "in 3 weeks", "next Tuesday", "by end of month".
+
 Return ONLY a JSON array — no explanation, no markdown, no code blocks.
 
 Each object must have:
 - type: one of "appointment", "meeting", "call", "email", "task", "follow_up", "test", "prescription", "reminder"
 - title: short title (max 8 words)
 - description: what needs to be done
-- timing: when it should happen (e.g. "within 2 weeks", "today", "by end of week", "as soon as possible")
+- timing: when it should happen as a human-readable phrase (e.g. "within 2 weeks", "today", "by end of week", "as soon as possible")
 - suggested_by: the name of who suggested or committed to it (use "Unknown" if unclear)
 - calendar_title: a ready-to-use calendar event title (for appointments/meetings/calls)
 - email_draft: optional short email text to follow up on this action
 
-For type="prescription" ONLY, also include these structured scheduling fields so a calendar can auto-create daily dose events:
-- start_date: ISO date "YYYY-MM-DD" when the medication starts. Default to today if the transcript says "starting today"/"now". If it says "starting tomorrow", use tomorrow's date. If unclear, omit.
+Structured scheduling fields — include when the transcript makes them resolvable:
+- start_date: ISO date "YYYY-MM-DD" when the action should happen, resolved against today (${todayISO}). Examples: "today" → ${todayISO}; "tomorrow" → tomorrow's date; "in 3 weeks" → today + 21 days; "next Tuesday" → the upcoming Tuesday. Applies to ALL types. Omit if truly unclear.
+- start_time: HH:MM 24-hour string if a time is mentioned (e.g. "at 2pm" → "14:00", "at 8:30am" → "08:30"). Omit if no time was specified.
+
+For type="prescription" ONLY, ALSO include these dose-schedule fields so the calendar can expand into per-day events:
 - duration_days: integer total number of days the medication is taken (e.g. "for 10 days" → 10, "for two weeks" → 14, "for a month" → 30). Omit if unclear.
 - dose_times: array of HH:MM 24-hour strings for each dose per day. Examples: "once daily" → ["09:00"], "twice a day" → ["09:00","21:00"], "three times a day" → ["08:00","14:00","20:00"], "every 4 hours" → ["08:00","12:00","16:00","20:00"]. Omit if unclear.
 
