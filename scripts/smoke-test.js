@@ -195,22 +195,25 @@ async function checkMarketingSite() {
     }
     pass('Page returns HTTP 200');
 
-    if (!res.text.includes('js-na3.hsforms.net/forms/embed/343125145.js')) {
-      fail('HubSpot embed script missing from #signup');
+    // Signup form is our own — no more HubSpot embed.
+    if (!res.text.includes('id="waitlist-form"')) {
+      fail('Waitlist form #waitlist-form missing from #signup');
     } else {
-      pass('HubSpot embed script present');
+      pass('Waitlist form present');
     }
 
-    if (res.text.includes('YOUR_PORTAL_ID') || res.text.includes('YOUR_FORM_ID')) {
-      fail('HubSpot placeholder IDs are back (regression)');
+    if (!res.text.includes('functions/v1/join-waitlist')) {
+      fail('Waitlist submit endpoint missing from page');
     } else {
-      pass('No HubSpot placeholder IDs');
+      pass('Waitlist submit endpoint referenced');
     }
 
-    if (!res.text.includes('hs-form-frame')) {
-      fail('hs-form-frame div not found');
+    // Regression guards — these MUST be gone now.
+    if (res.text.includes('hsforms.net') || res.text.includes('hs-form-frame') ||
+        res.text.includes('formspree.io') || res.text.includes('YOUR_PORTAL_ID')) {
+      fail('Legacy HubSpot/Formspree references found on live site (regression)');
     } else {
-      pass('hs-form-frame div present');
+      pass('No legacy HubSpot/Formspree references');
     }
   } catch (err) {
     fail('Could not reach marketing site', err.message);
@@ -303,6 +306,7 @@ function checkDuplicates() {
     ['action_rules',         `user_id, label`],
     ['user_settings',        `user_id`],
     ['user_tokens',          `user_id, provider`],
+    ['waitlist_signups',     `email`],
   ];
   for (const [tbl, cols] of tables) {
     try {
