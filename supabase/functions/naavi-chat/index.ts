@@ -191,17 +191,26 @@ async function saveAlertRule(
     ? `Emails from ${opts.fromName}`
     : `Emails with "${opts.subjectKeyword}" in subject`;
 
-  const { error } = await supabase.from('email_watch_rules').insert({
-    user_id:         userId,
-    from_name:       opts.fromName   ?? null,
-    from_email:      opts.fromEmail  ?? null,
-    subject_keyword: opts.subjectKeyword ?? null,
-    phone_number:    phone,
+  // Writes go to action_rules (unified trigger/action framework).
+  // email_watch_rules has been retired; evaluate-rules cron reads action_rules.
+  const triggerConfig: Record<string, string> = {};
+  if (opts.fromName)       triggerConfig.from_name = opts.fromName;
+  if (opts.fromEmail)      triggerConfig.from_email = opts.fromEmail;
+  if (opts.subjectKeyword) triggerConfig.subject_keyword = opts.subjectKeyword;
+
+  const { error } = await supabase.from('action_rules').insert({
+    user_id:        userId,
+    trigger_type:   'email',
+    trigger_config: triggerConfig,
+    action_type:    'sms',
+    action_config:  { to_phone: phone, body: `New email alert: ${label}` },
     label,
+    one_shot:       false,
+    enabled:        true,
   });
 
-  if (error) console.error('[naavi-chat] email_watch_rules insert error:', error.message);
-  else       console.log('[naavi-chat] Alert rule saved:', label);
+  if (error) console.error('[naavi-chat] action_rules insert error:', error.message);
+  else       console.log('[naavi-chat] Alert rule saved to action_rules:', label);
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────

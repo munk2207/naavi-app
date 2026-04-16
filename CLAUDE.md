@@ -216,16 +216,23 @@ The Naavi Claude system prompt lives in ONE place: the `get-naavi-prompt` Edge F
 
 **Current wiring:**
 - ✅ Voice server: fetches shared prompt, falls back to local `buildVoiceSystemPrompt` on error
-- ❌ Mobile app: still uses local `buildSystemPrompt` in `lib/naavi-client.ts` (mobile has unique rules — SCHEDULE_MEDICATION, SET_EMAIL_ALERT, SET_ACTION_RULE — not yet ported. Do NOT wire mobile to the Edge Function until these rules are added to `get-naavi-prompt`.)
-
-**TODO for a future session:**
-1. Port mobile-only rules into `get-naavi-prompt` as channel='app' additions
-2. Remove `buildSystemPrompt` from `lib/naavi-client.ts`
-3. Make mobile call the Edge Function with same fallback pattern as voice
+- ✅ Mobile app: fetches shared prompt, falls back to local `buildSystemPrompt` on error
+- Both surfaces append channel-specific context after the shared base (brief items, health, knowledge for mobile; calendar + knowledge for voice).
 
 **Critical — when debugging prompt behavior:**
-- Check Supabase deploy log for `get-naavi-prompt` — if the function is broken, voice falls back silently to the local copy, and behavior diverges
-- Both copies (Edge Function + local fallback in voice server) must stay in sync for now
+- Check Supabase deploy log for `get-naavi-prompt` — if the function is broken, BOTH surfaces fall back silently to their local copies, and behavior diverges from the Edge Function.
+- Local fallbacks in `lib/naavi-client.ts::buildSystemPrompt` and `naavi-voice-server/src/index.js::buildVoiceSystemPrompt` MUST stay roughly in sync with the Edge Function — when rolling out big prompt changes, update both fallbacks too.
+
+### RULE STORE — SINGLE SOURCE OF TRUTH
+
+All trigger/action rules live in `action_rules` table. The legacy `email_watch_rules` table and `check-email-alerts` Edge Function have been retired.
+
+- Writes: `naavi-chat` and `useOrchestrator` (mobile) insert into `action_rules` with `trigger_type='email'` for email alerts.
+- Reads: `evaluate-rules` Edge Function (cron every minute) iterates `action_rules` and fires matching actions via `send-sms` / `send-email`.
+- Trigger types: `email`, `time`, `calendar` (see `evaluate-rules` source for trigger_config shape).
+- Action types: `sms`, `whatsapp`, `email`.
+
+Do NOT reintroduce separate tables like `email_watch_rules`. Extend `action_rules` trigger types instead.
 
 ### MULTI-USER ARCHITECTURE (do not break)
 

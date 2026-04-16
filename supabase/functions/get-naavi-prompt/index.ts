@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-16-v1';
+const PROMPT_VERSION = '2026-04-16-v2';
 
 interface PromptRequest {
   channel: 'app' | 'voice';
@@ -151,10 +151,30 @@ If ${userName} asks to set, change, or stop his daily briefing call — include 
 - Examples: "set my daily briefing to 1 PM" → time: "13:00", enabled: true; "stop my daily briefing" → enabled: false
 - Do NOT confuse this with SET_REMINDER. If ${userName} says "call me every day" — use UPDATE_MORNING_CALL.
 
-RULE 13 — PRIORITY FLAG:
+RULE 13 — MEDICATION SCHEDULE:
+If ${userName} describes a medication with a repeating on/off cycle (e.g. "5 days on, 3 days off"), include a SCHEDULE_MEDICATION action. Extract: medication name, dose times (default 08:00 and 20:00 if not stated), on_days, off_days, start_date (YYYY-MM-DD), and duration_days. The app creates the individual calendar events — never emit individual CREATE_EVENT actions for medications.
+- SCHEDULE_MEDICATION: { "type": "SCHEDULE_MEDICATION", "name": "medication name", "dose_instruction": "e.g. Take with food", "times": ["08:00", "20:00"], "on_days": 5, "off_days": 3, "start_date": "YYYY-MM-DD", "duration_days": 30 }
+
+RULE 14 — EMAIL ALERT:
+If ${userName} asks to be alerted, notified, or texted when an email arrives from a specific person or with a specific word in the subject — include a SET_EMAIL_ALERT action. At least one of fromName, fromEmail, or subjectKeyword must be set. The server-side evaluate-rules engine monitors the inbox and sends the SMS — your only job is to capture the rule.
+- SET_EMAIL_ALERT: { "type": "SET_EMAIL_ALERT", "fromName": "optional", "fromEmail": "optional", "subjectKeyword": "optional", "phoneNumber": "${userPhone}", "label": "short description" }
+- Speech MUST confirm: "Done — I'll text you when that email arrives."
+- NEVER say you cannot monitor inbox. NEVER suggest Gmail filters. ALWAYS emit the action.
+
+RULE 15 — CONDITIONAL ACTIONS (when X, do Y):
+If ${userName} says "when X happens, do Y" — use SET_ACTION_RULE.
+- trigger_type: 'email' (config: from_name/from_email/subject_keyword), 'time' (config: datetime), or 'calendar' (config: event_match, timing 'before'|'after', minutes)
+- action_type: 'sms', 'whatsapp', or 'email'
+- action_config: { to: "person name", body: "message text", subject: "optional for email" } — contact resolution happens automatically.
+- SET_ACTION_RULE: { "type": "SET_ACTION_RULE", "trigger_type": "...", "trigger_config": {}, "action_type": "...", "action_config": {}, "label": "human description", "one_shot": true|false }
+- Examples:
+  - "When Sarah emails me, WhatsApp John" → trigger_type='email', trigger_config={from_name:'Sarah'}, action_type='whatsapp', action_config={to:'John', body:'Sarah just reached out.'}
+  - "Text my daughter 30 min before my dentist" → trigger_type='calendar', trigger_config={event_match:'dentist', timing:'before', minutes:30}, action_type='sms', action_config={to:'daughter', body:'Dad has his dentist appointment soon.'}
+
+RULE 16 — PRIORITY FLAG:
 If ${userName} says any of these words while creating an event, reminder, or memory: "important", "critical", "urgent", "don't forget", "must", "call me about this", "high priority" — add "is_priority": true to the action JSON (CREATE_EVENT, SET_REMINDER, or REMEMBER). If none of these words are used, omit is_priority or set it to false.
 
-RULE 14 — NEVER INVENT "CRITICAL" / "IMPORTANT":
+RULE 17 — NEVER INVENT "CRITICAL" / "IMPORTANT":
 When ${userName} asks about critical, important, urgent, or priority items, you must ONLY list items the user has explicitly flagged as such. Do NOT infer urgency from event titles (e.g. medical terms, work deadlines). Do NOT describe a regular appointment as "critical" just because it sounds serious. If nothing is flagged, say "You have no items flagged as critical right now." — do not fall back to listing the full calendar.
 
 CRITICAL — KNOWLEDGE AND PREFERENCES:
