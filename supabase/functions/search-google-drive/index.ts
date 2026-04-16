@@ -45,44 +45,50 @@ serve(async (req) => {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders });
   }
 
-  // Parse query from request body
+  // Parse body — may include user_id for server-side callers
   const body = await req.json().catch(() => ({}));
   const query: string = body.query ?? '';
+  const bodyUserId: string | null = body.user_id ?? null;
   if (!query.trim()) {
     return new Response(JSON.stringify({ files: [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
-  // Identify user + get refresh token in one query via RLS.
-  // PostgREST accepts the user JWT (same path as DB queries in the app).
-  // This avoids auth.getUser() which goes to the Auth server separately.
   const userClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_ANON_KEY')!,
     { global: { headers: { Authorization: authHeader } } }
   );
-  const { data: { user }, error: userError } = await userClient.auth.getUser();
-  if (userError || !user) {
-    return new Response(JSON.stringify({ files: [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-  }
 
   const adminClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
+  // Standard 3-step user_id resolution (CLAUDE.md rule 4)
+  let userId: string | null = null;
+  try {
+    const { data: { user } } = await userClient.auth.getUser();
+    if (user) userId = user.id;
+  } catch (_) { /* ignore */ }
+  if (!userId && bodyUserId) userId = bodyUserId;
+
+  if (!userId) {
+    return new Response(JSON.stringify({ files: [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
+
   const { data: tokenRow, error: tokenError } = await adminClient
     .from('user_tokens')
     .select('refresh_token')
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .eq('provider', 'google')
     .single();
 
   if (tokenError || !tokenRow?.refresh_token) {
-    console.log('[search-google-drive] No token found for user:', user.id);
+    console.log('[search-google-drive] No token found for user:', userId);
     return new Response(JSON.stringify({ files: [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
-  console.log('[search-google-drive] Token found for user:', user.id);
+  console.log('[search-google-drive] Token found for user:', userId);
 
   try {
     const accessToken = await getNewAccessToken(tokenRow.refresh_token);
