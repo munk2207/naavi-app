@@ -19,15 +19,17 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const CLASSIFIER_PROMPT = `Given the following note or transcript, identify all distinct knowledge fragments.
+function buildClassifierPrompt(userName: string): string {
+  return `Given the following note or transcript from ${userName}, identify all distinct knowledge fragments.
 For each fragment output JSON with:
   type (life_story|important_date|preference|relationship|place|routine|concern),
-  content (the fragment in Robert's words where possible),
+  content (the fragment in ${userName}'s own words — keep first-person "I", "my" where used; if a name substitution is needed, use "${userName}"),
   classification (PUBLIC|PERSONAL|SENSITIVE|MEDICAL|FINANCIAL),
   confidence (0.0–1.0).
 Return a JSON array only. No explanation.`;
+}
 
-async function extractFragments(text: string): Promise<Array<{
+async function extractFragments(text: string, userName: string): Promise<Array<{
   type: string;
   content: string;
   classification: string;
@@ -46,7 +48,7 @@ async function extractFragments(text: string): Promise<Array<{
       messages: [
         {
           role: 'user',
-          content: `${CLASSIFIER_PROMPT}\n\nNote:\n${text}`,
+          content: `${buildClassifierPrompt(userName)}\n\nNote:\n${text}`,
         },
       ],
     }),
@@ -111,15 +113,45 @@ serve(async (req) => {
     { global: { headers: { Authorization: authHeader } } }
   );
 
-  const { data: { user } } = await userClient.auth.getUser();
-  if (!user) {
+  let userId: string | null = null;
+
+  // Try JWT auth first (mobile app)
+  try {
+    const { data: { user } } = await userClient.auth.getUser();
+    if (user) userId = user.id;
+  } catch (_) { /* ignore */ }
+
+  const body = await req.json();
+  const { text, source = 'notes' } = body;
+
+  // Fallback: accept user_id from body (voice server with service role key)
+  if (!userId && body.user_id) {
+    userId = body.user_id;
+    console.log(`[ingest-note] Using user_id from request body: ${userId}`);
+  }
+
+  // Fallback: resolve from user_tokens
+  if (!userId) {
+    const adminClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
+    try {
+      const { data } = await adminClient
+        .from('user_tokens')
+        .select('user_id')
+        .eq('provider', 'google')
+        .limit(1)
+        .single();
+      if (data) userId = data.user_id;
+    } catch (_) { /* ignore */ }
+  }
+
+  if (!userId) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401, headers: corsHeaders,
     });
   }
-
-  const body = await req.json();
-  const { text, source = 'notes' } = body;
 
   if (!text?.trim()) {
     return new Response(JSON.stringify({ error: 'Missing text' }), {
@@ -128,9 +160,24 @@ serve(async (req) => {
   }
 
   try {
+    // Look up user's name from user_settings for personalized classification
+    let userName = 'the user';
+    try {
+      const nameClient = createClient(
+        Deno.env.get('SUPABASE_URL')!,
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+      );
+      const { data: settings } = await nameClient
+        .from('user_settings')
+        .select('name')
+        .eq('user_id', userId)
+        .single();
+      if (settings?.name) userName = settings.name;
+    } catch (_) { /* ignore */ }
+
     // 1. Extract fragments via Claude
-    const fragments = await extractFragments(text);
-    console.log(`[ingest-note] Extracted ${fragments.length} fragments`);
+    const fragments = await extractFragments(text, userName);
+    console.log(`[ingest-note] Extracted ${fragments.length} fragments for ${userName}`);
 
     if (fragments.length === 0) {
       return new Response(JSON.stringify({ fragments: [] }), {
@@ -139,14 +186,18 @@ serve(async (req) => {
     }
 
     // 2. Generate embeddings + store (non-blocking per fragment)
+    const adminClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
     const stored = [];
     for (const frag of fragments) {
       const embedding = await generateEmbedding(frag.content);
 
-      const { data, error } = await userClient
+      const { data, error } = await adminClient
         .from('knowledge_fragments')
         .insert({
-          user_id:        user.id,
+          user_id:        userId,
           type:           frag.type,
           content:        frag.content,
           classification: frag.classification,
@@ -164,7 +215,7 @@ serve(async (req) => {
       }
     }
 
-    console.log(`[ingest-note] Stored ${stored.length} fragments for user ${user.id}`);
+    console.log(`[ingest-note] Stored ${stored.length} fragments for user ${userId}`);
 
     return new Response(JSON.stringify({ fragments: stored }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

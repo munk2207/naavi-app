@@ -54,7 +54,19 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
-  // Try JWT auth first, then fallback for service role key (voice server)
+  // Parse query from body first — may contain user_id
+  let query: string | null = null;
+  let topK = 5;
+  let bodyUserId: string | null = null;
+  try {
+    const bodyText = await req.text();
+    const body = JSON.parse(bodyText);
+    query = body.q ?? null;
+    topK = body.top_k ?? 5;
+    bodyUserId = body.user_id ?? null;
+  } catch (_) { /* ignore */ }
+
+  // Try JWT auth first, then body user_id, then fallback
   let userId: string | null = null;
   try {
     const userClient = createClient(
@@ -66,7 +78,12 @@ serve(async (req) => {
     if (user) userId = user.id;
   } catch (_) { /* ignore */ }
 
-  // Fallback: find user from user_tokens (matches calendar sync user_id)
+  // Voice server passes user_id in body (service role key)
+  if (!userId && bodyUserId) {
+    userId = bodyUserId;
+  }
+
+  // Fallback: find user from user_tokens
   if (!userId) {
     try {
       const { data } = await adminClient
@@ -88,16 +105,6 @@ serve(async (req) => {
 
   console.log('[search-knowledge] User ID:', userId);
   const user = { id: userId };
-
-  // Parse query from body (already read as text to avoid double-consume)
-  let query: string | null = null;
-  let topK = 5;
-  try {
-    const bodyText = await req.text();
-    const body = JSON.parse(bodyText);
-    query = body.q ?? null;
-    topK = body.top_k ?? 5;
-  } catch (_) { /* ignore */ }
 
   // Fallback to query params
   if (!query) {
