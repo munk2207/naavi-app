@@ -23,8 +23,31 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PHONE       = '+16137697957';
-const PHONE_SPEAK = '+1 613 769 7957'; // spaced format — readable on screen, TTS reads it correctly
+// Phone numbers are looked up per-user from user_settings.phone — no hardcoding.
+
+function formatPhoneForSpeech(phone: string): string {
+  // Convert "+16137697957" → "+1 613 769 7957" so TTS reads it correctly
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return `+1 ${digits.slice(1, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+  }
+  return phone;
+}
+
+async function getUserPhone(
+  supabase: ReturnType<typeof createClient>,
+  userId: string
+): Promise<string> {
+  try {
+    const { data } = await supabase
+      .from('user_settings')
+      .select('phone')
+      .eq('user_id', userId)
+      .single();
+    if (data?.phone) return data.phone;
+  } catch (_) { /* ignore */ }
+  return ''; // empty — callers handle gracefully
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -170,6 +193,7 @@ async function resolveUserId(supabase: ReturnType<typeof createClient>, token: s
 async function saveAlertRule(
   supabase: ReturnType<typeof createClient>,
   userId: string,
+  phone: string,
   opts: { fromName?: string | null; fromEmail?: string | null; subjectKeyword?: string | null }
 ) {
   const label = opts.fromName
@@ -181,7 +205,7 @@ async function saveAlertRule(
     from_name:       opts.fromName   ?? null,
     from_email:      opts.fromEmail  ?? null,
     subject_keyword: opts.subjectKeyword ?? null,
-    phone_number:    PHONE,
+    phone_number:    phone,
     label,
   });
 
@@ -252,13 +276,15 @@ Deno.serve(async (req) => {
         if (chosen) {
           // Delete pending record and save confirmed rule
           await supabase.from('pending_disambig').delete().eq('id', pending.id);
-          await saveAlertRule(supabase, userId, {
+          const userPhone = await getUserPhone(supabase, userId);
+          await saveAlertRule(supabase, userId, userPhone, {
             fromName:  chosen.name,
             fromEmail: chosen.email,
           });
 
+          const phoneSpeak = userPhone ? ` at ${formatPhoneForSpeech(userPhone)}` : '';
           return speechResponse(
-            `Done — I'll text you at ${PHONE_SPEAK} as soon as an email from ${chosen.name} arrives.`
+            `Done — I'll text you${phoneSpeak} as soon as an email from ${chosen.name} arrives.`
           );
         }
 
@@ -311,7 +337,8 @@ Deno.serve(async (req) => {
         // 0 matches → fall through, save with from_name only (broad match)
       }
 
-      await saveAlertRule(supabase, userId, {
+      const userPhone = await getUserPhone(supabase, userId);
+      await saveAlertRule(supabase, userId, userPhone, {
         fromName:       fromName,
         fromEmail:      fromEmail,
         subjectKeyword: alertRule.subjectKeyword,
@@ -321,8 +348,9 @@ Deno.serve(async (req) => {
         ? `an email from ${fromName}`
         : `an email with "${alertRule.subjectKeyword}" in the subject`;
 
+      const phoneSpeak = userPhone ? ` at ${formatPhoneForSpeech(userPhone)}` : '';
       return speechResponse(
-        `Done — I'll text you at ${PHONE_SPEAK} as soon as ${confirmLabel} arrives.`
+        `Done — I'll text you${phoneSpeak} as soon as ${confirmLabel} arrives.`
       );
     }
 

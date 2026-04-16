@@ -252,7 +252,7 @@ export async function fetchTodayEvents(): Promise<BriefItem[]> {
 
 // ─── Fetch upcoming events (next N days) for the brief ────────────────────────
 
-export async function fetchUpcomingEvents(days = 7, passedUserId?: string): Promise<BriefItem[]> {
+export async function fetchUpcomingEvents(days = 30, passedUserId?: string): Promise<BriefItem[]> {
   const userId = passedUserId ?? await getSessionUserId();
   if (!userId || !supabase) return [];
 
