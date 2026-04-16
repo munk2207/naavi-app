@@ -46,7 +46,7 @@ serve(async (req) => {
   }
 
   const body = await req.json();
-  const { summary, description, start, end, attendees, recurrence, is_priority } = body;
+  const { summary, description, start, end, attendees, recurrence, is_priority, user_id: bodyUserId } = body;
 
   if (!summary || !start || !end) {
     return new Response(JSON.stringify({ error: 'Missing summary, start, or end' }), {
@@ -54,8 +54,13 @@ serve(async (req) => {
     });
   }
 
-  // Try JWT auth first, then fallback for service role key (voice server)
+  // User resolution per CLAUDE.md Rule 4:
+  //   (a) JWT auth — mobile app path
+  //   (b) Explicit user_id in request body — voice server / server-side path
+  //   (c) Fail loudly — NEVER use `.limit(1)` on user_tokens (multi-user unsafe)
   let userId: string | null = null;
+
+  // (a) JWT auth
   const userClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_ANON_KEY')!,
@@ -66,26 +71,20 @@ serve(async (req) => {
     if (user) userId = user.id;
   } catch (_) { /* ignore */ }
 
+  // (b) Explicit user_id in body (voice server passes service role key + user_id)
+  if (!userId && typeof bodyUserId === 'string' && bodyUserId.length > 0) {
+    userId = bodyUserId;
+    console.log(`[create-calendar-event] Resolved user from request body: ${userId}`);
+  }
+
   const adminClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
-  // Fallback: find user from user_tokens (voice server uses service role key)
   if (!userId) {
-    try {
-      const { data } = await adminClient
-        .from('user_tokens')
-        .select('user_id')
-        .eq('provider', 'google')
-        .limit(1)
-        .single();
-      if (data) userId = data.user_id;
-    } catch (_) { /* ignore */ }
-  }
-
-  if (!userId) {
-    return new Response(JSON.stringify({ error: 'No user found' }), {
+    console.error('[create-calendar-event] No user_id — JWT missing and body.user_id absent');
+    return new Response(JSON.stringify({ error: 'No user found — provide JWT or user_id in body' }), {
       status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
