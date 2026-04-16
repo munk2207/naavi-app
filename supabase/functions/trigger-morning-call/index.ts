@@ -119,7 +119,10 @@ Deno.serve(async (req) => {
             Method: 'POST',
             StatusCallback: `${voiceServerUrl}/call-status`,
             StatusCallbackMethod: 'POST',
-            StatusCallbackEvent: 'completed',
+            // 'answered' fires the moment the user picks up (CallStatus=in-progress).
+            // 'completed' fires on terminal states (completed/busy/no-answer/failed/canceled).
+            // Both are needed so retries stop at pickup, not when the call ends.
+            StatusCallbackEvent: 'answered completed',
           }),
         }
       );
