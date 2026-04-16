@@ -163,7 +163,9 @@ async function resolveUserId(supabase: ReturnType<typeof createClient>, token: s
     if (user) return user.id;
   } catch (_) { /* ignore */ }
 
-  // Attempt 2: find user from user_tokens (matches calendar sync user_id)
+  // Attempt 2: find user from user_tokens (single-user fallback).
+  // DO NOT add listUsers / oldest-user fallbacks — breaks multi-user safety.
+  // See CLAUDE.md rule 4: ONE user_id resolution pattern, everywhere.
   try {
     const { data } = await supabase
       .from('user_tokens')
@@ -172,17 +174,6 @@ async function resolveUserId(supabase: ReturnType<typeof createClient>, token: s
       .limit(1)
       .single();
     if (data) return data.user_id;
-  } catch (_) { /* ignore */ }
-
-  // Attempt 3: oldest registered user
-  try {
-    const { data: { users } } = await supabase.auth.admin.listUsers({ perPage: 100 });
-    if (users?.length) {
-      const sorted = [...users].sort((a, b) =>
-        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      );
-      return sorted[0].id;
-    }
   } catch (_) { /* ignore */ }
 
   return null;
