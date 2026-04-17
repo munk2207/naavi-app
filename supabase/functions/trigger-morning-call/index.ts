@@ -106,6 +106,32 @@ Deno.serve(async (req) => {
       const twilioNumber = '+12495235394';
       const credentials = btoa(`${accountSid}:${authToken}`);
 
+      // Build form body with multi-value StatusCallbackEvent. Twilio treats a
+      // single 'answered completed' string as an invalid event name (warning
+      // 21626). Each event must be its own repeated form field.
+      const body = new URLSearchParams();
+      body.append('To', s.morning_call_phone);
+      body.append('From', twilioNumber);
+      // Thread user_id + phone through the /outbound-voice URL so the voice
+      // server knows exactly whose brief to fetch — otherwise it falls back
+      // to user_tokens and picks the first Google account (which hit the
+      // wrong user on the 18:15 test).
+      body.append('Url', `${voiceServerUrl}/outbound-voice?user_id=${encodeURIComponent(s.user_id)}&phone=${encodeURIComponent(s.morning_call_phone)}`);
+      body.append('Method', 'POST');
+      body.append('StatusCallback', `${voiceServerUrl}/call-status`);
+      body.append('StatusCallbackMethod', 'POST');
+      // 'answered' fires the moment the user picks up (CallStatus=in-progress).
+      // 'completed' fires on terminal states. Each event MUST be appended
+      // separately — Twilio rejects a single space-joined value.
+      body.append('StatusCallbackEvent', 'answered');
+      body.append('StatusCallbackEvent', 'completed');
+      // Async Twilio Answering Machine Detection. Webhook fires IMMEDIATELY on
+      // pickup (no 4-second synchronous-AMD wait); AMD runs in parallel and
+      // AnsweredBy appears on the /call-status 'completed' event. The voice
+      // server no longer trusts AMD to gate playback — a spoken "hello" gate
+      // inside the media stream is the gatekeeper for real-human pickups.
+      body.append('MachineDetection', 'DetectMessageEnd');
+
       const callRes = await fetch(
         `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`,
         {
@@ -114,30 +140,7 @@ Deno.serve(async (req) => {
             Authorization: `Basic ${credentials}`,
             'Content-Type': 'application/x-www-form-urlencoded',
           },
-          body: new URLSearchParams({
-            To: s.morning_call_phone,
-            From: twilioNumber,
-            // Thread user_id + phone through the /outbound-voice URL so the
-            // voice server knows exactly whose brief to fetch — otherwise it
-            // falls back to user_tokens and picks the first Google account
-            // (which hit the wrong user on the 18:15 test).
-            Url: `${voiceServerUrl}/outbound-voice?user_id=${encodeURIComponent(s.user_id)}&phone=${encodeURIComponent(s.morning_call_phone)}`,
-            Method: 'POST',
-            StatusCallback: `${voiceServerUrl}/call-status`,
-            StatusCallbackMethod: 'POST',
-            // 'answered' fires the moment the user picks up (CallStatus=in-progress).
-            // 'completed' fires on terminal states (completed/busy/no-answer/failed/canceled).
-            // Both are needed so retries stop at pickup, not when the call ends.
-            StatusCallbackEvent: 'answered completed',
-            // Async Twilio Answering Machine Detection. Webhook fires IMMEDIATELY on
-            // pickup (no 4-second synchronous-AMD wait); AMD runs in parallel and
-            // AnsweredBy appears on the /call-status 'completed' event. The voice
-            // server no longer trusts AMD to gate playback — a spoken "hello" gate
-            // inside the media stream is the gatekeeper for real-human pickups.
-            // Keeping AMD on means /call-status can still count attempts as missed
-            // when VMs leave Naavi's gate prompt unanswered.
-            MachineDetection: 'DetectMessageEnd',
-          }),
+          body,
         }
       );
 
