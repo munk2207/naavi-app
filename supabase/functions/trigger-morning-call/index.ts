@@ -77,8 +77,7 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // TEMPORARY (test): Max 3 attempts — voice server sends final alert at 3.
-      // Revert to >= 10 once retry-cap behavior is verified live.
+      // Max 3 attempts per day — voice server sends first alert at 2, final at 3.
       if (s.morning_call_attempts >= 3) {
         continue;
       }
@@ -90,12 +89,11 @@ Deno.serve(async (req) => {
         // First attempt — only at scheduled time
         if (currentTime !== callTime) continue;
       } else {
-        // TEMPORARY (test): retry wait compressed from 5 minutes to 1.
-        // Revert to `< 5` once retry-cap and retry-interval are verified.
+        // Retry — wait 5 minutes since last attempt
         if (s.morning_call_last_attempt) {
           const lastAttempt = new Date(s.morning_call_last_attempt);
           const minutesSince = (now.getTime() - lastAttempt.getTime()) / 60000;
-          if (minutesSince < 1) continue;
+          if (minutesSince < 5) continue;
         }
       }
 
