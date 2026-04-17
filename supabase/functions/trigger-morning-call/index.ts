@@ -77,8 +77,9 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Max 10 attempts — skip (voice server sends final alert at 10)
-      if (s.morning_call_attempts >= 10) {
+      // TEMPORARY (test): Max 3 attempts — voice server sends final alert at 3.
+      // Revert to >= 10 once retry-cap behavior is verified live.
+      if (s.morning_call_attempts >= 3) {
         continue;
       }
 
@@ -89,11 +90,12 @@ Deno.serve(async (req) => {
         // First attempt — only at scheduled time
         if (currentTime !== callTime) continue;
       } else {
-        // Retry — wait 5 minutes since last attempt
+        // TEMPORARY (test): retry wait compressed from 5 minutes to 1.
+        // Revert to `< 5` once retry-cap and retry-interval are verified.
         if (s.morning_call_last_attempt) {
           const lastAttempt = new Date(s.morning_call_last_attempt);
           const minutesSince = (now.getTime() - lastAttempt.getTime()) / 60000;
-          if (minutesSince < 5) continue;
+          if (minutesSince < 1) continue;
         }
       }
 
@@ -115,7 +117,11 @@ Deno.serve(async (req) => {
           body: new URLSearchParams({
             To: s.morning_call_phone,
             From: twilioNumber,
-            Url: `${voiceServerUrl}/outbound-voice`,
+            // Thread user_id + phone through the /outbound-voice URL so the
+            // voice server knows exactly whose brief to fetch — otherwise it
+            // falls back to user_tokens and picks the first Google account
+            // (which hit the wrong user on the 18:15 test).
+            Url: `${voiceServerUrl}/outbound-voice?user_id=${encodeURIComponent(s.user_id)}&phone=${encodeURIComponent(s.morning_call_phone)}`,
             Method: 'POST',
             StatusCallback: `${voiceServerUrl}/call-status`,
             StatusCallbackMethod: 'POST',
@@ -123,12 +129,14 @@ Deno.serve(async (req) => {
             // 'completed' fires on terminal states (completed/busy/no-answer/failed/canceled).
             // Both are needed so retries stop at pickup, not when the call ends.
             StatusCallbackEvent: 'answered completed',
-            // Enable Twilio Answering Machine Detection. Adds ~2-3s latency at connect.
-            // Twilio passes AnsweredBy=(human|machine_start|machine_end_*|fax|unknown) in
-            // both the /outbound-voice webhook and the /call-status callback, letting the
-            // voice server hang up machine answers and keep retrying instead of treating
-            // voicemail pickups as answered.
-            MachineDetection: 'Enable',
+            // Async Twilio Answering Machine Detection. Webhook fires IMMEDIATELY on
+            // pickup (no 4-second synchronous-AMD wait); AMD runs in parallel and
+            // AnsweredBy appears on the /call-status 'completed' event. The voice
+            // server no longer trusts AMD to gate playback — a spoken "hello" gate
+            // inside the media stream is the gatekeeper for real-human pickups.
+            // Keeping AMD on means /call-status can still count attempts as missed
+            // when VMs leave Naavi's gate prompt unanswered.
+            MachineDetection: 'DetectMessageEnd',
           }),
         }
       );
