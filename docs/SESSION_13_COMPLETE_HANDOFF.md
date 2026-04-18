@@ -203,7 +203,13 @@ State at Session 13 end:
 - MyNaavi Drive folder + shared prompt already in place; verified live.
 - Morning call is permanent: 3-attempt cap, 5-min retry, 08:00 Toronto for Wael.
 
-Next likely tasks (in user's preference order):
+Next session is explicitly named "Integration with Google Play and multi user" — planned scope:
+- Add test users to Google Cloud OAuth consent screen test list (https://console.cloud.google.com/apis/credentials/consent?project=naavi-490516).
+- Add testers to Google Play Internal Testing track.
+- Walk through the onboarding flow for a new user (sign-in → phone setup in Settings → enable morning call).
+- Verify multi-user behavior end-to-end (voice server routes Huss / Wael / new testers correctly by phone).
+
+Deferred tasks still in queue:
 A. New mobile AAB with hands-free cue voice fix + SCHEDULE_MEDICATION retest.
 B. Attachment-harvesting Phase 1 (docs/PROPOSAL_ATTACHMENT_HARVESTING.md).
 C. Email-the-brief-on-giveup + save-for-tomorrow (not built).
