@@ -4,6 +4,32 @@
 
 ---
 
+## V52.1 TEST RESULTS (honest, no sugar-coating)
+
+V52.1 was built (`43bc612`) and installed on Wael's phone. Tests were run on the live device. Result: **more failures than passes. Wael's trust in the product state was damaged by the experience — partly because of real bugs, partly because the test script did not warn about known fragile paths upfront.**
+
+| Test | Result | Details |
+|---|---|---|
+| 1. Name save | ✅ Pass | Works after user is signed in with Google. Alert shows, value persists. |
+| 2. Global Search "find anything about dentist" | ✅ Pass | Card shows Calendar + Memory results. Works only because the exact phrase matched Claude's interpretation. |
+| 2b. "What do you know about my dentist" | ❌ FAIL (#1A) | Same intent, different wording → Claude treats as general-knowledge question, returns "Nothing stored" without searching. Phrasing fragility. |
+| 3. Save contact via voice | ❌ FAIL (#1B) | Voice transcription garbled the email + phone. Contact not saved. Script failed to warn about this upfront. |
+| 3b. Save contact via typed input | ✅ Pass | Saved. Card shows Name/Email/Phone. But the saved phone `613-123-456` is only 9 digits — voice truncation leaked through. |
+| 4. Search by phone (typed) | ❌ MULTIPLE FAIL | User typed `6137976679`. Bubble showed only "Find phone " — digits visually truncated (#2). System searched for `6237986746` — Claude changed the digits (#1B). Knowledge adapter returned 5 irrelevant "results" as noise (#1C). |
+| 5. Hands-free / voice call voice match | Not tested | Skipped after Test 4's cascading failures. |
+| 6. "Hey Google, talk to MyNaavi" | Not tested | Skipped. |
+| 7. "Hey Google, record this visit on MyNaavi" | Not tested | Skipped. |
+
+**Net state of V52.1:** the new features (tier-1 email pipeline, morning brief rewrite, drop-detection, contacts phone column, new Google Assistant shortcuts) are **live on the server side and architecturally correct**, but the USER-FACING retrieval experience is not reliable enough to demo to a senior user today. See issue list below.
+
+**What this session taught us (architectural-level):**
+- Claude is not a reliable carrier for literal user input (phone numbers, emails, codes).
+- Embedding search returns noise when used for identifier queries — no confidence threshold is defined.
+- The "intent-based prompt rule" approach is probabilistic. For retrieval, remove Claude from the data path entirely.
+- The chat text truncation issue is bigger than suspected — it affects user bubbles, not only assistant bubbles, and may be corrupting the actual data sent to Claude.
+
+---
+
 ## GROUND RULES FOR TESTING (read this FIRST)
 
 **Do not craft test scripts to make tests pass.** Honest tests surface problems; optimistic tests hide them. For every test step:
@@ -167,6 +193,14 @@ User searched for phone number `6237986746`. Memory adapter returned 5 results: 
 1. Add a minimum similarity threshold in `supabase/functions/global-search/adapters/knowledge.ts` (e.g. filter out `similarity < 0.5`).
 2. Detect identifier-like queries (mostly-digit strings, `@` present, UUID shape) and skip the knowledge adapter entirely for those. Run only the source-of-truth adapters (contacts, sent_messages) for identifiers.
 3. For the remaining semantic queries, also surface a confidence indicator in the UI (grey-out weak matches, or omit).
+
+### #1D — UI button labels clipped on home screen
+
+**Problem (visible in V52.1 screenshot):**
+Bottom-row buttons show clipped labels: "Sen" (should be "Send"), "Record", "Free" — plus some may be fully cut off. Send button on the right of the text input likewise clipped.
+
+**Fix direction:**
+Either widen the buttons, shrink the font size, or remove the text labels and keep icons only for the compact layout. `app/index.tsx` home screen button row. Cosmetic but adds to the impression that nothing is finished.
 
 ### Other carried-forward items
 
