@@ -158,7 +158,7 @@ Test scripts must call out known-fragile paths UPFRONT ("don't test this via voi
 
 | # | Item | Why deferred |
 |---|---|---|
-| 2 | Chat text cut-off ("Your name is Wael" spoken but only "Your name is" shown in bubble) | Logging shipped in build 93 but no reproduction yet — need data from the next occurrence. |
+| 2 | Chat text cut-off — NOW CONFIRMED ON BOTH SIDES: (a) assistant reply "Your name is Wael" spoken but only "Your name is" shown in bubble, (b) USER OWN MESSAGE — Wael typed "Find phone 6137976679" and the bubble showed only "Find phone " with the digits blank. This may be the root cause of #1B (Claude hallucinating digits) — if Claude received an incomplete input with digits stripped, it may have invented the missing digits when constructing the GLOBAL_SEARCH query. Investigate together. `components/ConversationBubble.tsx` has no numberOfLines cap, so the clipping happens higher up — inspect TextInput handling, sendToNaavi payload, conversation history storage. Logging from build 93 should help — check Supabase function logs for the raw user message + Claude response. |
 | 3 | Chat latency ~15s | Suspected `isBroadQuery` regex injecting huge knowledge fragments into the prompt. Server-side timing logs already in `naavi-chat`. Profile on next slow reproduction. |
 | 4 | Intermittent call drops after greeting | Drop-detection instrumentation now live. Wait for next occurrence + log inspection before changing code. |
 | 5 | Multi-user bug audit in voice server | Fixed reminders + emails this session. Other `/rest/v1/...` calls may have the same "no user_id filter" bug. Worth a grep. |
