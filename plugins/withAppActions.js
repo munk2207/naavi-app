@@ -62,6 +62,34 @@ const SHORTCUTS_XML = `<?xml version="1.0" encoding="utf-8"?>
     </intent>
   </capability>
 
+  <!--
+    Hands-free voice conversation
+    Trigger phrases: "Hey Google, talk to MyNaavi", "Hey Google, open hands-free on MyNaavi"
+    Deep link:       naavi://?auto=handsfree
+    Opens the app and auto-activates hands-free mode so the user can speak
+    with Naavi immediately, without tapping anything.
+  -->
+  <capability android:name="actions.intent.OPEN_APP_FEATURE">
+    <intent android:action="android.intent.action.VIEW">
+      <url-template android:value="naavi://?auto=handsfree" />
+      <parameter android:name="feature" android:key="feature" />
+    </intent>
+  </capability>
+
+  <!--
+    Start conversation recording
+    Trigger phrases: "Hey Google, record this visit on MyNaavi", "Hey Google, start recording on MyNaavi"
+    Deep link:       naavi://?auto=record
+    Opens the app and kicks off conversation recording. Same flow as tapping
+    the Record button on the home screen, but triggered by voice for hands-
+    free use (e.g. just before walking into a doctor appointment).
+  -->
+  <capability android:name="actions.intent.CREATE_MESSAGE">
+    <intent android:action="android.intent.action.VIEW">
+      <url-template android:value="naavi://?auto=record" />
+    </intent>
+  </capability>
+
 </shortcuts>
 `;
 

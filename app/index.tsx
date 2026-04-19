@@ -654,18 +654,44 @@ export default function HomeScreen() {
     setHandsfreeActive(handsfree.state !== 'inactive');
   }, [handsfree.state]);
 
-  // Auto-activate hands-free when app is opened via "Hey Google" (naavi:// deep link)
-  const handsfreeActivatedRef = useRef(false);
+  // Auto-trigger features when app is opened via "Hey Google" (naavi:// deep link)
+  // - naavi://?auto=handsfree → hands-free mode (default for any naavi:// URL
+  //   without a specific auto param — preserves prior behaviour)
+  // - naavi://?auto=record    → start conversation recording immediately
+  // Deep links to /brief, /calendar, /contacts route via expo-router to their
+  // own screens and don't hit this handler at the home-screen level.
+  const autoIntentRef = useRef(false);
   useEffect(() => {
-    if (handsfreeActivatedRef.current) return;
+    if (autoIntentRef.current) return;
 
     async function checkIntent() {
       try {
         const url = await Linking.getInitialURL();
-        if (url && url.startsWith('naavi://')) {
-          console.log('[Home] Opened via intent:', url, '— activating hands-free');
-          handsfreeActivatedRef.current = true;
-          // Small delay to let the screen render first
+        if (!url || !url.startsWith('naavi://')) return;
+
+        // Parse ?auto= param from the deep link.
+        const autoParam = (() => {
+          try {
+            const m = url.match(/[?&]auto=([^&]+)/i);
+            return m ? decodeURIComponent(m[1]).toLowerCase() : null;
+          } catch { return null; }
+        })();
+
+        autoIntentRef.current = true;
+        console.log('[Home] Opened via intent:', url, '— auto:', autoParam ?? 'handsfree');
+
+        if (autoParam === 'record') {
+          // Give the screen a moment to render so the recorder UI is mounted.
+          setTimeout(() => {
+            try {
+              startConvRecording();
+            } catch (err) {
+              console.error('[Home] Auto-record failed:', err);
+            }
+          }, 500);
+        } else {
+          // Default: hands-free (covers old naavi://, naavi://?auto=handsfree,
+          // and unrecognised auto params).
           setTimeout(() => handsfree.activate(), 500);
         }
       } catch {}
