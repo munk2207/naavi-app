@@ -81,6 +81,21 @@ serve(async (req) => {
     try {
       const accessToken = await getNewAccessToken(refresh_token);
 
+      // Fetch this user's contact email set ONCE per sync run, so per-message
+      // tier-1 classification is a cheap Set.has() lookup. Tier 1 = sender in
+      // Robert's own contacts. Combined with Gmail's IMPORTANT label below
+      // this catches institutional emails (bank, doctor) that aren't
+      // necessarily in contacts yet but Gmail's ML has flagged as important.
+      const { data: contactRows } = await adminClient
+        .from('contacts')
+        .select('email')
+        .eq('user_id', user_id);
+      const contactEmails = new Set<string>(
+        (contactRows ?? [])
+          .map((r: { email: string | null }) => (r.email ?? '').toLowerCase().trim())
+          .filter((e: string) => e.length > 0),
+      );
+
       // Fetch all messages from last 24 hours (read and unread)
       // so Robert's brief always shows today's emails even after he reads them
       const oneDayAgo = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000);
@@ -130,6 +145,25 @@ serve(async (req) => {
         const isImportant = labels.includes('IMPORTANT') || labels.includes('CATEGORY_PRIMARY');
         const receivedAt  = dateStr ? new Date(dateStr).toISOString() : new Date().toISOString();
 
+        // Naavi tier-1 classification — separate from Gmail's IMPORTANT label.
+        // Tier 1 means "worth surfacing in the morning brief and extracting
+        // actions from". Rules:
+        //   - Sender is in Robert's contacts, OR
+        //   - Gmail flagged IMPORTANT, OR
+        //   - Gmail categorized as CATEGORY_PERSONAL (human correspondence)
+        //   AND never if in PROMOTIONS / SOCIAL / FORUMS (Gmail's IMPORTANT
+        //   ML can be wrong on marketing — we override).
+        const senderEmailLower = (senderEmail ?? '').toLowerCase().trim();
+        const isMarketing = labels.includes('CATEGORY_PROMOTIONS')
+          || labels.includes('CATEGORY_SOCIAL')
+          || labels.includes('CATEGORY_FORUMS');
+        const inContacts = senderEmailLower.length > 0 && contactEmails.has(senderEmailLower);
+        const isTier1 = !isMarketing && (
+          inContacts
+          || labels.includes('IMPORTANT')
+          || labels.includes('CATEGORY_PERSONAL')
+        );
+
         const { error } = await adminClient
           .from('gmail_messages')
           .upsert({
@@ -144,11 +178,27 @@ serve(async (req) => {
             received_at:  receivedAt,
             is_unread:    isUnread,
             is_important: isImportant,
+            is_tier1:     isTier1,
             labels,
             updated_at:   new Date().toISOString(),
           }, { onConflict: 'user_id,gmail_message_id' });
 
         if (!error) count++;
+
+        // Fire-and-forget action extraction for every tier-1 email. The
+        // extract-email-actions function writes to email_actions (which the
+        // morning brief reads). We do NOT await — sync-gmail must stay fast;
+        // extraction per email can take 2-3s against Claude.
+        if (!error && isTier1) {
+          fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/extract-email-actions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+            },
+            body: JSON.stringify({ user_id, gmail_message_id: messageId }),
+          }).catch((e) => console.error('[sync-gmail] extract-email-actions call failed:', e?.message ?? e));
+        }
       }
 
       results.push({ user_id, messages: count });
