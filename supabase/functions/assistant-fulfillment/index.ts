@@ -64,10 +64,13 @@ interface CalendarEvent {
   location: string | null;
 }
 
-interface GmailMessage {
-  subject: string;
-  sender_name: string;
-  snippet: string;
+interface EmailAction {
+  action_type: string;
+  title: string;
+  vendor: string;
+  due_date: string | null;
+  urgency: string;
+  summary: string;
 }
 
 async function handleBrief(
@@ -77,9 +80,9 @@ async function handleBrief(
   const now      = new Date();
   const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
   const todayEnd   = new Date(now); todayEnd.setHours(23, 59, 59, 999);
-  const since24h   = new Date(now); since24h.setHours(since24h.getHours() - 24);
+  const sevenDays  = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  const [{ data: events }, { data: emails }] = await Promise.all([
+  const [{ data: events }, { data: actions }] = await Promise.all([
     adminClient
       .from('calendar_events')
       .select('title, start_time, end_time, location')
@@ -88,13 +91,17 @@ async function handleBrief(
       .lte('start_time', todayEnd.toISOString())
       .order('start_time')
       .limit(5),
+    // Morning brief now pulls from structured email_actions (populated by
+    // extract-email-actions), NOT raw gmail_messages. We surface only items
+    // that are actually actionable for the user this week — no "you have
+    // 237 unread" noise.
     adminClient
-      .from('gmail_messages')
-      .select('subject, sender_name, snippet')
+      .from('email_actions')
+      .select('action_type, title, vendor, due_date, urgency, summary')
       .eq('user_id', userId)
-      .gte('received_at', since24h.toISOString())
-      .order('received_at', { ascending: false })
-      .limit(5),
+      .eq('dismissed', false)
+      .order('due_date', { ascending: true, nullsFirst: false })
+      .limit(20),
   ]);
 
   const sentences: string[] = [];
@@ -118,16 +125,36 @@ async function handleBrief(
     sentences.push('Your calendar is clear today.');
   }
 
-  const emailList = (emails as GmailMessage[] | null) ?? [];
-  if (emailList.length > 0) {
-    sentences.push(
-      `You have ${emailList.length} new email${emailList.length > 1 ? 's' : ''} in the last 24 hours.`
-    );
-    const first = emailList[0];
-    sentences.push(`The most recent is from ${first.sender_name}: ${first.subject}.`);
-  } else {
-    sentences.push('No new emails in the last 24 hours.');
+  // Filter email actions to things worth mentioning this morning:
+  //   - due within 7 days (if due_date exists), OR
+  //   - urgency is "today" or "this_week" (no date but still pressing).
+  // "soon" (7-30 days) and "info" items are skipped — they belong in the app,
+  // not in a spoken brief that should stay under ~30 seconds.
+  const allActions = (actions as EmailAction[] | null) ?? [];
+  const actionList = allActions.filter((a) => {
+    if (a.urgency === 'today' || a.urgency === 'this_week') return true;
+    if (a.due_date) {
+      const due = new Date(a.due_date);
+      return due >= now && due <= sevenDays;
+    }
+    return false;
+  });
+
+  if (actionList.length > 0) {
+    const count = actionList.length;
+    const noun = count === 1 ? 'item' : 'items';
+    sentences.push(`You have ${count} email ${noun} needing attention.`);
+    for (const a of actionList.slice(0, 3)) {
+      const line = a.summary?.trim() || `${a.action_type} from ${a.vendor}`;
+      // Ensure the line ends with a period for clean TTS pacing.
+      sentences.push(line.endsWith('.') ? line : `${line}.`);
+    }
+    if (count > 3) {
+      sentences.push(`Plus ${count - 3} more in your email.`);
+    }
   }
+  // If nothing actionable, stay silent about email — silence beats noise for
+  // a senior user. The rest of the brief still plays.
 
   return wrap(sentences.join(' '));
 }

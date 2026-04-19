@@ -18,6 +18,7 @@ import { sentMessagesAdapter } from './sent_messages.ts';
 import { contactsAdapter } from './contacts.ts';
 import { listsAdapter } from './lists.ts';
 import { calendarAdapter } from './calendar.ts';
+import { gmailAdapter } from './gmail.ts';
 
 export const adapters: SearchAdapter[] = [
   knowledgeAdapter,
@@ -26,4 +27,5 @@ export const adapters: SearchAdapter[] = [
   contactsAdapter,
   listsAdapter,
   calendarAdapter,
+  gmailAdapter,
 ];
