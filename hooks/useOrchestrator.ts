@@ -155,17 +155,29 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       const retrievalRe = /\b(find|look\s*up|search|show\s*me|what\s+do\s+(we|you|i)\s+have|what\s+do\s+you\s+know|do\s+(we|you|i)\s+have|is\s+there|tell\s+me\s+about|information\s+on|anything\s+(about|on))\b/i;
       const isRetrievalQuery = hasLongDigitRun || hasAtSign || retrievalRe.test(userMessage);
 
+      // Strip question/retrieval verbs and trailing filler so the search
+      // query matches real content. The raw user message "Find Gordon Doig's
+      // phone number" was being sent as-is to substring search, and no
+      // contact has a name literally containing that entire phrase. Extract
+      // just the noun phrase at the core.
+      const searchQuery = userMessage
+        .replace(/^\s*(can you\s+)?(please\s+)?(find|look\s*up|search\s+(for)?|show\s*me|tell\s*me\s*(about)?|what\s+do\s+(we|you|i)\s+have\s+(on|about)?|what\s+do\s+you\s+know\s+about|do\s+(we|you|i)\s+have|is\s+there|information\s+on|anything\s+(about|on))\s+/i, '')
+        .replace(/['\u2019]s\s+(phone|email|number|address|contact|info|information|details?)\s*$/i, '')
+        .replace(/\s+(phone|email|number|address|contact|info|information|details?)\s*$/i, '')
+        .replace(/[?.!,;]+\s*$/, '')
+        .trim() || userMessage.trim();
+
       let preSearchResults: GlobalSearchResult[] = [];
       if (isRetrievalQuery && supabase) {
         try {
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user) {
             const { data, error } = await supabase.functions.invoke('global-search', {
-              body: { query: userMessage, user_id: session.user.id, limit: 8 },
+              body: { query: searchQuery, user_id: session.user.id, limit: 8 },
             });
             if (!error && Array.isArray(data?.ranked)) {
               preSearchResults = (data.ranked as GlobalSearchResult[]).slice(0, 8);
-              console.log('[Orchestrator] pre-search returned', preSearchResults.length, 'results');
+              console.log('[Orchestrator] pre-search query=', JSON.stringify(searchQuery), 'returned', preSearchResults.length, 'results');
             }
           }
         } catch (err) {
