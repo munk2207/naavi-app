@@ -6,10 +6,11 @@ You are working on MyNaavi, an AI life orchestration companion for active senior
 
 ### ACTIVE WORKTREE / BRANCH — CHECK BEFORE ANY EDIT
 
-**Main repo (mobile app) canonical active worktree:**
-`C:\Users\waela\OneDrive\Desktop\Naavi\.claude\worktrees\cranky-hoover` (branch: `claude/cranky-hoover`)
+**Default: work directly on `main` in the repo base.** Recent sessions (16, 17) worked cleanly on main — no active feature worktree is needed.
 
 **Main repo base:** `C:\Users\waela\OneDrive\Desktop\Naavi` (branch: `main`)
+
+**Stale worktrees under `.claude/worktrees/`:** `cranky-hoover` and `focused-agnesi` are leftover from earlier sessions (behind main by 20+ commits). Do NOT work there unless explicitly asked. They can be cleaned up in a dedicated maintenance session.
 
 **Build clone:** `C:\Users\waela\naavi-mobile` (branch: `main`) — **DO NOT EDIT CODE HERE.** Exists only for `eas build`. Sync via `git fetch origin && git merge origin/main`. Never `cp -f`.
 
@@ -222,25 +223,6 @@ The Naavi Claude system prompt lives in ONE place: the `get-naavi-prompt` Edge F
 **Critical — when debugging prompt behavior:**
 - Check Supabase deploy log for `get-naavi-prompt` — if the function is broken, BOTH surfaces fall back silently to their local copies, and behavior diverges from the Edge Function.
 - Local fallbacks in `lib/naavi-client.ts::buildSystemPrompt` and `naavi-voice-server/src/index.js::buildVoiceSystemPrompt` MUST stay roughly in sync with the Edge Function — when rolling out big prompt changes, update both fallbacks too.
-
-### PENDING SECURITY FOLLOWUPS — schedule for next mobile release
-
-1. **Rotate Supabase anon JWT** — the current anon key was committed in
-   three old migration files (`20260402_reminders_cron.sql`,
-   `20260407_evaluate_rules_cron.sql`, `20260415_morning_call_cron.sql`).
-   Those files sit in git history forever. The live cron jobs now use
-   `current_setting('app.settings.service_role_key', true)` so revoking
-   the anon key is safe from cron's perspective. Steps:
-   - Go to Supabase dashboard → Settings → API → Rotate anon key
-   - Update `EXPO_PUBLIC_SUPABASE_ANON_KEY` in Vercel env + Railway env
-   - Rebuild + redeploy mobile AAB with new key
-   - Mobile users need to install the new build from Play Store
-
-2. **Revoke old GitHub PAT** — a personal access token was previously
-   embedded in the main repo's `git remote` URL. It has been removed
-   from local git config. You must also revoke it at
-   https://github.com/settings/tokens (look for the `ghp_` prefixed
-   token) in case it leaked elsewhere.
 
 ### RULE STORE — SINGLE SOURCE OF TRUTH
 
