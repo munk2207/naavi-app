@@ -240,6 +240,7 @@ Deno.serve(async (req) => {
     const userText    = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : '';
     const userPreview = userText.slice(0, 80).replace(/\s+/g, ' ');
     console.log(`[timing] ${elapsed()} | userText preview: "${userPreview}"`);
+    console.log(`[TRACE-3 naavi-chat] userText full:`, JSON.stringify(userText), `length:`, userText.length);
 
     // ── Step 1: check for pending disambiguation ──────────────────────────────
     const userId = await resolveUserId(supabase, token);

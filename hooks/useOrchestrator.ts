@@ -142,6 +142,45 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       // Check if this is a broad knowledge query — fetch memories directly
       const isBroadQuery = /\b(all|list all|list everything|everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
 
+      // ── Retrieval pre-search — orchestrator-driven, Claude-free ──────────
+      // When the user asks about their own data (retrieval intent), run
+      // global-search FIRST with the literal user message and inject the
+      // results into Claude's context. This is the same pattern the voice
+      // server uses. Without it, Claude sometimes answers "nothing found"
+      // from its own reasoning while the search did find results — which
+      // for a blind user hearing only Claude's voice is catastrophic.
+      const digitsOnly = userMessage.replace(/[\s\-().+]/g, '');
+      const hasLongDigitRun = /\d{7,}/.test(digitsOnly);
+      const hasAtSign = /@/.test(userMessage);
+      const retrievalRe = /\b(find|look\s*up|search|show\s*me|what\s+do\s+(we|you|i)\s+have|what\s+do\s+you\s+know|do\s+(we|you|i)\s+have|is\s+there|tell\s+me\s+about|information\s+on|anything\s+(about|on))\b/i;
+      const isRetrievalQuery = hasLongDigitRun || hasAtSign || retrievalRe.test(userMessage);
+
+      let preSearchResults: GlobalSearchResult[] = [];
+      if (isRetrievalQuery && supabase) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            const { data, error } = await supabase.functions.invoke('global-search', {
+              body: { query: userMessage, user_id: session.user.id, limit: 8 },
+            });
+            if (!error && Array.isArray(data?.ranked)) {
+              preSearchResults = (data.ranked as GlobalSearchResult[]).slice(0, 8);
+              console.log('[Orchestrator] pre-search returned', preSearchResults.length, 'results');
+            }
+          }
+        } catch (err) {
+          console.error('[Orchestrator] pre-search failed:', err);
+        }
+
+        if (preSearchResults.length > 0) {
+          const lines = preSearchResults.map(r => `- [${r.source}] ${r.title}${r.snippet ? ' — ' + r.snippet : ''}`);
+          enrichedMessage = `${enrichedMessage}\n\n## Live search results for the user's question (these are authoritative — use them to answer; do NOT say "I couldn't find" if results are listed here)\n${lines.join('\n')}`;
+          turnGlobalSearch = { query: userMessage, results: preSearchResults };
+        } else {
+          enrichedMessage = `${enrichedMessage}\n\n## Live search results for the user's question\nSearched calendar, contacts, memory, lists, email, rules, and sent messages. Nothing matched. Say that plainly — do not guess.`;
+        }
+      }
+
       const [response, knowledgeResult] = await Promise.all([
         sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language),
         isBroadQuery ? fetchAllKnowledge(100) : Promise.resolve([]),

@@ -9,9 +9,16 @@
  */
 
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
+
+// Fixed-pixel max width computed from the window width at render time.
+// Percentage maxWidth ('85%') combined with alignSelf: 'flex-end' and a
+// long unbreakable word (e.g. a 10-digit phone number) caused Android to
+// clip text silently instead of wrapping. A fixed-pixel value sidesteps the
+// measurement quirk and lets Android wrap normally.
+const BUBBLE_MAX_WIDTH = Math.round(Dimensions.get('window').width * 0.85);
 
 interface Props {
   role: 'user' | 'assistant';
@@ -54,7 +61,8 @@ export function ConversationBubble({ role, content, timestamp }: Props) {
 const styles = StyleSheet.create({
   container: {
     marginVertical: 6,
-    maxWidth: '85%',
+    maxWidth: BUBBLE_MAX_WIDTH,
+    flexShrink: 1,
   },
   naaviContainer: {
     alignSelf: 'flex-start',
