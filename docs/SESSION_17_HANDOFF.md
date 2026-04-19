@@ -116,6 +116,23 @@ Move retrieval OUT of Claude's decision-making and into the orchestrator. Option
 - `lib/naavi-client.ts::buildSystemPrompt` — also include GLOBAL_SEARCH rule so the local fallback keeps parity with the server prompt
 - Requires V53 mobile build + voice-server-side mirror change
 
+### #1B (also top priority) — Voice-input reliability for structured data (emails, phone numbers, IDs)
+
+**The problem (proven 2026-04-19):**
+When Wael tested `save contact Jan Doe, email jan@example.com, phone 613-123-456` via voice, the transcription garbled the data and Naavi failed to save the contact. The same content typed worked fine.
+
+**Why this matters:**
+This is not a minor caveat. For a senior-user product (Robert is legally blind), voice IS the primary input. A feature that only works by typing is a feature that doesn't work — for the user we are building for. Worse, discovering this mid-test erodes trust in everything else we ship: if voice contact-save fails silently, how many other voice paths fail silently?
+
+**Fix directions (next session):**
+- Evaluate Deepgram / Whisper configuration in the mobile app — is the STT getting enough context to disambiguate email syntax ("jan at example dot com" → "jan@example.com")?
+- Add post-transcription normalization: regex-detect speech patterns for emails and phone numbers, rewrite them into canonical form before sending to Claude.
+- Add a voice-input confirmation card: show the transcribed text to the user before acting on it, for commands that contain email/phone/date structured data.
+- Consider dedicated structured-data prompts: "After the beep, spell the email letter by letter."
+
+**Process note — session 17 mistake to not repeat:**
+Test scripts must call out known-fragile paths UPFRONT ("don't test this via voice, type it"). Discovering fragility inside a test is worse than knowing about it beforehand.
+
 ### Other carried-forward items
 
 | # | Item | Why deferred |
