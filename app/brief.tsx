@@ -11,6 +11,9 @@ import { router } from 'expo-router';
 import * as Speech from 'expo-speech';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/constants/Colors';
+// speakCue uses Deepgram aura-hera-en so this screen sounds like Naavi's
+// main voice (falls back to expo-speech if the network is down).
+import { speakCue } from '@/lib/tts';
 
 type Status = 'loading' | 'speaking' | 'done' | 'error';
 
@@ -34,18 +37,10 @@ export default function BriefScreen() {
         setPlainText(text);
         setSatus('speaking');
 
-        Speech.speak(text, {
-          language: 'en-US',
-          rate: 0.95,
-          onDone: () => {
-            if (!cancelled) {
-              setSatus('done');
-              setTimeout(() => router.replace('/'), 1000);
-            }
-          },
-          onError: () => {
-            if (!cancelled) router.replace('/');
-          },
+        speakCue(text, 'en').then(() => {
+          if (cancelled) return;
+          setSatus('done');
+          setTimeout(() => router.replace('/'), 1000);
         });
       } catch {
         if (!cancelled) {

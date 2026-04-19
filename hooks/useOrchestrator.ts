@@ -16,7 +16,7 @@ import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
-import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem } from '@/lib/naavi-client';
+import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem, type GlobalSearchResult } from '@/lib/naavi-client';
 import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
 import { sendPushNotification } from '@/lib/push';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
@@ -41,6 +41,7 @@ export interface ConversationTurn {
   driveFiles: StorageFile[];
   navigationResults: NavigationResult[];
   listResults: { action: string; listName: string; items?: string[]; webViewLink?: string }[];
+  globalSearch?: { query: string; results: GlobalSearchResult[] };
   timestamp?: string;
 }
 
@@ -89,6 +90,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     const turnDocs: { title: string; webViewLink?: string }[] = [];
     const turnMemory: { text: string; count: number }[] = [];
     const turnLists: { action: string; listName: string; items?: string[]; webViewLink?: string }[] = [];
+    let turnGlobalSearch: { query: string; results: GlobalSearchResult[] } | undefined;
 
     try {
       let enrichedMessage = userMessage;
@@ -215,6 +217,31 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           if (query) {
             const files = await registry.storage.search(query, '');
             turnDrive.push(...files);
+          }
+        }
+
+        if (action.type === 'GLOBAL_SEARCH') {
+          // Cross-source search: calls global-search Edge Function, which
+          // fans out to knowledge, rules, sent_messages, contacts, lists,
+          // calendar, and gmail adapters and returns a ranked list.
+          const query = String(action.query ?? '').trim();
+          if (query && supabase) {
+            try {
+              const { data: { session } } = await supabase.auth.getSession();
+              if (session?.user) {
+                const { data, error } = await supabase.functions.invoke('global-search', {
+                  body: { query, user_id: session.user.id, limit: 8 },
+                });
+                if (error) {
+                  console.error('[Orchestrator] GLOBAL_SEARCH failed:', error.message);
+                } else if (data?.ranked) {
+                  const results = (data.ranked as GlobalSearchResult[]).slice(0, 8);
+                  turnGlobalSearch = { query, results };
+                }
+              }
+            } catch (err) {
+              console.error('[Orchestrator] GLOBAL_SEARCH error:', err);
+            }
           }
         }
 
@@ -486,7 +513,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       }
       console.log('[Orchestrator] response.speech:', response.speech);
       console.log('[Orchestrator] displaySpeech (for bubble):', displaySpeech);
-      const newTurn = {
+      const newTurn: ConversationTurn = {
         userMessage,
         assistantSpeech: displaySpeech,
         drafts:           turnDrafts,
@@ -497,6 +524,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         driveFiles:       turnDrive,
         navigationResults: turnNav,
         listResults:      turnLists,
+        globalSearch:     turnGlobalSearch,
         timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' }) + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
       };
       setTurns(prev => [...prev, newTurn]);
@@ -509,6 +537,32 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           const itemsText = lr.items.map((item: string, i: number) => `${i + 1}. ${item}`).join('. ');
           finalSpeech += ` Here are the items: ${itemsText}.`;
         }
+      }
+      // Append top GLOBAL_SEARCH hits so they are spoken, with a source
+      // label so the user can tell where each result came from. Keep to 3
+      // or the reply gets too long.
+      if (turnGlobalSearch && turnGlobalSearch.results.length > 0) {
+        const labelFor = (src: string) => {
+          if (src === 'calendar') return 'calendar';
+          if (src === 'contacts') return 'contacts';
+          if (src === 'lists') return 'lists';
+          if (src === 'gmail') return 'email';
+          if (src === 'sent_messages') return 'sent messages';
+          if (src === 'rules') return 'automations';
+          if (src === 'knowledge') return 'memory';
+          return src;
+        };
+        const top = turnGlobalSearch.results.slice(0, 3);
+        const phrases = top.map(r => {
+          const text = (r.snippet && r.snippet.trim()) || r.title;
+          return `In ${labelFor(r.source)}: ${text}`;
+        });
+        finalSpeech += ` ${phrases.join('. ')}.`;
+        if (turnGlobalSearch.results.length > top.length) {
+          finalSpeech += ` Plus ${turnGlobalSearch.results.length - top.length} more.`;
+        }
+      } else if (turnGlobalSearch) {
+        finalSpeech += ` I didn't find anything for ${turnGlobalSearch.query}.`;
       }
 
       // Strip "Say yes to send" prompt when not in hands-free (Robert uses the Send button)

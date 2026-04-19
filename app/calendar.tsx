@@ -11,6 +11,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import * as Speech from 'expo-speech';
 import { supabase } from '@/lib/supabase';
 import { Colors } from '@/constants/Colors';
+import { speakCue } from '@/lib/tts';
 
 type Status = 'loading' | 'speaking' | 'done' | 'error';
 
@@ -35,18 +36,10 @@ export default function CalendarScreen() {
         setPlainText(text);
         setStatus('speaking');
 
-        Speech.speak(text, {
-          language: 'en-US',
-          rate: 0.95,
-          onDone: () => {
-            if (!cancelled) {
-              setStatus('done');
-              setTimeout(() => router.replace('/'), 1000);
-            }
-          },
-          onError: () => {
-            if (!cancelled) router.replace('/');
-          },
+        speakCue(text, 'en').then(() => {
+          if (cancelled) return;
+          setStatus('done');
+          setTimeout(() => router.replace('/'), 1000);
         });
       } catch {
         if (!cancelled) {

@@ -101,11 +101,15 @@ export async function saveContact(contact: {
     console.error('[Supabase] Cannot save contact — no user session');
     return;
   }
-  // Only insert columns that definitely exist in the contacts table
+  // Save name, email, and phone. Phone is new as of V52 — the contacts
+  // table has a phone column (migration 20260419_contacts_phone.sql) and
+  // the Global Search contacts adapter matches on it. `phone || null`
+  // avoids inserting an empty string when Claude didn't extract one.
   const { error } = await supabase.from('contacts').insert({
     user_id: userId,
     name: contact.name,
-    email: contact.email,
+    email: contact.email || null,
+    phone: contact.phone?.trim() || null,
   });
   if (error) console.error('[Supabase] Failed to save contact:', error.message);
   else console.log('[Supabase] Contact saved:', contact.name);

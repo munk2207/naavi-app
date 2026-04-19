@@ -41,7 +41,7 @@ import { ConversationBubble } from '@/components/ConversationBubble';
 import { ConversationActionCard } from '@/components/ConversationActionCard';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
-import type { BriefItem } from '@/lib/naavi-client';
+import type { BriefItem, GlobalSearchResult } from '@/lib/naavi-client';
 import type { Email } from '@/lib/types';
 import { speakCue } from '@/lib/tts';
 
@@ -1075,6 +1075,51 @@ export default function HomeScreen() {
                 </View>
               ))}
 
+              {/* Global Search results */}
+              {turn.globalSearch && turn.globalSearch.results.length > 0 && (
+                <View style={styles.globalSearchSection}>
+                  <Text style={styles.globalSearchLabel}>
+                    🔎 Results for "{turn.globalSearch.query}"
+                  </Text>
+                  {Object.entries(
+                    turn.globalSearch.results.reduce<Record<string, GlobalSearchResult[]>>((acc, r) => {
+                      (acc[r.source] ||= []).push(r);
+                      return acc;
+                    }, {})
+                  ).map(([source, hits]) => (
+                    <View key={source} style={styles.globalSearchGroup}>
+                      <Text style={styles.globalSearchGroupLabel}>
+                        {source === 'calendar' ? '📅 Calendar' :
+                         source === 'contacts' ? '👤 Contacts' :
+                         source === 'lists' ? '📝 Lists' :
+                         source === 'gmail' ? '✉ Email' :
+                         source === 'sent_messages' ? '📤 Sent messages' :
+                         source === 'rules' ? '⚡ Automations' :
+                         source === 'knowledge' ? '🧠 Memory' :
+                         source}
+                        {' · '}{hits.length}
+                      </Text>
+                      {hits.slice(0, 3).map((hit, i) => (
+                        <TouchableOpacity
+                          key={i}
+                          style={styles.globalSearchHit}
+                          onPress={() => hit.url && Linking.openURL(hit.url)}
+                          disabled={!hit.url}
+                        >
+                          <Text style={styles.globalSearchHitTitle} numberOfLines={2}>{hit.title}</Text>
+                          {hit.snippet ? (
+                            <Text style={styles.globalSearchHitMeta} numberOfLines={2}>{hit.snippet}</Text>
+                          ) : null}
+                        </TouchableOpacity>
+                      ))}
+                      {hits.length > 3 && (
+                        <Text style={styles.globalSearchHitMeta}>…{hits.length - 3} more in {source}</Text>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              )}
+
               {/* Drive files */}
               {turn.driveFiles.length > 0 && (
                 <View style={styles.driveSection}>
@@ -1866,6 +1911,43 @@ const styles = StyleSheet.create({
   driveSection: {
     marginTop: 12,
     gap: 8,
+  },
+  globalSearchSection: {
+    marginTop: 12,
+    gap: 10,
+    backgroundColor: Colors.bgElevated,
+    borderRadius: 16,
+    padding: 14,
+  },
+  globalSearchLabel: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  globalSearchGroup: {
+    gap: 6,
+  },
+  globalSearchGroupLabel: {
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  globalSearchHit: {
+    backgroundColor: Colors.bgCard,
+    borderRadius: 12,
+    padding: 12,
+    gap: 2,
+  },
+  globalSearchHitTitle: {
+    fontSize: Typography.base,
+    fontWeight: Typography.semibold,
+    color: Colors.textPrimary,
+  },
+  globalSearchHitMeta: {
+    fontSize: Typography.sm,
+    color: Colors.textMuted,
   },
   driveCard: {
     backgroundColor: Colors.bgCard,
