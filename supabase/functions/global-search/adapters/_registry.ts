@@ -15,9 +15,15 @@ import type { SearchAdapter } from './_interface.ts';
 import { knowledgeAdapter } from './knowledge.ts';
 import { rulesAdapter } from './rules.ts';
 import { sentMessagesAdapter } from './sent_messages.ts';
+import { contactsAdapter } from './contacts.ts';
+import { listsAdapter } from './lists.ts';
+import { calendarAdapter } from './calendar.ts';
 
 export const adapters: SearchAdapter[] = [
   knowledgeAdapter,
   rulesAdapter,
   sentMessagesAdapter,
+  contactsAdapter,
+  listsAdapter,
+  calendarAdapter,
 ];
