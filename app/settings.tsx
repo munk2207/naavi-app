@@ -20,7 +20,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserName } from '@/lib/naavi-client';
+import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserNameAsync, syncUserNameToSupabase } from '@/lib/naavi-client';
 import { signOut, supabase } from '@/lib/supabase';
 import { isCalendarConnected, connectGoogleCalendar, disconnectGoogleCalendar } from '@/lib/calendar';
 import { saveNotionToken, getNotionToken, removeNotionToken, hasNotionToken } from '@/lib/notion';
@@ -125,22 +125,35 @@ export default function SettingsScreen() {
     isCalendarConnected().then(setCalendarConnected);
     hasNotionToken().then(setNotionConnected);
     isEpicConnected().then(setEpicConnected);
-    const saved = getUserName();
-    if (saved) { setUserName(saved); setUserNameSaved(true); }
+    // Name: read local cache first for instant display, then prefer Supabase
+    // (server is canonical). Fixes build 93 regression where getUserName()
+    // returned '' on native and the field came up empty.
+    (async () => {
+      const cached = await getUserNameAsync();
+      if (cached) { setUserName(cached); setUserNameSaved(true); }
+    })();
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setPushEnabled(Notification.permission === 'granted');
     }
-    // Load user-scoped settings from Supabase (morning call + phone)
+    // Load user-scoped settings from Supabase (name + morning call + phone).
+    // Server value wins over SecureStore for name — prevents a stale cached
+    // name from a previous Google account leaking into the current session.
     if (supabase) {
       (async () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
         const { data } = await supabase
           .from('user_settings')
-          .select('morning_call_enabled, morning_call_time, phone')
+          .select('name, morning_call_enabled, morning_call_time, phone')
           .eq('user_id', user.id)
           .maybeSingle();
         if (data) {
+          if (data.name) {
+            setUserName(data.name);
+            setUserNameSaved(true);
+            // Overwrite local cache so next app-open reads the fresh value.
+            saveUserName(data.name);
+          }
           if (data.morning_call_enabled !== null && data.morning_call_enabled !== undefined) {
             setMorningCallEnabled(data.morning_call_enabled);
           }
@@ -282,11 +295,37 @@ export default function SettingsScreen() {
           />
           <TouchableOpacity
             style={[styles.saveBtn, !userName.trim() && styles.saveBtnDisabled]}
-            onPress={() => {
+            onPress={async () => {
               const name = userName.trim();
               if (!name) return;
+              // 1. Cache locally for fast reads on next open.
               saveUserName(name);
+              // 2. Sync to Supabase — await so we know it succeeded. On
+              //    failure, alert the user and don't claim "Saved".
+              try {
+                await syncUserNameToSupabase(name);
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                Alert.alert('Could not save name', msg);
+                return;
+              }
+              // 3. Re-fetch to confirm the server wrote it and reflect the
+              //    canonical value (in case of case/spacing normalization).
+              try {
+                if (supabase) {
+                  const { data: { user } } = await supabase.auth.getUser();
+                  if (user) {
+                    const { data } = await supabase
+                      .from('user_settings')
+                      .select('name')
+                      .eq('user_id', user.id)
+                      .maybeSingle();
+                    if (data?.name) setUserName(data.name);
+                  }
+                }
+              } catch { /* non-fatal — client already has the value */ }
               setUserNameSaved(true);
+              Alert.alert('Saved', `MyNaavi will call you "${name}".`);
             }}
             disabled={!userName.trim()}
           >
@@ -640,7 +679,7 @@ export default function SettingsScreen() {
         <View style={styles.divider} />
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V51 (build 93)</Text>
+        <Text style={styles.version}>MyNaavi — V52 (build 94)</Text>
 
       </ScrollView>
     </SafeAreaView>

@@ -53,16 +53,23 @@ export function saveUserName(name: string): void {
   });
 }
 
-async function syncUserNameToSupabase(name: string): Promise<void> {
-  if (!supabase) return;
+/**
+ * Sync the user's name to Supabase user_settings. Throws on failure so
+ * callers (e.g. Settings Save button) can show an error Alert instead of
+ * silently leaving the server stale. The fire-and-forget caller path
+ * (saveUserName) swallows the error on its own.
+ */
+export async function syncUserNameToSupabase(name: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase not configured');
   const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return;
-  await supabase
+  if (!session?.user) throw new Error('Not signed in');
+  const { error } = await supabase
     .from('user_settings')
     .upsert(
       { user_id: session.user.id, name, updated_at: new Date().toISOString() },
       { onConflict: 'user_id' }
     );
+  if (error) throw new Error(error.message);
 }
 
 /**
@@ -153,8 +160,19 @@ export interface NaaviResponse {
 }
 
 export interface NaaviAction {
-  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT' | 'DELETE_EVENT' | 'SAVE_TO_DRIVE' | 'REMEMBER' | 'DELETE_MEMORY' | 'FETCH_TRAVEL_TIME' | 'SCHEDULE_MEDICATION' | 'SET_EMAIL_ALERT' | 'SET_ACTION_RULE' | 'LIST_CREATE' | 'LIST_ADD' | 'LIST_REMOVE' | 'LIST_READ';
+  type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT' | 'DELETE_EVENT' | 'SAVE_TO_DRIVE' | 'REMEMBER' | 'DELETE_MEMORY' | 'FETCH_TRAVEL_TIME' | 'SCHEDULE_MEDICATION' | 'SET_EMAIL_ALERT' | 'SET_ACTION_RULE' | 'LIST_CREATE' | 'LIST_ADD' | 'LIST_REMOVE' | 'LIST_READ' | 'GLOBAL_SEARCH';
   [key: string]: unknown;
+}
+
+// Result returned by a single adapter in the global-search Edge Function.
+export interface GlobalSearchResult {
+  source: string;   // e.g. "calendar", "contacts", "gmail"
+  title: string;
+  snippet: string;
+  score: number;
+  createdAt?: string;
+  url?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface PendingThread {
