@@ -1,24 +1,133 @@
 /**
- * Contacts adapter — searches the local `contacts` table (saved name, email,
- * phone). Matches against all three columns with case-insensitive partial
- * match. Phone match lets queries like "find what I know about 613-555-1234"
- * locate a saved contact.
+ * Contacts adapter — queries Google Contacts (People API) LIVE via the user's
+ * OAuth token. No internal Supabase silo.
+ *
+ * Rationale: Robert already keeps his contacts in Google / his phone. Naavi's
+ * job is to read from that real source, not to maintain a divergent copy.
+ *
+ * Pattern (same as calendar adapter):
+ *   1. Read refresh_token from user_tokens.
+ *   2. Exchange for a fresh access_token (Google OAuth).
+ *   3. Fetch the user's connections via People API (one paged GET). Uses
+ *      personFields=names,emailAddresses,phoneNumbers — no metadata beyond
+ *      that so Robert's address book details stay out of our logs.
+ *   4. Client-side filter on name / email / normalized phone digits.
+ *   5. Score and return.
+ *
+ * Requires OAuth scopes on the user's refresh token:
+ *   - https://www.googleapis.com/auth/contacts.readonly
+ *   - https://www.googleapis.com/auth/contacts.other.readonly
+ *
+ * These are in both lib/calendar.ts (web) and lib/supabase.ts (mobile). Users
+ * whose token was minted before these scopes were added must sign out and
+ * sign back in to refresh the grant; the adapter will silently return [] for
+ * such users instead of crashing.
  */
 
 import type { SearchAdapter, SearchContext, SearchResult } from './_interface.ts';
 
-type ContactRow = {
-  id: string;
-  name: string | null;
-  email: string | null;
-  phone: string | null;
-  created_at: string | null;
+const GOOGLE_TOKEN_URL       = 'https://oauth2.googleapis.com/token';
+const PEOPLE_CONNECTIONS_API = 'https://people.googleapis.com/v1/people/me/connections';
+const OTHER_CONTACTS_API     = 'https://people.googleapis.com/v1/otherContacts';
+
+// Cap on contacts fetched per source. Most users have < 500; more than that
+// would slow the search and the marginal hit rate is low.
+const MAX_CONTACTS_PER_SOURCE = 500;
+
+type PersonName  = { displayName?: string; givenName?: string; familyName?: string };
+type PersonEmail = { value?: string; type?: string };
+type PersonPhone = { value?: string; type?: string };
+type Person = {
+  resourceName?: string;
+  names?: PersonName[];
+  emailAddresses?: PersonEmail[];
+  phoneNumbers?: PersonPhone[];
 };
 
-// Normalize phone-like strings so "613-555-1234", "(613) 555 1234", and
-// "+16135551234" all match the same stored number.
 function normalizePhone(s: string): string {
   return s.replace(/[^\d]/g, '');
+}
+
+async function getAccessToken(refreshToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id:     Deno.env.get('GOOGLE_CLIENT_ID')     ?? '',
+        client_secret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '',
+        refresh_token: refreshToken,
+        grant_type:    'refresh_token',
+      }),
+    });
+    const data = await res.json();
+    return typeof data.access_token === 'string' ? data.access_token : null;
+  } catch (err) {
+    console.error('[contacts-adapter] token refresh failed:', err);
+    return null;
+  }
+}
+
+async function fetchConnections(accessToken: string): Promise<Person[]> {
+  const out: Person[] = [];
+  let pageToken: string | undefined = undefined;
+  while (out.length < MAX_CONTACTS_PER_SOURCE) {
+    const url = new URL(PEOPLE_CONNECTIONS_API);
+    url.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers');
+    url.searchParams.set('pageSize', '1000');
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+    try {
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!res.ok) {
+        console.warn(`[contacts-adapter] connections.list returned ${res.status}`);
+        break;
+      }
+      const data = await res.json();
+      const connections = (data?.connections ?? []) as Person[];
+      out.push(...connections);
+      pageToken = typeof data?.nextPageToken === 'string' ? data.nextPageToken : undefined;
+      if (!pageToken) break;
+    } catch (err) {
+      console.error('[contacts-adapter] connections.list error:', err);
+      break;
+    }
+  }
+  return out.slice(0, MAX_CONTACTS_PER_SOURCE);
+}
+
+async function fetchOtherContacts(accessToken: string): Promise<Person[]> {
+  const out: Person[] = [];
+  let pageToken: string | undefined = undefined;
+  while (out.length < MAX_CONTACTS_PER_SOURCE) {
+    const url = new URL(OTHER_CONTACTS_API);
+    url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers');
+    url.searchParams.set('pageSize', '1000');
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+    try {
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!res.ok) {
+        // otherContacts is optional — some users may not have any. Do not
+        // treat a 403 here as fatal; the main connections list is primary.
+        if (res.status !== 404) {
+          console.warn(`[contacts-adapter] otherContacts.list returned ${res.status}`);
+        }
+        break;
+      }
+      const data = await res.json();
+      const contacts = (data?.otherContacts ?? []) as Person[];
+      out.push(...contacts);
+      pageToken = typeof data?.nextPageToken === 'string' ? data.nextPageToken : undefined;
+      if (!pageToken) break;
+    } catch (err) {
+      console.error('[contacts-adapter] otherContacts.list error:', err);
+      break;
+    }
+  }
+  return out.slice(0, MAX_CONTACTS_PER_SOURCE);
 }
 
 export const contactsAdapter: SearchAdapter = {
@@ -27,66 +136,103 @@ export const contactsAdapter: SearchAdapter = {
   icon: 'person',
   privacyTag: 'general',
 
-  isConnected: async () => true, // every user has the table
+  isConnected: async (ctx: SearchContext) => {
+    const { data } = await ctx.supabase
+      .from('user_tokens')
+      .select('refresh_token')
+      .eq('user_id', ctx.userId)
+      .eq('provider', 'google')
+      .maybeSingle();
+    return !!data?.refresh_token;
+  },
 
   search: async (ctx: SearchContext): Promise<SearchResult[]> => {
     const q = ctx.query.trim();
     if (!q) return [];
 
-    const pattern = `%${q}%`;
-    const digitsOnly = normalizePhone(q);
-    const isPhoneLike = digitsOnly.length >= 7;
+    const qLower = q.toLowerCase();
+    const qDigits = normalizePhone(q);
+    const isPhoneLike = qDigits.length >= 7;
 
-    // Build OR clauses: always search name+email, plus phone if the query
-    // looks like a phone (≥7 digits). Phone match uses digits-only pattern
-    // so formatting differences don't prevent a hit.
-    const orClauses = [
-      `name.ilike.${pattern}`,
-      `email.ilike.${pattern}`,
-    ];
-    if (isPhoneLike) {
-      orClauses.push(`phone.ilike.%${digitsOnly}%`);
-    }
-
-    const { data, error } = await ctx.supabase
-      .from('contacts')
-      .select('id, name, email, phone, created_at')
+    // ── 1. Refresh token → access token ─────────────────────────────────────
+    const { data: tokenRow } = await ctx.supabase
+      .from('user_tokens')
+      .select('refresh_token')
       .eq('user_id', ctx.userId)
-      .or(orClauses.join(','))
-      .limit(Math.max(ctx.limit * 2, 20));
+      .eq('provider', 'google')
+      .maybeSingle();
 
-    if (error) {
-      console.error('[contacts-adapter] fetch error:', error.message);
+    const refreshToken = tokenRow?.refresh_token;
+    if (!refreshToken) {
+      console.warn('[contacts-adapter] no Google refresh token for user', ctx.userId);
       return [];
     }
 
-    const rows = (data ?? []) as ContactRow[];
-    const qLower = q.toLowerCase();
+    const accessToken = await getAccessToken(refreshToken);
+    if (!accessToken) {
+      console.warn('[contacts-adapter] could not refresh access token for user', ctx.userId);
+      return [];
+    }
 
-    // Score: name match = 1.0, phone match = 0.85, email-only match = 0.7.
+    // ── 2. Fetch both sources in parallel ──────────────────────────────────
+    const [connections, otherContacts] = await Promise.all([
+      fetchConnections(accessToken),
+      fetchOtherContacts(accessToken),
+    ]);
+
+    // Dedupe on resourceName.
+    const seen = new Set<string>();
+    const all: Person[] = [];
+    for (const p of [...connections, ...otherContacts]) {
+      const key = p.resourceName ?? JSON.stringify(p.names?.[0] ?? p.emailAddresses?.[0] ?? p.phoneNumbers?.[0]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      all.push(p);
+    }
+
+    console.log(`[contacts-adapter] searching ${all.length} contacts for "${q}"`);
+
+    // ── 3. Score every contact, keep anything with a real match ────────────
+    // Score: name 1.0, phone 0.85, email 0.7. Same weights as the old
+    // Supabase adapter so mobile UI grouping stays consistent.
     const hits: SearchResult[] = [];
-    for (const c of rows) {
-      const name = (c.name ?? '').toLowerCase();
-      const email = (c.email ?? '').toLowerCase();
-      const phoneDigits = c.phone ? normalizePhone(c.phone) : '';
+    for (const p of all) {
+      const displayName = p.names?.[0]?.displayName ?? '';
+      const nameLower   = displayName.toLowerCase();
+
+      const emails = (p.emailAddresses ?? [])
+        .map(e => e.value ?? '')
+        .filter(Boolean);
+      const phones = (p.phoneNumbers ?? [])
+        .map(p => p.value ?? '')
+        .filter(Boolean);
 
       let score = 0;
-      if (name.includes(qLower)) score = 1.0;
-      else if (isPhoneLike && phoneDigits.includes(digitsOnly)) score = 0.85;
-      else if (email.includes(qLower)) score = 0.7;
+
+      if (nameLower.includes(qLower) && qLower.length > 0) {
+        score = 1.0;
+      } else if (isPhoneLike && phones.some(ph => normalizePhone(ph).includes(qDigits))) {
+        score = 0.85;
+      } else if (emails.some(e => e.toLowerCase().includes(qLower))) {
+        score = 0.7;
+      }
+
       if (score === 0) continue;
 
-      const snippetParts = [c.email, c.phone].filter(Boolean).join(' · ');
+      const primaryEmail = emails[0];
+      const primaryPhone = phones[0];
+      const snippetParts = [primaryEmail, primaryPhone].filter(Boolean);
+
       hits.push({
         source: 'contacts',
-        title: c.name ?? c.email ?? c.phone ?? 'Contact',
-        snippet: snippetParts,
+        title: displayName || primaryEmail || primaryPhone || 'Contact',
+        snippet: snippetParts.join(' · '),
         score,
-        createdAt: c.created_at ?? undefined,
         metadata: {
-          contact_id: c.id,
-          email: c.email,
-          phone: c.phone,
+          resource_name: p.resourceName ?? null,
+          name: displayName || null,
+          emails,
+          phones,
         },
       });
     }

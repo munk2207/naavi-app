@@ -72,7 +72,21 @@ export const knowledgeAdapter: SearchAdapter = {
 
     const rows = (data ?? []) as Row[];
 
-    return rows.map((r): SearchResult => ({
+    // Drop weak matches. pgvector returns top match_count rows regardless of
+    // how bad the matches are, so a query with no real answer still yields
+    // five unrelated "results" (e.g. searching "Bob" surfaced "Wael likes
+    // pizza"). Anything below this threshold is noise, not a match.
+    //
+    // text-embedding-3-small cosine similarity rough guide:
+    //   0.7+  strong semantic match
+    //   0.5-0.7 plausible match
+    //   <0.5  noise
+    const MIN_SIMILARITY = 0.5;
+    const filtered = rows.filter(
+      r => typeof r.similarity === 'number' && r.similarity >= MIN_SIMILARITY,
+    );
+
+    return filtered.map((r): SearchResult => ({
       source: 'knowledge',
       title: r.content.length > 80 ? r.content.slice(0, 77) + '...' : r.content,
       snippet: r.content,
