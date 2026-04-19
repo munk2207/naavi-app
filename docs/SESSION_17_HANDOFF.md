@@ -110,12 +110,19 @@ New log lines available for post-mortem on the intermittent "call drops after gr
 
 ### #1 TOP PRIORITY — Retrieval / Global Search must not depend on phrasing or Claude's judgment
 
-**The problem (proven 2026-04-19):**
+**Problem A — phrasing fragility (proven 2026-04-19):**
 Two semantically identical questions, only the wording differs:
 - *"What do we have on my dentist"* → Claude emits `GLOBAL_SEARCH` → grouped results card with the calendar event ✅
 - *"What do you know about my dentist"* → Claude interprets as asking its own general knowledge → answers "Nothing stored" WITHOUT searching ❌
 
-Even the v6 intent-based prompt (deployed this session) + v6 strengthening ("you" disambiguation) cannot guarantee Claude makes the same decision across every phrasing. Any trivial wording change can flip it. The user correctly called this out as unacceptable for a retrieval feature.
+Even the v6 intent-based prompt (deployed this session) + v6 strengthening ("you" disambiguation) cannot guarantee Claude makes the same decision across every phrasing. Any trivial wording change can flip it.
+
+**Problem B — Claude hallucinates literal data (proven 2026-04-19, worse):**
+User typed message containing the phone number `6137976679`. Claude correctly emitted `GLOBAL_SEARCH` — but the `query` field it constructed was `6237986746`. **The digits were changed by Claude between input and action.** The server ran against the wrong number and correctly found nothing, creating a confusing false-negative.
+
+This means Claude is unsafe as the data path for any retrieval-by-identifier use case (phone numbers, account numbers, SKUs, dates, case IDs). Even with a perfect intent-based prompt, Claude can mangle the payload.
+
+**Implication:** the fix is not "better prompt". The fix is to **remove Claude from the retrieval data path entirely** — the orchestrator must run the search with the user's literal input text, not with what Claude echoes back.
 
 **The fix (architectural, next session):**
 Move retrieval OUT of Claude's decision-making and into the orchestrator. Options:
