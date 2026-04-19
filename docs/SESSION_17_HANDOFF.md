@@ -154,6 +154,20 @@ This is not a minor caveat. For a senior-user product (Robert is legally blind),
 **Process note — session 17 mistake to not repeat:**
 Test scripts must call out known-fragile paths UPFRONT ("don't test this via voice, type it"). Discovering fragility inside a test is worse than knowing about it beforehand.
 
+### #1C (related to #1) — Knowledge adapter returns irrelevant noise for non-semantic queries
+
+**Problem (proven 2026-04-19):**
+User searched for phone number `6237986746`. Memory adapter returned 5 results: "Eric Fazma is my friend", "John is my friend", "Wael likes pizza" etc. — none related to the phone number. Similarity scores ~0.1–0.2.
+
+**Root cause:**
+- Knowledge adapter does OpenAI embedding search and returns top-N by similarity, **no minimum threshold**. Even random noise-level matches get returned as "results".
+- For identifier queries (phones, emails, IDs), semantic embeddings are the wrong tool entirely — should use exact/substring match on the actual content.
+
+**Fix directions:**
+1. Add a minimum similarity threshold in `supabase/functions/global-search/adapters/knowledge.ts` (e.g. filter out `similarity < 0.5`).
+2. Detect identifier-like queries (mostly-digit strings, `@` present, UUID shape) and skip the knowledge adapter entirely for those. Run only the source-of-truth adapters (contacts, sent_messages) for identifiers.
+3. For the remaining semantic queries, also surface a confidence indicator in the UI (grey-out weak matches, or omit).
+
 ### Other carried-forward items
 
 | # | Item | Why deferred |
