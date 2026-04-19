@@ -4,6 +4,20 @@
 
 ---
 
+## GROUND RULES FOR TESTING (read this FIRST)
+
+**Do not craft test scripts to make tests pass.** Honest tests surface problems; optimistic tests hide them. For every test step:
+
+1. **Call out known-fragile paths UPFRONT.** If voice input is unreliable for emails / phone numbers, say so BEFORE the test starts, not after it fails.
+2. **Test what the end user would actually do.** Wael / Robert will use voice for most interactions. "The typed version works" is not equivalent to "the feature works" for this product.
+3. **If a test catches a real bug, do not re-run with a softer query to get a green check.** Treat the failure as data. Document it. Move on.
+4. **Do not tell the user "it worked on my side via curl"** as if that closes the loop. The loop closes when it works on the user's phone in the user's session.
+5. **No test theater.** Anything that's convenient for passing the test but not representative of real use is a false signal.
+
+This is a senior-user product where Wael's trust in the test results matters more than the number of green checks. If a path is fragile, ship fewer green checks and more honest red ones — that is the only useful signal.
+
+---
+
 ## Quick recap for the next session
 
 Four big themes shipped this session:
