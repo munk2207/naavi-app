@@ -94,13 +94,37 @@ New log lines available for post-mortem on the intermittent "call drops after gr
 
 ## Known bugs / architectural issues carried forward (for V53+)
 
+### #1 TOP PRIORITY — Retrieval / Global Search must not depend on phrasing or Claude's judgment
+
+**The problem (proven 2026-04-19):**
+Two semantically identical questions, only the wording differs:
+- *"What do we have on my dentist"* → Claude emits `GLOBAL_SEARCH` → grouped results card with the calendar event ✅
+- *"What do you know about my dentist"* → Claude interprets as asking its own general knowledge → answers "Nothing stored" WITHOUT searching ❌
+
+Even the v6 intent-based prompt (deployed this session) + v6 strengthening ("you" disambiguation) cannot guarantee Claude makes the same decision across every phrasing. Any trivial wording change can flip it. The user correctly called this out as unacceptable for a retrieval feature.
+
+**The fix (architectural, next session):**
+Move retrieval OUT of Claude's decision-making and into the orchestrator. Options:
+- **A. Serial pre-search** — detect retrieval-style messages (regex on `what/who/where/when/do I have/is there/tell me about…` + proper noun) → run global-search FIRST → inject results into Claude's prompt → Claude speaks using them. Adds ~1.5 s latency on retrieval queries only.
+- **B. Parallel always-search** — run global-search on every user message in parallel with Claude. Always attach results to the turn card (regardless of Claude's speech). Claude may say "I don't know" while the card shows the answer — mixed UX but data is always visible.
+- **C. Parallel + reflect** — run search & Claude in parallel. If Claude answered from its own knowledge but search has relevant results, append/replace with "By the way, I found…". Complex.
+
+**Recommendation: Option A (serial pre-search with simple detection)** — cleanest UX, latency only on retrieval-intent messages. Regex heuristic is deliberately crude (not an exhaustive list) — it just needs to catch the bulk of cases. Claude still takes responsibility for *using* the results well.
+
+**Scope for implementation:**
+- `hooks/useOrchestrator.ts` — add retrieval-detection regex, fire global-search before sendToNaavi when matched, enrich `enrichedMessage` with top results
+- `lib/naavi-client.ts::buildSystemPrompt` — also include GLOBAL_SEARCH rule so the local fallback keeps parity with the server prompt
+- Requires V53 mobile build + voice-server-side mirror change
+
+### Other carried-forward items
+
 | # | Item | Why deferred |
 |---|---|---|
-| 1 | Chat text cut-off ("Your name is Wael" spoken but only "Your name is" shown in bubble) | Logging shipped in build 93 but no reproduction yet — need data from the next occurrence. |
-| 2 | Chat latency ~15s | Suspected `isBroadQuery` regex injecting huge knowledge fragments into the prompt. Server-side timing logs already in `naavi-chat`. Profile on next slow reproduction. |
-| 3 | Intermittent call drops after greeting | Drop-detection instrumentation now live. Wait for next occurrence + log inspection before changing code. |
-| 4 | Multi-user bug audit in voice server | Fixed reminders + emails this session. Other `/rest/v1/...` calls may have the same "no user_id filter" bug. Worth a grep. |
-| 5 | **List-based trigger phrases are brittle by design** | Many rules in `get-naavi-prompt` (RULE 9, 11, 12, 18, 19) and regexes in `useOrchestrator.ts` (e.g. `isBroadQuery`) rely on exact keyword lists. One typo or word variation breaks them. RULE 19 was converted to intent-based in v6 (2026-04-19) as a starting example — the same treatment should be applied across all list-matching rules. Architectural principle: **describe intent, let Claude generalize**. |
+| 2 | Chat text cut-off ("Your name is Wael" spoken but only "Your name is" shown in bubble) | Logging shipped in build 93 but no reproduction yet — need data from the next occurrence. |
+| 3 | Chat latency ~15s | Suspected `isBroadQuery` regex injecting huge knowledge fragments into the prompt. Server-side timing logs already in `naavi-chat`. Profile on next slow reproduction. |
+| 4 | Intermittent call drops after greeting | Drop-detection instrumentation now live. Wait for next occurrence + log inspection before changing code. |
+| 5 | Multi-user bug audit in voice server | Fixed reminders + emails this session. Other `/rest/v1/...` calls may have the same "no user_id filter" bug. Worth a grep. |
+| 6 | List-based trigger phrases are brittle by design (broader cleanup) | Many rules in `get-naavi-prompt` (RULE 9, 11, 12, 18, 19) and regexes in `useOrchestrator.ts` (e.g. `isBroadQuery`) rely on exact keyword lists. One typo or word variation breaks them. RULE 19 was converted to intent-based in v6 as a starting example — same treatment should be applied across all list-matching rules. Architectural principle: **describe intent, let Claude generalize** — but only where Claude's judgment is acceptable. For retrieval (see #1 above), remove Claude from the decision path entirely. |
 
 ---
 
