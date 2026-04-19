@@ -23,23 +23,54 @@
  */
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Resolve user_id from JWT (mobile) or body (voice / server-side).
+async function resolveUserId(
+  authHeader: string,
+  bodyUserId: string | undefined,
+): Promise<string | null> {
+  if (authHeader) {
+    try {
+      const userClient = createClient(
+        Deno.env.get('SUPABASE_URL')!,
+        Deno.env.get('SUPABASE_ANON_KEY')!,
+        { global: { headers: { Authorization: authHeader } } },
+      );
+      const { data: { user } } = await userClient.auth.getUser();
+      if (user?.id) return user.id;
+    } catch {
+      /* fall through */
+    }
+  }
+  if (bodyUserId && typeof bodyUserId === 'string' && bodyUserId.length > 0) {
+    return bodyUserId;
+  }
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const { to, body, channel = 'sms', recipient_name, sender_name } = await req.json() as {
-      to: string;
-      body: string;
-      channel?: 'sms' | 'whatsapp';
-      recipient_name?: string;
-      sender_name?: string;
-    };
+    const { to, body, channel = 'sms', recipient_name, sender_name, user_id: bodyUserId, source } =
+      await req.json() as {
+        to: string;
+        body: string;
+        channel?: 'sms' | 'whatsapp';
+        recipient_name?: string;
+        sender_name?: string;
+        user_id?: string;
+        source?: string;
+      };
+
+    const authHeader = req.headers.get('Authorization') ?? '';
+    const userId = await resolveUserId(authHeader, bodyUserId);
 
     if (!to || !body) {
       return new Response(JSON.stringify({ error: 'Missing to or body' }), {
@@ -108,6 +139,34 @@ serve(async (req) => {
     }
 
     console.log(`[send-sms] Sent ${channel} to ${to}: ${body.slice(0, 60)}`);
+
+    // Log to sent_messages — fire-and-forget so a log failure never blocks
+    // a successful send response. Uses service role to bypass RLS when the
+    // caller is the voice server / cron (no JWT).
+    if (userId) {
+      const admin = createClient(
+        Deno.env.get('SUPABASE_URL')!,
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      );
+      admin
+        .from('sent_messages')
+        .insert({
+          user_id: userId,
+          channel,
+          to_name: recipient_name ?? null,
+          to_phone: to,
+          body,
+          delivery_status: 'sent',
+          provider_sid: data.sid ?? null,
+          source: source ?? null,
+        })
+        .then(({ error }) => {
+          if (error) console.error('[send-sms] sent_messages log failed:', error.message);
+        });
+    } else {
+      console.warn('[send-sms] no user_id — skipping sent_messages log');
+    }
+
     return new Response(JSON.stringify({ success: true, sid: data.sid }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

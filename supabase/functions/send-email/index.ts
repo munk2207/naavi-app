@@ -149,6 +149,24 @@ serve(async (req) => {
     }
 
     console.log(`[send-email] Sent "${subject}" to ${to}`);
+
+    // Log to sent_messages so Global Search can find it later. Fire-and-forget.
+    adminClient
+      .from('sent_messages')
+      .insert({
+        user_id: user.id,
+        channel: 'email',
+        to_name: toName ?? null,
+        to_email: to,
+        subject: subject ?? null,
+        body: emailBody,
+        delivery_status: 'sent',
+        source: 'mobile',
+      })
+      .then(({ error }) => {
+        if (error) console.error('[send-email] sent_messages log failed:', error.message);
+      });
+
     return new Response(JSON.stringify({ success: true, to }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
