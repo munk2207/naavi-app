@@ -1409,6 +1409,18 @@ export default function HomeScreen() {
                 onSubmitEditing={handleSend}
                 editable={status === 'idle' || status === 'error'}
                 accessibilityLabel="Message input"
+                // Disable Android's aggressive autocomplete/autocorrect which
+                // was stripping typed digits (e.g. "Find phone 6137976679"
+                // arrived at the app as "Find phone " with the digits gone,
+                // because Android's keyboard tried to replace them with a
+                // contact suggestion). Trade-off: no word suggestions while
+                // typing. For our senior user that's a net win — reliable
+                // input matters more than typing shortcuts.
+                autoCorrect={false}
+                autoComplete="off"
+                spellCheck={false}
+                textContentType="none"
+                keyboardType="default"
               />
               <TouchableOpacity
                 style={[styles.sendBtn, (!inputText.trim() || status === 'thinking' || status === 'speaking') && styles.sendBtnDisabled]}

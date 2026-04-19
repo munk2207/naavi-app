@@ -141,18 +141,29 @@ serve(async (req) => {
       });
     }
 
+    // Drop weak matches. pgvector returns top match_count rows regardless of
+    // how bad the matches are, so queries with no real answer still produce
+    // 5 unrelated "results" (e.g. searching a phone number surfaces
+    // "Wael likes pizza"). Anything below this threshold is noise. Matches
+    // the threshold used in global-search/adapters/knowledge.ts.
+    const MIN_SIMILARITY = 0.5;
+    const filtered = (results ?? []).filter(
+      (r: { similarity?: number }) =>
+        typeof r.similarity === 'number' && r.similarity >= MIN_SIMILARITY,
+    );
+
     // Update last_retrieved_at on returned fragments
-    if (results && results.length > 0) {
-      const ids = results.map((r: { id: string }) => r.id);
+    if (filtered.length > 0) {
+      const ids = filtered.map((r: { id: string }) => r.id);
       await adminClient
         .from('knowledge_fragments')
         .update({ last_retrieved_at: new Date().toISOString() })
         .in('id', ids);
     }
 
-    console.log(`[search-knowledge] "${query}" → ${results?.length ?? 0} results`);
+    console.log(`[search-knowledge] "${query}" → ${filtered.length} results (from ${results?.length ?? 0} raw, threshold ${MIN_SIMILARITY})`);
 
-    return new Response(JSON.stringify({ results: results ?? [] }), {
+    return new Response(JSON.stringify({ results: filtered }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
