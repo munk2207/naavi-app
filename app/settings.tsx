@@ -104,6 +104,9 @@ export default function SettingsScreen() {
   const [morningCallEnabled, setMorningCallEnabled] = useState(true);
   const [morningCallTime, setMorningCallTime]       = useState('08:00');
   const [morningCallLoading, setMorningCallLoading] = useState(false);
+  const [phone, setPhone]                           = useState('');
+  const [phoneSaved, setPhoneSaved]                 = useState(false);
+  const [phoneLoading, setPhoneLoading]             = useState(false);
 
   // Provider selections — all default to Google for Phase 7
   const [calendarProvider, setCalendarProvider] =
@@ -127,15 +130,29 @@ export default function SettingsScreen() {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setPushEnabled(Notification.permission === 'granted');
     }
-    // Load morning call settings from Supabase
+    // Load user-scoped settings from Supabase (morning call + phone)
     if (supabase) {
-      supabase.from('user_settings').select('morning_call_enabled, morning_call_time').limit(1).single()
-        .then(({ data }) => {
-          if (data) {
+      (async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data } = await supabase
+          .from('user_settings')
+          .select('morning_call_enabled, morning_call_time, phone')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (data) {
+          if (data.morning_call_enabled !== null && data.morning_call_enabled !== undefined) {
             setMorningCallEnabled(data.morning_call_enabled);
+          }
+          if (data.morning_call_time) {
             setMorningCallTime(String(data.morning_call_time).substring(0, 5));
           }
-        });
+          if (data.phone) {
+            setPhone(data.phone);
+            setPhoneSaved(true);
+          }
+        }
+      })();
     }
   }, []);
 
@@ -184,6 +201,40 @@ export default function SettingsScreen() {
       Alert.alert('Error', 'Could not save morning call settings.');
     }
     setMorningCallLoading(false);
+  }
+
+  async function handleSavePhone() {
+    const raw = phone.trim().replace(/[\s\-\(\)]/g, '');
+    // E.164 — plus sign, country code, up to 15 digits total (per ITU spec).
+    // We require at least 10 digits after the plus.
+    if (!/^\+\d{10,15}$/.test(raw)) {
+      Alert.alert(
+        'Invalid phone',
+        'Use international format starting with +, then country code and number.\nExample: +16135551234'
+      );
+      return;
+    }
+    if (!supabase) return;
+    setPhoneLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setPhoneLoading(false); return; }
+      const { error } = await supabase.from('user_settings').upsert({
+        user_id: user.id,
+        phone: raw,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+      if (error) throw error;
+      setPhone(raw);
+      setPhoneSaved(true);
+      Alert.alert(
+        'Saved',
+        'Phone number saved. Naavi will call this number for your morning brief, and will recognize you when you call back.'
+      );
+    } catch (err) {
+      Alert.alert('Error', 'Could not save phone number. Please try again.');
+    }
+    setPhoneLoading(false);
   }
 
   async function handleSaveNotionToken() {
@@ -240,6 +291,39 @@ export default function SettingsScreen() {
             disabled={!userName.trim()}
           >
             <Text style={styles.saveBtnText}>Save name</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* Your Phone Number */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Your Phone Number</Text>
+          <Text style={styles.sectionNote}>
+            {phoneSaved
+              ? `Saved as ${phone}. Naavi will call this number for your morning brief and will recognize you when you call back.`
+              : 'Enter your phone in international format, starting with + and your country code (e.g. +16135551234). Required for morning calls.'}
+          </Text>
+          <TextInput
+            style={styles.keyInput}
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="+16135551234"
+            placeholderTextColor={Colors.textMuted}
+            keyboardType="phone-pad"
+            autoCapitalize="none"
+            autoCorrect={false}
+            accessibilityLabel="Your phone number"
+          />
+          <TouchableOpacity
+            style={[styles.saveBtn, (!phone.trim() || phoneLoading) && styles.saveBtnDisabled]}
+            onPress={handleSavePhone}
+            disabled={!phone.trim() || phoneLoading}
+            accessibilityRole="button"
+          >
+            <Text style={styles.saveBtnText}>
+              {phoneLoading ? 'Saving...' : 'Save phone'}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -556,7 +640,7 @@ export default function SettingsScreen() {
         <View style={styles.divider} />
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V50 (build 92)</Text>
+        <Text style={styles.version}>MyNaavi — V51 (build 93)</Text>
 
       </ScrollView>
     </SafeAreaView>

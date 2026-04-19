@@ -504,6 +504,7 @@ export async function sendToNaavi(
   const { userName, userPhone } = await getUserProfile();
 
   const isBroadQuery = /\b(all|list all|list everything|everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
+  console.log('[NaaviClient] userMessage:', userMessage, '| isBroadQuery:', isBroadQuery);
   const [healthContext, knowledgeFragments, sharedBase] = await Promise.all([
     getEpicHealthContext(),
     isBroadQuery ? fetchAllKnowledge(100) : searchKnowledge(userMessage, 5),
@@ -564,7 +565,10 @@ export async function sendToNaavi(
     rawText = response.content[0].type === 'text' ? response.content[0].text : '';
   }
 
-  return parseResponse(rawText);
+  console.log('[NaaviClient] raw Claude response:', rawText);
+  const parsed = parseResponse(rawText);
+  console.log('[NaaviClient] parsed speech:', parsed.speech);
+  return parsed;
 }
 
 // ─── Response parser ──────────────────────────────────────────────────────────

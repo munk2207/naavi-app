@@ -484,6 +484,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       if (!handsfreeRef.current && turnDrafts.some(d => isConfirmable(d))) {
         displaySpeech = displaySpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
       }
+      console.log('[Orchestrator] response.speech:', response.speech);
+      console.log('[Orchestrator] displaySpeech (for bubble):', displaySpeech);
       const newTurn = {
         userMessage,
         assistantSpeech: displaySpeech,
@@ -513,6 +515,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       if (!handsfreeRef.current && turnDrafts.some(d => isConfirmable(d))) {
         finalSpeech = finalSpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
       }
+      console.log('[Orchestrator] finalSpeech (for TTS):', finalSpeech);
 
       // Check if this turn has a confirmable action (Phase A: DRAFT_MESSAGE)
       const confirmableDraft = turnDrafts.find(d => isConfirmable(d));
