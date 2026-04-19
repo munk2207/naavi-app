@@ -80,13 +80,29 @@ async function getGoogleAccessToken(supabase: ReturnType<typeof createClient>, u
 }
 
 async function findList(supabase: ReturnType<typeof createClient>, userId: string, name: string) {
-  const { data } = await supabase
+  // Try exact match first
+  const { data: exact } = await supabase
     .from('lists')
     .select('id, name, category, drive_file_id, web_view_link')
     .eq('user_id', userId)
     .ilike('name', name)
     .maybeSingle();
-  return data;
+  if (exact) return exact;
+
+  // Try stripping trailing "list"/"lists" — Claude often appends the word
+  // (e.g. "Costco list" → "Costco") when the stored name doesn't include it.
+  const stripped = name.replace(/\s+lists?$/i, '').trim();
+  if (stripped && stripped !== name) {
+    const { data: strippedMatch } = await supabase
+      .from('lists')
+      .select('id, name, category, drive_file_id, web_view_link')
+      .eq('user_id', userId)
+      .ilike('name', stripped)
+      .maybeSingle();
+    if (strippedMatch) return strippedMatch;
+  }
+
+  return null;
 }
 
 async function readDriveDoc(accessToken: string, fileId: string): Promise<string> {

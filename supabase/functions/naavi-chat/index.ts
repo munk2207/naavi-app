@@ -218,8 +218,16 @@ async function saveAlertRule(
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
+  // ── Timing diagnostics (Session 16) — remove once chat latency root cause is found.
+  const t0 = Date.now();
+  const elapsed = () => `${Date.now() - t0}ms`;
+
   try {
     const { system, messages, max_tokens } = await req.json();
+
+    const systemLen   = typeof system === 'string' ? system.length : 0;
+    const messageCount = Array.isArray(messages) ? messages.length : 0;
+    console.log(`[timing] ${elapsed()} | request parsed | system=${systemLen} chars | messages=${messageCount}`);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -230,9 +238,12 @@ Deno.serve(async (req) => {
 
     const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
     const userText    = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : '';
+    const userPreview = userText.slice(0, 80).replace(/\s+/g, ' ');
+    console.log(`[timing] ${elapsed()} | userText preview: "${userPreview}"`);
 
     // ── Step 1: check for pending disambiguation ──────────────────────────────
     const userId = await resolveUserId(supabase, token);
+    console.log(`[timing] ${elapsed()} | resolveUserId done | userId=${userId ?? 'null'}`);
 
     if (userId) {
       const { data: pending } = await supabase
@@ -244,6 +255,7 @@ Deno.serve(async (req) => {
         .order('expires_at', { ascending: false })
         .limit(1)
         .maybeSingle();
+      console.log(`[timing] ${elapsed()} | pending_disambig check done | pending=${pending ? 'yes' : 'no'}`);
 
       if (pending) {
         const options: { name: string; email: string }[] = pending.payload.options;
@@ -296,6 +308,7 @@ Deno.serve(async (req) => {
 
     // ── Step 2: detect new email alert intent ─────────────────────────────────
     const alertRule = detectEmailAlert(userText);
+    console.log(`[timing] ${elapsed()} | detectEmailAlert done | alert=${alertRule ? 'yes' : 'no'}`);
 
     if (alertRule && userId) {
       let fromName  = alertRule.fromName;
@@ -360,14 +373,18 @@ Deno.serve(async (req) => {
     if (!apiKey) return jsonResponse({ error: 'ANTHROPIC_API_KEY not configured' }, 500);
 
     const client   = new Anthropic({ apiKey });
+    const claudeStart = Date.now();
+    console.log(`[timing] ${elapsed()} | Claude call starting | model=claude-sonnet-4-6 | max_tokens=${max_tokens ?? 2048}`);
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: max_tokens ?? 2048,
       system,
       messages,
     });
+    const claudeMs = Date.now() - claudeStart;
 
     const rawText = response.content[0].type === 'text' ? response.content[0].text : '';
+    console.log(`[timing] ${elapsed()} | Claude call done | Claude=${claudeMs}ms | rawTextLen=${rawText.length} | total=${elapsed()}`);
     return jsonResponse({ rawText });
 
   } catch (err) {

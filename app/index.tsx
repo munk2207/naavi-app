@@ -43,6 +43,7 @@ import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { BriefItem } from '@/lib/naavi-client';
 import type { Email } from '@/lib/types';
+import { speakCue } from '@/lib/tts';
 
 function emailToBriefItem(email: Email): BriefItem {
   return {
@@ -626,25 +627,12 @@ export default function HomeScreen() {
   }, [turns]);
 
   // ── Hands-free mode ──────────────────────────────────────────────────────
-  // speakCue: short spoken cue using expo-speech (local, instant, no echo).
-  // Returns a Promise that resolves when TTS finishes — hands-free waits
-  // before starting speech recognition (Android can't do both simultaneously).
-  // Cloud TTS (nova) is used for Naavi's full responses, not for short cues.
-  const speakCueRef = useRef((text: string): Promise<void> => {
-    return new Promise((resolve) => {
-      const Speech = require('expo-speech');
-      Speech.speak(text, {
-        language: 'en-CA',
-        rate: 0.85,
-        pitch: 1.05,
-        onDone: () => resolve(),
-        onError: () => resolve(),
-        onStopped: () => resolve(),
-      });
-      // Safety timeout in case callbacks don't fire
-      setTimeout(resolve, 5000);
-    });
-  });
+  // speakCue: short spoken cue using cloud TTS (Deepgram aura-hera-en) so the
+  // cue voice matches Naavi's main replies and the phone call voice. Returns a
+  // Promise that resolves when playback finishes — hands-free waits before
+  // starting speech recognition (Android can't do both simultaneously). Falls
+  // back to expo-speech if the network is unavailable.
+  const speakCueRef = useRef((text: string): Promise<void> => speakCue(text, 'en'));
 
   // Voice-confirm callback: hands-free reports what Robert said during confirmation
   const handleConfirmResponse = useCallback((response: 'confirm' | 'cancel' | 'timeout' | 'edit', editText?: string) => {
