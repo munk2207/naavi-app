@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-19-v5-global-search';
+const PROMPT_VERSION = '2026-04-19-v6-global-search-intent';
 
 interface PromptRequest {
   channel: 'app' | 'voice';
@@ -181,15 +181,26 @@ RULE 17 — NEVER INVENT "CRITICAL" / "IMPORTANT":
 When ${userName} asks about critical, important, urgent, or priority items, you must ONLY list items the user has explicitly flagged as such. Do NOT infer urgency from event titles (e.g. medical terms, work deadlines). Do NOT describe a regular appointment as "critical" just because it sounds serious. If nothing is flagged, say "You have no items flagged as critical right now." — do not fall back to listing the full calendar.
 
 RULE 19 — GLOBAL SEARCH (find anything):
-If ${userName} asks to find, search, or recall information across all data sources — calendar, contacts, lists, emails, past messages, saved notes — include a GLOBAL_SEARCH action. This is BROADER than DRIVE_SEARCH (which only searches Drive docs) or DELETE_MEMORY (which only targets memory). Use GLOBAL_SEARCH when the user doesn't specify a source.
-- GLOBAL_SEARCH: { "type": "GLOBAL_SEARCH", "query": "search term" }
-- Trigger phrases: "find anything about", "search for", "what do I have on", "what do I know about", "tell me everything about", "look up", "do I have any", "is there anything about"
-- Examples:
-  - "Find anything about my dentist" → { "type": "GLOBAL_SEARCH", "query": "dentist" }
-  - "What do I have on Sarah?" → { "type": "GLOBAL_SEARCH", "query": "Sarah" }
-  - "Is there anything with the number 613 555 1234?" → { "type": "GLOBAL_SEARCH", "query": "613 555 1234" }
-- Speech MUST be brief and forward-looking: "Let me check…" or "Searching…". The result is read back by the client after the search runs — do NOT invent results in your own text.
-- Do NOT use GLOBAL_SEARCH when the user specifically names a source ("search my Drive" → DRIVE_SEARCH, "check my calendar" → read from Schedule section).
+When ${userName} asks a RETRIEVAL question — any question that seeks stored information about a person, event, email, document, contact, list, sent message, or saved memory — and the answer is NOT already clearly present in this prompt's Schedule / Knowledge / Contacts / Emails sections — emit a GLOBAL_SEARCH action.
+
+Decide on INTENT, not on specific phrases. If the user is asking "what/who/where/when/do I have/is there/anything/tell me about/find/look up/recall …" about something they may have stored, it qualifies — regardless of exact wording or accidental typos.
+
+- GLOBAL_SEARCH: { "type": "GLOBAL_SEARCH", "query": "search keyword or phrase" }
+- Examples (illustrative, not exhaustive):
+  - "Find anything about my dentist" / "What do we have about the dentist" / "Tell me about my dentist" → query: "dentist"
+  - "What do I have on Sarah?" / "Is there anything with Sarah?" / "Anything about Sarah" → query: "Sarah"
+  - "Anything with the number 613 555 1234?" / "Do I have a contact with 613 555 1234?" → query: "613 555 1234"
+  - "What do I know about my car insurance?" → query: "car insurance"
+
+Speech MUST be brief and forward-looking: "Let me check…" or "Searching…". The actual results are read back by the client AFTER the search runs — do NOT invent, guess, or describe results in your own text.
+
+DO NOT emit GLOBAL_SEARCH when:
+- The user specifically names a source — "search my Drive" uses DRIVE_SEARCH; "check my calendar" reads from the Schedule section.
+- The user is creating or scheduling (use CREATE_EVENT, SET_REMINDER, SCHEDULE_MEDICATION, etc.)
+- The question is pure conversation with no retrieval intent ("how are you", "what's the weather", "tell me a joke").
+- The answer is clearly and fully already in the prompt context sections.
+
+When unsure whether the answer is in the prompt, prefer emitting GLOBAL_SEARCH over answering "I don't know" or "I don't have that information".
 
 RULE 18 — RECORD CALL / VISIT${channel === 'voice' ? ' (TAKES PRIORITY OVER RULE 9)' : ' (APP: tell user to use Record button)'}:
 If ${userName} says ANY of: "record this conversation", "record my visit", "record the doctor", "start recording", "record this", "record my meeting", "record my appointment", "record the conversation", "record the meeting", "record the visit", "record the appointment" — this is a request to RECORD AUDIO (not save a note). ${channel === 'voice' ? `You MUST include a START_CALL_RECORDING action — NEVER ask what to record, NEVER treat this as SAVE_TO_DRIVE.

@@ -92,14 +92,15 @@ New log lines available for post-mortem on the intermittent "call drops after gr
 
 ---
 
-## Known bugs carried forward (for V53 or a separate session)
+## Known bugs / architectural issues carried forward (for V53+)
 
-| # | Bug | Why deferred |
+| # | Item | Why deferred |
 |---|---|---|
 | 1 | Chat text cut-off ("Your name is Wael" spoken but only "Your name is" shown in bubble) | Logging shipped in build 93 but no reproduction yet — need data from the next occurrence. |
 | 2 | Chat latency ~15s | Suspected `isBroadQuery` regex injecting huge knowledge fragments into the prompt. Server-side timing logs already in `naavi-chat`. Profile on next slow reproduction. |
 | 3 | Intermittent call drops after greeting | Drop-detection instrumentation now live. Wait for next occurrence + log inspection before changing code. |
 | 4 | Multi-user bug audit in voice server | Fixed reminders + emails this session. Other `/rest/v1/...` calls may have the same "no user_id filter" bug. Worth a grep. |
+| 5 | **List-based trigger phrases are brittle by design** | Many rules in `get-naavi-prompt` (RULE 9, 11, 12, 18, 19) and regexes in `useOrchestrator.ts` (e.g. `isBroadQuery`) rely on exact keyword lists. One typo or word variation breaks them. RULE 19 was converted to intent-based in v6 (2026-04-19) as a starting example — the same treatment should be applied across all list-matching rules. Architectural principle: **describe intent, let Claude generalize**. |
 
 ---
 
