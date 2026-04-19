@@ -149,7 +149,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       // server uses. Without it, Claude sometimes answers "nothing found"
       // from its own reasoning while the search did find results — which
       // for a blind user hearing only Claude's voice is catastrophic.
-      const digitsOnly = userMessage.replace(/[\s\-().+]/g, '');
+      // (reuses `digitsOnly` from the phone-lookup block above)
       const hasLongDigitRun = /\d{7,}/.test(digitsOnly);
       const hasAtSign = /@/.test(userMessage);
       const retrievalRe = /\b(find|look\s*up|search|show\s*me|what\s+do\s+(we|you|i)\s+have|what\s+do\s+you\s+know|do\s+(we|you|i)\s+have|is\s+there|tell\s+me\s+about|information\s+on|anything\s+(about|on))\b/i;
