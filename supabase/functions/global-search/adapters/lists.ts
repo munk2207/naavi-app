@@ -76,13 +76,14 @@ async function fetchDocText(accessToken: string, fileId: string): Promise<string
   }
 }
 
-function extractMatchingLines(docText: string, qLower: string): string[] {
+function extractMatchingLines(docText: string, variants: string[]): string[] {
   const lines = docText.split(/\r?\n/);
   const matches: string[] = [];
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
-    if (line.toLowerCase().includes(qLower)) {
+    const lineLower = line.toLowerCase();
+    if (variants.some(v => lineLower.includes(v))) {
       matches.push(line.length > MAX_SNIPPET_LEN ? line.slice(0, MAX_SNIPPET_LEN - 1) + '…' : line);
     }
   }
@@ -101,15 +102,20 @@ export const listsAdapter: SearchAdapter = {
     const q = ctx.query.trim();
     if (!q) return [];
 
-    const qLower = q.toLowerCase();
-    const pattern = `%${q}%`;
+    const variants = ctx.queryVariants;
 
     // ── Name / category match (fast path) ──────────────────────────────────
+    const orClauses: string[] = [];
+    for (const v of variants) {
+      const pat = `%${v}%`;
+      orClauses.push(`name.ilike.${pat}`, `category.ilike.${pat}`);
+    }
+
     const { data: nameMatches, error: nameErr } = await ctx.supabase
       .from('lists')
       .select('id, name, category, drive_file_id, web_view_link, updated_at')
       .eq('user_id', ctx.userId)
-      .or(`name.ilike.${pattern},category.ilike.${pattern}`)
+      .or(orClauses.join(','))
       .limit(Math.max(ctx.limit * 2, 20));
 
     if (nameErr) {
@@ -150,7 +156,7 @@ export const listsAdapter: SearchAdapter = {
         const results = await Promise.all(
           listsWithDrive.map(async (list) => {
             const docText = await fetchDocText(accessToken, list.drive_file_id!);
-            const lines = docText ? extractMatchingLines(docText, qLower) : [];
+            const lines = docText ? extractMatchingLines(docText, variants) : [];
             return { list, lines };
           }),
         );
@@ -163,13 +169,13 @@ export const listsAdapter: SearchAdapter = {
     // ── Merge name matches and item matches ────────────────────────────────
     const byListId = new Map<string, { list: ListRow; matchedLines: string[]; score: number }>();
 
-    // Name match: score 1.0 (name includes q), category-only: 0.6
+    // Name match: score 1.0 (name includes any variant), category-only: 0.6
     for (const l of nameMatchRows) {
       const name = (l.name ?? '').toLowerCase();
       const category = (l.category ?? '').toLowerCase();
       let score = 0;
-      if (name.includes(qLower))        score = 1.0;
-      else if (category.includes(qLower)) score = 0.6;
+      if (variants.some(v => name.includes(v))) score = 1.0;
+      else if (variants.some(v => category.includes(v))) score = 0.6;
       if (score === 0) continue;
       byListId.set(l.id, { list: l, matchedLines: [], score });
     }

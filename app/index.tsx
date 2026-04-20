@@ -1432,19 +1432,6 @@ export default function HomeScreen() {
                 <Text style={styles.sendBtnLabel}>Send</Text>
               </TouchableOpacity>
             </View>
-            {/* DIAGNOSTIC — remove after the digit-strip bug is diagnosed.
-               Shows the live value of inputText (what onChangeText has captured
-               so far) + length, so we can see whether the digits ever reach the
-               TextInput state. If user types "What is phone number 6137374471"
-               and this readout shows "What is phone" len=13, the digits never
-               entered state — onChangeText never received them. If it shows
-               the full text, the loss is downstream (handleSend / send). */}
-            {inputText.length > 0 && (
-              <Text style={{ color: '#ff9800', fontSize: 11, fontFamily: 'monospace', paddingHorizontal: 8, paddingTop: 4 }}>
-                DBG inputText[{inputText.length}]: {JSON.stringify(inputText)}
-              </Text>
-            )}
-
             {/* Row 2: three action buttons centered */}
             <View style={styles.actionButtonsRow}>
               {/* Naavi mic — speak a question, note, or command */}

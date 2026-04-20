@@ -90,7 +90,21 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     const turnDocs: { title: string; webViewLink?: string }[] = [];
     const turnMemory: { text: string; count: number }[] = [];
     const turnLists: { action: string; listName: string; items?: string[]; webViewLink?: string }[] = [];
-    let turnGlobalSearch: { query: string; results: GlobalSearchResult[] } | undefined;
+    let turnGlobalSearch: {
+      query: string;
+      results: GlobalSearchResult[];
+      /**
+       * Where the turnGlobalSearch came from:
+       *   'pre-search'    — orchestrator ran global-search BEFORE Claude and
+       *                     injected results into Claude's prompt. Claude's
+       *                     own speech already incorporates them, so we
+       *                     skip the tail-append (avoid double reading).
+       *   'claude-action' — Claude explicitly emitted a GLOBAL_SEARCH action.
+       *                     Its speech is typically a filler ("Let me
+       *                     check..."); the tail-append IS the answer.
+       */
+      origin: 'pre-search' | 'claude-action';
+    } | undefined;
 
     try {
       let enrichedMessage = userMessage;
@@ -187,7 +201,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         if (preSearchResults.length > 0) {
           const lines = preSearchResults.map(r => `- [${r.source}] ${r.title}${r.snippet ? ' — ' + r.snippet : ''}`);
           enrichedMessage = `${enrichedMessage}\n\n## Live search results for the user's question (these are authoritative — use them to answer; do NOT say "I couldn't find" if results are listed here)\n${lines.join('\n')}`;
-          turnGlobalSearch = { query: userMessage, results: preSearchResults };
+          turnGlobalSearch = { query: userMessage, results: preSearchResults, origin: 'pre-search' };
         } else {
           enrichedMessage = `${enrichedMessage}\n\n## Live search results for the user's question\nSearched calendar, contacts, memory, lists, email, rules, and sent messages. Nothing matched. Say that plainly — do not guess.`;
         }
@@ -287,7 +301,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                   console.error('[Orchestrator] GLOBAL_SEARCH failed:', error.message);
                 } else if (data?.ranked) {
                   const results = (data.ranked as GlobalSearchResult[]).slice(0, 8);
-                  turnGlobalSearch = { query, results };
+                  turnGlobalSearch = { query, results, origin: 'claude-action' };
                 }
               }
             } catch (err) {
@@ -590,9 +604,18 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
       }
       // Append top GLOBAL_SEARCH hits so they are spoken, with a source
-      // label so the user can tell where each result came from. Keep to 3
-      // or the reply gets too long.
-      if (turnGlobalSearch && turnGlobalSearch.results.length > 0) {
+      // label. ONLY when Claude emitted a GLOBAL_SEARCH action — in that
+      // case its own speech is a filler ("Let me check…") and this
+      // tail-append is the actual answer.
+      //
+      // When turnGlobalSearch.origin === 'pre-search', the orchestrator
+      // already injected results into Claude's prompt and Claude's reply
+      // incorporates them. Appending again makes Robert hear the same
+      // data twice. Skip.
+      const appendTail =
+        turnGlobalSearch &&
+        turnGlobalSearch.origin === 'claude-action';
+      if (appendTail && turnGlobalSearch!.results.length > 0) {
         const labelFor = (src: string) => {
           if (src === 'calendar') return 'calendar';
           if (src === 'contacts') return 'contacts';
@@ -603,17 +626,17 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           if (src === 'knowledge') return 'memory';
           return src;
         };
-        const top = turnGlobalSearch.results.slice(0, 3);
+        const top = turnGlobalSearch!.results.slice(0, 3);
         const phrases = top.map(r => {
           const text = (r.snippet && r.snippet.trim()) || r.title;
           return `In ${labelFor(r.source)}: ${text}`;
         });
         finalSpeech += ` ${phrases.join('. ')}.`;
-        if (turnGlobalSearch.results.length > top.length) {
-          finalSpeech += ` Plus ${turnGlobalSearch.results.length - top.length} more.`;
+        if (turnGlobalSearch!.results.length > top.length) {
+          finalSpeech += ` Plus ${turnGlobalSearch!.results.length - top.length} more.`;
         }
-      } else if (turnGlobalSearch) {
-        finalSpeech += ` I didn't find anything for ${turnGlobalSearch.query}.`;
+      } else if (appendTail) {
+        finalSpeech += ` I didn't find anything for ${turnGlobalSearch!.query}.`;
       }
 
       // Strip "Say yes to send" prompt when not in hands-free (Robert uses the Send button)

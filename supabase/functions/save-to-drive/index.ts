@@ -15,6 +15,23 @@ const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files?uploa
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files';
 const NAAVI_FOLDER_NAME = 'MyNaavi';
 
+// Category → subfolder mapping. Callers pass `category` in the request body
+// to opt into structured placement; omitted means "legacy root" behaviour.
+// Supported values stay in lockstep with the `documents.source` convention
+// so Global Search's drive adapter covers every new file.
+const CATEGORY_SUBFOLDER: Record<string, string> = {
+  transcript: 'Transcripts',
+  brief:      'Briefs',
+  note:       'Notes',
+  list:       'Lists',
+};
+
+// Categories that already have a dedicated metadata table and Global Search
+// adapter (e.g. lists). For these we route the Drive file correctly but do
+// NOT also write a `documents` row — that would surface the same entity in
+// two Global Search result groups.
+const SKIP_DOCUMENTS_ROW: Set<string> = new Set(['list']);
+
 // Find the user's MyNaavi folder, creating it in their Drive root if absent.
 // Everything Naavi saves to Drive goes under this folder so it's easy to
 // search / browse all Naavi-generated content from any Drive client.
@@ -53,6 +70,38 @@ async function ensureNaaviFolder(accessToken: string): Promise<string> {
   return folder.id as string;
 }
 
+// Find or create a named subfolder under `parentId`. Used to materialise
+// MyNaavi/Transcripts, MyNaavi/Briefs, MyNaavi/Notes lazily (first caller
+// wins the create; subsequent calls just look it up).
+async function findOrCreateSubfolder(
+  accessToken: string,
+  parentId: string,
+  name: string,
+): Promise<string> {
+  const escaped = name.replace(/'/g, "\\'");
+  const query = `name='${escaped}' and mimeType='application/vnd.google-apps.folder' and trashed=false and '${parentId}' in parents`;
+  const searchUrl = `${DRIVE_FILES_URL}?q=${encodeURIComponent(query)}&fields=files(id,name)&pageSize=1`;
+  const searchRes = await fetch(searchUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (searchRes.ok) {
+    const data = await searchRes.json();
+    if (Array.isArray(data.files) && data.files.length > 0) return data.files[0].id as string;
+  }
+  const createRes = await fetch(DRIVE_FILES_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [parentId],
+    }),
+  });
+  if (!createRes.ok) throw new Error(`Failed to create ${name} subfolder: ${await createRes.text()}`);
+  const folder = await createRes.json();
+  return folder.id as string;
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -85,13 +134,18 @@ serve(async (req) => {
   }
 
   const body = await req.json();
-  const { title, content, user_id: bodyUserId } = body;
+  const { title, content, user_id: bodyUserId, category } = body;
 
   if (!title || content === undefined || content === null) {
     return new Response(JSON.stringify({ error: 'Missing title or content' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
+
+  // Only the known category values are honoured; unknown / absent values
+  // fall through to the MyNaavi root (legacy behaviour).
+  const normalisedCategory: string | null =
+    typeof category === 'string' && category in CATEGORY_SUBFOLDER ? category : null;
 
   const userClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -135,16 +189,19 @@ serve(async (req) => {
   try {
     const accessToken = await getNewAccessToken(tokenRow.refresh_token);
 
-    // Make sure the MyNaavi folder exists and grab its ID so every file
-    // created here lands inside it.
-    const folderId = await ensureNaaviFolder(accessToken);
+    // Make sure the MyNaavi folder (and the per-category subfolder, if one
+    // was requested) exists, and pick the parent ID for this file.
+    const rootFolderId = await ensureNaaviFolder(accessToken);
+    const parentFolderId = normalisedCategory
+      ? await findOrCreateSubfolder(accessToken, rootFolderId, CATEGORY_SUBFOLDER[normalisedCategory])
+      : rootFolderId;
 
     // Build multipart body — creates a Google Doc from plain text
     const boundary = `naavi_drive_${Date.now()}`;
     const metadata = JSON.stringify({
       name: title,
       mimeType: 'application/vnd.google-apps.document',
-      parents: [folderId],
+      parents: [parentFolderId],
     });
 
     const body = [
@@ -176,12 +233,35 @@ serve(async (req) => {
     }
 
     const file = await uploadRes.json();
-    console.log(`[save-to-drive] Created "${title}" — ${file.id}`);
+    const webViewLink = `https://docs.google.com/document/d/${file.id}/edit`;
+    console.log(`[save-to-drive] Created "${title}" — ${file.id} (category=${normalisedCategory ?? 'root'})`);
+
+    // Record a row in `documents` so Global Search covers this file via the
+    // drive adapter. Only done when the caller opted into a category (i.e.
+    // knows what kind of file this is) — legacy no-category calls stay
+    // out of documents to avoid polluting search with mixed content.
+    if (normalisedCategory && !SKIP_DOCUMENTS_ROW.has(normalisedCategory)) {
+      const { error: docErr } = await adminClient
+        .from('documents')
+        .upsert({
+          user_id: userId,
+          file_name: title,
+          mime_type: 'application/vnd.google-apps.document',
+          document_type: null,
+          drive_file_id: file.id,
+          drive_web_view_link: webViewLink,
+          source: normalisedCategory,
+        }, { onConflict: 'user_id,drive_file_id' });
+      if (docErr) {
+        console.error('[save-to-drive] documents upsert failed:', docErr.message);
+      }
+    }
 
     return new Response(JSON.stringify({
       success: true,
       fileId: file.id,
-      webViewLink: `https://docs.google.com/document/d/${file.id}/edit`,
+      webViewLink,
+      category: normalisedCategory,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

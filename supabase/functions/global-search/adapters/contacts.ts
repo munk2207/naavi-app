@@ -150,7 +150,7 @@ export const contactsAdapter: SearchAdapter = {
     const q = ctx.query.trim();
     if (!q) return [];
 
-    const qLower = q.toLowerCase();
+    const variants = ctx.queryVariants;
     const qDigits = normalizePhone(q);
     const isPhoneLike = qDigits.length >= 7;
 
@@ -209,11 +209,14 @@ export const contactsAdapter: SearchAdapter = {
 
       let score = 0;
 
-      if (nameLower.includes(qLower) && qLower.length > 0) {
+      if (variants.some(v => v.length > 0 && nameLower.includes(v))) {
         score = 1.0;
       } else if (isPhoneLike && phones.some(ph => normalizePhone(ph).includes(qDigits))) {
         score = 0.85;
-      } else if (emails.some(e => e.toLowerCase().includes(qLower))) {
+      } else if (emails.some(e => {
+        const el = e.toLowerCase();
+        return variants.some(v => el.includes(v));
+      })) {
         score = 0.7;
       }
 

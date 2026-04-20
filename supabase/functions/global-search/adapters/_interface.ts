@@ -22,6 +22,11 @@ export type PrivacyTag = 'general' | 'medical' | 'financial' | 'legal';
 export interface SearchContext {
   userId: string;
   query: string;
+  /** Expanded, lowercased query variants — original + stem + synonyms. Built
+   *  by `query_expansion.expandQuery` in the handler. ILIKE-based adapters
+   *  should match any variant; adapters with their own upstream search
+   *  (calendar via Google q=) can use just `query`. */
+  queryVariants: string[];
   limit: number;
   supabase: SupabaseClient;
   // Individual adapters that need Google APIs, Epic, etc. fetch their own

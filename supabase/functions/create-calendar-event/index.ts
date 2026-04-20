@@ -106,6 +106,30 @@ serve(async (req) => {
   }
 
   try {
+    // Idempotency — if an event with the same title + start_time already
+    // exists for this user, return it instead of creating another. Covers
+    // the retry / double-fire class of bug where Claude emits CREATE_EVENT
+    // twice for the same scheduling intent, which would otherwise clutter
+    // the user's calendar with identical rows.
+    const { data: existingEvent } = await adminClient
+      .from('calendar_events')
+      .select('google_event_id')
+      .eq('user_id', user.id)
+      .eq('title', summary)
+      .eq('start_time', start)
+      .maybeSingle();
+
+    if (existingEvent?.google_event_id) {
+      console.log(`[create-calendar-event] Duplicate suppressed: "${summary}" at ${start} → ${existingEvent.google_event_id}`);
+      return new Response(JSON.stringify({
+        success: true,
+        eventId: existingEvent.google_event_id,
+        deduped: true,
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const accessToken = await getNewAccessToken(tokenRow.refresh_token);
 
     const event: Record<string, unknown> = {

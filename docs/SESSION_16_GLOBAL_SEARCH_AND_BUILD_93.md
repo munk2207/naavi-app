@@ -42,9 +42,6 @@ Three big things shipped today:
   - **EAS cloud env var** `EXPO_PUBLIC_SUPABASE_ANON_KEY` on project `@waggan/naavi` (critical — first build of 93 was discarded because EAS still had the old key; second build is what shipped)
 - On Supabase dashboard → API Keys → "Legacy anon, service_role API keys" tab → **"Disable JWT-based API keys"** button was clicked. The leaked JWT is now permanently invalid.
 
-**Still pending (separate from key rotation):**
-- Revoke any residual GitHub PAT at https://github.com/settings/tokens (look for `ghp_` prefix) if not already done.
-
 ---
 
 ## Global Search — what's deployed

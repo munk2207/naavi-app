@@ -11,6 +11,28 @@ import type { SearchAdapter, SearchContext, SearchResult } from './_interface.ts
 
 const OPENAI_API = 'https://api.openai.com/v1/embeddings';
 
+// Identifier-shape queries (phone numbers, emails, UUIDs) are the wrong tool
+// for semantic embedding search. text-embedding-3-small will happily return
+// "Wael likes pizza" with similarity 0.12 when the query is "6137976679".
+// Short-circuit before calling OpenAI — these queries belong to the
+// source-of-truth adapters (contacts, sent_messages, gmail) only.
+function isIdentifierQuery(raw: string): boolean {
+  const q = raw.trim();
+  if (!q) return false;
+
+  if (q.includes('@')) return true;
+
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q)) return true;
+
+  const digits = q.replace(/\D/g, '');
+  if (digits.length >= 7) {
+    const nonSep = q.replace(/[\s\-().+]/g, '');
+    if (nonSep === digits) return true;
+  }
+
+  return false;
+}
+
 async function generateEmbedding(text: string): Promise<number[] | null> {
   const key = Deno.env.get('OPENAI_API_KEY');
   if (!key) {
@@ -49,6 +71,8 @@ export const knowledgeAdapter: SearchAdapter = {
   isConnected: async () => true,
 
   search: async (ctx: SearchContext): Promise<SearchResult[]> => {
+    if (isIdentifierQuery(ctx.query)) return [];
+
     const embedding = await generateEmbedding(ctx.query);
     if (!embedding) return [];
 

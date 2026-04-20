@@ -30,17 +30,27 @@ export const sentMessagesAdapter: SearchAdapter = {
   search: async (ctx: SearchContext): Promise<SearchResult[]> => {
     const q = ctx.query.trim();
     if (!q) return [];
-    const like = `%${q}%`;
+    const variants = ctx.queryVariants;
 
-    // Search body, subject, recipient name, recipient phone, recipient email.
-    // pg_trgm GIN indexes make ILIKE fast on body + to_name.
+    // Build OR clause across every variant × every searched field so
+    // "payments" and "pay" hit the same rows.
+    const orClauses: string[] = [];
+    for (const v of variants) {
+      const like = `%${v}%`;
+      orClauses.push(
+        `body.ilike.${like}`,
+        `subject.ilike.${like}`,
+        `to_name.ilike.${like}`,
+        `to_phone.ilike.${like}`,
+        `to_email.ilike.${like}`,
+      );
+    }
+
     const { data, error } = await ctx.supabase
       .from('sent_messages')
       .select('id, channel, to_name, to_phone, to_email, subject, body, sent_at, delivery_status')
       .eq('user_id', ctx.userId)
-      .or(
-        `body.ilike.${like},subject.ilike.${like},to_name.ilike.${like},to_phone.ilike.${like},to_email.ilike.${like}`,
-      )
+      .or(orClauses.join(','))
       .order('sent_at', { ascending: false })
       .limit(ctx.limit);
 
@@ -50,7 +60,6 @@ export const sentMessagesAdapter: SearchAdapter = {
     }
 
     const rows = (data ?? []) as SentRow[];
-    const qLower = q.toLowerCase();
 
     return rows.map((r): SearchResult => {
       // Score: strongest = body match, then subject, then recipient identity.
@@ -58,9 +67,9 @@ export const sentMessagesAdapter: SearchAdapter = {
       const subj = r.subject?.toLowerCase() ?? '';
       const name = r.to_name?.toLowerCase() ?? '';
       let score = 0.5; // baseline for any ILIKE hit
-      if (body.includes(qLower)) score = 0.9;
-      else if (subj.includes(qLower)) score = 0.75;
-      else if (name.includes(qLower)) score = 0.65;
+      if (variants.some(v => body.includes(v))) score = 0.9;
+      else if (variants.some(v => subj.includes(v))) score = 0.75;
+      else if (variants.some(v => name.includes(v))) score = 0.65;
 
       const recipient = r.to_name ?? r.to_phone ?? r.to_email ?? 'unknown';
       const prefix = r.channel === 'email' ? 'Email' : r.channel === 'whatsapp' ? 'WhatsApp' : 'SMS';

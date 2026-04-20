@@ -54,9 +54,10 @@ export const rulesAdapter: SearchAdapter = {
     }
 
     const rows = (data ?? []) as RuleRow[];
-    const q = ctx.query.toLowerCase();
+    const variants = ctx.queryVariants;
 
-    // Score: label match = 1.0, config match = 0.6
+    // Score: label match = 1.0, config match = 0.6. Any variant counts —
+    // "payments", "payment", and "pay" all take the same path.
     const hits: SearchResult[] = [];
     for (const r of rows) {
       const label = (r.label ?? '').toLowerCase();
@@ -64,8 +65,8 @@ export const rulesAdapter: SearchAdapter = {
       const action = safeJson(r.action_config).toLowerCase();
 
       let score = 0;
-      if (label.includes(q)) score = 1.0;
-      else if (trigger.includes(q) || action.includes(q)) score = 0.6;
+      if (variants.some(v => label.includes(v))) score = 1.0;
+      else if (variants.some(v => trigger.includes(v) || action.includes(v))) score = 0.6;
       if (score === 0) continue;
 
       const enabledTag = r.enabled === false ? ' (disabled)' : '';

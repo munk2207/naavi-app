@@ -19,6 +19,9 @@ import { contactsAdapter } from './contacts.ts';
 import { listsAdapter } from './lists.ts';
 import { calendarAdapter } from './calendar.ts';
 import { gmailAdapter } from './gmail.ts';
+import { emailActionsAdapter } from './email_actions.ts';
+import { driveAdapter } from './drive.ts';
+import { remindersAdapter } from './reminders.ts';
 
 export const adapters: SearchAdapter[] = [
   knowledgeAdapter,
@@ -28,4 +31,7 @@ export const adapters: SearchAdapter[] = [
   listsAdapter,
   calendarAdapter,
   gmailAdapter,
+  emailActionsAdapter,
+  driveAdapter,
+  remindersAdapter,
 ];

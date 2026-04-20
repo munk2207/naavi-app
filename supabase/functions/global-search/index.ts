@@ -23,6 +23,7 @@
 import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { adapters } from './adapters/_registry.ts';
 import type { SearchResult, SearchContext } from './adapters/_interface.ts';
+import { expandQuery } from './query_expansion.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -137,15 +138,19 @@ Deno.serve(async (req) => {
       return json({ error: 'unable to resolve user' }, 401);
     }
 
+    const trimmedQuery = query.trim();
+    const queryVariants = expandQuery(trimmedQuery);
+
     const ctx: SearchContext = {
       userId,
-      query: query.trim(),
+      query: trimmedQuery,
+      queryVariants,
       limit: perSourceLimit,
       supabase,
     };
 
     console.log(
-      `[global-search] user=${userId} query="${ctx.query}" adapters=${adapters.length}`,
+      `[global-search] user=${userId} query="${ctx.query}" variants=${JSON.stringify(queryVariants)} adapters=${adapters.length}`,
     );
 
     // Run every adapter in parallel. Each adapter is isolated — its failure

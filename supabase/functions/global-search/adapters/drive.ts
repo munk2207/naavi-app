@@ -1,0 +1,316 @@
+/**
+ * Drive adapter — hybrid of two sources:
+ *
+ *   1. Our own `documents` table (attachments Naavi harvested from emails,
+ *      with rich metadata: document_type, linked email_actions vendor +
+ *      summary + reference).
+ *   2. Google Drive API live search (fullText + name across the user's
+ *      entire Drive — covers text-layer PDFs, Docs, Sheets, Slides).
+ *
+ * Results are deduped on drive_file_id. When the same file shows up in
+ * both sources, the documents-table row wins (richer metadata).
+ *
+ * Multi-variant aware — honours ctx.queryVariants so "payments" and "pay"
+ * both find the same files.
+ */
+
+import type { SearchAdapter, SearchContext, SearchResult } from './_interface.ts';
+
+const GOOGLE_TOKEN_URL  = 'https://oauth2.googleapis.com/token';
+const DRIVE_FILES_URL   = 'https://www.googleapis.com/drive/v3/files';
+
+async function getAccessToken(refreshToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id:     Deno.env.get('GOOGLE_CLIENT_ID')     ?? '',
+        client_secret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '',
+        refresh_token: refreshToken,
+        grant_type:    'refresh_token',
+      }),
+    });
+    const data = await res.json();
+    return typeof data.access_token === 'string' ? data.access_token : null;
+  } catch (err) {
+    console.error('[drive-adapter] token refresh failed:', err);
+    return null;
+  }
+}
+
+type DocRow = {
+  id: string;
+  gmail_message_id: string | null;
+  file_name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  document_type: string | null;
+  drive_file_id: string | null;
+  drive_web_view_link: string | null;
+  created_at: string | null;
+  extracted_summary: string | null;
+  extracted_amount_cents: number | null;
+  extracted_currency: string | null;
+  extracted_date: string | null;
+  extracted_reference: string | null;
+  extracted_expiry: string | null;
+  email_action: {
+    vendor: string | null;
+    summary: string | null;
+    reference: string | null;
+    action_type: string | null;
+  } | null;
+};
+
+type DriveFile = {
+  id: string;
+  name: string;
+  mimeType: string;
+  webViewLink?: string;
+  modifiedTime?: string;
+  size?: string;
+};
+
+function escapeForDriveQ(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function iconForMime(mime: string | null | undefined): string {
+  if (!mime) return 'document';
+  if (mime === 'application/pdf') return 'pdf';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime === 'application/vnd.google-apps.document') return 'google-doc';
+  if (mime === 'application/vnd.google-apps.spreadsheet') return 'google-sheet';
+  if (mime === 'application/vnd.google-apps.presentation') return 'google-slides';
+  return 'document';
+}
+
+export const driveAdapter: SearchAdapter = {
+  name: 'drive',
+  label: 'Drive',
+  icon: 'cloud',
+  privacyTag: 'general',
+
+  // Connected means the user has a Google refresh token AND we can reach
+  // either of the two sources. We check the cheap Supabase lookup and let
+  // the Drive-side call no-op on token failure.
+  isConnected: async (ctx: SearchContext) => {
+    const { data } = await ctx.supabase
+      .from('user_tokens')
+      .select('refresh_token')
+      .eq('user_id', ctx.userId)
+      .eq('provider', 'google')
+      .maybeSingle();
+    return !!data?.refresh_token;
+  },
+
+  search: async (ctx: SearchContext): Promise<SearchResult[]> => {
+    const q = ctx.query.trim();
+    if (!q) return [];
+    const variants = ctx.queryVariants;
+
+    // ── Source 1 — documents table (harvested attachments) ─────────────────
+    const docsOr: string[] = [];
+    for (const v of variants) {
+      const pat = `%${v}%`;
+      docsOr.push(
+        `file_name.ilike.${pat}`,
+        `document_type.ilike.${pat}`,
+        `extracted_summary.ilike.${pat}`,
+        `extracted_reference.ilike.${pat}`,
+      );
+    }
+    const { data: docsData, error: docsErr } = await ctx.supabase
+      .from('documents')
+      .select(`
+        id, gmail_message_id, file_name, mime_type, size_bytes, document_type,
+        drive_file_id, drive_web_view_link, created_at,
+        extracted_summary, extracted_amount_cents, extracted_currency,
+        extracted_date, extracted_reference, extracted_expiry,
+        email_action:email_actions(vendor, summary, reference, action_type)
+      `)
+      .eq('user_id', ctx.userId)
+      .or(docsOr.join(','))
+      .order('created_at', { ascending: false })
+      .limit(ctx.limit);
+
+    if (docsErr) {
+      console.error('[drive-adapter] documents fetch error:', docsErr.message);
+    }
+    const docs = (docsData ?? []) as unknown as DocRow[];
+
+    // Also pull documents whose LINKED email_action matches a variant (vendor,
+    // summary, reference). Supabase .or() can't traverse an fk in one clause,
+    // so we do a cheap second query via email_actions → document.
+    const actionOr: string[] = [];
+    for (const v of variants) {
+      const pat = `%${v}%`;
+      actionOr.push(
+        `vendor.ilike.${pat}`,
+        `summary.ilike.${pat}`,
+        `reference.ilike.${pat}`,
+      );
+    }
+    const { data: linkedActions } = await ctx.supabase
+      .from('email_actions')
+      .select('id, vendor, summary, reference, action_type')
+      .eq('user_id', ctx.userId)
+      .eq('dismissed', false)
+      .or(actionOr.join(','))
+      .limit(ctx.limit);
+    const actionIds = (linkedActions ?? []).map((a: { id: string }) => a.id);
+
+    let linkedDocs: DocRow[] = [];
+    if (actionIds.length > 0) {
+      const { data: ld } = await ctx.supabase
+        .from('documents')
+        .select(`
+          id, gmail_message_id, file_name, mime_type, size_bytes, document_type,
+          drive_file_id, drive_web_view_link, created_at,
+          email_action:email_actions(vendor, summary, reference, action_type)
+        `)
+        .eq('user_id', ctx.userId)
+        .in('email_action_id', actionIds)
+        .limit(ctx.limit);
+      linkedDocs = (ld ?? []) as unknown as DocRow[];
+    }
+
+    // Dedupe docs on id
+    const docById = new Map<string, DocRow>();
+    for (const d of [...docs, ...linkedDocs]) {
+      if (d.id && !docById.has(d.id)) docById.set(d.id, d);
+    }
+
+    // ── Source 2 — live Google Drive API search ────────────────────────────
+    let driveFiles: DriveFile[] = [];
+    const { data: tokenRow } = await ctx.supabase
+      .from('user_tokens')
+      .select('refresh_token')
+      .eq('user_id', ctx.userId)
+      .eq('provider', 'google')
+      .maybeSingle();
+    if (tokenRow?.refresh_token) {
+      const accessToken = await getAccessToken(tokenRow.refresh_token);
+      if (accessToken) {
+        const clauses: string[] = [];
+        for (const v of variants) {
+          const e = escapeForDriveQ(v);
+          clauses.push(`fullText contains '${e}'`);
+          clauses.push(`name contains '${e}'`);
+        }
+        const driveQ = `(${clauses.join(' or ')}) and trashed=false`;
+        const url =
+          `${DRIVE_FILES_URL}?q=${encodeURIComponent(driveQ)}` +
+          `&fields=files(id,name,mimeType,webViewLink,modifiedTime,size)` +
+          `&pageSize=${ctx.limit * 2}`;
+        try {
+          const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+          if (res.ok) {
+            const data = await res.json();
+            driveFiles = (data?.files ?? []) as DriveFile[];
+          } else {
+            console.warn('[drive-adapter] Drive fullText returned', res.status);
+          }
+        } catch (err) {
+          console.error('[drive-adapter] Drive fullText error:', err);
+        }
+      }
+    }
+
+    // ── Merge ──────────────────────────────────────────────────────────────
+    // Prefer documents-table rows when the same drive_file_id appears in
+    // both sources — the documents row carries richer metadata.
+    const seenDriveIds = new Set<string>();
+    const hits: SearchResult[] = [];
+
+    for (const d of docById.values()) {
+      if (d.drive_file_id) seenDriveIds.add(d.drive_file_id);
+
+      const ea = d.email_action;
+      const fileNameLower = d.file_name.toLowerCase();
+      const docType = (d.document_type ?? '').toLowerCase();
+      const vendorLower = (ea?.vendor ?? '').toLowerCase();
+      const summaryLower = (ea?.summary ?? '').toLowerCase();
+      const referenceLower = (ea?.reference ?? '').toLowerCase();
+      const extractedSummaryLower = (d.extracted_summary ?? '').toLowerCase();
+      const extractedRefLower = (d.extracted_reference ?? '').toLowerCase();
+
+      let score = 0.6;
+      if (variants.some(v => fileNameLower.includes(v))) score = 0.95;
+      else if (variants.some(v => vendorLower.includes(v))) score = 0.85;
+      else if (variants.some(v => (referenceLower.includes(v) || extractedRefLower.includes(v)) && v.length >= 3)) score = 0.8;
+      else if (variants.some(v => extractedSummaryLower.includes(v))) score = 0.75;
+      else if (variants.some(v => summaryLower.includes(v))) score = 0.72;
+      else if (variants.some(v => docType.includes(v))) score = 0.7;
+
+      // Snippet prefers the PDF's own extracted summary when present — it
+      // tends to be more specific than the email-body summary.
+      const snippetBits: string[] = [];
+      if (d.extracted_summary) {
+        snippetBits.push(d.extracted_summary);
+      } else {
+        if (d.document_type) snippetBits.push(d.document_type);
+        if (ea?.vendor)       snippetBits.push(ea.vendor);
+        if (ea?.reference)    snippetBits.push(ea.reference);
+      }
+      const snippet = snippetBits.filter(Boolean).join(' · ') || (ea?.summary ?? '');
+
+      hits.push({
+        source: 'drive',
+        title: d.file_name,
+        snippet,
+        score,
+        createdAt: d.created_at ?? undefined,
+        url: d.drive_web_view_link ?? undefined,
+        metadata: {
+          drive_file_id: d.drive_file_id,
+          mime_type: d.mime_type,
+          size_bytes: d.size_bytes,
+          document_type: d.document_type,
+          source_kind: 'harvested',
+          icon: iconForMime(d.mime_type),
+          gmail_message_id: d.gmail_message_id,
+          vendor: ea?.vendor ?? null,
+          action_type: ea?.action_type ?? null,
+          reference: d.extracted_reference ?? ea?.reference ?? null,
+          extracted_summary: d.extracted_summary ?? null,
+          extracted_amount_cents: d.extracted_amount_cents ?? null,
+          extracted_currency: d.extracted_currency ?? null,
+          extracted_date: d.extracted_date ?? null,
+          extracted_expiry: d.extracted_expiry ?? null,
+        },
+      });
+    }
+
+    for (const f of driveFiles) {
+      if (seenDriveIds.has(f.id)) continue; // already covered by harvested row
+      const nameLower = f.name.toLowerCase();
+
+      // Name matches score higher than content-only. We can't tell from the
+      // Drive response which clause matched (name vs fullText) — infer from
+      // the local substring check.
+      const nameHit = variants.some(v => nameLower.includes(v));
+      const score = nameHit ? 0.85 : 0.65;
+
+      hits.push({
+        source: 'drive',
+        title: f.name,
+        snippet: '',
+        score,
+        createdAt: f.modifiedTime,
+        url: f.webViewLink,
+        metadata: {
+          drive_file_id: f.id,
+          mime_type: f.mimeType,
+          size_bytes: f.size ? Number(f.size) : null,
+          source_kind: 'drive_live',
+          icon: iconForMime(f.mimeType),
+        },
+      });
+    }
+
+    hits.sort((a, b) => b.score - a.score);
+    return hits.slice(0, ctx.limit);
+  },
+};
