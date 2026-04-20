@@ -12,9 +12,13 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { isInstitutionalEmail } from '../_shared/institutional_domains.ts';
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GMAIL_API = 'https://gmail.googleapis.com/gmail/v1/users/me';
+const PEOPLE_CONNECTIONS_API = 'https://people.googleapis.com/v1/people/me/connections';
+const OTHER_CONTACTS_API = 'https://people.googleapis.com/v1/otherContacts';
+const MAX_CONTACTS_PER_SOURCE = 500;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -56,6 +60,51 @@ function parseSender(from: string): { name: string; email: string } {
   return { name: '', email: from.trim() };
 }
 
+// Build the user's personal-contact email set from Google People API (the same
+// source the Global Search contacts adapter reads). Matches the user's real
+// address book — NOT the sparse local `contacts` table.
+async function fetchGoogleContactEmails(accessToken: string): Promise<Set<string>> {
+  const out = new Set<string>();
+
+  const pages = async (baseUrl: string, maskKey: string, arrayKey: string) => {
+    let pageToken: string | undefined;
+    let fetched = 0;
+    while (fetched < MAX_CONTACTS_PER_SOURCE) {
+      const url = new URL(baseUrl);
+      url.searchParams.set(maskKey, 'emailAddresses');
+      url.searchParams.set('pageSize', '1000');
+      if (pageToken) url.searchParams.set('pageToken', pageToken);
+      try {
+        const res = await fetch(url.toString(), {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = (data?.[arrayKey] ?? []) as Array<{ emailAddresses?: Array<{ value?: string }> }>;
+        for (const p of list) {
+          for (const e of p.emailAddresses ?? []) {
+            const v = (e.value ?? '').toLowerCase().trim();
+            if (v.length > 0) out.add(v);
+          }
+        }
+        fetched += list.length;
+        pageToken = typeof data?.nextPageToken === 'string' ? data.nextPageToken : undefined;
+        if (!pageToken) return;
+      } catch (err) {
+        console.warn('[sync-gmail] People API page fetch failed:', err);
+        return;
+      }
+    }
+  };
+
+  await Promise.all([
+    pages(PEOPLE_CONNECTIONS_API, 'personFields', 'connections'),
+    pages(OTHER_CONTACTS_API,     'readMask',     'otherContacts'),
+  ]);
+
+  return out;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -81,28 +130,21 @@ serve(async (req) => {
     try {
       const accessToken = await getNewAccessToken(refresh_token);
 
-      // Fetch this user's contact email set ONCE per sync run, so per-message
-      // tier-1 classification is a cheap Set.has() lookup. Tier 1 = sender in
-      // Robert's own contacts. Combined with Gmail's IMPORTANT label below
-      // this catches institutional emails (bank, doctor) that aren't
-      // necessarily in contacts yet but Gmail's ML has flagged as important.
-      const { data: contactRows } = await adminClient
-        .from('contacts')
-        .select('email')
-        .eq('user_id', user_id);
-      const contactEmails = new Set<string>(
-        (contactRows ?? [])
-          .map((r: { email: string | null }) => (r.email ?? '').toLowerCase().trim())
-          .filter((e: string) => e.length > 0),
-      );
+      // Fetch the user's Google People contacts ONCE per sync run, so
+      // per-message personal-signal classification is a cheap Set.has()
+      // lookup. Uses Google People API (same source as the contacts adapter
+      // in Global Search) — the local `contacts` table is only populated by
+      // manual saves and was too sparse to rely on for signal strength.
+      const contactEmails = await fetchGoogleContactEmails(accessToken);
 
-      // Fetch all messages from last 24 hours (read and unread)
-      // so Robert's brief always shows today's emails even after he reads them
-      const oneDayAgo = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000);
-      const query = `after:${oneDayAgo}`;
+      // Fetch all messages from last 7 days (read and unread) so Global
+      // Search has historical depth for recall queries; morning brief still
+      // scopes to today via received_at filters at read time.
+      const sevenDaysAgo = Math.floor((Date.now() - 7 * 24 * 60 * 60 * 1000) / 1000);
+      const query = `after:${sevenDaysAgo}`;
 
       const listRes = await fetch(
-        `${GMAIL_API}/messages?maxResults=20&q=${encodeURIComponent(query)}`,
+        `${GMAIL_API}/messages?maxResults=100&q=${encodeURIComponent(query)}`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
 
@@ -135,9 +177,9 @@ serve(async (req) => {
         const parts = msg.payload?.parts ?? [];
         const textPart = parts.find((p: { mimeType: string }) => p.mimeType === 'text/plain');
         if (textPart?.body?.data) {
-          bodyText = decodeBase64(textPart.body.data).slice(0, 500);
+          bodyText = decodeBase64(textPart.body.data).slice(0, 3000);
         } else if (msg.payload?.body?.data) {
-          bodyText = decodeBase64(msg.payload.body.data).slice(0, 500);
+          bodyText = decodeBase64(msg.payload.body.data).slice(0, 3000);
         }
 
         const labels: string[] = msg.labelIds ?? [];
@@ -148,7 +190,9 @@ serve(async (req) => {
         // Naavi tier-1 classification — separate from Gmail's IMPORTANT label.
         // Tier 1 means "worth surfacing in the morning brief and extracting
         // actions from". Rules:
-        //   - Sender is in Robert's contacts, OR
+        //   - Sender is in Robert's Google contacts (personal), OR
+        //   - Sender domain is on the institutional list (government, bank,
+        //     insurance, utility, telecom, major courier), OR
         //   - Gmail flagged IMPORTANT, OR
         //   - Gmail categorized as CATEGORY_PERSONAL (human correspondence)
         //   AND never if in PROMOTIONS / SOCIAL / FORUMS (Gmail's IMPORTANT
@@ -158,11 +202,31 @@ serve(async (req) => {
           || labels.includes('CATEGORY_SOCIAL')
           || labels.includes('CATEGORY_FORUMS');
         const inContacts = senderEmailLower.length > 0 && contactEmails.has(senderEmailLower);
+        const isInstitutional = isInstitutionalEmail(senderEmailLower);
         const isTier1 = !isMarketing && (
           inContacts
+          || isInstitutional
           || labels.includes('IMPORTANT')
           || labels.includes('CATEGORY_PERSONAL')
         );
+
+        // Three-tier sub-ranking within tier-1:
+        //   institutional — domain matches a trusted institution list
+        //                   (covers senders Robert will never have as
+        //                    personal contacts, like Revenue Canada)
+        //   personal      — sender is in Robert's Google People contacts
+        //   ambient       — tier-1 by Gmail label alone (lower confidence)
+        //   null          — not tier-1
+        // Institutional wins over personal for messages that satisfy both —
+        // this surfaces the INSTITUTION nature of the email (bill, notice)
+        // over the personal relationship with the sender.
+        const signalStrength: 'personal' | 'institutional' | 'ambient' | null = !isTier1
+          ? null
+          : isInstitutional
+            ? 'institutional'
+            : inContacts
+              ? 'personal'
+              : 'ambient';
 
         const { error } = await adminClient
           .from('gmail_messages')
@@ -179,6 +243,7 @@ serve(async (req) => {
             is_unread:    isUnread,
             is_important: isImportant,
             is_tier1:     isTier1,
+            signal_strength: signalStrength,
             labels,
             updated_at:   new Date().toISOString(),
           }, { onConflict: 'user_id,gmail_message_id' });

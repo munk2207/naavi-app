@@ -73,9 +73,12 @@ export async function createList(name: string, category: string = 'other'): Prom
   const existing = await findListByName(userId, name);
   if (existing) return { success: true, list: existing };
 
-  // Create a Google Doc via save-to-drive
+  // Create a Google Doc via save-to-drive. category='list' routes the new
+  // Doc into MyNaavi/Lists/ instead of the MyNaavi root; save-to-drive
+  // deliberately does NOT also create a documents row for lists because
+  // the lists table + lists adapter already cover them in Global Search.
   const { data, error } = await supabase.functions.invoke('save-to-drive', {
-    body: { title: name, content: '' },
+    body: { title: name, content: '', category: 'list' },
   });
   if (error || !data?.fileId) {
     return { success: false, error: error?.message ?? 'Failed to create Drive doc' };

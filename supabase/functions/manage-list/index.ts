@@ -125,8 +125,50 @@ async function updateDriveDoc(accessToken: string, fileId: string, content: stri
   return res.ok;
 }
 
+// Ensure the MyNaavi → Lists folder path exists under the user's Drive root
+// and return the Lists folder ID. Idempotent: reuses existing folders when
+// present, creates lazily on first call. Lists created before this function
+// was introduced live at Drive root — step 4 migration moves them.
+async function ensureListsFolder(accessToken: string): Promise<string> {
+  const findFolder = async (name: string, parentId?: string): Promise<string | null> => {
+    const parentClause = parentId ? ` and '${parentId}' in parents` : '';
+    const q = `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentClause}`;
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=1`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data.files) && data.files.length > 0 ? data.files[0].id as string : null;
+  };
+
+  const createFolder = async (name: string, parentId?: string): Promise<string> => {
+    const body: Record<string, unknown> = {
+      name,
+      mimeType: 'application/vnd.google-apps.folder',
+    };
+    if (parentId) body.parents = [parentId];
+    const res = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`Failed to create folder ${name}: ${await res.text()}`);
+    const d = await res.json();
+    return d.id as string;
+  };
+
+  const rootId = (await findFolder('MyNaavi')) ?? (await createFolder('MyNaavi'));
+  const listsId = (await findFolder('Lists', rootId)) ?? (await createFolder('Lists', rootId));
+  return listsId;
+}
+
 async function createDriveDoc(accessToken: string, title: string): Promise<{ fileId: string; webViewLink: string } | null> {
-  // Create empty Google Doc
+  // Create the Lists folder lazily so new list Docs land under
+  // MyNaavi/Lists/ rather than at the Drive root. Existing list Docs are
+  // relocated by the step-4 migration.
+  const listsFolderId = await ensureListsFolder(accessToken);
+
   const res = await fetch('https://www.googleapis.com/drive/v3/files', {
     method: 'POST',
     headers: {
@@ -136,6 +178,7 @@ async function createDriveDoc(accessToken: string, title: string): Promise<{ fil
     body: JSON.stringify({
       name: title,
       mimeType: 'application/vnd.google-apps.document',
+      parents: [listsFolderId],
     }),
   });
   if (!res.ok) return null;

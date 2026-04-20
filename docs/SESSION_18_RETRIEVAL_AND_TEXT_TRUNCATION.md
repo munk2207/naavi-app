@@ -1,103 +1,193 @@
-# Session 18 — Retrieval robustness & text truncation
+# Session 18 — Retrieval robustness, live data sources, website rewrite
 
 **Date:** Sunday, April 19, 2026
-**Focus:** Remove Claude from the retrieval data path (fix #1A, #1B). Investigate text truncation in user bubbles (fix #2) — suspected root cause of digit hallucination.
-**Carryover from Session 17:** V52.1 (build 95) on phone. Five failures documented in SESSION_17_HANDOFF.md.
+**Status:** Closed.
+**Closing builds shipped:** V53.2 build 98 DIAG on Internal Testing. Voice server commit `dd92c5f`. Website live on `origin/main` with `81e2952` and prior.
 
 ---
 
-## Ground rules (carried forward, repeat every session)
+## Session headline
 
-1. Call out known-fragile paths UPFRONT in test scripts (voice for structured data is fragile).
-2. Test what the end user actually does (voice, not just typed).
-3. Do not soften a failing query to turn red into green.
-4. "Curl worked" ≠ "feature works." Closed only on the user's phone.
+Two architectural shifts landed tonight, both from the same insight: **Claude is good at reasoning about data, bad at carrying data.**
+
+1. **Retrieval moved from Claude's action payload into the orchestrator.** Mobile and voice server both detect retrieval intent, strip question words, run `global-search` with the user's literal text, and inject results into Claude's prompt. Claude speaks grounded answers instead of guessing, and digits/IDs never get paraphrased by an LLM.
+
+2. **Global Search adapters stopped keeping silos and started reading live sources.** Calendar now queries Google Calendar API live. Contacts now queries Google People API live. Lists now reads item content from Drive docs. The sync tables are no longer the search-of-truth — Google is.
+
+The supporting fixes: 0.5 similarity threshold on knowledge search (in two places), TextInput autocomplete disabled, pre-search query word-stripping, bubble-truncation fix via fixed-pixel `maxWidth` + `flexShrink: 1`.
+
+---
+
+## Ground rules from the top of the session (still apply for Session 19)
+
+1. Do not craft test scripts to make tests pass. Call out known-fragile paths upfront.
+2. Test what the end user would actually do (voice input included).
+3. Do not re-run with a softer query to turn a red into a green.
+4. "It worked on my side via curl" does not close the loop. It closes on the user's phone in the user's session.
 5. No test theater.
 
----
+Two more that emerged tonight:
 
-## Session 18 proposed plan (awaiting approval)
-
-### Objective
-
-Make retrieval deterministic: when the user asks a retrieval-style question, the **orchestrator** runs `global-search` with the user's **literal, untouched text** — Claude never sees the query as a free-form field to paraphrase. This closes #1A (phrasing fragility) and #1B (digit hallucination in `GLOBAL_SEARCH.query`) in one change.
-
-In parallel, investigate #2 (user-bubble truncation) — this may be related to #1B if the message is being truncated *before* it reaches Claude.
-
-### Phase 1 — Diagnose #2 (text truncation) FIRST (no code changes)
-
-**Why first:** if the user's typed text is being truncated *before* `send()` is called, then the orchestrator-side pre-search would also receive truncated input. We need to know where the string is actually complete vs. not. This is 15 minutes of read-only investigation.
-
-Trace for a concrete failing message `"Find phone 6137976679"`:
-
-1. Read `app/index.tsx::handleSend` — inspect `inputText` state + `setInputText('')` timing. Does `text` equal the full input string at call time?
-2. Read `hooks/useOrchestrator.ts::send()` — how is `userMessage` stored to `turns[]`? Is it `userMessage` or `enrichedMessage`?
-3. Read the bubble render site in `app/index.tsx` — check for wrapping Views with `flex`, `width`, `overflow`, `numberOfLines` on Text, or anything truncating the string.
-4. Add instrumentation plan only (not code): what `console.log`s would definitively answer where the string is intact.
-
-**Deliverable:** a one-paragraph finding — "truncation is at location X, here's the evidence" OR "truncation is cosmetic (rendering only), the real string reaches Claude intact."
-
-### Phase 2 — Orchestrator-side pre-search (Option A from SESSION_17)
-
-**Architectural principle:** Claude decides *how to talk about* results. The orchestrator decides *what to search for*.
-
-**Implementation sketch (confirm before coding):**
-
-1. **New helper** `lib/retrieval.ts` (or inline in `useOrchestrator.ts`):
-   - `detectRetrievalIntent(userMessage: string): { isRetrieval: boolean; searchText: string }`
-   - Regex detection — deliberately crude. Triggers on: `what|who|where|when|how many|tell me about|do (we|you|I) have|is there|look up|find|search|show me|list` + a noun phrase, OR any message with a digit run ≥ 7 (likely a phone/ID lookup), OR any `@`/email pattern.
-   - `searchText` = the raw user message, lightly stripped of question words at the front (e.g. "what do you know about my dentist" → "my dentist"), but NEVER rewriting digits or identifiers. If unsure, pass the full message.
-
-2. **In `useOrchestrator.ts::send`**, BEFORE `Promise.all([sendToNaavi, ...])`:
-   - If `detectRetrievalIntent(userMessage).isRetrieval` → run `global-search` with `searchText` (raw).
-   - Attach top-N results to `enrichedMessage` under a `## Search results` section, marked clearly so Claude uses them.
-   - Set `turnGlobalSearch = { query, results }` so the card renders the data regardless of what Claude says.
-   - On retrieval intent, instruct Claude via enriched context NOT to emit a second `GLOBAL_SEARCH` action.
-
-3. **Remove reliance on Claude's `GLOBAL_SEARCH` action for retrieval** — keep the action handler in place as a safety net, but the orchestrator-driven path takes precedence. Claude is no longer the primary trigger.
-
-4. **Voice server mirror** — `naavi-voice-server/src/index.js` gets the same pre-search logic (same regex). Without this, voice calls still go through Claude-decides-to-search and inherit the same bugs. Single-source the regex by putting it in a tiny JS helper both sides import (or duplicate with a comment if sharing is painful).
-
-**Trade-offs (disclose):**
-- Adds ~0.5–1.5 s latency on retrieval messages (parallel `global-search` fetch during Claude thinking).
-- Crude regex will misfire — e.g. "find me a quiet cafe" has "find" but shouldn't search the user's own data. Acceptable: a spurious search returns 0 hits and Claude ignores it.
-- Some true retrievals won't match the regex — acceptable fallback: Claude's own `GLOBAL_SEARCH` still fires.
-
-### Phase 3 — #1C minimum-similarity threshold (small, scoped)
-
-While touching retrieval:
-- `supabase/functions/global-search/adapters/knowledge.ts` — add `similarity < 0.5` filter (threshold tunable).
-- Detect identifier-like queries (mostly-digit, contains `@`, or UUID shape) server-side in `global-search` dispatcher — skip knowledge adapter for those; run only exact-match adapters (contacts, sent_messages, gmail, calendar).
-
-Keep Phase 3 optional — only do it if Phase 1 + 2 land quickly. Otherwise it becomes Session 19.
-
-### Phase 4 — Verification (honest, representative)
-
-For each change:
-- Call out fragile paths upfront (voice is fragile for digits).
-- Test #1A with the exact failing wording: *"What do you know about my dentist"* typed AND spoken.
-- Test #1B with the exact failing number: type `Find phone 6137976679` — confirm the search runs on `6137976679`, not a rewritten number.
-- Reproduce from the user's phone, not just curl. If the loop can't be closed on the phone this session, document that clearly.
+6. **Do not assume.** When a fix doesn't work, instrument and observe before proposing the next one. (I violated this with the autocomplete fix — claimed it would solve the digit-strip bug without verifying; it didn't on the first try, and the user called it.)
+7. **Do not blindly mirror patterns across features.** The email_actions pipeline uses next-morning confirmation; the recording pipeline does NOT. Applying one pattern to the other created a contradiction between the home page and the how-to-use page. Tonight's root fix: check the actual code path, not the nearest pattern.
 
 ---
 
-## Out of scope this session
+## What shipped — server side (live, no install)
 
-- #1D button clipping (cosmetic, queue for a UI polish pass)
-- #1B voice transcription of emails/phones (Deepgram tuning — separate effort)
-- Document OCR / attachment harvesting (next major feature, future session)
-- Drive item-level adapter
-- Merge cleanup of stale worktrees
-- Gmail non-tier-1 adapter
-
----
-
-## Work log
-
-(to be filled during the session)
+| Change | Where |
+|---|---|
+| Live Google Calendar query replacing the 6-hour-sync adapter | `supabase/functions/global-search/adapters/calendar.ts` |
+| Live Google People API query replacing the internal contacts silo | `supabase/functions/global-search/adapters/contacts.ts` |
+| Drive-doc item search for lists (not just list names) | `supabase/functions/global-search/adapters/lists.ts` |
+| 0.5 similarity threshold on Global Search knowledge adapter | `supabase/functions/global-search/adapters/knowledge.ts` |
+| 0.5 similarity threshold on the voice-server's knowledge endpoint | `supabase/functions/search-knowledge/index.ts` |
+| `[TRACE-3]` diagnostic log in `naavi-chat` | `supabase/functions/naavi-chat/index.ts` |
+| Voice server pre-search on retrieval intent | `naavi-voice-server/src/index.js` (commit `bc6ba2e`) |
+| Voice server pre-search query word-stripping | `naavi-voice-server/src/index.js` (commit `dd92c5f`) |
 
 ---
 
-## Known commits / builds
+## What shipped — mobile side (V53.2 build 98 DIAG, Internal Testing)
 
-(to be filled at session close)
+| Change | File |
+|---|---|
+| OAuth scopes now include `contacts.readonly` + `contacts.other.readonly` | `lib/supabase.ts` |
+| Orchestrator pre-search on retrieval intent, with question-word stripping | `hooks/useOrchestrator.ts` |
+| Bubble truncation fix (fixed-pixel maxWidth + flexShrink) | `components/ConversationBubble.tsx` |
+| TextInput autocomplete / autocorrect / spellcheck disabled | `app/index.tsx` |
+| Live `inputText` DIAG readout under chat box (orange, to be removed in next clean build) | `app/index.tsx` |
+| Version bump chain: V53 (build 96) → V53.1 (build 97) → V53.2 (build 98) | `app.json`, `app/settings.tsx` |
+
+The diagnostic orange readout is still in the current build. It will come out in the next clean build. Not urgent.
+
+**User must sign out and sign back in after install** — the new contacts OAuth scope isn't in tokens minted before V53.
+
+---
+
+## What shipped — website (live on mynaavi.com)
+
+Full home-page rewrite for the invited-early-adopter audience, following the ground rules the user articulated during the session:
+
+- Lead with what Robert *actually* experiences, not what Naavi *does*. The stories carry the product.
+- Do not name the reader's fears out loud — they recognize themselves.
+- Well-educated older people don't want to be lectured.
+- The product answer never appears in the same breath as the fear.
+
+Specific changes on the site:
+- Home page rewritten: short hero, "Your life" prose section with four alternating panels (asymmetry intro + hockey + insurance + brakes), honest doctor visit scene, personal invitation merged into the signup section.
+- Removed: the Siri/Alexa comparison table, the 4-persona audience grid, the "She's already in every room you live in" section, the long "letter to Robert."
+- Added the OCR-of-attachments-coming-soon parenthetical to the brake scene — the only forward-looking claim on the page, and it's labelled.
+- Doctor visit scene corrected to match the actual immediate auto-create behavior — calendar + reminders are ready before Robert reaches his car, transcript goes to Drive, added to memory, searchable for future use.
+- `/guide` renamed to `/how-to-use` with a 308 redirect; label unified across nav, footer, page title, meta.
+- Blogs nav button inverted to secondary styling so Getting Started (now "How to use") reads as primary.
+- Early Adoption three-step added to the how-to-use page: sign up → receive invitation → download.
+- Role dropdown trimmed to Active senior / Family member / Other.
+- CTA unified to "I'd be glad to try it" — a personal acceptance phrase, not a waitlist ask.
+- Signature on the invitation: `— Wael`. No title, no "co-founder" framing — keeps it personal.
+
+Website commit hashes (in order tonight):
+`e168646`, `26238db`, `81b5ec3`, `db1b04f`, `0a78d5f`, `8e0da22`, `77881f9`, `cf5b614`, `23ae759`, `02e7f16`, `81e2952`.
+
+---
+
+## Bugs diagnosed, resolved or deferred
+
+| # | Bug | Status after Session 18 |
+|---|---|---|
+| 1 | Chat bubble truncated long digit strings on Android | **Resolved** (V53.1+). Fixed-pixel maxWidth + flexShrink. |
+| 2 | Claude appeared to hallucinate digits in `GLOBAL_SEARCH.query` | **Root cause different from first suspected.** It was Android's keyboard autocomplete replacing typed digits with contact suggestions from the user's phone book before the app even received the keystrokes. Not Claude. Resolved by disabling autocomplete + autocorrect on the TextInput. |
+| 3 | Phrasing fragility ("what do you know" vs "what do we have" diverged in behavior) | **Partially resolved.** Orchestrator-side pre-search now catches most retrieval phrasings via regex. Claude is no longer the routing decision-maker for retrieval. |
+| 4 | Knowledge adapter returning 5 unrelated results for non-semantic queries | **Resolved.** 0.5 similarity threshold applied in both `global-search/adapters/knowledge.ts` and `search-knowledge` Edge Function. |
+| 5 | Claude's voice reply said "nothing found" while the card showed the actual result (the "Find Hany" contradiction) | **Partially resolved.** Pre-search results are now injected into Claude's prompt so replies are grounded. Query word-stripping added so `Find Hany` searches for `Hany`, not the literal phrase. |
+| 6 | Contacts adapter was an internal Supabase silo, never knew about the user's real contacts | **Resolved.** Live Google People API query. Requires user re-auth after V53 install. |
+| 7 | Calendar adapter had a 6-hour sync lag | **Resolved.** Live Google Calendar API query. |
+| 8 | Lists adapter only searched list names, never items | **Resolved.** Drive doc content now scanned at search time. |
+| 9 | Home page contradicted the how-to-use page about what happens after a recording ends | **Resolved.** Home page now describes the immediate auto-create behavior. The contradiction was caused by me misapplying the email_actions pattern to the recording flow. |
+
+---
+
+## Verified working on the user's phone (Session 18 close)
+
+- `Find Bob` → card shows the calendar event `meeting with bob — Apr 20, 2026`. Live calendar fix proven.
+- `Find Hany` → card shows `Dr. Hany Yassa - Eye - 613-590-1077 - Oct 31, 2025`. Card correct; pre-search query fix addresses the prior contradiction between voice and card.
+- `Find phone 6137374471` (typed) → bubble shows full digits on V53.2. Autocomplete disable + bubble-truncation fix both proven.
+- User reports "everything works" after V53.2 install.
+
+---
+
+## Known open items — Session 19 scope
+
+**Session 19 name: `SESSION_19_SAME_QUESTION_SAME_ANSWER.md`**
+*Subtitle: Robert asks the same thing twice. Naavi answers the same way both times.*
+
+Scope (in priority order):
+
+1. **Intermittent Deepgram transcript dropout** — calls where user speaks, audio arrives, no `[Deepgram] FINAL:` ever produced. Workaround: hang up and redial. Not root-caused. Evidence captured in the 16:56 voice call logs from tonight.
+
+2. **Deepgram first-word truncation during barge-in** — observed tonight: user said "what time is it," Deepgram transcribed "Time is it?" The missing "what" drops the query off the trivial fast-path in `askClaude`. The query then falls into the full Sonnet path with knowledge fetch, taking ~5s for what should be a 2s answer.
+
+3. **Trivial fast-path regex fragility** — requires "what" at start for most patterns. One missing word kicks everything to the slow path. Needs reworking so transcript quirks don't degrade the experience.
+
+4. **Voice call latency variance** — retrieval queries now ~6s (expected, due to pre-search), but trivial queries occasionally take 10s when they should be 2-3s. Always correlated with the above Deepgram issues.
+
+5. **Voice STT garbling structured data** (emails, phone numbers, addresses) — Deepgram struggles with identifiers. Needs either Deepgram tuning, post-transcription normalization, or a dedicated "spell it letter by letter" flow.
+
+6. **Intermittent call drops after greeting** — Session 17 added drop-detection instrumentation. Still passive — waiting for the next real occurrence to diagnose. The evidence is ready when it happens: grep Railway logs for `[DROP]`.
+
+All five above roll up to the session's framing: **Robert asks the same thing twice, and gets different answers.** Each of these bugs is a cause of that, not a separate thing.
+
+---
+
+## Carried-forward items that are NOT Session 19 scope
+
+| # | Item | Why deferred |
+|---|---|---|
+| A | Attachment / OCR harvesting proposal | Next major feature after Session 19. Biggest next pain-point for Robert (warranty receipts, property tax notices). See `docs/PROPOSAL_ATTACHMENT_HARVESTING.md`. |
+| B | Drive content adapter for general files (beyond lists) | Future. |
+| C | Non-tier-1 Gmail adapter | Future, low priority. Promotional mail isn't what Robert asks about. |
+| D | Remove the V53.2 DIAG orange readout | Next clean mobile build, whenever one is queued. Cosmetic. |
+| E | Multi-user audit of voice server `/rest/v1/...` calls | Grep pass pending. Session 17 found + fixed two; others may exist. |
+| F | Stale worktrees `.claude/worktrees/cranky-hoover` and `focused-agnesi` | Cleanup session whenever. |
+| G | Hardening Claude's preference enforcement (e.g. the "no meetings before 10 AM" rule) with a deterministic guardrail, not just prompt wording | Worth doing once Session 19 stabilizes the base. |
+
+---
+
+## Two honest notes for the next session's Claude
+
+1. **The `record-my-visit` flow creates calendar events immediately, not via the next-morning email_actions pipeline.** I got this wrong tonight and wrote a home-page scene describing next-morning confirmation. Wael caught it. The correction is on the live site. Don't re-introduce the mistake.
+
+2. **Autocomplete props on a TextInput are a request, not a guarantee.** Android keyboards can and do ignore them. When the user reports "my digit-strip fix didn't work," instrument before patching again. Tonight, the autocomplete disable WORKED after a fresh install — the first test was against a cached old build. Could have been diagnosed faster if I'd checked the install state first.
+
+---
+
+## File path reminders
+
+| Thing | Path |
+|---|---|
+| Mobile app main repo | `C:\Users\waela\OneDrive\Desktop\Naavi` |
+| Mobile build clone (EAS only) | `C:\Users\waela\naavi-mobile` |
+| Voice server | `C:\Users\waela\OneDrive\Desktop\Naavi\naavi-voice-server` |
+| Website | `C:\Users\waela\OneDrive\Desktop\Naavi\mynaavi-website` |
+| This session's doc | `C:\Users\waela\OneDrive\Desktop\Naavi\docs\SESSION_18_RETRIEVAL_AND_TEXT_TRUNCATION.md` |
+
+---
+
+## Commit log — Session 18
+
+| Repo | Commit | Description |
+|---|---|---|
+| naavi-app | (updated TRACE-3 in naavi-chat) | Diagnostic log for user message handoff |
+| naavi-app | `7f817ed` | V53 build 96 — live sources, mobile pre-search, bubble fix, contacts scope |
+| naavi-app | `9bb3466` | Fix duplicate `digitsOnly` declaration |
+| naavi-app | `28b9014` | V53.1 build 97 — autocomplete disable, question-word stripping, knowledge threshold |
+| naavi-app | `6707959` | V53.2 build 98 DIAG — orange live inputText readout |
+| naavi-voice-server | `bc6ba2e` | Pre-search on retrieval intent, grounded Claude replies |
+| naavi-voice-server | `dd92c5f` | Question-word stripping before global-search |
+| mynaavi-website | `e168646` → `81e2952` | Full home rewrite, URL rename, label unification, doctor-scene correction, transcript+memory clarification |
+
+AAB builds on Expo: `V53 (build 96)`, `V53.1 (build 97)`, `V53.2 (build 98) DIAG`.
+
+---
+
+Session 18 closed 2026-04-19 late evening. Next session will be `SESSION_19_SAME_QUESTION_SAME_ANSWER.md`.

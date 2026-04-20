@@ -20,6 +20,7 @@ type GmailRow = {
   snippet: string | null;
   body_text: string | null;
   received_at: string | null;
+  signal_strength: 'personal' | 'institutional' | 'ambient' | null;
 };
 
 export const gmailAdapter: SearchAdapter = {
@@ -34,17 +35,34 @@ export const gmailAdapter: SearchAdapter = {
     const q = ctx.query.trim();
     if (!q) return [];
 
-    const pattern = `%${q}%`;
+    const variants = ctx.queryVariants;
+    const orClauses: string[] = [];
+    for (const v of variants) {
+      const pat = `%${v}%`;
+      orClauses.push(
+        `subject.ilike.${pat}`,
+        `sender_name.ilike.${pat}`,
+        `sender_email.ilike.${pat}`,
+        `snippet.ilike.${pat}`,
+        `body_text.ilike.${pat}`,
+      );
+    }
+
+    // Exclude ambient — Gmail flagged them but we don't know the sender.
+    // Global Search is a retrieval tool, not a research tool; CNN articles
+    // mentioning a company are not the user's relationship with that
+    // company. Only personal (in contacts) and institutional (trusted
+    // domain or Claude-promoted) appear. Ambient stays in the inbox and
+    // morning brief — just not here.
     const { data, error } = await ctx.supabase
       .from('gmail_messages')
       .select(
-        'id, gmail_message_id, subject, sender_name, sender_email, snippet, body_text, received_at',
+        'id, gmail_message_id, subject, sender_name, sender_email, snippet, body_text, received_at, signal_strength',
       )
       .eq('user_id', ctx.userId)
       .eq('is_tier1', true)
-      .or(
-        `subject.ilike.${pattern},sender_name.ilike.${pattern},sender_email.ilike.${pattern},snippet.ilike.${pattern},body_text.ilike.${pattern}`,
-      )
+      .in('signal_strength', ['personal', 'institutional'])
+      .or(orClauses.join(','))
       .order('received_at', { ascending: false })
       .limit(ctx.limit);
 
@@ -54,7 +72,6 @@ export const gmailAdapter: SearchAdapter = {
     }
 
     const rows = (data ?? []) as GmailRow[];
-    const qLower = q.toLowerCase();
 
     const hits: SearchResult[] = [];
     for (const r of rows) {
@@ -65,12 +82,18 @@ export const gmailAdapter: SearchAdapter = {
       const body = (r.body_text ?? '').toLowerCase();
 
       // Score: subject match = 1.0, sender name/email = 0.85, body = 0.7,
-      // snippet-only = 0.6.
+      // snippet-only = 0.6. Trusted senders (signal_strength = 'personal' or
+      // 'institutional') get a +0.1 nudge so a known-sender match outranks a
+      // subject-match on an ambient sender.
       let score = 0.5;
-      if (subject.includes(qLower)) score = 1.0;
-      else if (sender.includes(qLower) || senderEmail.includes(qLower)) score = 0.85;
-      else if (body.includes(qLower)) score = 0.7;
-      else if (snippet.includes(qLower)) score = 0.6;
+      if (variants.some(v => subject.includes(v))) score = 1.0;
+      else if (variants.some(v => sender.includes(v) || senderEmail.includes(v))) score = 0.85;
+      else if (variants.some(v => body.includes(v))) score = 0.7;
+      else if (variants.some(v => snippet.includes(v))) score = 0.6;
+
+      if (r.signal_strength === 'personal' || r.signal_strength === 'institutional') {
+        score = Math.min(1.0, score + 0.1);
+      }
 
       const from = r.sender_name ?? r.sender_email ?? 'Unknown';
       const title = r.subject?.trim() ? `${from}: ${r.subject}` : `Email from ${from}`;

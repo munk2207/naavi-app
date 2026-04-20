@@ -22,7 +22,7 @@ serve(async (req) => {
   }
 
   try {
-    const { user_id, max = 100 } = await req.json();
+    const { user_id, max = 100, force = false } = await req.json();
     if (!user_id) throw new Error('user_id required');
 
     const supabase = createClient(
@@ -41,6 +41,9 @@ serve(async (req) => {
 
     if (error) throw new Error(error.message);
 
+    // When force=true, re-extract every tier-1 email (useful after an
+    // extract-email-actions schema upgrade adds new fields like doc_type).
+    // Otherwise skip rows that already have an email_actions row.
     const existing = await supabase
       .from('email_actions')
       .select('gmail_message_id')
@@ -49,7 +52,7 @@ serve(async (req) => {
 
     const todo = (msgs ?? [])
       .map((r: { gmail_message_id: string }) => r.gmail_message_id)
-      .filter((id: string) => !seen.has(id));
+      .filter((id: string) => force ? true : !seen.has(id));
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';

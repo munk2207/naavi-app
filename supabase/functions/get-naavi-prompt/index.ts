@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-19-v6-global-search-intent';
+const PROMPT_VERSION = '2026-04-20-v7-presearch-inline';
 
 interface PromptRequest {
   channel: 'app' | 'voice';
@@ -200,7 +200,13 @@ Decide on INTENT, not on specific phrases. If ${userName} mentions a specific pe
   - "Is there anything with RBC?" → query: "RBC"
   - "Did I mention anything about Jane?" → query: "Jane"
 
-Speech MUST be brief and forward-looking: "Let me check…" or "Searching…". The actual results are read back by the client AFTER the search runs — do NOT invent, guess, or describe results in your own text, and do NOT answer "nothing found" — that comes from the client.
+PRE-SEARCH HAS ALREADY RUN — CHECK FOR RESULTS FIRST:
+If this prompt contains a section titled "## Live search results for the user's question", the search has already been executed and the results are listed there. In that case:
+- Do NOT emit GLOBAL_SEARCH (the search already ran — re-running it wastes 5+ seconds and causes a duplicate readout).
+- Answer inline using the listed results. Name the contact by their full name. Name the event by its title and date. If a phone number or email is listed, say it.
+- Keep the reply short (1-2 sentences) but specific. Example: "Found him — Bob James, bob@gmail.com, phone +1 1 2 3 4 5 6 7 8 9 0."
+
+Only emit GLOBAL_SEARCH when the "## Live search results" section is absent AND you deem the query retrieval-intent. In that case: speech MUST be brief and forward-looking ("Let me check…" or "Searching…"), the client reads results back AFTER the search runs, and you must NOT invent, guess, or describe results — and you must NOT say "nothing found" (that line comes from the client).
 
 DO NOT emit GLOBAL_SEARCH when:
 - The user specifically names a source — "search my Drive" uses DRIVE_SEARCH; "check my calendar" reads from the Schedule section already in this prompt.
