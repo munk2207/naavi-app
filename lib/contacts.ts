@@ -51,7 +51,24 @@ export async function lookupContact(name: string): Promise<Contact | null> {
 
   const nameLower = name.toLowerCase().trim();
 
-  // 1. Search people table (saved via ADD_CONTACT — has phone numbers)
+  // 1. Google People API — the CANONICAL source for user-owned contacts.
+  //    It reads the user's real address book and returns the actual phone
+  //    numbers Robert has curated. Put first because anything else is at
+  //    best a cache and at worst a regex-extracted hallucination from a
+  //    voice transcript (seen with Fatma — "+20261" was pulled out of a
+  //    Test Drive recording by a greedy digit regex).
+  try {
+    const { data, error } = await supabase.functions.invoke('lookup-contact', {
+      body: { name },
+    });
+    if (!error && !data?.error && data?.contact) {
+      console.log('[contacts] Found via Google People API:', data.contact.name);
+      return data.contact;
+    }
+  } catch { /* continue */ }
+
+  // 2. Local `people` table — populated by the ADD_CONTACT action when the
+  //    user asks Naavi to save someone. Structured, safe.
   try {
     const { data } = await supabase
       .from('people')
@@ -65,64 +82,8 @@ export async function lookupContact(name: string): Promise<Contact | null> {
     }
   } catch { /* continue */ }
 
-  // 2. Search knowledge_fragments for phone numbers (e.g. "Wael's phone is +16137697957")
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user?.id) {
-      const { data } = await supabase
-        .from('knowledge_fragments')
-        .select('content')
-        .eq('user_id', session.user.id)
-        .ilike('content', `%${nameLower}%phone%`)
-        .limit(5);
-
-      if (data && data.length > 0) {
-        // Extract phone number from content like "Wael's phone is +16137697957"
-        for (const row of data) {
-          const phoneMatch = row.content.match(/(\+?\d[\d\s\-()]{7,})/);
-          if (phoneMatch) {
-            const phone = phoneMatch[1].replace(/[\s\-()]/g, '');
-            console.log('[contacts] Found phone in knowledge:', phone);
-            return { name, email: null, phone: phone.startsWith('+') ? phone : `+${phone}` };
-          }
-        }
-      }
-
-      // Also try reverse pattern: content has phone and name
-      const { data: data2 } = await supabase
-        .from('knowledge_fragments')
-        .select('content')
-        .eq('user_id', session.user.id)
-        .ilike('content', `%${nameLower}%`)
-        .limit(10);
-
-      if (data2 && data2.length > 0) {
-        for (const row of data2) {
-          const phoneMatch = row.content.match(/(\+?\d[\d\s\-()]{7,})/);
-          if (phoneMatch) {
-            const phone = phoneMatch[1].replace(/[\s\-()]/g, '');
-            console.log('[contacts] Found phone in knowledge (broad):', phone);
-            return { name, email: null, phone: phone.startsWith('+') ? phone : `+${phone}` };
-          }
-        }
-      }
-    }
-  } catch { /* continue */ }
-
-  // 3. Search Naavi's own contacts table
-  try {
-    const { data } = await supabase
-      .from('contacts')
-      .select('name, email')
-      .ilike('name', `%${nameLower}%`)
-      .limit(1);
-
-    if (data && data.length > 0 && data[0].email) {
-      return { name: data[0].name, email: data[0].email, phone: null };
-    }
-  } catch { /* continue */ }
-
-  // 4. Search Gmail sender cache
+  // 3. Gmail sender cache — email-only fallback when the person has emailed
+  //    the user but isn't in their Google contacts yet.
   try {
     const { data } = await supabase
       .from('gmail_messages')
@@ -136,13 +97,26 @@ export async function lookupContact(name: string): Promise<Contact | null> {
     }
   } catch { /* continue */ }
 
-  // 5. Google People API via Edge Function
+  // 4. Legacy `contacts` table — kept for email-only lookup; do not add a
+  //    phone column here. This table is sparse and being deprecated in
+  //    favour of Google People API (step 1).
   try {
-    const { data, error } = await supabase.functions.invoke('lookup-contact', {
-      body: { name },
-    });
-    if (!error && !data?.error && data?.contact) return data.contact;
+    const { data } = await supabase
+      .from('contacts')
+      .select('name, email')
+      .ilike('name', `%${nameLower}%`)
+      .limit(1);
+
+    if (data && data.length > 0 && data[0].email) {
+      return { name: data[0].name, email: data[0].email, phone: null };
+    }
   } catch { /* continue */ }
+
+  // Deliberately NOT searching knowledge_fragments for phone numbers.
+  // That path used a greedy digit regex on free-text voice transcripts,
+  // which produced garbage numbers like "+20261" extracted from phrases
+  // uttered during recorded conversations. Phone numbers are structured
+  // data and must come from structured sources only.
 
   return null;
 }
