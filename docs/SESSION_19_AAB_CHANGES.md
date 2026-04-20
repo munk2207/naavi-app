@@ -37,6 +37,21 @@ that closes out the Global Search phase. Updated as each step completes.
 
 ---
 
+## Post-99 hotfix — `lookupContact` phone source (V53.4 build 100)
+
+**Cause:** Fatma's "Contact info" section in the Claude prompt showed `Phone: +20261` — a bogus number. Root-caused via naavi-chat TRACE-3 log: `lib/contacts.ts::lookupContact` was pulling phone numbers by regex-scanning raw voice-transcript knowledge fragments. The regex `(\+?\d[\d\s\-()]{7,})` grabbed a digit substring ("+20261") from a recorded "Test Drive" transcript and returned it as if it were Fatma's phone. Google Contacts had her 4 real numbers all along but was only consulted as the 5th fallback.
+
+**Fix (lib/contacts.ts):**
+- Reordered sources: **Google People API is now step 1** (canonical).
+- Local `people` table is step 2 (manual saves via ADD_CONTACT).
+- Gmail sender cache (email fallback) is step 3.
+- Legacy `contacts` table is step 4 (email-only).
+- **Removed entirely:** the knowledge_fragments regex path. Phone numbers are structured data and must come from structured sources only.
+
+**Version bump:** `app.json` versionCode 99 → 100; `app/settings.tsx` version string → "MyNaavi — V53.4 (build 100)".
+
+---
+
 ## Post-build checklist
 
 - [ ] `git commit` with a descriptive message
