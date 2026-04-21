@@ -1,10 +1,19 @@
 # MyNaavi — Client Quick Reference
 
-**Who this is for:** a client (Robert, or any user) calling MyNaavi at +1 249 523 5394. Print it, put it by the phone.
+**Who this is for:** a client (Robert, or any user) reaching MyNaavi by phone. Print it, put it by the phone — or next to the car keys.
 
 **Legend:**
 - 🔗 **Orchestrated** — one command, Naavi chains multiple services together behind the scenes. These are the most valuable commands.
 - • **Single service** — one simple service lookup.
+
+## 📞 How to reach Naavi
+
+You don't need to pick up the phone to dial her. Once Naavi is saved as a contact on your phone (done during sign-in), just speak to whichever voice assistant you already use:
+
+- *"Hey Google, call Naavi."* — from your phone, your car (Android Auto), your smart display
+- *"Hey Siri, call Naavi."* — from iPhone, Apple Watch, CarPlay, HomePod
+
+Your phone places the call. Naavi answers. No screen tapped.
 
 ---
 

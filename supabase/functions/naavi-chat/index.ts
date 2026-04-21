@@ -83,6 +83,93 @@ function detectEmailAlert(msg: string): { fromName: string | null; subjectKeywor
   return { fromName, subjectKeyword };
 }
 
+// ── Calendar PDF ask-time reader ──────────────────────────────────────────────
+//
+// When Robert asks a calendar-shaped question ("when is the first day of
+// school", "next PA day", etc.) AND he has a document_type='calendar' PDF
+// harvested, we download that PDF binary at ask-time and pass it to Claude
+// as a `document` content block so Claude reads the actual calendar grid
+// and answers with the specific date.
+//
+// Only fires when the regex matches AND a calendar PDF exists. No cost
+// otherwise.
+
+const CALENDAR_INTENT_RE =
+  /\b(when|what\s+(date|day|time)|how\s+many\s+days|next|first|last|upcoming)\b[\s\S]{0,80}\b(school|pa\s*day|holiday|break|semester|term|class|practice|game|tournament|match|concert|report\s*card|parent\s*teacher|exam|final)\b/i;
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const slice = bytes.subarray(i, i + CHUNK);
+    binary += String.fromCharCode(...slice);
+  }
+  return btoa(binary);
+}
+
+async function fetchCalendarPdfBlock(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  userText: string,
+): Promise<{ type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string } } | null> {
+  if (!CALENDAR_INTENT_RE.test(userText)) return null;
+
+  // Find the user's most recent calendar PDF.
+  const { data: calDoc } = await supabase
+    .from('documents')
+    .select('drive_file_id, file_name, size_bytes, mime_type')
+    .eq('user_id', userId)
+    .eq('document_type', 'calendar')
+    .eq('mime_type', 'application/pdf')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!calDoc?.drive_file_id) return null;
+  // 20 MB guard — Claude PDF input cap is around 32 MB; leave headroom.
+  if (typeof calDoc.size_bytes === 'number' && calDoc.size_bytes > 20 * 1024 * 1024) return null;
+
+  // Exchange refresh token for access token
+  const { data: tokenRow } = await supabase
+    .from('user_tokens')
+    .select('refresh_token')
+    .eq('user_id', userId)
+    .eq('provider', 'google')
+    .single();
+  if (!tokenRow?.refresh_token) return null;
+
+  try {
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id:     Deno.env.get('GOOGLE_CLIENT_ID')!,
+        client_secret: Deno.env.get('GOOGLE_CLIENT_SECRET')!,
+        refresh_token: tokenRow.refresh_token,
+        grant_type:    'refresh_token',
+      }),
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) return null;
+
+    const dlRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(calDoc.drive_file_id)}?alt=media`,
+      { headers: { Authorization: `Bearer ${tokenData.access_token}` } },
+    );
+    if (!dlRes.ok) return null;
+    const bytes = new Uint8Array(await dlRes.arrayBuffer());
+    if (bytes.length === 0) return null;
+
+    return {
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: bytesToBase64(bytes) },
+    };
+  } catch (err) {
+    console.error('[naavi-chat] calendar pdf fetch failed:', err);
+    return null;
+  }
+}
+
 // ── Google Contacts lookup ────────────────────────────────────────────────────
 
 async function lookupContactsByName(
@@ -374,13 +461,38 @@ Deno.serve(async (req) => {
     if (!apiKey) return jsonResponse({ error: 'ANTHROPIC_API_KEY not configured' }, 500);
 
     const client   = new Anthropic({ apiKey });
+
+    // Calendar ask-time PDF injection — when the user asks a date question
+    // and has a calendar-typed PDF harvested, pass that PDF to Claude as a
+    // document block so Claude reads the actual calendar grid and answers.
+    // Only fires for calendar-shaped queries; otherwise no-op.
+    let augmentedMessages = messages;
+    if (userId) {
+      const calBlock = await fetchCalendarPdfBlock(supabase, userId, userText);
+      if (calBlock) {
+        console.log(`[timing] ${elapsed()} | calendar PDF attached for Claude`);
+        // Append the PDF to the last user message's content. If content is a
+        // plain string, upgrade to an array so we can mix text + document.
+        const copy = [...messages];
+        const lastIdx = copy.map((m: { role: string }) => m.role).lastIndexOf('user');
+        if (lastIdx !== -1) {
+          const lastMsg = copy[lastIdx];
+          const existingContent = typeof lastMsg.content === 'string'
+            ? [{ type: 'text', text: lastMsg.content }]
+            : (Array.isArray(lastMsg.content) ? lastMsg.content : [{ type: 'text', text: String(lastMsg.content) }]);
+          copy[lastIdx] = { ...lastMsg, content: [calBlock, ...existingContent] };
+          augmentedMessages = copy;
+        }
+      }
+    }
+
     const claudeStart = Date.now();
     console.log(`[timing] ${elapsed()} | Claude call starting | model=claude-sonnet-4-6 | max_tokens=${max_tokens ?? 2048}`);
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: max_tokens ?? 2048,
       system,
-      messages,
+      messages: augmentedMessages,
     });
     const claudeMs = Date.now() - claudeStart;
 
