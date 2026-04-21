@@ -1,31 +1,51 @@
 /**
- * resolve-place Edge Function
+ * resolve-place Edge Function (v2 — verified-address-only)
  *
- * Turns a named place ("Costco", "Home Depot", "cottage") into coordinates
- * + radius suitable for a geofence. Caches resolutions in the user_places
- * table so repeated uses of the same name are free.
+ * Looks up a named place and returns coordinates, or indicates that the
+ * user must confirm/clarify. Never silently caches a Google guess.
+ *
+ * Lookup order:
+ *   1. Personal keywords ("home"/"house"/"my home" → home_address;
+ *      "office"/"work"/"my office" → work_address). If the user has the
+ *      address set, resolve that address via Places API. If not set,
+ *      return status='personal_unset' so Claude can tell the user to add
+ *      it in Settings.
+ *   2. Cache — user_places where (user_id, alias) matches the slugified
+ *      place_name. Instant hit if a previous conversation saved it.
+ *   3. Fresh — Google Places API biased by reference coordinates (from
+ *      caller) or by the user's home_address if they have one. Returns
+ *      the result WITHOUT writing to cache unless save_to_cache=true.
+ *
+ * Caching is explicit: callers must set save_to_cache=true AFTER the
+ * user has confirmed the address. When saving, two rows are written:
+ *   - Row A: slugified spoken name (what the user called the place)
+ *   - Row B: slugified canonical name (what Places API named it)
+ * Both point to the same coordinates. Subsequent lookups by either
+ * name will hit the cache.
  *
  * Request body:
  *   {
- *     user_id:        "uuid",              // required
- *     place_name:     "Costco",            // required, natural language
- *     reference_lat?: number,              // optional, helps disambiguate (user's home)
- *     reference_lng?: number,              // optional
- *     radius_meters?: number               // optional, default 100
+ *     user_id:         "uuid",                  // required
+ *     place_name:      "Costco Merivale",       // required, what the user said
+ *     reference_lat?:  number,                  // optional bias anchor
+ *     reference_lng?:  number,
+ *     radius_meters?:  number,                  // default 100
+ *     save_to_cache?:  boolean,                 // default false
+ *     canonical_alias?: string                  // only used when save_to_cache=true
  *   }
  *
- * Returns:
- *   { alias, place_name, lat, lng, radius_meters, from_cache: boolean }
- *
- * Required Supabase secret:
- *   GOOGLE_PLACES_API_KEY — Google Cloud project with Places API enabled.
- *
- * Auth: service role (called from voice server or mobile orchestrator).
- *
- * Caching: results are saved to user_places keyed by (user_id, alias).
- * Alias is derived from place_name (lowercase, dashed). If a user says
- * "Costco" twice and the reference location is the same, the second call
- * returns the cached row instantly without a Places API hit.
+ * Response:
+ *   {
+ *     status:        'ok' | 'personal_unset' | 'not_found',
+ *     source:        'memory' | 'fresh' | 'settings_home' | 'settings_work' | null,
+ *     alias:         "costco-merivale",
+ *     canonical_alias?: "costco-wholesale",
+ *     place_name:    "Costco Wholesale",
+ *     address?:      "1280 Merivale Rd, Ottawa, ON",
+ *     lat:           number,
+ *     lng:           number,
+ *     radius_meters: number
+ *   }
  */
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
@@ -37,9 +57,26 @@ const corsHeaders = {
 };
 
 const PLACES_TEXT_SEARCH = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
+const PLACES_GEOCODE     = 'https://maps.googleapis.com/maps/api/geocode/json';
+
+// Personal-keyword map — aliases that resolve from user_settings columns.
+// Keys are slugified forms; compare against slugify(place_name).
+const PERSONAL_HOME = new Set([
+  'home', 'my-home', 'house', 'the-house', 'my-house', 'my-place', 'home-address',
+]);
+const PERSONAL_WORK = new Set([
+  'office', 'my-office', 'the-office', 'work', 'my-work', 'the-work', 'work-address',
+]);
 
 function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
 }
 
 serve(async (req) => {
@@ -57,14 +94,56 @@ serve(async (req) => {
     const referenceLat   = body.reference_lat !== undefined ? Number(body.reference_lat) : null;
     const referenceLng   = body.reference_lng !== undefined ? Number(body.reference_lng) : null;
     const radiusOverride = body.radius_meters !== undefined ? Number(body.radius_meters) : 100;
+    const saveToCache    = body.save_to_cache === true;
+    const canonicalAlias = body.canonical_alias ? String(body.canonical_alias) : null;
 
     if (!user_id || !placeName) {
-      return json({ error: 'Missing user_id or place_name' }, 400);
+      return jsonResponse({ status: 'error', error: 'Missing user_id or place_name' }, 400);
     }
 
     const alias = slugify(placeName);
 
-    // 1. Check cache
+    // ── Load user_settings once — used by personal keywords + reference fallback
+    const { data: settings } = await admin
+      .from('user_settings')
+      .select('home_address, work_address')
+      .eq('user_id', user_id)
+      .maybeSingle();
+
+    const homeAddress = settings?.home_address as string | null;
+    const workAddress = settings?.work_address as string | null;
+
+    // ── (1) Personal keywords — resolve via saved address or report unset
+    if (PERSONAL_HOME.has(alias)) {
+      if (!homeAddress) {
+        return jsonResponse({
+          status: 'personal_unset',
+          personal: 'home',
+        });
+      }
+      return await resolveByAddress({
+        admin, apiKey, user_id, placeName, alias,
+        addressQuery: homeAddress,
+        source: 'settings_home',
+        radiusOverride, saveToCache, canonicalAlias,
+      });
+    }
+    if (PERSONAL_WORK.has(alias)) {
+      if (!workAddress) {
+        return jsonResponse({
+          status: 'personal_unset',
+          personal: 'work',
+        });
+      }
+      return await resolveByAddress({
+        admin, apiKey, user_id, placeName, alias,
+        addressQuery: workAddress,
+        source: 'settings_work',
+        radiusOverride, saveToCache, canonicalAlias,
+      });
+    }
+
+    // ── (2) Memory lookup — any alias this user has previously confirmed
     const { data: cached } = await admin
       .from('user_places')
       .select('alias, place_name, lat, lng, radius_meters')
@@ -73,80 +152,201 @@ serve(async (req) => {
       .maybeSingle();
 
     if (cached) {
-      await admin
-        .from('user_places')
+      await admin.from('user_places')
         .update({ last_used_at: new Date().toISOString() })
         .eq('user_id', user_id)
         .eq('alias', alias);
 
-      console.log(`[resolve-place] cache hit: ${alias}`);
-      return json({ ...cached, from_cache: true });
+      console.log(`[resolve-place] memory hit: ${alias}`);
+      return jsonResponse({
+        status: 'ok',
+        source: 'memory',
+        alias: cached.alias,
+        place_name: cached.place_name,
+        lat: cached.lat,
+        lng: cached.lng,
+        radius_meters: cached.radius_meters,
+      });
     }
 
-    // 2. Cache miss — call Places API
+    // ── (3) Fresh resolve via Places API
     if (!apiKey) {
-      return json({ error: 'GOOGLE_PLACES_API_KEY not configured' }, 500);
+      return jsonResponse({ status: 'error', error: 'GOOGLE_PLACES_API_KEY not configured' }, 500);
+    }
+
+    // Pick reference anchor: explicit caller coords > user home_address > nothing
+    let biasLat: number | null = referenceLat;
+    let biasLng: number | null = referenceLng;
+    if ((biasLat === null || biasLng === null) && homeAddress) {
+      const homeCoords = await geocodeAddress(homeAddress, apiKey);
+      if (homeCoords) {
+        biasLat = homeCoords.lat;
+        biasLng = homeCoords.lng;
+      }
     }
 
     const qs = new URLSearchParams({ query: placeName, key: apiKey });
-    if (referenceLat !== null && referenceLng !== null && Number.isFinite(referenceLat) && Number.isFinite(referenceLng)) {
-      qs.set('location', `${referenceLat},${referenceLng}`);
-      qs.set('radius', '50000'); // 50km disambiguation radius
+    if (biasLat !== null && biasLng !== null && Number.isFinite(biasLat) && Number.isFinite(biasLng)) {
+      qs.set('location', `${biasLat},${biasLng}`);
+      qs.set('radius', '50000'); // 50km bias radius
     }
 
     const res = await fetch(`${PLACES_TEXT_SEARCH}?${qs.toString()}`);
     if (!res.ok) {
-      return json({ error: `Places API ${res.status}` }, 502);
+      return jsonResponse({ status: 'error', error: `Places API ${res.status}` }, 502);
     }
 
     const data = await res.json();
     const first = data.results?.[0];
     if (!first) {
-      return json({ error: 'No place found' }, 404);
+      return jsonResponse({ status: 'not_found' });
     }
 
     const lat = first.geometry?.location?.lat;
     const lng = first.geometry?.location?.lng;
     if (typeof lat !== 'number' || typeof lng !== 'number') {
-      return json({ error: 'Place result missing coordinates' }, 502);
+      return jsonResponse({ status: 'not_found' });
     }
 
-    const resolvedName = first.name ?? placeName;
+    const resolvedName  = first.name ?? placeName;
+    const resolvedAddr  = first.formatted_address ?? null;
+    const canonicalSlug = slugify(resolvedName);
 
-    // 3. Cache the result
-    const { error: insertErr } = await admin
-      .from('user_places')
-      .insert({
-        user_id,
-        alias,
-        place_name: resolvedName,
+    // If save_to_cache, write BOTH alias rows
+    if (saveToCache) {
+      await writeBothAliases({
+        admin, user_id,
+        spokenAlias: alias,
+        canonicalAlias: canonicalAlias ?? canonicalSlug,
+        placeName: resolvedName,
         lat, lng,
-        radius_meters: radiusOverride,
+        radius: radiusOverride,
       });
-
-    if (insertErr && !insertErr.message.includes('duplicate key')) {
-      console.error('[resolve-place] cache insert failed:', insertErr.message);
-      // Fall through — we still have a valid result to return
+      console.log(`[resolve-place] cached (confirmed) "${placeName}" → ${resolvedName} @ ${lat},${lng}`);
+    } else {
+      console.log(`[resolve-place] fresh (unsaved) "${placeName}" → ${resolvedName} @ ${lat},${lng}`);
     }
 
-    console.log(`[resolve-place] resolved "${placeName}" → ${resolvedName} @ ${lat},${lng}`);
-    return json({
+    return jsonResponse({
+      status: 'ok',
+      source: 'fresh',
       alias,
+      canonical_alias: canonicalSlug,
       place_name: resolvedName,
-      lat, lng,
+      address: resolvedAddr,
+      lat,
+      lng,
       radius_meters: radiusOverride,
-      from_cache: false,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[resolve-place] Error:', msg);
-    return json({ error: msg }, 500);
+    return jsonResponse({ status: 'error', error: msg }, 500);
   }
 });
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+async function geocodeAddress(address: string, apiKey: string): Promise<{ lat: number; lng: number } | null> {
+  try {
+    const qs = new URLSearchParams({ address, key: apiKey });
+    const res = await fetch(`${PLACES_GEOCODE}?${qs.toString()}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const first = data.results?.[0];
+    const lat = first?.geometry?.location?.lat;
+    const lng = first?.geometry?.location?.lng;
+    if (typeof lat === 'number' && typeof lng === 'number') return { lat, lng };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveByAddress(opts: {
+  admin: any;
+  apiKey: string | undefined;
+  user_id: string;
+  placeName: string;
+  alias: string;
+  addressQuery: string;
+  source: 'settings_home' | 'settings_work';
+  radiusOverride: number;
+  saveToCache: boolean;
+  canonicalAlias: string | null;
+}): Promise<Response> {
+  if (!opts.apiKey) {
+    return jsonResponse({ status: 'error', error: 'GOOGLE_PLACES_API_KEY not configured' }, 500);
+  }
+
+  const coords = await geocodeAddress(opts.addressQuery, opts.apiKey);
+  if (!coords) {
+    return jsonResponse({ status: 'not_found' });
+  }
+
+  if (opts.saveToCache) {
+    await writeBothAliases({
+      admin: opts.admin,
+      user_id: opts.user_id,
+      spokenAlias: opts.alias,
+      canonicalAlias: opts.canonicalAlias ?? opts.alias,
+      placeName: opts.addressQuery,
+      lat: coords.lat,
+      lng: coords.lng,
+      radius: opts.radiusOverride,
+    });
+  }
+
+  return jsonResponse({
+    status: 'ok',
+    source: opts.source,
+    alias: opts.alias,
+    place_name: opts.addressQuery,
+    address: opts.addressQuery,
+    lat: coords.lat,
+    lng: coords.lng,
+    radius_meters: opts.radiusOverride,
   });
+}
+
+async function writeBothAliases(opts: {
+  admin: any;
+  user_id: string;
+  spokenAlias: string;
+  canonicalAlias: string;
+  placeName: string;
+  lat: number;
+  lng: number;
+  radius: number;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  // Row A — spoken alias
+  await opts.admin.from('user_places')
+    .upsert(
+      {
+        user_id: opts.user_id,
+        alias: opts.spokenAlias,
+        place_name: opts.placeName,
+        lat: opts.lat, lng: opts.lng,
+        radius_meters: opts.radius,
+        last_used_at: now,
+      },
+      { onConflict: 'user_id,alias' },
+    );
+
+  // Row B — canonical alias (only if different from spoken)
+  if (opts.canonicalAlias && opts.canonicalAlias !== opts.spokenAlias) {
+    await opts.admin.from('user_places')
+      .upsert(
+        {
+          user_id: opts.user_id,
+          alias: opts.canonicalAlias,
+          place_name: opts.placeName,
+          lat: opts.lat, lng: opts.lng,
+          radius_meters: opts.radius,
+          last_used_at: now,
+        },
+        { onConflict: 'user_id,alias' },
+      );
+  }
 }

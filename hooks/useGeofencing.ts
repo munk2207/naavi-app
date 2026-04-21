@@ -150,6 +150,18 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
       return 0;
     }
 
+    // Get user's current position once — used as reference anchor for all
+    // resolve-place calls below so ambiguous names ("Costco") resolve to
+    // the nearby instance instead of whatever Google picks globally.
+    // If GPS is unavailable, resolve-place falls back to home_address.
+    let referenceCoords: { lat: number; lng: number } | null = null;
+    try {
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      referenceCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    } catch (err) {
+      console.log('[geofence-sync] no GPS available — resolve-place will fall back to home_address');
+    }
+
     // Load this user's active location rules
     const { data: rules, error } = await supabase
       .from('action_rules')
@@ -171,8 +183,25 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
       const direction = String(cfg.direction ?? 'arrive');
       if (!placeName) continue;
 
-      // Resolve place → coordinates (Places API + user_places cache)
-      const resolved = await resolvePlace(userId, placeName);
+      // Fast path — if the rule already has baked-in resolved coords (from
+      // the SET_ACTION_RULE intercept / pending-confirmation flow), use them
+      // directly. No resolve-place round-trip needed.
+      const resolvedLat = typeof cfg.resolved_lat === 'number' ? cfg.resolved_lat : null;
+      const resolvedLng = typeof cfg.resolved_lng === 'number' ? cfg.resolved_lng : null;
+      if (resolvedLat !== null && resolvedLng !== null) {
+        regions.push({
+          identifier: rule.id,
+          latitude:  resolvedLat,
+          longitude: resolvedLng,
+          radius:    typeof cfg.radius_meters === 'number' ? cfg.radius_meters : 100,
+          notifyOnEnter: direction !== 'leave',
+          notifyOnExit:  direction === 'leave',
+        });
+        continue;
+      }
+
+      // Fallback — older rules without baked coords. Resolve via Edge Function.
+      const resolved = await resolvePlace(userId, placeName, referenceCoords);
       if (!resolved) {
         console.error(`[geofence-sync] could not resolve "${placeName}" for rule ${rule.id}`);
         continue;
@@ -225,18 +254,28 @@ interface ResolvedPlace {
   radius_meters: number;
 }
 
-async function resolvePlace(userId: string, placeName: string): Promise<ResolvedPlace | null> {
+async function resolvePlace(
+  userId: string,
+  placeName: string,
+  referenceCoords: { lat: number; lng: number } | null,
+): Promise<ResolvedPlace | null> {
   try {
+    const body: Record<string, unknown> = { user_id: userId, place_name: placeName };
+    if (referenceCoords) {
+      body.reference_lat = referenceCoords.lat;
+      body.reference_lng = referenceCoords.lng;
+    }
     const res = await fetch(`${SUPABASE_URL}/functions/v1/resolve-place`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${SUPABASE_ANON}`,
       },
-      body: JSON.stringify({ user_id: userId, place_name: placeName }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) return null;
     const data = await res.json();
+    if (data?.status !== 'ok') return null;
     if (typeof data?.lat !== 'number' || typeof data?.lng !== 'number') return null;
     return {
       lat: data.lat,

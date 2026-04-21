@@ -28,6 +28,16 @@ import type { StorageFile, NavigationResult } from '@/lib/types';
 
 import { isConfirmable, buildActionSummary, SPEECH, type PendingAction } from '@/lib/voice-confirm';
 
+// Endpoints for direct Edge Function calls from the orchestrator (location-rule
+// confirmation flow and resolve-place cache writes).
+const SUPABASE_URL  = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
+const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
+
+// Affirmative / negative patterns for the pending-location confirmation turn.
+// Kept tight so ambiguous replies fall through to the clarification branch.
+const AFFIRMATIVE_RE = /^(yes|yeah|yep|yup|sure|confirm|confirmed|correct|ok|okay|alright|do it|go ahead|set it|please|please do)[.!?]*$/i;
+const NEGATIVE_RE    = /^(no|nope|cancel|never ?mind|stop|forget it|don[']?t)[.!?]*$/i;
+
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'pending_confirm' | 'error';
 
 export interface ConversationTurn {
@@ -51,6 +61,29 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const pendingActionRef = useRef<PendingAction | null>(null);
+
+  // Pending location rule — between the "Found X, shall I set?" turn and the
+  // user's yes/no confirmation. Supports the verified-address-only rule
+  // (see project_naavi_location_verified_address.md).
+  //   originalAction: the SET_ACTION_RULE Claude emitted, kept so we can
+  //                   insert with the original label/action_config/one_shot.
+  //   placeName:      the query that was searched (e.g. "Costco Merivale").
+  //   resolved:       present when resolve-place returned a fresh success;
+  //                   null when the last attempt returned not_found.
+  //   attempts:       1-3. At >3 we bail with "call me back."
+  const pendingLocationRef = useRef<{
+    originalAction: any;
+    placeName: string;
+    resolved: {
+      place_name: string;
+      address?: string;
+      lat: number;
+      lng: number;
+      canonical_alias?: string;
+      radius_meters: number;
+    } | null;
+    attempts: number;
+  } | null>(null);
 
   // Always-current ref — send() reads this so it never uses a stale brief
   const briefRef = useRef(briefItems);
@@ -81,7 +114,181 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     setStatus('thinking');
     setError(null);
 
+    // ── PENDING LOCATION CONFIRMATION (M1 verified-address flow) ──────────────
+    // If there's a pending location rule from the previous turn, handle this
+    // user message as either a confirmation, a cancel, or a clarification.
+    // Skips the Claude round-trip entirely.
+    if (pendingLocationRef.current && supabase) {
+      const pending = pendingLocationRef.current;
+      const msg = userMessage.trim();
+      const isYes = AFFIRMATIVE_RE.test(msg);
+      const isNo  = NEGATIVE_RE.test(msg);
+
+      // Helper — emit a text-only turn and reset status. No cards, no actions.
+      const emitPendingTurn = (speech: string) => {
+        setTurns(prev => [...prev, {
+          userMessage,
+          assistantSpeech: speech,
+          drafts: [], createdEvents: [], deletedEvents: [], savedDocs: [],
+          rememberedItems: [], driveFiles: [], navigationResults: [], listResults: [],
+          globalSearch: undefined,
+          timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
+                   + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
+        }]);
+        setStatus('idle');
+      };
+
+      // Helper — commit the pending rule (used by yes-path AND clarification-memory-hit-path).
+      const commitPending = async (sessionUserId: string, sourceLabel: 'confirmed' | 'memory') => {
+        if (!pending.resolved) return false;
+        const triggerConfig = {
+          ...(pending.originalAction?.trigger_config ?? {}),
+          place_name: pending.resolved.place_name,
+          resolved_lat: pending.resolved.lat,
+          resolved_lng: pending.resolved.lng,
+        };
+        const { error } = await supabase.from('action_rules').insert({
+          user_id:        sessionUserId,
+          trigger_type:   'location',
+          trigger_config: triggerConfig,
+          action_type:    String(pending.originalAction?.action_type ?? 'sms'),
+          action_config:  pending.originalAction?.action_config ?? {},
+          label:          String(pending.originalAction?.label ?? 'Location alert'),
+          one_shot:       pending.originalAction?.one_shot ?? false,
+        });
+        if (error) {
+          console.error('[Orchestrator] pending location insert failed:', error.message);
+          return false;
+        }
+        // Only write to cache on explicit user confirmation (not on memory-hit during clarification).
+        if (sourceLabel === 'confirmed') {
+          await fetch(`${SUPABASE_URL}/functions/v1/resolve-place`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON}` },
+            body: JSON.stringify({
+              user_id: sessionUserId,
+              place_name: pending.placeName,
+              save_to_cache: true,
+              canonical_alias: pending.resolved.canonical_alias,
+            }),
+          }).catch((err) => console.error('[Orchestrator] save-to-cache failed:', err));
+        }
+        try {
+          const { syncGeofencesForUser } = await import('@/hooks/useGeofencing');
+          await syncGeofencesForUser(sessionUserId);
+        } catch (err) {
+          console.error('[Orchestrator] geofence sync after confirmed location rule:', err);
+        }
+        return true;
+      };
+
+      // ── CASE: yes + we have a resolved place → commit
+      if (isYes && pending.resolved) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) {
+          pendingLocationRef.current = null;
+          emitPendingTurn("I'm not signed in. Please sign in and try again.");
+          return;
+        }
+        const ok = await commitPending(session.user.id, 'confirmed');
+        const speech = ok
+          ? `Alert set — ${pending.resolved.place_name}.`
+          : `Couldn't save the rule — something went wrong. Try again?`;
+        pendingLocationRef.current = null;
+        emitPendingTurn(speech);
+        return;
+      }
+
+      // ── CASE: no / cancel → drop and move on
+      if (isNo) {
+        pendingLocationRef.current = null;
+        emitPendingTurn('Cancelled.');
+        return;
+      }
+
+      // ── CASE: clarification — user provided more detail (or a new place name)
+      pending.attempts += 1;
+      if (pending.attempts > 3) {
+        pendingLocationRef.current = null;
+        emitPendingTurn("I couldn't find that. Please check the exact location and call me back.");
+        return;
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        pendingLocationRef.current = null;
+        emitPendingTurn("I'm not signed in. Please sign in and try again.");
+        return;
+      }
+
+      // Combine the original query with the new clarification so we search
+      // for "Costco Merivale" not just "Merivale".
+      const combinedQuery = `${pending.placeName} ${msg}`.trim();
+
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/resolve-place`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON}` },
+          body: JSON.stringify({ user_id: session.user.id, place_name: combinedQuery, save_to_cache: false }),
+        });
+        const data = await res.json();
+
+        if (data?.status === 'ok' && (data.source === 'fresh' || data.source === 'memory' || data.source === 'settings_home' || data.source === 'settings_work')) {
+          pending.placeName = combinedQuery;
+          pending.resolved = {
+            place_name:      data.place_name,
+            address:         data.address,
+            lat:             data.lat,
+            lng:             data.lng,
+            canonical_alias: data.canonical_alias,
+            radius_meters:   data.radius_meters,
+          };
+          pendingLocationRef.current = pending;
+
+          if (data.source === 'memory' || data.source === 'settings_home' || data.source === 'settings_work') {
+            // Already in memory/settings — treat as verified without re-asking.
+            const ok = await commitPending(session.user.id, 'memory');
+            pendingLocationRef.current = null;
+            const sourceText = data.source === 'memory' ? 'from your saved locations' :
+                               data.source === 'settings_home' ? 'from Settings (home)' :
+                               'from Settings (work)';
+            emitPendingTurn(ok
+              ? `${data.place_name} ${sourceText} — I'll alert you when you arrive.`
+              : `Couldn't save the rule — something went wrong.`);
+            return;
+          }
+
+          // Fresh — ask for confirmation.
+          emitPendingTurn(`Found ${data.place_name}${data.address ? ' at ' + data.address : ''}. Shall I set the alert?`);
+          return;
+        }
+
+        if (data?.status === 'personal_unset') {
+          pendingLocationRef.current = null;
+          const which = data.personal === 'work' ? 'work' : 'home';
+          emitPendingTurn(`Please add your ${which} address in Settings first, then try again.`);
+          return;
+        }
+
+        // not_found or error — ask for different input
+        emitPendingTurn(`I couldn't find "${combinedQuery}" near you. Can you try a different street or neighborhood?`);
+        return;
+      } catch (err) {
+        console.error('[Orchestrator] pending location clarification failed:', err);
+        pendingLocationRef.current = null;
+        emitPendingTurn('Could not reach the location service. Try again later.');
+        return;
+      }
+    }
+    // ── end pending location handler ──────────────────────────────────────────
+
     // This turn's cards — collected during processing
+    // Set to a string to override Claude's speech for this turn (used by the
+    // location-rule intercept, where the orchestrator produces the reply).
+    let turnSpeechOverride: string | null = null;
+    // Flag indicating the location intercept ran — skips geofence sync based
+    // on Claude-emitted SET_ACTION_RULE (the intercept handles its own sync).
+    let locationIntercepted = false;
     const turnNav: NavigationResult[] = [];
     const turnDrive: StorageFile[] = [];
     const turnDrafts: NaaviAction[] = [];
@@ -555,6 +762,119 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               }
 
               const triggerType = String(action.trigger_type ?? 'email');
+
+              // ── LOCATION RULE: verified-address-only flow ─────────────────
+              // Intercept the insert. Call resolve-place; branch on outcome.
+              // See project_naavi_location_verified_address.md.
+              if (triggerType === 'location') {
+                const placeName = String((action.trigger_config ?? {}).place_name ?? '').trim();
+                if (!placeName) {
+                  locationIntercepted = true;
+                  turnSpeechOverride = "I didn't catch the place for that alert. Can you say it again?";
+                  continue;
+                }
+                try {
+                  const res = await fetch(`${SUPABASE_URL}/functions/v1/resolve-place`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON}` },
+                    body: JSON.stringify({
+                      user_id: session.user.id,
+                      place_name: placeName,
+                      save_to_cache: false,
+                    }),
+                  });
+                  const data = await res.json();
+
+                  // 1. Memory / Settings hit → insert immediately with resolved coords.
+                  if (data?.status === 'ok' && (data.source === 'memory' || data.source === 'settings_home' || data.source === 'settings_work')) {
+                    const triggerConfig = {
+                      ...(action.trigger_config ?? {}),
+                      place_name: data.place_name,
+                      resolved_lat: data.lat,
+                      resolved_lng: data.lng,
+                    };
+                    const { error: insertErr } = await supabase.from('action_rules').insert({
+                      user_id:        session.user.id,
+                      trigger_type:   'location',
+                      trigger_config: triggerConfig,
+                      action_type:    actionType,
+                      action_config:  actionConfig,
+                      label:          String(action.label ?? 'Location alert'),
+                      one_shot:       action.one_shot ?? false,
+                    });
+                    if (insertErr) {
+                      console.error('[Orchestrator] memory-hit insert failed:', insertErr.message);
+                    } else {
+                      try {
+                        const { syncGeofencesForUser } = await import('@/hooks/useGeofencing');
+                        await syncGeofencesForUser(session.user.id);
+                      } catch (err) {
+                        console.error('[Orchestrator] geofence sync after memory-hit insert:', err);
+                      }
+                    }
+                    locationIntercepted = true;
+                    const sourceText = data.source === 'memory'
+                      ? 'from your saved locations'
+                      : data.source === 'settings_home' ? 'from Settings (home)' : 'from Settings (work)';
+                    turnSpeechOverride = `${data.place_name} ${sourceText} — I'll alert you when you arrive.`;
+                    continue;
+                  }
+
+                  // 2. Fresh resolve → defer to next turn for user confirmation.
+                  if (data?.status === 'ok' && data.source === 'fresh') {
+                    pendingLocationRef.current = {
+                      originalAction: action,
+                      placeName,
+                      resolved: {
+                        place_name:      data.place_name,
+                        address:         data.address,
+                        lat:             data.lat,
+                        lng:             data.lng,
+                        canonical_alias: data.canonical_alias,
+                        radius_meters:   data.radius_meters,
+                      },
+                      attempts: 1,
+                    };
+                    locationIntercepted = true;
+                    turnSpeechOverride = `Found ${data.place_name}${data.address ? ' at ' + data.address : ''}. Shall I set the alert?`;
+                    continue;
+                  }
+
+                  // 3. Personal address unset (home/office without address saved).
+                  if (data?.status === 'personal_unset') {
+                    const which = data.personal === 'work' ? 'work' : 'home';
+                    locationIntercepted = true;
+                    turnSpeechOverride = `Please add your ${which} address in Settings first, then try again.`;
+                    continue;
+                  }
+
+                  // 4. Not found → enter the 3-attempt clarification loop.
+                  if (data?.status === 'not_found') {
+                    pendingLocationRef.current = {
+                      originalAction: action,
+                      placeName,
+                      resolved: null,
+                      attempts: 1,
+                    };
+                    locationIntercepted = true;
+                    turnSpeechOverride = `I couldn't find "${placeName}" near you. Can you try a different street or neighborhood?`;
+                    continue;
+                  }
+
+                  // 5. Unknown error — fall through with a neutral reply.
+                  console.error('[Orchestrator] resolve-place returned unexpected status:', data);
+                  locationIntercepted = true;
+                  turnSpeechOverride = "Something went wrong finding that place. Try again with a street address.";
+                  continue;
+                } catch (err) {
+                  console.error('[Orchestrator] resolve-place fetch failed:', err);
+                  locationIntercepted = true;
+                  turnSpeechOverride = "Couldn't reach the location service. Try again in a moment.";
+                  continue;
+                }
+              }
+
+              // ── Non-location triggers: original insert path ──────────────
               const { error } = await supabase.from('action_rules').insert({
                 user_id:        session.user.id,
                 trigger_type:   triggerType,
@@ -566,18 +886,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               });
               if (error) console.error('[Orchestrator] SET_ACTION_RULE failed:', error.message);
               else console.log('[Orchestrator] SET_ACTION_RULE saved:', action.label);
-
-              // For location rules, register the OS geofence immediately so
-              // the alert is armed without waiting for the next app foreground.
-              // See project_naavi_location_trigger_plan.md Q7 "mobile path".
-              if (!error && triggerType === 'location') {
-                try {
-                  const { syncGeofencesForUser } = await import('@/hooks/useGeofencing');
-                  await syncGeofencesForUser(session.user.id);
-                } catch (err) {
-                  console.error('[Orchestrator] geofence sync after insert failed:', err);
-                }
-              }
             }
           }
         }
@@ -588,6 +896,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       let displaySpeech = response.speech;
       if (!handsfreeRef.current && turnDrafts.some(d => isConfirmable(d))) {
         displaySpeech = displaySpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
+      }
+      // Location rule intercept — always wins over Claude's speech.
+      if (turnSpeechOverride !== null) {
+        displaySpeech = turnSpeechOverride;
       }
       console.log('[Orchestrator] response.speech:', response.speech);
       console.log('[Orchestrator] displaySpeech (for bubble):', displaySpeech);
@@ -609,11 +921,14 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       saveConversationTurn(newTurn).catch(() => {});
 
       // Build final speech — append list items for LIST_READ so Naavi reads them aloud
-      let finalSpeech = response.speech;
-      for (const lr of turnLists) {
-        if (lr.action === 'read' && lr.items && lr.items.length > 0) {
-          const itemsText = lr.items.map((item: string, i: number) => `${i + 1}. ${item}`).join('. ');
-          finalSpeech += ` Here are the items: ${itemsText}.`;
+      // Location intercept takes precedence over Claude's speech (no list-append).
+      let finalSpeech = turnSpeechOverride !== null ? turnSpeechOverride : response.speech;
+      if (turnSpeechOverride === null) {
+        for (const lr of turnLists) {
+          if (lr.action === 'read' && lr.items && lr.items.length > 0) {
+            const itemsText = lr.items.map((item: string, i: number) => `${i + 1}. ${item}`).join('. ');
+            finalSpeech += ` Here are the items: ${itemsText}.`;
+          }
         }
       }
       // Append top GLOBAL_SEARCH hits so they are spoken, with a source
