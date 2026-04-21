@@ -98,6 +98,8 @@ If in doubt, ASK before creating parallel config.
 
 10. **MULTI-USER SAFETY.** Naavi has multiple users (wael.aggan@gmail.com = Wael, heaggan@gmail.com = Huss). Never write code that does `.limit(1)` or "oldest user wins" on tables shared across users (`user_tokens`, `user_settings`, `calendar_events`, `reminders`, `knowledge_fragments`, `lists`). Always resolve the specific user by JWT (mobile app), caller phone number (voice server), or explicit `user_id` in request body (Edge Functions called from voice server).
 
+11. **NEVER RECOMMEND WHEN TO STOP OR WORK.** Do not suggest pausing, resting, stopping for the night, coming back tomorrow, or any pacing based on time of day, day of week, fatigue, or how much work has already been done. The user decides when to work and when to stop — it is their responsibility. Do not act as a human co-worker with wellness concerns. You are an AI machine; behave like one. Recommendations must be based ONLY on technical scope (context drift, unresolved decisions, blockers) — never on the clock or "freshness."
+
 ### WHERE TO START
 
 Read `project_naavi_active_bugs.md` in the memory folder FIRST. It has the current build state, what's working, what's broken, and what to do next.
@@ -230,10 +232,90 @@ All trigger/action rules live in `action_rules` table. The legacy `email_watch_r
 
 - Writes: `naavi-chat` and `useOrchestrator` (mobile) insert into `action_rules` with `trigger_type='email'` for email alerts.
 - Reads: `evaluate-rules` Edge Function (cron every minute) iterates `action_rules` and fires matching actions via `send-sms` / `send-email`.
-- Trigger types: `email`, `time`, `calendar` (see `evaluate-rules` source for trigger_config shape).
+- Trigger types: `email`, `time`, `calendar`, `weather` (see `evaluate-rules` source for trigger_config shape).
 - Action types: `sms`, `whatsapp`, `email`.
 
 Do NOT reintroduce separate tables like `email_watch_rules`. Extend `action_rules` trigger types instead.
+
+### ALERT FAN-OUT — self-alerts always quadruple-channel
+
+Every alert where the destination is the user themselves MUST fire on **all four** channels: SMS + WhatsApp + Email + Push. Third-party alerts (alerts sent to someone other than the user) fire on SMS + WhatsApp only because we don't have email/push tokens for non-users.
+
+**Why:** SMS requires cell reception. A senior on WiFi-only (traveling, international, weak signal) silently misses critical alerts. Multi-channel guarantees at least one path lands. Stability-over-cost applies — quadrupled messaging cost is acceptable; missed alerts are not.
+
+**Where implemented:** `fireAction()` in `supabase/functions/evaluate-rules/index.ts` handles fan-out for `action_rules` triggers. `check-reminders` Edge Function does its own fan-out for the `reminders` table (currently SMS + WhatsApp + Push; email still to add).
+
+**Self-alert detection:** `action_config.to_phone` matches user's `user_settings.phone` → self-alert. Otherwise → third-party.
+
+**Graceful degradation:** missing phone/email/push token → skip that channel, fire the rest. Never block.
+
+Do NOT add per-rule channel toggles. Channel choice is not a user preference — it's a reliability guarantee. Full design in `project_naavi_alert_fanout.md` memory.
+
+### DRIVE STRUCTURE (Session 19 restructure)
+
+Every file Naavi creates in the user's Google Drive lives under `MyNaavi/`:
+
+```
+MyNaavi/
+├── Documents/    — email attachments, harvested into by-type subfolders
+│   ├── invoice/, warranty/, receipt/, contract/, medical/,
+│   ├── statement/, tax/, ticket/, notice/, calendar/, other/
+├── Briefs/       — morning brief saves (missed morning calls)
+├── Notes/        — SAVE_TO_DRIVE voice action + Drive Notes
+├── Transcripts/  — voice-call recording summaries
+└── Lists/        — voice-managed list Docs (mobile-side routing ships with next AAB)
+```
+
+`save-to-drive` accepts `category: 'transcript' | 'brief' | 'note' | 'list'` and lazily creates the subfolder on first use. Calling without `category` falls back to the legacy MyNaavi-root behaviour (backwards compatible).
+
+**Every file written under `MyNaavi/*/` (except Lists) gets a row in `documents` with `source = category`** so Global Search's `drive` adapter covers them. Lists are excluded from `documents` because the `lists` table + `lists` adapter already cover them.
+
+### DOCUMENT TYPES (email_actions + documents, 11 values)
+
+`invoice | warranty | receipt | contract | medical | statement | tax | ticket | notice | calendar | other`
+
+- `invoice` — bill awaiting payment.
+- `receipt` — proof of payment completed.
+- `warranty` — coverage with an expiry date.
+- `contract` — signed agreement.
+- `medical` — lab result, prescription, referral.
+- `statement` — monthly account summary (bank, credit card, utility).
+- `tax` — T4, CRA correspondence, tax-year document.
+- `ticket` — travel or event ticket, boarding pass.
+- `notice` — government or institutional notice (gov.ca, condo AGM).
+- `calendar` — recurring schedule listing many dated events (school year, sports season).
+- `other` — documentary but none of the above.
+
+When `extract-email-actions` or `extract-document-text` run, Claude Haiku classifies and stores this on the row. `harvest-attachment` uses it to pick the destination folder. `extract-document-text` also moves the Drive file to the correct `Documents/<type>/` subfolder when content-based classification differs from the harvest-time guess (classify-once rule: only reclassifies if current type is `other` or NULL).
+
+### GLOBAL SEARCH — 10 adapters (all covered)
+
+Every content repo Robert has is searchable via `global-search` Edge Function:
+
+- `knowledge` — REMEMBER items, pgvector embeddings (identifier-shape queries skip this)
+- `rules` — `action_rules`
+- `sent_messages` — SMS / WhatsApp / email Naavi sent
+- `contacts` — Google People API (live, not the local `contacts` table)
+- `lists` — `lists` table + Drive doc item search
+- `calendar` — Google Calendar API (live, reads ALL user calendars including subscribed external ones)
+- `gmail` — tier-1 only, `ambient` signal_strength excluded
+- `email_actions` — structured actions Claude extracted (bills, appointments, renewals, etc.)
+- `drive` — hybrid: `documents` table (harvested, rich metadata) + Google Drive live `fullText`
+- `reminders` — one-off time-based reminders (added Session 19; was the last gap)
+
+Query normalization happens at the handler level via `query_expansion.ts::expandQuery`: lowercase, plural/singular stemming (`payments` → `payment`), synonym map (bill→pay, meeting→appointment, doctor→appointment, invoice→pay, etc.), and email-username expansion (`david@gmail.com` also searches `david`). ILIKE adapters receive a `queryVariants: string[]` and match ANY variant. Calendar and knowledge adapters use their own morphology (Google `q=`, embeddings).
+
+### ATTACHMENT + OCR PIPELINE (harvest → extract → classify → route)
+
+New in Session 19, all server-side, no AAB:
+
+1. **`sync-gmail`** syncs tier-1 emails (7-day window, 100 msgs, 3000-char body cap, 3-tier `signal_strength`).
+2. **Fire-and-forget to `extract-email-actions`** — Haiku classifies action_type AND document_type/reference/expiry.
+3. **Fire-and-forget to `harvest-attachment`** — downloads PDF/JPG/PNG/DOCX/XLSX (10 KB – 25 MB range; signature-image filter skips `imageNNN.*` pattern + images < 100 KB), uploads to `MyNaavi/Documents/<type>/`, writes `documents` row with idempotency guard on `(user_id, gmail_message_id, file_name)`.
+4. **Fire-and-forget to `extract-document-text`** — for PDFs: Claude Haiku reads text layer directly. For scanned PDFs or JPG/PNG images: Google Vision `DOCUMENT_TEXT_DETECTION` → Haiku classifies. Saves `extracted_summary`, `extracted_*` fields, and `extracted_text` + `ocr_sidecar_drive_file_id` when Vision ran. Sidecar `.ocr.txt` file uploaded to same Drive folder as the source.
+5. **Classify-once folder routing** — if content-type classification differs from harvest-time guess and current type is `other`/NULL, the Drive file moves to the correct `Documents/<type>/` subfolder.
+
+`GOOGLE_VISION_API_KEY` is a Supabase secret. `_shared/institutional_domains.ts` is a curated list of trusted Canadian domains used by `sync-gmail` for tier-1 classification.
 
 ### MULTI-USER ARCHITECTURE (do not break)
 

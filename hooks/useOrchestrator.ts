@@ -554,9 +554,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                 }
               }
 
+              const triggerType = String(action.trigger_type ?? 'email');
               const { error } = await supabase.from('action_rules').insert({
                 user_id:        session.user.id,
-                trigger_type:   String(action.trigger_type ?? 'email'),
+                trigger_type:   triggerType,
                 trigger_config: action.trigger_config ?? {},
                 action_type:    actionType,
                 action_config:  actionConfig,
@@ -565,6 +566,18 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               });
               if (error) console.error('[Orchestrator] SET_ACTION_RULE failed:', error.message);
               else console.log('[Orchestrator] SET_ACTION_RULE saved:', action.label);
+
+              // For location rules, register the OS geofence immediately so
+              // the alert is armed without waiting for the next app foreground.
+              // See project_naavi_location_trigger_plan.md Q7 "mobile path".
+              if (!error && triggerType === 'location') {
+                try {
+                  const { syncGeofencesForUser } = await import('@/hooks/useGeofencing');
+                  await syncGeofencesForUser(session.user.id);
+                } catch (err) {
+                  console.error('[Orchestrator] geofence sync after insert failed:', err);
+                }
+              }
             }
           }
         }

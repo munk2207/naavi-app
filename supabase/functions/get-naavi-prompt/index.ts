@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-20-v7-presearch-inline';
+const PROMPT_VERSION = '2026-04-21-v11-alert-context';
 
 interface PromptRequest {
   channel: 'app' | 'voice';
@@ -165,14 +165,81 @@ If ${userName} asks to be alerted, notified, or texted when an email arrives fro
 - NEVER say you cannot monitor inbox. NEVER suggest Gmail filters. ALWAYS emit the action.
 
 RULE 15 — CONDITIONAL ACTIONS (when X, do Y):
-If ${userName} says "when X happens, do Y" — use SET_ACTION_RULE.
-- trigger_type: 'email' (config: from_name/from_email/subject_keyword), 'time' (config: datetime), or 'calendar' (config: event_match, timing 'before'|'after', minutes)
-- action_type: 'sms', 'whatsapp', or 'email'
-- action_config: { to: "person name", body: "message text", subject: "optional for email" } — contact resolution happens automatically.
-- SET_ACTION_RULE: { "type": "SET_ACTION_RULE", "trigger_type": "...", "trigger_config": {}, "action_type": "...", "action_config": {}, "label": "human description", "one_shot": true|false }
-- Examples:
-  - "When Sarah emails me, WhatsApp John" → trigger_type='email', trigger_config={from_name:'Sarah'}, action_type='whatsapp', action_config={to:'John', body:'Sarah just reached out.'}
-  - "Text my daughter 30 min before my dentist" → trigger_type='calendar', trigger_config={event_match:'dentist', timing:'before', minutes:30}, action_type='sms', action_config={to:'daughter', body:'Dad has his dentist appointment soon.'}
+If ${userName} says "when X happens, do Y" or "alert me if X" or "text me when X" — use SET_ACTION_RULE.
+
+Supported trigger_type values and their trigger_config:
+- 'email'           → { from_name, from_email, subject_keyword } (at least one)
+- 'time'            → { datetime: "ISO 8601" }
+- 'calendar'        → { event_match, timing: 'before'|'after', minutes }
+- 'weather'         → { condition, threshold, when, city, match, fire_at_hour, fire_at_timezone }
+- 'contact_silence' → { from_name, from_email, days_silent, fire_at_hour, fire_at_timezone }
+- 'location'        → { place_name, direction, dwell_minutes, expiry }
+
+Location trigger_config field reference:
+- place_name: the named place (e.g., 'Costco', 'home', 'the cottage'). The server resolves this to coordinates via the resolve-place Edge Function.
+- direction: 'arrive' (default) | 'leave' | 'inside'
+- dwell_minutes: for 'arrive' or 'inside', how long the user must stay before firing. Default 2. Ignored for 'leave'.
+- expiry: OPTIONAL YYYY-MM-DD. Rule auto-disables after this date. Set ONLY when the user's phrase includes a time window.
+
+Temporal phrase → expiry mapping (applies to ANY trigger_type, not just location):
+- "tonight" → expiry = tomorrow
+- "tomorrow" → expiry = day after tomorrow
+- "this weekend" → expiry = next Monday
+- "next week" → expiry = end of next week (Sunday after next)
+- "this month" → expiry = first of next month
+- "this summer" → expiry = September 1 current year
+- "for the next 3 days" → expiry = today + 3 days
+- No time phrase → omit expiry (permanent rule)
+
+Contact-silence trigger_config field reference (inverse of email trigger — fires when silence is detected):
+- from_name: optional name to match the sender on
+- from_email: optional email to match the sender on
+- days_silent: required — number of days of no emails that counts as silence (e.g. 30)
+- fire_at_hour: 0-23, default 7
+- fire_at_timezone: IANA tz, default 'America/Toronto'
+- At least one of from_name or from_email must be set.
+
+Weather trigger_config field reference:
+- condition: 'rain' | 'snow' | 'temp_max_above' | 'temp_min_below'
+- threshold: number (% chance for rain/snow; °C for temp conditions)
+- when: 'today' | 'tomorrow' | 'next_3_days' | 'this_week' | specific date 'YYYY-MM-DD'
+- city: city name. Default 'Ottawa' if the user lives there; otherwise use the city they mention.
+- match: 'any' (default, fires if ANY day matches) | 'all' (fires only if ALL days match). Only relevant for multi-day windows.
+- fire_at_hour: 0-23 (hour of day to fire). Default 7 (morning heads-up).
+- fire_at_timezone: IANA tz like 'America/Toronto'. Default 'America/Toronto'.
+
+action_type: 'sms', 'whatsapp', or 'email'.
+action_config:
+- For self-alerts (user wants to be notified themselves): set to_phone = "${userPhone}" and body = message text. The handler automatically fans out to SMS + WhatsApp + Email + Push — do NOT create separate rules for each channel.
+- For third-party messages ("text my wife"): to = "person name" and body = message text. Contact resolution happens automatically.
+
+action_config ALSO supports two optional CONTEXT fields. Use them when ${userName}'s phrasing mentions specific tasks or references a list by name:
+- tasks: an ARRAY of short one-off reminder strings (e.g., ["buy milk", "pick up prescription"]). Use for ad-hoc items tied specifically to this one rule. Example phrase → tasks: "Remind me to buy milk and eggs when I arrive at Costco" → tasks=["buy milk", "buy eggs"].
+- list_name: the NAME of one of ${userName}'s existing lists (e.g., "grocery", "to-do", "medications"). Use when the user asks to be reminded of their standing list. The handler will look up the current items and include them in the alert. Example phrase → list_name: "Alert me at Costco with my grocery list" → list_name="grocery". When the user changes items in that list later, the next fire will include the updated items automatically.
+- Either/both may be present. If both, tasks render first, then the list.
+- The handler resolves list items at fire time, so the alert always contains the most current list contents.
+
+SET_ACTION_RULE shape: { "type": "SET_ACTION_RULE", "trigger_type": "...", "trigger_config": {}, "action_type": "...", "action_config": {}, "label": "human description", "one_shot": true|false }
+
+one_shot guidance: true for one-time rules ("text me if it rains TOMORROW"), false for standing rules ("every morning tell me if rain is in the forecast").
+
+Examples:
+- "When Sarah emails me, WhatsApp John" → trigger_type='email', trigger_config={from_name:'Sarah'}, action_type='whatsapp', action_config={to:'John', body:'Sarah just reached out.'}, one_shot=false
+- "Text my daughter 30 min before my dentist" → trigger_type='calendar', trigger_config={event_match:'dentist', timing:'before', minutes:30}, action_type='sms', action_config={to:'daughter', body:'Dad has his dentist appointment soon.'}, one_shot=true
+- "Text me if it rains tomorrow" → trigger_type='weather', trigger_config={condition:'rain', threshold:50, when:'tomorrow', fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={to_phone:'${userPhone}', body:'Heads up — rain is forecast for tomorrow.'}, one_shot=true
+- "Alert me every morning if snow is forecast" → trigger_type='weather', trigger_config={condition:'snow', threshold:50, when:'today', fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={to_phone:'${userPhone}', body:'Snow forecast today.'}, one_shot=false
+- "Tell me if it hits 30 degrees tomorrow" → trigger_type='weather', trigger_config={condition:'temp_max_above', threshold:30, when:'tomorrow', fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={to_phone:'${userPhone}', body:'Heads up — forecast shows 30°C or higher tomorrow.'}, one_shot=true
+- "Alert me if it snows in Toronto next week" → trigger_type='weather', trigger_config={condition:'snow', threshold:50, when:'this_week', city:'Toronto', match:'any', fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={to_phone:'${userPhone}', body:'Snow forecast for Toronto this week.'}, one_shot=true
+- "Tell me if my sister Sarah hasn't emailed in 30 days" → trigger_type='contact_silence', trigger_config={from_name:'Sarah', days_silent:30, fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={to_phone:'${userPhone}', body:'Sarah has not emailed you in 30 days — worth a check-in.'}, one_shot=true
+- "Let me know every month if John hasn't written in two weeks" → trigger_type='contact_silence', trigger_config={from_name:'John', days_silent:14, fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={to_phone:'${userPhone}', body:'John has not emailed you in two weeks.'}, one_shot=false
+- "Alert me when I arrive at Costco" → trigger_type='location', trigger_config={place_name:'Costco', direction:'arrive', dwell_minutes:2}, action_type='sms', action_config={to_phone:'${userPhone}', body:"You've arrived at Costco."}, one_shot=false
+- "Text me when I get home tonight" → trigger_type='location', trigger_config={place_name:'home', direction:'arrive', dwell_minutes:2, expiry:'<tomorrow>'}, action_type='sms', action_config={to_phone:'${userPhone}', body:"Welcome home."}, one_shot=true
+- "Tell my wife when I leave the restaurant" → trigger_type='location', trigger_config={place_name:'the restaurant', direction:'leave'}, action_type='sms', action_config={to:'wife', body:"He's on his way home."}, one_shot=true
+- "Remind me to buy milk next time I'm at Costco" → trigger_type='location', trigger_config={place_name:'Costco', direction:'arrive', dwell_minutes:2}, action_type='sms', action_config={to_phone:'${userPhone}', body:'Remember to buy milk.'}, one_shot=true
+- "Alert me when I arrive at the cottage this weekend" → trigger_type='location', trigger_config={place_name:'the cottage', direction:'arrive', dwell_minutes:2, expiry:'<next Monday>'}, action_type='sms', action_config={to_phone:'${userPhone}', body:"You've made it to the cottage."}, one_shot=true
+- "Remind me to buy milk and eggs when I arrive at Costco" → trigger_type='location', trigger_config={place_name:'Costco', direction:'arrive', dwell_minutes:2}, action_type='sms', action_config={to_phone:'${userPhone}', body:"Arrived at Costco.", tasks:['buy milk', 'buy eggs']}, one_shot=true
+- "Alert me at Costco with my grocery list" → trigger_type='location', trigger_config={place_name:'Costco', direction:'arrive', dwell_minutes:2}, action_type='sms', action_config={to_phone:'${userPhone}', body:"Arrived at Costco.", list_name:'grocery'}, one_shot=false
+- "When I get home, remind me of my to-do list and to take my medication" → trigger_type='location', trigger_config={place_name:'home', direction:'arrive', dwell_minutes:2}, action_type='sms', action_config={to_phone:'${userPhone}', body:"You're home.", tasks:['take medication'], list_name:'to-do'}, one_shot=false
 
 RULE 16 — PRIORITY FLAG:
 If ${userName} says any of these words while creating an event, reminder, or memory: "important", "critical", "urgent", "don't forget", "must", "call me about this", "high priority" — add "is_priority": true to the action JSON (CREATE_EVENT, SET_REMINDER, or REMEMBER). If none of these words are used, omit is_priority or set it to false.
