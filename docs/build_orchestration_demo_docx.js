@@ -116,6 +116,27 @@ const quote = (t) => new Paragraph({
   spacing: { before: 120, after: 120 },
 });
 
+// Dialog turn — speaker label on its own line above an italic quote block.
+// Used for the extended scenarios section.
+const dialogTurn = (speaker, line, speakerColor) => {
+  const speakerLabel = new Paragraph({
+    children: [new TextRun({ text: speaker, bold: true, color: speakerColor ?? '2E5A8F' })],
+    spacing: { before: 180, after: 30 },
+  });
+  const lineQuote = new Paragraph({
+    style: 'Quote',
+    children: [italic(line)],
+    spacing: { before: 0, after: 60 },
+  });
+  return [speakerLabel, lineQuote];
+};
+
+const stagingNote = (text) => new Paragraph({
+  children: [new TextRun({ text: text, italics: true, color: '666666' })],
+  spacing: { before: 160, after: 160 },
+  indent: { left: 360 },
+});
+
 const hr = () => new Paragraph({
   spacing: { before: 160, after: 160 },
   border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'CCCCCC', space: 1 } },
@@ -397,6 +418,179 @@ children.push(hr());
 children.push(h2('Why this is the product, not a feature'));
 children.push(p([text('A calendar app tells you what\u2019s next. An email app tells you what came in. A weather app tells you whether to bring an umbrella.')]));
 children.push(p([text('MyNaavi reads them all, reasons across them, and acts in the world on the user\u2019s behalf — via SMS, voice, email, and push — so that the senior using it never has to stitch any of it together manually.')]));
+
+// ─── Extended scenarios ─────────────────────────────────────────────────────
+children.push(hr());
+children.push(h2('Extended scenarios — worked dialogs'));
+children.push(p([text('Each scene below is a complete end-to-end example drawn from the MyNaavi home page. Where the 15 commands above show one orchestration at a time, these show Naavi handling an entire situation across multiple services and multiple turns.')]));
+children.push(hr());
+
+// Colour codes for dialog turns
+const ROBERT_COLOUR = '1F3A5F';   // navy
+const NAAVI_COLOUR  = '2E8B57';   // green
+
+const scenarios = [
+  {
+    title: 'Scenario A — Three things on the drive home',
+    setup: "Robert is driving home from his granddaughter Layla\u2019s hockey tournament. The radio is on. Layla, from the back seat, mentions three things in a row \u2014 her hockey practice Tuesday, the Christmas gift she\u2019s been hinting at, and the broken hinge on her dollhouse. Rather than stop the car or pull out his phone, Robert speaks.",
+    dialog: [
+      { speaker: 'Robert:', colour: ROBERT_COLOUR, line: '"Naavi, put Layla\u2019s hockey practice Tuesday at six on the calendar, remind me about her Christmas gift in November, and remember the dollhouse door."' },
+      { speaker: 'Naavi:',  colour: NAAVI_COLOUR, line: '"Done. Hockey practice Tuesday at six is on your calendar. I\u2019ll remind you about Layla\u2019s Christmas gift in November. And I\u2019ve saved a note about the dollhouse door for your next visit."' },
+    ],
+    staging: 'The following Tuesday at 5:30 PM, Robert\u2019s phone rings.',
+    dialogAfter: [
+      { speaker: 'Naavi (voice call):', colour: NAAVI_COLOUR, line: '"Robert, Layla\u2019s hockey practice is in thirty minutes."' },
+    ],
+    closing: 'Robert\u2019s coat is already on by the time he remembers why.',
+    plugs: [
+      'Voice input (Twilio voice call OR in-app hands-free)',
+      'Claude Sonnet parses ONE sentence into THREE distinct actions',
+      'Google Calendar (CREATE_EVENT for Tuesday practice)',
+      'Supabase reminders (SET_REMINDER for November)',
+      'Supabase knowledge_fragments (REMEMBER "dollhouse door")',
+      'evaluate-rules cron (calendar trigger, 30-minute pre-event)',
+      'Twilio voice (Tuesday reminder call)',
+    ],
+    replaces: 'Three phone-unlock moments. Three apps. Three places to forget to check.',
+  },
+  {
+    title: 'Scenario B \u2014 The email Robert meant to deal with',
+    setup: 'Thursday afternoon, an email from the insurance company lands in Robert\u2019s inbox about an upcoming renewal. He intends to handle it that evening, then forgets.',
+    staging: 'Friday 8 AM \u2014 Naavi\u2019s morning brief call:',
+    dialog: [
+      { speaker: 'Naavi (voice):', colour: NAAVI_COLOUR, line: '"Good morning, Robert. Ottawa is four degrees today, rain after lunch. Before I go \u2014 your insurance renewal is due in fifteen days. Would you like a reminder three days before?"' },
+      { speaker: 'Robert:',        colour: ROBERT_COLOUR, line: '"Yes."' },
+      { speaker: 'Naavi:',         colour: NAAVI_COLOUR, line: '"Done. I\u2019ll call you three days before."' },
+    ],
+    closing: 'One loose thread tied, without Robert having to hold it.',
+    plugs: [
+      'sync-gmail (nightly / hourly Gmail sync, tier-1 only)',
+      'Claude Haiku (extract-email-actions \u2014 action_type=\u2018renewal\u2019 + expiry_date)',
+      'Supabase email_actions (structured renewal row)',
+      'trigger-morning-call + Twilio voice (morning brief)',
+      'Brief composer pulls email_actions with expiring dates',
+      'Claude Sonnet weaves weather + emails + renewals into one natural paragraph',
+      'action_rules (creates a new time trigger from Robert\u2019s "yes")',
+      'Three days before: SMS + WhatsApp + Email + Push fan-out',
+    ],
+    replaces: 'Opening the email. Reading the small print. Remembering. Setting a calendar nag yourself.',
+  },
+  {
+    title: 'Scenario C \u2014 The brakes that started complaining',
+    setup: 'Robert notices a slow complaint from the car\u2019s brakes. He can\u2019t remember when they were last serviced.',
+    dialog: [
+      { speaker: 'Robert:', colour: ROBERT_COLOUR, line: '"Naavi, when did I last get the brakes done?"' },
+      { speaker: 'Naavi:',  colour: NAAVI_COLOUR, line: '"November last year at Canadian Tire. The service email said the brake job is under warranty until next November."' },
+      { speaker: 'Robert:', colour: ROBERT_COLOUR, line: '"Email the service desk, ask if they can take me Thursday afternoon."' },
+      { speaker: 'Naavi:',  colour: NAAVI_COLOUR, line: '"I\u2019ve drafted: \u2018Hi, could you please book me in for a brake check Thursday afternoon? Thanks, Robert.\u2019 Say yes to send, or tell me what to change."' },
+      { speaker: 'Robert:', colour: ROBERT_COLOUR, line: '"Yes."' },
+      { speaker: 'Naavi:',  colour: NAAVI_COLOUR, line: '"Sent."' },
+    ],
+    staging: 'Next morning \u2014 Naavi\u2019s morning brief call:',
+    dialogAfter: [
+      { speaker: 'Naavi (voice):', colour: NAAVI_COLOUR, line: '"Before I go \u2014 Canadian Tire replied. Thursday at 2 PM works. Want it on your calendar with a reminder?"' },
+      { speaker: 'Robert:',        colour: ROBERT_COLOUR, line: '"Yes."' },
+    ],
+    plugs: [
+      'Global Search (gmail + knowledge + email_actions)',
+      'Claude Sonnet reasons across sources to compose answer',
+      'Attachment harvest pipeline had pulled the original Canadian Tire invoice PDF (OCR\u2019d, stored with date + warranty expiry)',
+      'DRAFT_MESSAGE action (Claude composes email draft in Robert\u2019s voice)',
+      'Voice-confirm flow (reads back + waits for "yes")',
+      'Gmail send (send-email-action)',
+      'Inbound reply captured by next sync-gmail',
+      'Morning brief picks up the reply via tier-1 sender recognition',
+      'Final "yes" triggers CREATE_EVENT + calendar-based reminder',
+    ],
+    replaces: 'Rummaging through email. Writing a service email in under 30 seconds. Remembering to check tomorrow. Putting the appointment on the calendar.',
+  },
+  {
+    title: 'Scenario D \u2014 The doctor\u2019s visit, held for Robert',
+    setup: 'Robert is in the waiting room of his doctor\u2019s office. The hardest part of the visit won\u2019t be the visit \u2014 it\u2019s remembering the five things the doctor will say afterward.',
+    dialog: [
+      { speaker: 'Robert (via Hey Google on his phone):', colour: ROBERT_COLOUR, line: '"Hey Google, call Naavi."' },
+    ],
+    staging: '(The phone dials Naavi. She answers \u2014 it\u2019s a live voice call.)',
+    dialogAfter: [
+      { speaker: 'Naavi:', colour: NAAVI_COLOUR, line: '"Hello, Robert."' },
+      { speaker: 'Robert:', colour: ROBERT_COLOUR, line: '"Record my visit."' },
+      { speaker: 'Naavi:', colour: NAAVI_COLOUR, line: '"Recording your visit. I\u2019ll save and summarise when you say stop."' },
+    ],
+    staging2: 'Robert sets the phone on the table. The doctor speaks during the appointment:',
+    dialog2: [
+      { speaker: 'Doctor:', colour: '555555', line: '"Stop the atorvastatin for now. Retest the liver panel in three weeks. Book a follow-up for May 12. And I\u2019d like you to see Dr. Chen about the thyroid \u2014 I\u2019ll send the referral."' },
+    ],
+    staging3: 'After the appointment:',
+    dialog3: [
+      { speaker: 'Robert:', colour: ROBERT_COLOUR, line: '"Naavi, stop."' },
+      { speaker: 'Naavi:',  colour: NAAVI_COLOUR, line: '"Recording saved."' },
+    ],
+    byTheTimeBlock: [
+      'Full transcript saved to his Drive, searchable.',
+      'Medication change on his calendar with reminders for each dose.',
+      'Liver panel lab appointment scheduled for three weeks out.',
+      'Follow-up booked for May 12.',
+      'Referral email to Dr. Chen drafted and ready to send.',
+      'Visit summary email in Robert\u2019s inbox.',
+    ],
+    staging4: 'Months later:',
+    dialog4: [
+      { speaker: 'Robert:', colour: ROBERT_COLOUR, line: '"Naavi, what did my doctor say about the thyroid?"' },
+      { speaker: 'Naavi:',  colour: NAAVI_COLOUR, line: '"At your April 21 visit, Dr. Patel said he\u2019d like you to see Dr. Chen about thyroid concerns and sent the referral."' },
+    ],
+    plugs: [
+      'Hey Google integration (system-level voice activation)',
+      'Twilio voice call (inbound, phone-to-Naavi)',
+      'Audio recording (Twilio record API)',
+      'AssemblyAI transcription',
+      'Claude Sonnet extracts: medication change, lab booking, follow-up, referral, summary',
+      'Google Drive (save transcript + summary)',
+      'Google Calendar (3 events: medication stop, lab, follow-up)',
+      'Supabase reminders (medication dose reminders)',
+      'DRAFT_MESSAGE + voice-confirm flow (referral email)',
+      'Gmail send',
+      'Gmail to Robert (visit summary)',
+      'Supabase documents + knowledge_fragments (transcript indexed for future search)',
+      'Global Search (months later, recall path)',
+    ],
+    replaces: 'Trying to remember what the doctor said. Scribbled notes. Calling your spouse for the details. Forgetting to book the follow-up. Losing the referral in a stack of papers.',
+  },
+];
+
+for (const sc of scenarios) {
+  children.push(h3(sc.title));
+  children.push(p([bold('Setup: '), text(sc.setup)]));
+  children.push(p([bold('Dialog:')]));
+
+  const renderTurns = (turns) => {
+    for (const t of turns) {
+      for (const blk of dialogTurn(t.speaker, t.line, t.colour)) children.push(blk);
+    }
+  };
+
+  if (sc.dialog) renderTurns(sc.dialog);
+  if (sc.staging) children.push(stagingNote(sc.staging));
+  if (sc.dialogAfter) renderTurns(sc.dialogAfter);
+  if (sc.staging2) children.push(stagingNote(sc.staging2));
+  if (sc.dialog2) renderTurns(sc.dialog2);
+  if (sc.staging3) children.push(stagingNote(sc.staging3));
+  if (sc.dialog3) renderTurns(sc.dialog3);
+  if (sc.byTheTimeBlock) {
+    children.push(p([bold('By the time Robert reaches his car:')]));
+    for (const item of sc.byTheTimeBlock) children.push(bullet([text(item)]));
+  }
+  if (sc.staging4) children.push(stagingNote(sc.staging4));
+  if (sc.dialog4) renderTurns(sc.dialog4);
+
+  if (sc.closing) children.push(p([italic(sc.closing)]));
+  children.push(labelPara('Services touched', sc.plugs).flat()[0]);
+  for (const plug of sc.plugs) children.push(bullet([italic(plug)]));
+  if (sc.replaces) children.push(labelBlock('What it replaces', sc.replaces));
+  children.push(hr());
+}
+
+children.push(h2('Why these four scenarios matter together'));
+children.push(p([text('Each scenario touches 5\u201312 services in sequence. Each one involves Naavi doing something the user explicitly did not do \u2014 she noticed, remembered, drafted, asked back for confirmation, followed up a day later, or surfaced a fact months after the fact. That is the product: orchestration that unfolds across time, not just across tools.')]));
 
 // ─── Build + write ───────────────────────────────────────────────────────────
 const doc = new Document({

@@ -275,3 +275,175 @@ Gmail (pharmacy emails) → attachment harvest (prescription PDFs) → Claude Ha
 A calendar app tells you what's next. An email app tells you what came in. A weather app tells you whether to bring an umbrella.
 
 MyNaavi reads them all, reasons across them, and acts in the world on the user's behalf — via SMS, voice, email, and push — so that the senior using it never has to stitch any of it together manually.
+
+---
+
+## Extended scenarios — worked dialogs
+
+Each scene below is a complete end-to-end example drawn from the MyNaavi home page. Where the 15 commands above show **one** orchestration at a time, these show Naavi handling an entire situation across multiple services and multiple turns.
+
+---
+
+### Scenario A — Three things on the drive home
+
+**Setup:** Robert is driving home from his granddaughter Layla's hockey tournament. The radio is on. Layla, from the back seat, mentions three things in a row — her hockey practice Tuesday, the Christmas gift she's been hinting at, and the broken hinge on her dollhouse. Rather than stop the car or pull out his phone, Robert speaks.
+
+**Dialog:**
+
+> **Robert:** *"Naavi, put Layla's hockey practice Tuesday at six on the calendar, remind me about her Christmas gift in November, and remember the dollhouse door."*
+>
+> **Naavi:** *"Done. Hockey practice Tuesday at six is on your calendar. I'll remind you about Layla's Christmas gift in November. And I've saved a note about the dollhouse door for your next visit."*
+
+**The following Tuesday at 5:30 PM, Robert's phone rings.**
+
+> **Naavi (voice call):** *"Robert, Layla's hockey practice is in thirty minutes."*
+
+Robert's coat is already on by the time he remembers why.
+
+**Services touched:**
+- Voice input (Twilio voice call OR in-app hands-free)
+- Claude Sonnet parses ONE sentence into THREE distinct actions
+- Google Calendar (CREATE_EVENT for Tuesday practice)
+- Supabase `reminders` (SET_REMINDER for November)
+- Supabase `knowledge_fragments` (REMEMBER "dollhouse door")
+- `evaluate-rules` cron (calendar trigger, 30-minute pre-event)
+- Twilio voice (Tuesday reminder call)
+
+**What it replaces:** Three phone-unlock moments. Three apps. Three places to forget to check.
+
+---
+
+### Scenario B — The email Robert meant to deal with
+
+**Setup:** Thursday afternoon, an email from the insurance company lands in Robert's inbox about an upcoming renewal. He intends to handle it that evening, then forgets.
+
+**Dialog:**
+
+**Friday 8 AM — Naavi's morning brief call:**
+
+> **Naavi (voice):** *"Good morning, Robert. Ottawa is four degrees today, rain after lunch. Before I go — your insurance renewal is due in fifteen days. Would you like a reminder three days before?"*
+>
+> **Robert:** *"Yes."*
+>
+> **Naavi:** *"Done. I'll call you three days before."*
+
+One loose thread tied, without Robert having to hold it.
+
+**Services touched:**
+- `sync-gmail` (nightly / hourly Gmail sync, tier-1 only)
+- Claude Haiku (`extract-email-actions` — classifies action_type='renewal' + expiry_date)
+- Supabase `email_actions` (structured renewal row)
+- `trigger-morning-call` + Twilio voice (morning brief)
+- Brief composer pulls `email_actions` with expiring dates
+- Claude Sonnet (weaves weather + emails + renewals into one natural paragraph)
+- `action_rules` (creates a new time trigger from Robert's "yes")
+- Three days before: SMS + WhatsApp + Email + Push fan-out
+
+**What it replaces:** Opening the email. Reading the small print. Remembering. Setting a calendar nag yourself.
+
+---
+
+### Scenario C — The brakes that started complaining
+
+**Setup:** Robert notices a slow complaint from the car's brakes. He can't remember when they were last serviced.
+
+**Dialog:**
+
+> **Robert:** *"Naavi, when did I last get the brakes done?"*
+>
+> **Naavi:** *"November last year at Canadian Tire. The service email said the brake job is under warranty until next November."*
+>
+> **Robert:** *"Email the service desk, ask if they can take me Thursday afternoon."*
+>
+> **Naavi:** *"I've drafted: 'Hi, could you please book me in for a brake check Thursday afternoon? Thanks, Robert.' Say yes to send, or tell me what to change."*
+>
+> **Robert:** *"Yes."*
+>
+> **Naavi:** *"Sent."*
+
+**Next morning — Naavi's morning brief call:**
+
+> **Naavi (voice):** *"Before I go — Canadian Tire replied. Thursday at 2 PM works. Want it on your calendar with a reminder?"*
+>
+> **Robert:** *"Yes."*
+
+**Services touched:**
+- Global Search (`gmail` + `knowledge` + `email_actions`)
+- Claude Sonnet reasons across sources to compose answer
+- Attachment harvest pipeline had pulled the original Canadian Tire invoice PDF (OCR'd, stored with date + warranty expiry)
+- DRAFT_MESSAGE action (Claude composes email draft in Robert's voice)
+- Voice-confirm flow (reads back + waits for "yes")
+- Gmail send (`send-email-action`)
+- Inbound reply captured by next `sync-gmail`
+- Morning brief picks up the reply via tier-1 sender recognition
+- Final "yes" triggers CREATE_EVENT + calendar-based reminder
+
+**What it replaces:** Rummaging through email. Writing a service email in under 30 seconds. Remembering to check tomorrow. Putting the appointment on the calendar.
+
+---
+
+### Scenario D — The doctor's visit, held for Robert
+
+**Setup:** Robert is in the waiting room of his doctor's office. The hardest part of the visit won't be the visit — it's remembering the five things the doctor will say afterward.
+
+**Dialog:**
+
+> **Robert (via Hey Google on his phone):** *"Hey Google, call Naavi."*
+>
+> **(The phone dials Naavi. She answers — it's a live voice call.)**
+>
+> **Naavi:** *"Hello, Robert."*
+>
+> **Robert:** *"Record my visit."*
+>
+> **Naavi:** *"Recording your visit. I'll save and summarise when you say stop."*
+>
+> **Robert sets the phone on the table.**
+
+**The doctor speaks during the appointment:**
+
+> **Doctor:** *"Stop the atorvastatin for now. Retest the liver panel in three weeks. Book a follow-up for May 12. And I'd like you to see Dr. Chen about the thyroid — I'll send the referral."*
+
+**After the appointment:**
+
+> **Robert:** *"Naavi, stop."*
+>
+> **Naavi:** *"Recording saved."*
+
+**By the time Robert reaches his car:**
+
+- Full transcript saved to his Drive, searchable.
+- Medication change on his calendar with reminders for each dose.
+- Liver panel lab appointment scheduled for three weeks out.
+- Follow-up booked for May 12.
+- Referral email to Dr. Chen drafted and ready to send.
+- Visit summary email in Robert's inbox.
+
+**Months later:**
+
+> **Robert:** *"Naavi, what did my doctor say about the thyroid?"*
+>
+> **Naavi:** *"At your April 21 visit, Dr. Patel said he'd like you to see Dr. Chen about thyroid concerns and sent the referral."*
+
+**Services touched:**
+- Hey Google integration (system-level voice activation)
+- Twilio voice call (inbound, phone-to-Naavi)
+- Audio recording (Twilio record API)
+- AssemblyAI transcription
+- Claude Sonnet extracts: medication change, lab booking, follow-up, referral, summary
+- Google Drive (save transcript + summary)
+- Google Calendar (3 events: medication stop, lab, follow-up)
+- Supabase `reminders` (medication dose reminders)
+- DRAFT_MESSAGE + voice-confirm flow (referral email)
+- Gmail send
+- Gmail to Robert (visit summary)
+- Supabase `documents` + `knowledge_fragments` (transcript indexed for future search)
+- Global Search (months later, recall path)
+
+**What it replaces:** Trying to remember what the doctor said. Scribbled notes. Calling your spouse for the details. Forgetting to book the follow-up. Losing the referral in a stack of papers.
+
+---
+
+## Why these four scenarios matter together
+
+Each scenario touches 5-12 services in sequence. Each one involves Naavi doing something the user explicitly did not do — she noticed, remembered, drafted, asked back for confirmation, followed up a day later, or surfaced a fact months after the fact. That is the product: orchestration that unfolds across time, not just across tools.
