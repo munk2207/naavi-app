@@ -678,8 +678,25 @@ export default function SettingsScreen() {
 
         <View style={styles.divider} />
 
+        {/* Location alerts (Phase 2) */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Location alerts</Text>
+          <Text style={styles.sectionNote}>
+            Allow MyNaavi to fire alerts when you arrive at or leave places you care about.
+          </Text>
+          <TouchableOpacity
+            style={styles.saveBtn}
+            onPress={() => router.push('/permission-location')}
+            accessibilityRole="button"
+          >
+            <Text style={styles.saveBtnText}>Manage location alerts</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.divider} />
+
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V53.4 (build 100)</Text>
+        <Text style={styles.version}>MyNaavi — V54.0 (build 101)</Text>
 
       </ScrollView>
     </SafeAreaView>

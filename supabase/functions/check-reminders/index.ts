@@ -113,28 +113,40 @@ serve(async (req) => {
           }
         }
       } else {
-        // Normal reminder — send SMS + WhatsApp + push
+        // Normal reminder — fan out to SMS + WhatsApp + Email + Push (all 4).
+        // Follows the ALERT FAN-OUT rule (project_naavi_alert_fanout.md).
         const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
         // SMS
         fetch(`${supabaseUrl}/functions/v1/send-sms`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({ to: reminder.phone_number, body: smsBody }),
+          body: JSON.stringify({ to: reminder.phone_number, body: smsBody, user_id: reminder.user_id, source: 'reminder' }),
         }).catch(err => console.error(`[check-reminders] SMS failed:`, err));
 
         // WhatsApp
         fetch(`${supabaseUrl}/functions/v1/send-sms`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({ to: reminder.phone_number, body: smsBody, channel: 'whatsapp' }),
+          body: JSON.stringify({ to: reminder.phone_number, body: smsBody, channel: 'whatsapp', user_id: reminder.user_id, source: 'reminder' }),
         }).catch(err => console.error(`[check-reminders] WhatsApp failed:`, err));
 
-        // Push notification
-        fetch(`${supabaseUrl}/functions/v1/send-push`, {
+        // Email (via user's own Gmail OAuth)
+        fetch(`${supabaseUrl}/functions/v1/send-user-email`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({ userId: reminder.user_id, title: 'Naavi Reminder', body: smsBody }),
+          body: JSON.stringify({
+            user_id: reminder.user_id,
+            subject: `Reminder: ${reminder.title}`,
+            body: smsBody,
+          }),
+        }).catch(err => console.error(`[check-reminders] Email failed:`, err));
+
+        // Push notification — endpoint is send-push-notification (not send-push)
+        fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+          body: JSON.stringify({ user_id: reminder.user_id, title: 'Naavi Reminder', body: smsBody }),
         }).catch(err => console.error(`[check-reminders] Push failed:`, err));
       }
 

@@ -3,7 +3,7 @@
  * Sets up navigation, i18n, and safe area handling.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, View, Text, StyleSheet } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -14,6 +14,8 @@ import * as Updates from 'expo-updates';
 import '../lib/i18n'; // Initialise i18n before any screen renders
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
+import { syncDeviceTimezone } from '@/lib/location';
+import { useGeofencing } from '@/hooks/useGeofencing';
 
 // Handle Google OAuth deep link callback (naavi://auth/callback#access_token=...)
 async function handleAuthCallback(url: string) {
@@ -45,6 +47,41 @@ async function handleAuthCallback(url: string) {
 }
 
 export default function RootLayout() {
+  // Track the current user id so child hooks (useGeofencing) can re-sync
+  // when auth changes.
+  const [userId, setUserId] = useState<string | null>(null);
+
+  // Wire geofence lifecycle to the current user. Handles auth changes,
+  // foreground re-sync, and owns the OS geofence registration.
+  useGeofencing(userId);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    // Get the initial session, then subscribe to auth state changes.
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      const uid = data?.session?.user?.id ?? null;
+      setUserId(uid);
+      // Sync device timezone to user_settings on every signin — supports
+      // the global-first rule (no hardcoded timezone defaults).
+      if (uid) syncDeviceTimezone(uid).catch(() => {});
+    });
+
+    const { data: authSub } = supabase.auth.onAuthStateChange((_event, session) => {
+      const uid = session?.user?.id ?? null;
+      setUserId(uid);
+      if (uid) syncDeviceTimezone(uid).catch(() => {});
+    });
+
+    return () => {
+      mounted = false;
+      authSub.subscription.unsubscribe();
+    };
+  }, []);
+
   // OTA updates disabled — all deploys go through Google Play builds
   // useEffect(() => {
   //   async function checkForOTA() {
@@ -120,6 +157,10 @@ export default function RootLayout() {
         <Stack.Screen
           name="notes"
           options={{ title: 'My Notes', headerShown: true }}
+        />
+        <Stack.Screen
+          name="permission-location"
+          options={{ title: 'Location alerts', headerShown: true }}
         />
         {/* Google Assistant App Action deep link screens — transient, no header */}
         <Stack.Screen name="brief"    options={{ headerShown: false }} />

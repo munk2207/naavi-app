@@ -236,7 +236,7 @@ serve(async (req) => {
     }
   }
 
-  console.log(`[send-push] Sent ${sent}/${subs.length} for user ${user.id}`);
+  console.log(`[send-push] Sent ${sent}/${subs.length} for user ${userId}`);
   return new Response(JSON.stringify({ success: true, sent }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
