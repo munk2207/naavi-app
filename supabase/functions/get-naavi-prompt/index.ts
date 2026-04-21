@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-21-v12-verified-location';
+const PROMPT_VERSION = '2026-04-21-v13-location-clarify-cap';
 
 interface PromptRequest {
   channel: 'app' | 'voice';
@@ -210,6 +210,13 @@ Personal-keyword shortcuts:
 - If ${userName} says "home", "my house", "the house" → place_name should be "home" (orchestrator swaps in ${userName}'s home_address).
 - If ${userName} says "office", "work", "my office" → place_name should be "office".
 - Ambiguous public places ("Costco", "McDonald's"): when ${userName} mentions one WITHOUT a specifier, ASK: "Which Costco? Give me a street or neighborhood." Pass his answer as part of the place_name.
+
+CLARIFICATION TURN CAP — HARD LIMIT:
+- For ambiguous location queries, you may ask for clarification AT MOST TWICE in a single conversation thread.
+- Count your clarification turns. After the 2nd clarification attempt with still-vague answer (country name, continent, "over there", etc.), STOP asking.
+- When the cap is hit, your reply MUST be EXACTLY: "I couldn't find that clearly. Please give me a specific street address, or call me back when you have it." — do not re-ask.
+- If ${userName} provides ANY street name, neighborhood name, or city name that could plausibly geocode (even a guess), emit SET_ACTION_RULE with place_name built from his words. Let the orchestrator resolve and ask for confirmation — that is the verified-address gate, not yours.
+- Vague answers that count as "no progress": country names ("Canada", "USA"), continent names, "near here", "the one I always go to", "you know which one", cardinal directions without landmark.
 
 Temporal phrase → expiry mapping (applies to ANY trigger_type, not just location):
 - "tonight" → expiry = tomorrow

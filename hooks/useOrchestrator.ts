@@ -38,6 +38,11 @@ const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 const AFFIRMATIVE_RE = /^(yes|yeah|yep|yup|sure|confirm|confirmed|correct|ok|okay|alright|do it|go ahead|set it|please|please do)[.!?]*$/i;
 const NEGATIVE_RE    = /^(no|nope|cancel|never ?mind|stop|forget it|don[']?t)[.!?]*$/i;
 
+// Fresh-command pattern — detects when the user has clearly started a NEW
+// rule-creation command rather than clarifying the pending one. Prevents
+// the "home + Alert me when I arrive to my office" concatenation bug.
+const FRESH_COMMAND_RE = /^\s*(alert|text|notify|remind|tell)\s+(me|my|the|him|her|us|them)\b/i;
+
 export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'pending_confirm' | 'error';
 
 export interface ConversationTurn {
@@ -206,78 +211,92 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         return;
       }
 
-      // ── CASE: clarification — user provided more detail (or a new place name)
-      pending.attempts += 1;
-      if (pending.attempts > 3) {
+      // ── CASE: fresh command — user has started a NEW rule creation rather
+      // than clarifying the pending one. Drop pending so the normal flow can
+      // handle it. The concatenation bug ("home Alert me when I arrive to my
+      // office") came from treating this as a clarification.
+      if (FRESH_COMMAND_RE.test(msg)) {
+        console.log('[Orchestrator] pending location dropped — user sent a fresh command');
         pendingLocationRef.current = null;
-        emitPendingTurn("I couldn't find that. Please check the exact location and call me back.");
-        return;
-      }
+        // Fall through to the normal send() flow (no return).
+      } else {
+        // ── CASE: clarification — user provided more detail (or a new place name)
+        pending.attempts += 1;
+        if (pending.attempts > 3) {
+          pendingLocationRef.current = null;
+          emitPendingTurn("I couldn't find that. Please check the exact location and call me back.");
+          return;
+        }
 
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) {
-        pendingLocationRef.current = null;
-        emitPendingTurn("I'm not signed in. Please sign in and try again.");
-        return;
-      }
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) {
+          pendingLocationRef.current = null;
+          emitPendingTurn("I'm not signed in. Please sign in and try again.");
+          return;
+        }
 
-      // Combine the original query with the new clarification so we search
-      // for "Costco Merivale" not just "Merivale".
-      const combinedQuery = `${pending.placeName} ${msg}`.trim();
+        // Combine the original query with the new clarification so we search
+        // for "Costco Merivale" not just "Merivale".
+        const combinedQuery = `${pending.placeName} ${msg}`.trim();
 
-      try {
-        const res = await fetch(`${SUPABASE_URL}/functions/v1/resolve-place`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON}` },
-          body: JSON.stringify({ user_id: session.user.id, place_name: combinedQuery, save_to_cache: false }),
-        });
-        const data = await res.json();
+        try {
+          const res = await fetch(`${SUPABASE_URL}/functions/v1/resolve-place`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON}` },
+            body: JSON.stringify({ user_id: session.user.id, place_name: combinedQuery, save_to_cache: false }),
+          });
+          const data = await res.json();
 
-        if (data?.status === 'ok' && (data.source === 'fresh' || data.source === 'memory' || data.source === 'settings_home' || data.source === 'settings_work')) {
-          pending.placeName = combinedQuery;
-          pending.resolved = {
-            place_name:      data.place_name,
-            address:         data.address,
-            lat:             data.lat,
-            lng:             data.lng,
-            canonical_alias: data.canonical_alias,
-            radius_meters:   data.radius_meters,
-          };
-          pendingLocationRef.current = pending;
+          if (data?.status === 'ok' && (data.source === 'fresh' || data.source === 'memory' || data.source === 'settings_home' || data.source === 'settings_work')) {
+            pending.placeName = combinedQuery;
+            pending.resolved = {
+              place_name:      data.place_name,
+              address:         data.address,
+              lat:             data.lat,
+              lng:             data.lng,
+              canonical_alias: data.canonical_alias,
+              radius_meters:   data.radius_meters,
+            };
+            pendingLocationRef.current = pending;
 
-          if (data.source === 'memory' || data.source === 'settings_home' || data.source === 'settings_work') {
-            // Already in memory/settings — treat as verified without re-asking.
-            const ok = await commitPending(session.user.id, 'memory');
-            pendingLocationRef.current = null;
-            const sourceText = data.source === 'memory' ? 'from your saved locations' :
-                               data.source === 'settings_home' ? 'from Settings (home)' :
-                               'from Settings (work)';
-            emitPendingTurn(ok
-              ? `${data.place_name} ${sourceText} — I'll alert you when you arrive.`
-              : `Couldn't save the rule — something went wrong.`);
+            if (data.source === 'memory' || data.source === 'settings_home' || data.source === 'settings_work') {
+              // Already in memory/settings — treat as verified without re-asking.
+              const ok = await commitPending(session.user.id, 'memory');
+              pendingLocationRef.current = null;
+              const sourceText = data.source === 'memory' ? 'from your saved locations' :
+                                 data.source === 'settings_home' ? 'from Settings (home)' :
+                                 'from Settings (work)';
+              emitPendingTurn(ok
+                ? `${data.place_name} ${sourceText} — I'll alert you when you arrive.`
+                : `Couldn't save the rule — something went wrong.`);
+              return;
+            }
+
+            // Fresh — ask for confirmation.
+            emitPendingTurn(`Found ${data.place_name}${data.address ? ' at ' + data.address : ''}. Say yes to set the alert, cancel to skip, or give me a different area.`);
             return;
           }
 
-          // Fresh — ask for confirmation.
-          emitPendingTurn(`Found ${data.place_name}${data.address ? ' at ' + data.address : ''}. Shall I set the alert?`);
-          return;
-        }
+          if (data?.status === 'personal_unset') {
+            pendingLocationRef.current = null;
+            const which = data.personal === 'work' ? 'work' : 'home';
+            emitPendingTurn(`Please add your ${which} address in Settings first, then try again.`);
+            return;
+          }
 
-        if (data?.status === 'personal_unset') {
+          // not_found or error — ask for different input, include tries-left + escape.
+          const triesLeft = 3 - pending.attempts;
+          const escape = triesLeft > 0
+            ? ` Tell me a different street or neighborhood, or say cancel to stop. (${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left.)`
+            : '';
+          emitPendingTurn(`I couldn't find "${combinedQuery}" near you.${escape}`);
+          return;
+        } catch (err) {
+          console.error('[Orchestrator] pending location clarification failed:', err);
           pendingLocationRef.current = null;
-          const which = data.personal === 'work' ? 'work' : 'home';
-          emitPendingTurn(`Please add your ${which} address in Settings first, then try again.`);
+          emitPendingTurn('Could not reach the location service. Try again later.');
           return;
         }
-
-        // not_found or error — ask for different input
-        emitPendingTurn(`I couldn't find "${combinedQuery}" near you. Can you try a different street or neighborhood?`);
-        return;
-      } catch (err) {
-        console.error('[Orchestrator] pending location clarification failed:', err);
-        pendingLocationRef.current = null;
-        emitPendingTurn('Could not reach the location service. Try again later.');
-        return;
       }
     }
     // ── end pending location handler ──────────────────────────────────────────
@@ -836,7 +855,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                       attempts: 1,
                     };
                     locationIntercepted = true;
-                    turnSpeechOverride = `Found ${data.place_name}${data.address ? ' at ' + data.address : ''}. Shall I set the alert?`;
+                    turnSpeechOverride = `Found ${data.place_name}${data.address ? ' at ' + data.address : ''}. Say yes to set the alert, cancel to skip, or give me a different area.`;
                     continue;
                   }
 
@@ -857,7 +876,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                       attempts: 1,
                     };
                     locationIntercepted = true;
-                    turnSpeechOverride = `I couldn't find "${placeName}" near you. Can you try a different street or neighborhood?`;
+                    turnSpeechOverride = `I couldn't find "${placeName}" near you. Tell me a different street or neighborhood, or say cancel to stop.`;
                     continue;
                   }
 

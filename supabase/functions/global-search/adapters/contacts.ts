@@ -226,11 +226,22 @@ export const contactsAdapter: SearchAdapter = {
       const primaryPhone = phones[0];
       const snippetParts = [primaryEmail, primaryPhone].filter(Boolean);
 
+      // Give each contact a tap target: tel: to dial, fall back to mailto:.
+      // The mobile UI uses Linking.openURL(hit.url), which honors both schemes.
+      // Without this, the contact card renders disabled and Robert can't
+      // one-tap a contact he just searched for.
+      const url = primaryPhone
+        ? `tel:${primaryPhone.replace(/[^\d+]/g, '')}`
+        : primaryEmail
+        ? `mailto:${primaryEmail}`
+        : undefined;
+
       hits.push({
         source: 'contacts',
         title: displayName || primaryEmail || primaryPhone || 'Contact',
         snippet: snippetParts.join(' · '),
         score,
+        url,
         metadata: {
           resource_name: p.resourceName ?? null,
           name: displayName || null,

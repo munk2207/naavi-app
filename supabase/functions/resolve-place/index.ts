@@ -113,8 +113,11 @@ serve(async (req) => {
     const homeAddress = settings?.home_address as string | null;
     const workAddress = settings?.work_address as string | null;
 
+    console.log(`[resolve-place] called with place_name="${placeName}" alias="${alias}" home_set=${!!homeAddress} work_set=${!!workAddress}`);
+
     // ── (1) Personal keywords — resolve via saved address or report unset
     if (PERSONAL_HOME.has(alias)) {
+      console.log(`[resolve-place] personal HOME keyword matched. home_address="${homeAddress ?? '(null)'}"`);
       if (!homeAddress) {
         return jsonResponse({
           status: 'personal_unset',
@@ -129,6 +132,7 @@ serve(async (req) => {
       });
     }
     if (PERSONAL_WORK.has(alias)) {
+      console.log(`[resolve-place] personal WORK keyword matched. work_address="${workAddress ?? '(null)'}"`);
       if (!workAddress) {
         return jsonResponse({
           status: 'personal_unset',
@@ -251,14 +255,26 @@ async function geocodeAddress(address: string, apiKey: string): Promise<{ lat: n
   try {
     const qs = new URLSearchParams({ address, key: apiKey });
     const res = await fetch(`${PLACES_GEOCODE}?${qs.toString()}`);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(`[geocode] HTTP ${res.status} for "${address}"`);
+      return null;
+    }
     const data = await res.json();
+    if (data.status && data.status !== 'OK') {
+      console.error(`[geocode] API status="${data.status}" error="${data.error_message ?? 'none'}" for "${address}"`);
+      return null;
+    }
     const first = data.results?.[0];
     const lat = first?.geometry?.location?.lat;
     const lng = first?.geometry?.location?.lng;
-    if (typeof lat === 'number' && typeof lng === 'number') return { lat, lng };
+    if (typeof lat === 'number' && typeof lng === 'number') {
+      console.log(`[geocode] "${address}" → ${first.formatted_address ?? 'unknown'} @ ${lat},${lng}`);
+      return { lat, lng };
+    }
+    console.error(`[geocode] no results / bad shape for "${address}"`);
     return null;
-  } catch {
+  } catch (err) {
+    console.error(`[geocode] exception for "${address}":`, err instanceof Error ? err.message : String(err));
     return null;
   }
 }
