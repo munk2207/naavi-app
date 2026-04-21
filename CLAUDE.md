@@ -102,11 +102,17 @@ If in doubt, ASK before creating parallel config.
 
 ### WHERE TO START
 
-Read `project_naavi_active_bugs.md` in the memory folder FIRST. It has the current build state, what's working, what's broken, and what to do next.
+**Most recent handoff:** `docs/SESSION_20_END_TO_END_VALIDATION.md` — read this first. It captures Session 20's work, the 11-of-11 test results, deferred bugs, and the Session 21 agenda (end-to-end test and validation).
+
+**Current build:** V54.2 (build 103) on Google Play Internal Testing.
+
+**Current Claude prompt version:** `2026-04-21-v13-location-clarify-cap` (via `get-naavi-prompt` Edge Function).
+
+**Then read memory files listed in §7 of SESSION_20_END_TO_END_VALIDATION.md** — the short list that future sessions need (alert fan-out rule, verified-address rule, context fields pattern, location-trigger plan, feedback/test discipline).
+
+**Older background:** `docs/SESSION_8_DETAILED_REPORT.md` for the early Twilio voice architecture; most of 9-19 are also in `docs/` for context.
 
 Memory folder: `C:\Users\waela\.claude\projects\C--Users-waela-OneDrive-Desktop-Naavi\memory\`
-
-Detailed session reports: `C:\Users\waela\OneDrive\Desktop\Naavi\docs\` (SESSION_8_DETAILED_REPORT.md, SESSION_9 info in memory)
 
 ### THE PROJECT — TWO PARTS
 
@@ -232,10 +238,22 @@ All trigger/action rules live in `action_rules` table. The legacy `email_watch_r
 
 - Writes: `naavi-chat` and `useOrchestrator` (mobile) insert into `action_rules` with `trigger_type='email'` for email alerts.
 - Reads: `evaluate-rules` Edge Function (cron every minute) iterates `action_rules` and fires matching actions via `send-sms` / `send-email`.
-- Trigger types: `email`, `time`, `calendar`, `weather` (see `evaluate-rules` source for trigger_config shape).
+- Trigger types shipped: `email`, `time`, `calendar`, `weather`, `contact_silence`, `location` (see `evaluate-rules` source + `project_naavi_alert_scope.md` memory for each trigger_config shape).
 - Action types: `sms`, `whatsapp`, `email`.
+- Trigger types deferred: `list_change` (7 design questions open — see `project_naavi_list_change_trigger_deferred.md`), `health` (Epic integration required), `price` (scraping complexity).
 
 Do NOT reintroduce separate tables like `email_watch_rules`. Extend `action_rules` trigger types instead.
+
+### LOCATION TRIGGER — VERIFIED-ADDRESS ONLY
+
+Naavi never creates a location alert from a guessed address. An address must be EITHER already in memory from a prior conversation OR confirmed by the user in-conversation after readback. After 3 failed clarification attempts, Naavi says *"please check the exact location and call me back."*
+
+- Resolution flow: `resolve-place` Edge Function → personal keyword lookup (`home`/`office` → `user_settings.home_address`/`.work_address`) → `user_places` cache → Google Places API (biased by reference coords). Only caches on `save_to_cache=true` (explicit user confirmation).
+- On confirmation, save under BOTH aliases: the spoken name AND the Places-canonical name.
+- Mobile orchestrator intercepts `SET_ACTION_RULE` for `trigger_type='location'` and runs the flow before writing the rule.
+- OS-level geofencing via `hooks/useGeofencing.ts` + `Location.startGeofencingAsync` + `TaskManager.defineTask`.
+
+Full design: `project_naavi_location_verified_address.md` + `project_naavi_location_trigger_plan.md` memory files.
 
 ### ALERT FAN-OUT — self-alerts always quadruple-channel
 
@@ -333,3 +351,15 @@ Never add a new Edge Function that picks "first user" from a shared table. Alway
 1. Try JWT auth (mobile app)
 2. Accept `user_id` from request body (voice server)
 3. Fall back to `user_tokens` lookup (single-user apps only)
+
+### SUPABASE CLIENT AUTH CONFIG (REQUIRED)
+
+The mobile Supabase client MUST be created with explicit auth options on React Native:
+- `storage: AsyncStorage` — persists the session across app restarts
+- `autoRefreshToken: true` — keeps JWT fresh
+- `persistSession: true` — survives backgrounding
+- `AppState` listener calling `supabase.auth.startAutoRefresh()` on foreground, `stopAutoRefresh()` on background
+
+Without this config, the session lives in memory only; the refresh timer can die when the app backgrounds; after ~1 hour the JWT expires silently; `supabase.functions.invoke()` fails — including `text-to-speech`. Users see this as "voice stops working mid-session, only logout/login restores it." Shipped in V54.2 build 103.
+
+See `lib/supabase.ts` for the canonical pattern.
