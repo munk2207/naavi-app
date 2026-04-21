@@ -124,6 +124,7 @@ Document types:
   tax        = tax slips (T4, CRA correspondence), tax-year documents
   ticket     = travel or event tickets, boarding passes, reservations
   notice     = government or institutional notice (gov.ca, Service Canada, condo board)
+  calendar   = a recurring schedule listing many dated events — school year calendars, sports season schedules, holiday lists, program timetables
   other      = documentary in nature but doesn't fit above
 
 Today is ${todayISO} (${wd}, America/Toronto).
@@ -138,7 +139,7 @@ If YES — return an object with these fields:
 {
   "is_actionable": true,
   "sender_type": "personal" | "institutional" | "ambient",
-  "document_type": "invoice" | "warranty" | "receipt" | "contract" | "medical" | "statement" | "tax" | "ticket" | "notice" | "other" | null,
+  "document_type": "invoice" | "warranty" | "receipt" | "contract" | "medical" | "statement" | "tax" | "ticket" | "notice" | "calendar" | "other" | null,
   "reference": "<<any invoice number, policy number, case ID, order number, claim number mentioned, else null>>",
   "expiry_date": "<<ISO 8601 date when the document stops being relevant (warranty end, policy expiry, ticket use-by) — NOT the same as due_date, else null>>",
   "action_type": "pay" | "confirm" | "review" | "respond" | "appointment" | "renewal" | "delivery" | "info",
@@ -244,7 +245,7 @@ ${emailText.slice(0, 3000)}`,
       });
     }
 
-    const validDocTypes = ['invoice','warranty','receipt','contract','medical','statement','tax','ticket','notice','other'];
+    const validDocTypes = ['invoice','warranty','receipt','contract','medical','statement','tax','ticket','notice','calendar','other'];
     const documentType = validDocTypes.includes(parsed.document_type)
       ? parsed.document_type as ExtractedAction['document_type']
       : null;

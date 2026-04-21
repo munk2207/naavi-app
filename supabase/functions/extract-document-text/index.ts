@@ -152,7 +152,7 @@ Return ONE line of JSON. No markdown. No code fences.
 
 {
   "summary": "<<one short sentence describing what this document is, under 140 chars>>",
-  "document_type": "invoice" | "warranty" | "receipt" | "contract" | "medical" | "statement" | "tax" | "ticket" | "notice" | "other",
+  "document_type": "invoice" | "warranty" | "receipt" | "contract" | "medical" | "statement" | "tax" | "ticket" | "notice" | "calendar" | "other",
   "amount_cents": <<integer cents if a monetary total is present, else null>>,
   "currency": "<<USD|CAD|EUR|...>> or null",
   "date": "<<ISO 8601 date of the document itself or null>>",
@@ -166,9 +166,10 @@ Rules:
 - Do not fabricate a reference.
 - If the OCR text is garbage or empty, return {"summary":"OCR text unusable","document_type":"other","amount_cents":null,"currency":null,"date":null,"reference":null,"expiry":null}.
 - document_type meanings:
-    invoice, receipt, warranty, contract, medical, statement, tax, ticket, notice, other
+    invoice, receipt, warranty, contract, medical, statement, tax, ticket, notice, calendar, other
     (invoice = bill to pay; receipt = proof of payment; statement = monthly summary;
-     notice = government/institutional letter; other = none of the above fit)
+     notice = government/institutional letter; calendar = a grid or list of many dated events
+     like a school year or sports season schedule; other = none of the above fit)
 
 OCR TEXT:
 ${text.slice(0, 8000)}`,
@@ -238,7 +239,7 @@ async function deleteDriveFile(accessToken: string, fileId: string): Promise<voi
 
 const VALID_DOC_TYPES = [
   'invoice', 'warranty', 'receipt', 'contract', 'medical',
-  'statement', 'tax', 'ticket', 'notice', 'other',
+  'statement', 'tax', 'ticket', 'notice', 'calendar', 'other',
 ] as const;
 type DocType = typeof VALID_DOC_TYPES[number];
 
@@ -408,7 +409,7 @@ Return ONE line of JSON. No markdown. No code fences.
 
 {
   "summary": "<<one short sentence describing what this document is, under 140 chars>>",
-  "document_type": "invoice" | "warranty" | "receipt" | "contract" | "medical" | "statement" | "tax" | "ticket" | "notice" | "other",
+  "document_type": "invoice" | "warranty" | "receipt" | "contract" | "medical" | "statement" | "tax" | "ticket" | "notice" | "calendar" | "other",
   "amount_cents": <<integer cents if a monetary total is present, else null>>,
   "currency": "<<USD|CAD|EUR|...>> or null",
   "date": "<<ISO 8601 date of the document itself (invoice date, statement date, appointment date) or null>>",
@@ -432,6 +433,7 @@ Rules:
     tax       = T4, CRA correspondence, tax slip, tax return
     ticket    = travel or event ticket, boarding pass, reservation confirmation
     notice    = government or institutional notice (gov.ca, condo AGM, official letter)
+    calendar  = a recurring schedule with many dated events — school year calendar, sports season schedule, holiday list, program timetable. This is the right pick when the doc shows a grid of dates or a long list of events across a whole year.
     other     = documentary but none of the above.`,
             },
           ],
