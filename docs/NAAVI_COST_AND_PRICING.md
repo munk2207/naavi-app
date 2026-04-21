@@ -8,6 +8,60 @@ This document estimates the monthly cost to run MyNaavi, split into **fixed infr
 
 ---
 
+## 0. How much to trust these numbers
+
+Short version: **my per-user estimates could be off by ±30–50%.** Aggregate cost at 100+ users is much tighter (±10%) because individual user variance averages out.
+
+### Realistic per-user ranges
+
+| Profile | Point estimate | Realistic range | 80% confidence band |
+|---|---|---|---|
+| Light | $13 | $8–$25 | $10–$18 |
+| Moderate | **$30** | **$20–$55** | **$25–$40** |
+| Heavy | $106 | $70–$180 | $80–$140 |
+
+### Top three sources of deviation (largest to smallest)
+
+1. **User behavior variance.** The "moderate profile" (50 chat turns/day, 15 min voice, 20 alerts) is a hypothesis, not a measurement. One user might hit 15 turns/day, another 80. That alone moves Claude + Deepgram + Twilio costs by 3–5×. Until we have 30 days of actual usage across 5+ users, this is the single biggest uncertainty.
+
+2. **Claude token patterns.** Two specific risks where actual cost may exceed estimates:
+   - The `isBroadQuery` regex injects up to 100 knowledge fragments into the prompt for open-ended questions ("what do I know about…"). That's ~30k extra input tokens per query. If this fires 5–10× per day, it adds **$13–$27/month** per user on top of the $14 Claude estimate.
+   - Calendar PDF ask-time reader attaches entire PDF documents to Claude's context. One PDF attach ≈ 20k tokens. Three attaches/day = $5.40/month per user.
+
+   Working in our favor: Anthropic prompt caching gives a 90% discount on cached prefix. **Not yet implemented.** Once it is, Claude cost drops 30–40% at steady state.
+
+3. **Feature adoption variance.** AssemblyAI (voice recording) and Twilio voice minutes are binary: most users won't use them; a few will use them heavily. My moderate profile splits the difference — which means most actual users will be below, and a small tail will be well above.
+
+### Systematic risks — cost could be higher than estimated
+
+| Risk | How much it could add | Mitigation |
+|---|---|---|
+| Claude token count per turn higher than 1,500 | +$10–$15/mo per user | Measure actual from `naavi-chat` Edge Function logs |
+| `isBroadQuery` path firing often | +$13–$27/mo per user | Narrow the regex; cap knowledge fetch to 20 not 100 |
+| Twilio voice minutes climbing if users treat Naavi as phone buddy | +$15–$25/mo per user | Add a soft cap on minutes; reach out if user exceeds |
+| Support costs not modeled | +$5–$15/mo per user at scale | Price Plus tier with this headroom; triage support volume |
+
+### Random risks — could go either way
+
+- OCR usage depends on each user's email mix (scanned vs text PDFs).
+- Places API calls depend on location rule churn.
+- Voice recording adoption is feature-specific and binary.
+
+### What would shrink the uncertainty
+
+1. **30 days of real usage** from the 2 current users. Supabase logs + Twilio console + Deepgram dashboard + Anthropic console give exact per-user cost. The estimates then become measurements.
+2. **Implement Anthropic prompt caching.** 30–40% Claude savings at steady state.
+3. **Log token counts per turn** in the `naavi-chat` table. Lets us project accurately per user going forward.
+
+### What this means for pricing
+
+- **Don't price below $49.** The $39 Essentials tier has 22% margin at the moderate estimate; if moderate cost is actually $40 instead of $30, that margin collapses. $49 is a safer floor.
+- **Plus at $59 has a buffer.** Even if moderate cost comes in at $40, margin stays around 30%.
+- **Heavy users can be unprofitable on any tier.** A user consuming $150/month at a $89 Premium tier is a $61/month loss. Either soft-cap usage (works for ~95% of users), hard-cap (complaints), or bump Premium to $119.
+- **Expect pricing to require one revision** within 60–90 days of paying users. That's normal; build it into the ToS.
+
+---
+
 ## 1. Fixed infrastructure cost
 
 These costs are incurred whether the service has 2 users or 2,000. They don't grow with user count until volume thresholds (bandwidth, storage, build quotas) are crossed.
@@ -128,9 +182,11 @@ Note: every self-alert fires on 4 channels (SMS + WhatsApp + Email + Push). Emai
 | AssemblyAI | $0.00 | $0.74 | $1.85 |
 | Google Cloud | $0.22 | $0.60 | $1.61 |
 | Twilio | $6.02 | $12.47 | $32.66 |
-| **Per-user monthly variable cost** | **~$13** | **~$30** | **~$106** |
+| **Point estimate** | **~$13** | **~$30** | **~$106** |
+| **Realistic range** | $8–$25 | $20–$55 | $70–$180 |
+| **80% confidence band** | $10–$18 | $25–$40 | $80–$140 |
 
-The moderate profile — the expected baseline for the target senior user — is **~$30/month in raw variable cost**.
+The moderate profile — the expected baseline for the target senior user — is **~$30/month at the point estimate, with a realistic range of $20–$55**. See §0 for the sources of variance.
 
 ---
 
@@ -264,7 +320,7 @@ To sustain full-time development (~$15,000/month): ~50 paying users.
 
 ## 9. Summary one-liner
 
-> **MyNaavi costs about $30/month per user in provider fees at the moderate profile, with ~$55/month fixed. A $59/month Plus subscription clears ~50% gross margin at 100 users — well inside the range needed to fund ongoing development.**
+> **The $30/moderate estimate is my best guess from public pricing and assumed usage. Actual could land anywhere from $20 to $55 per user per month. I would bet on $25–$40 with 70% confidence — which is why the $59 Plus tier leaves room. Ship at that price, measure actual costs over the first 60 days from 5+ users, and be prepared to adjust within 90 days.**
 
 ---
 

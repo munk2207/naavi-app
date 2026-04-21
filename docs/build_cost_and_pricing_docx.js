@@ -115,6 +115,59 @@ children.push(p([text('This document estimates the monthly cost to run MyNaavi, 
 children.push(p([italic('All numbers below are estimates based on public provider pricing and projected usage profiles. Real costs will vary by user behavior, provider promotions, and volume discounts.')]));
 children.push(hr());
 
+// ── 0. How much to trust these numbers
+children.push(h2('0. How much to trust these numbers'));
+children.push(p([text('Short version: '), bold('my per-user estimates could be off by \u00B130\u201350%.'), text(' Aggregate cost at 100+ users is much tighter (\u00B110%) because individual user variance averages out.')]));
+
+children.push(h3('Realistic per-user ranges'));
+children.push(buildTable(
+  [1600, 2000, 2200, 2800],
+  [
+    ['Profile',  'Point estimate', 'Realistic range', '80% confidence band'],
+    ['Light',    '$13',            '$8\u2013$25',     '$10\u2013$18'],
+    ['Moderate', '$30',            '$20\u2013$55',    '$25\u2013$40'],
+    ['Heavy',    '$106',           '$70\u2013$180',   '$80\u2013$140'],
+  ],
+));
+
+children.push(h3('Top three sources of deviation (largest to smallest)'));
+children.push(numItem([bold('User behavior variance. '), text('The "moderate profile" (50 chat turns/day, 15 min voice, 20 alerts) is a hypothesis, not a measurement. One user might hit 15 turns/day, another 80. That alone moves Claude + Deepgram + Twilio costs by 3\u20135\u00D7. Until we have 30 days of actual usage across 5+ users, this is the single biggest uncertainty.')]));
+children.push(numItem([bold('Claude token patterns. '), text('Two specific risks where actual cost may exceed estimates:')]));
+children.push(bullet([text('The isBroadQuery regex injects up to 100 knowledge fragments for open-ended questions. ~30k extra input tokens per query. If fired 5\u201310\u00D7/day, adds '), bold('$13\u2013$27/month'), text(' per user on top of the $14 Claude estimate.')]));
+children.push(bullet([text('Calendar PDF ask-time reader attaches entire PDFs to Claude. ~20k tokens per attach. Three attaches/day = $5.40/month per user.')]));
+children.push(p([italic('Working in our favor: Anthropic prompt caching gives a 90% discount on cached prefix. Not yet implemented. Once it is, Claude cost drops 30\u201340% at steady state.')]));
+children.push(numItem([bold('Feature adoption variance. '), text('AssemblyAI (voice recording) and Twilio voice minutes are binary: most users won\u2019t use them; a few will use them heavily. My moderate profile splits the difference \u2014 which means most actual users will be below, and a small tail will be well above.')]));
+
+children.push(h3('Systematic risks \u2014 cost could be higher than estimated'));
+children.push(buildTable(
+  [3800, 2500, 2280],
+  [
+    ['Risk', 'How much it could add', 'Mitigation'],
+    ['Claude token count per turn higher than 1,500',         '+$10\u2013$15/mo per user',  'Measure actual from naavi-chat logs'],
+    ['isBroadQuery path firing often',                        '+$13\u2013$27/mo per user', 'Narrow regex; cap knowledge fetch to 20 not 100'],
+    ['Twilio voice minutes climbing if users treat Naavi\nas phone buddy', '+$15\u2013$25/mo per user', 'Soft cap on minutes; reach out if exceeded'],
+    ['Support costs not modeled',                             '+$5\u2013$15/mo per user',  'Price Plus tier with headroom; triage volume'],
+  ],
+));
+
+children.push(h3('Random risks \u2014 could go either way'));
+children.push(bullet([text('OCR usage depends on each user\u2019s email mix (scanned vs text PDFs).')]));
+children.push(bullet([text('Places API calls depend on location rule churn.')]));
+children.push(bullet([text('Voice recording adoption is feature-specific and binary.')]));
+
+children.push(h3('What would shrink the uncertainty'));
+children.push(numItem([bold('30 days of real usage '), text('from the 2 current users. Supabase logs + Twilio console + Deepgram dashboard + Anthropic console give exact per-user cost. The estimates then become measurements.')]));
+children.push(numItem([bold('Implement Anthropic prompt caching. '), text('30\u201340% Claude savings at steady state.')]));
+children.push(numItem([bold('Log token counts per turn '), text('in the naavi-chat table. Lets us project accurately per user.')]));
+
+children.push(h3('What this means for pricing'));
+children.push(bullet([bold('Don\u2019t price below $49. '), text('The $39 Essentials tier has 22% margin at the moderate estimate; if moderate cost is actually $40 instead of $30, that margin collapses. $49 is a safer floor.')]));
+children.push(bullet([bold('Plus at $59 has a buffer. '), text('Even if moderate cost comes in at $40, margin stays around 30%.')]));
+children.push(bullet([bold('Heavy users can be unprofitable on any tier. '), text('$150/month provider cost on a $89 Premium tier is a $61/month loss. Soft-cap usage (works for 95%), hard-cap (complaints), or bump Premium to $119.')]));
+children.push(bullet([bold('Expect pricing to require one revision '), text('within 60\u201390 days of paying users. Build it into the ToS.')]));
+
+children.push(hr());
+
 // ── 1. Fixed infrastructure
 children.push(h2('1. Fixed infrastructure cost'));
 children.push(p([text('These costs are incurred whether the service has 2 users or 2,000. They don\u2019t grow with user count until volume thresholds (bandwidth, storage, build quotas) are crossed.')]));
@@ -220,10 +273,12 @@ children.push(buildTable(
     ['AssemblyAI',       '$0.00', '$0.74',  '$1.85'],
     ['Google Cloud',     '$0.22', '$0.60',  '$1.61'],
     ['Twilio',           '$6.02', '$12.47', '$32.66'],
-    ['Per-user monthly variable cost', '~$13', '~$30', '~$106'],
+    ['Point estimate',      '~$13',        '~$30',         '~$106'],
+    ['Realistic range',     '$8\u2013$25', '$20\u2013$55', '$70\u2013$180'],
+    ['80% confidence band', '$10\u2013$18', '$25\u2013$40', '$80\u2013$140'],
   ],
 ));
-children.push(p([text('The moderate profile \u2014 the expected baseline for the target senior user \u2014 is '), bold('~$30/month in raw variable cost.')]));
+children.push(p([text('The moderate profile \u2014 the expected baseline for the target senior user \u2014 is '), bold('~$30/month at the point estimate, with a realistic range of $20\u2013$55.'), text(' See \u00A70 for the sources of variance.')]));
 
 // ── 4. Total cost at scales
 children.push(h2('4. Total cost at different scales'));
@@ -340,7 +395,7 @@ children.push(numItem([bold('Don\u2019t underprice. '), text('Seniors value reli
 children.push(h2('9. Summary one-liner'));
 children.push(new Paragraph({
   style: 'Quote',
-  children: [italic('MyNaavi costs about $30/month per user in provider fees at the moderate profile, with ~$55/month fixed. A $59/month Plus subscription clears ~50% gross margin at 100 users \u2014 well inside the range needed to fund ongoing development.')],
+  children: [italic('The $30/moderate estimate is my best guess from public pricing and assumed usage. Actual could land anywhere from $20 to $55 per user per month. I would bet on $25\u2013$40 with 70% confidence \u2014 which is why the $59 Plus tier leaves room. Ship at that price, measure actual costs over the first 60 days from 5+ users, and be prepared to adjust within 90 days.')],
   spacing: { before: 120, after: 120 },
   indent: { left: 540 },
   border: { left: { style: BorderStyle.SINGLE, size: 12, color: '5DCAA5', space: 12 } },
