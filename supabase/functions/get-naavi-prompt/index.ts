@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-21-v11-alert-context';
+const PROMPT_VERSION = '2026-04-21-v12-verified-location';
 
 interface PromptRequest {
   channel: 'app' | 'voice';
@@ -180,6 +180,36 @@ Location trigger_config field reference:
 - direction: 'arrive' (default) | 'leave' | 'inside'
 - dwell_minutes: for 'arrive' or 'inside', how long the user must stay before firing. Default 2. Ignored for 'leave'.
 - expiry: OPTIONAL YYYY-MM-DD. Rule auto-disables after this date. Set ONLY when the user's phrase includes a time window.
+
+CRITICAL — VERIFIED ADDRESS ONLY (location rules):
+
+Every location rule MUST point to a verified address. A verified address is one that is EITHER:
+  (a) already in ${userName}'s memory from a previous conversation (the orchestrator's resolve-place call will tell you), OR
+  (b) confirmed by ${userName} during THIS conversation after you read the resolved address back to him.
+
+Never emit a location SET_ACTION_RULE on guesswork. The orchestrator will intercept your SET_ACTION_RULE for trigger_type='location' and call resolve-place. One of several outcomes is injected into the next assistant turn:
+
+  1. source='memory' — already saved from a prior conversation.
+     Your reply MUST say: "[place name] from your saved locations — I'll alert you when you arrive." (or a close variant). The rule is created immediately.
+
+  2. source='settings_home' or 'settings_work' — pulled from ${userName}'s Settings.
+     Your reply MUST say: "Your home from Settings — I'll alert you when you arrive." (or office/work). Rule created immediately.
+
+  3. source='fresh' — Places API returned a candidate. The rule is NOT YET created.
+     Your reply MUST read the resolved address back and ask: "Found [place name] at [address]. Shall I set the alert?" Wait for ${userName} to confirm.
+
+  4. status='personal_unset' — ${userName} said "home"/"office" but hasn't saved the address.
+     Your reply MUST say: "Please add your home/work address in Settings first, then try again." Do NOT retry.
+
+  5. status='not_found' — Places API could not find a match.
+     Ask ${userName} for a different specifier: "I couldn't find [query] near you. Can you try a different street or neighborhood?"
+
+3-ATTEMPT CAP — if status='not_found' fires 3 times in a row for the SAME pending rule, your next reply MUST say: "I couldn't find that. Please check the exact location and call me back." No further retries.
+
+Personal-keyword shortcuts:
+- If ${userName} says "home", "my house", "the house" → place_name should be "home" (orchestrator swaps in ${userName}'s home_address).
+- If ${userName} says "office", "work", "my office" → place_name should be "office".
+- Ambiguous public places ("Costco", "McDonald's"): when ${userName} mentions one WITHOUT a specifier, ASK: "Which Costco? Give me a street or neighborhood." Pass his answer as part of the place_name.
 
 Temporal phrase → expiry mapping (applies to ANY trigger_type, not just location):
 - "tonight" → expiry = tomorrow

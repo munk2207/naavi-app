@@ -107,6 +107,10 @@ export default function SettingsScreen() {
   const [phone, setPhone]                           = useState('');
   const [phoneSaved, setPhoneSaved]                 = useState(false);
   const [phoneLoading, setPhoneLoading]             = useState(false);
+  const [homeAddress, setHomeAddress]               = useState('');
+  const [homeAddressLoading, setHomeAddressLoading] = useState(false);
+  const [workAddress, setWorkAddress]               = useState('');
+  const [workAddressLoading, setWorkAddressLoading] = useState(false);
 
   // Provider selections — all default to Google for Phase 7
   const [calendarProvider, setCalendarProvider] =
@@ -144,7 +148,7 @@ export default function SettingsScreen() {
         if (!user) return;
         const { data } = await supabase
           .from('user_settings')
-          .select('name, morning_call_enabled, morning_call_time, phone')
+          .select('name, morning_call_enabled, morning_call_time, phone, home_address, work_address')
           .eq('user_id', user.id)
           .maybeSingle();
         if (data) {
@@ -164,6 +168,8 @@ export default function SettingsScreen() {
             setPhone(data.phone);
             setPhoneSaved(true);
           }
+          if (data.home_address) setHomeAddress(String(data.home_address));
+          if (data.work_address) setWorkAddress(String(data.work_address));
         }
       })();
     }
@@ -257,6 +263,56 @@ export default function SettingsScreen() {
     setNotionConnected(true);
     setNotionToken('');
     Alert.alert('Connected', 'Notion integration token saved.');
+  }
+
+  async function handleSaveHomeAddress() {
+    const addr = homeAddress.trim();
+    if (!addr) {
+      Alert.alert('Enter an address', 'Type your home address, then Save.');
+      return;
+    }
+    if (!supabase) return;
+    setHomeAddressLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setHomeAddressLoading(false); return; }
+      const { error } = await supabase.from('user_settings').upsert({
+        user_id: user.id,
+        home_address: addr,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+      if (error) throw error;
+      setHomeAddress(addr);
+      Alert.alert('Saved', 'Home address saved. Naavi will use this for "home" alerts.');
+    } catch (err) {
+      Alert.alert('Error', 'Could not save home address. Please try again.');
+    }
+    setHomeAddressLoading(false);
+  }
+
+  async function handleSaveWorkAddress() {
+    const addr = workAddress.trim();
+    if (!addr) {
+      Alert.alert('Enter an address', 'Type your work or office address, then Save.');
+      return;
+    }
+    if (!supabase) return;
+    setWorkAddressLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setWorkAddressLoading(false); return; }
+      const { error } = await supabase.from('user_settings').upsert({
+        user_id: user.id,
+        work_address: addr,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+      if (error) throw error;
+      setWorkAddress(addr);
+      Alert.alert('Saved', 'Work address saved. Naavi will use this for "office" alerts.');
+    } catch (err) {
+      Alert.alert('Error', 'Could not save work address. Please try again.');
+    }
+    setWorkAddressLoading(false);
   }
 
   async function handleDisconnectNotion() {
@@ -691,12 +747,57 @@ export default function SettingsScreen() {
           >
             <Text style={styles.saveBtnText}>Manage location alerts</Text>
           </TouchableOpacity>
+
+          {/* Home & Work addresses — feed the "home" / "office" shortcuts */}
+          <Text style={[styles.sectionNote, { marginTop: 20 }]}>
+            Your home and work addresses let MyNaavi create alerts when you say "home" or "office".
+          </Text>
+
+          <Text style={styles.toolLabel}>Home address</Text>
+          <TextInput
+            style={styles.keyInput}
+            value={homeAddress}
+            onChangeText={setHomeAddress}
+            placeholder="e.g., 123 Main St, Ottawa, ON"
+            placeholderTextColor={Colors.textMuted}
+            autoCapitalize="words"
+            autoCorrect={false}
+            accessibilityLabel="Home address"
+          />
+          <TouchableOpacity
+            style={[styles.saveBtn, (!homeAddress.trim() || homeAddressLoading) && styles.saveBtnDisabled]}
+            onPress={handleSaveHomeAddress}
+            disabled={!homeAddress.trim() || homeAddressLoading}
+            accessibilityRole="button"
+          >
+            <Text style={styles.saveBtnText}>{homeAddressLoading ? 'Saving…' : 'Save home address'}</Text>
+          </TouchableOpacity>
+
+          <Text style={[styles.toolLabel, { marginTop: 12 }]}>Work address</Text>
+          <TextInput
+            style={styles.keyInput}
+            value={workAddress}
+            onChangeText={setWorkAddress}
+            placeholder="e.g., 55 Elgin St, Ottawa, ON"
+            placeholderTextColor={Colors.textMuted}
+            autoCapitalize="words"
+            autoCorrect={false}
+            accessibilityLabel="Work address"
+          />
+          <TouchableOpacity
+            style={[styles.saveBtn, (!workAddress.trim() || workAddressLoading) && styles.saveBtnDisabled]}
+            onPress={handleSaveWorkAddress}
+            disabled={!workAddress.trim() || workAddressLoading}
+            accessibilityRole="button"
+          >
+            <Text style={styles.saveBtnText}>{workAddressLoading ? 'Saving…' : 'Save work address'}</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.divider} />
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V54.0 (build 101)</Text>
+        <Text style={styles.version}>MyNaavi — V54.1 (build 102)</Text>
 
       </ScrollView>
     </SafeAreaView>
