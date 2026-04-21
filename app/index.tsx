@@ -587,6 +587,18 @@ export default function HomeScreen() {
   const [handsfreeActive, setHandsfreeActive] = useState(false);
   const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, pendingAction, confirmPending, cancelPending, editPending } = useOrchestrator('en', brief, avoidHighwaysRef.current, handsfreeActive);
 
+  // Per-(turn, source) expanded state for Global Search "N more" groups.
+  // Key format: `${turnIndex}:${source}`. When a key is present, show all
+  // hits in that group instead of the first 3.
+  const [expandedSearchGroups, setExpandedSearchGroups] = useState<Set<string>>(new Set());
+  const toggleSearchGroup = useCallback((key: string) => {
+    setExpandedSearchGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+
   // Re-check highway preference after each turn so DELETE_MEMORY takes effect immediately
   useEffect(() => {
     if (!supabase || !currentUserId) return;
@@ -1112,37 +1124,51 @@ export default function HomeScreen() {
                       (acc[r.source] ||= []).push(r);
                       return acc;
                     }, {})
-                  ).map(([source, hits]) => (
-                    <View key={source} style={styles.globalSearchGroup}>
-                      <Text style={styles.globalSearchGroupLabel}>
-                        {source === 'calendar' ? '📅 Calendar' :
-                         source === 'contacts' ? '👤 Contacts' :
-                         source === 'lists' ? '📝 Lists' :
-                         source === 'gmail' ? '✉ Email' :
-                         source === 'sent_messages' ? '📤 Sent messages' :
-                         source === 'rules' ? '⚡ Automations' :
-                         source === 'knowledge' ? '🧠 Memory' :
-                         source}
-                        {' · '}{hits.length}
-                      </Text>
-                      {hits.slice(0, 3).map((hit, i) => (
-                        <TouchableOpacity
-                          key={i}
-                          style={styles.globalSearchHit}
-                          onPress={() => hit.url && Linking.openURL(hit.url)}
-                          disabled={!hit.url}
-                        >
-                          <Text style={styles.globalSearchHitTitle} numberOfLines={2}>{hit.title}</Text>
-                          {hit.snippet ? (
-                            <Text style={styles.globalSearchHitMeta} numberOfLines={2}>{hit.snippet}</Text>
-                          ) : null}
-                        </TouchableOpacity>
-                      ))}
-                      {hits.length > 3 && (
-                        <Text style={styles.globalSearchHitMeta}>…{hits.length - 3} more in {source}</Text>
-                      )}
-                    </View>
-                  ))}
+                  ).map(([source, hits]) => {
+                    const groupKey = `${ti}:${source}`;
+                    const isExpanded = expandedSearchGroups.has(groupKey);
+                    const visibleHits = isExpanded ? hits : hits.slice(0, 3);
+                    const hiddenCount = hits.length - 3;
+                    return (
+                      <View key={source} style={styles.globalSearchGroup}>
+                        <Text style={styles.globalSearchGroupLabel}>
+                          {source === 'calendar' ? '📅 Calendar' :
+                           source === 'contacts' ? '👤 Contacts' :
+                           source === 'lists' ? '📝 Lists' :
+                           source === 'gmail' ? '✉ Email' :
+                           source === 'sent_messages' ? '📤 Sent messages' :
+                           source === 'rules' ? '⚡ Automations' :
+                           source === 'knowledge' ? '🧠 Memory' :
+                           source}
+                          {' · '}{hits.length}
+                        </Text>
+                        {visibleHits.map((hit, i) => (
+                          <TouchableOpacity
+                            key={i}
+                            style={styles.globalSearchHit}
+                            onPress={() => hit.url && Linking.openURL(hit.url)}
+                            disabled={!hit.url}
+                          >
+                            <Text style={styles.globalSearchHitTitle} numberOfLines={2}>{hit.title}</Text>
+                            {hit.snippet ? (
+                              <Text style={styles.globalSearchHitMeta} numberOfLines={2}>{hit.snippet}</Text>
+                            ) : null}
+                          </TouchableOpacity>
+                        ))}
+                        {hits.length > 3 && (
+                          <TouchableOpacity
+                            style={styles.globalSearchHit}
+                            onPress={() => toggleSearchGroup(groupKey)}
+                            accessibilityLabel={isExpanded ? `Collapse ${source} results` : `Show ${hiddenCount} more ${source} results`}
+                          >
+                            <Text style={styles.globalSearchExpandToggle}>
+                              {isExpanded ? `▲ Show less` : `▼ Show ${hiddenCount} more in ${source}`}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })}
                 </View>
               )}
 
@@ -1429,7 +1455,7 @@ export default function HomeScreen() {
                 accessibilityLabel="Send message"
               >
                 <Text style={styles.sendBtnText}>➤</Text>
-                <Text style={styles.sendBtnLabel}>Send</Text>
+                <Text style={styles.sendBtnLabel} numberOfLines={1} adjustsFontSizeToFit>Send</Text>
               </TouchableOpacity>
             </View>
             {/* Row 2: three action buttons centered */}
@@ -1483,7 +1509,7 @@ export default function HomeScreen() {
                     if (['uploading', 'transcribing', 'extracting'].includes(convState)) return;
                     resetConv(); clearLive(); startConvRecording(voiceLang); startLive();
                   }}
-                  accessibilityLabel="Tap to record a conversation"
+                  accessibilityLabel="Tap to record a meeting or conversation"
                 >
                   {['uploading', 'transcribing', 'extracting'].includes(convState) ? (
                     <ActivityIndicator size="small" color="#fff" />
@@ -1492,7 +1518,7 @@ export default function HomeScreen() {
                       {convState === 'recording' ? '⏹' : convState === 'labeling' ? '🏷️' : '👥'}
                     </Text>
                   )}
-                  <Text style={styles.bottomBtnLabel}>Record</Text>
+                  <Text style={styles.bottomBtnLabel}>Meet</Text>
                 </TouchableOpacity>
               )}
 
@@ -1985,6 +2011,13 @@ const styles = StyleSheet.create({
   globalSearchHitMeta: {
     fontSize: Typography.sm,
     color: Colors.textMuted,
+  },
+  globalSearchExpandToggle: {
+    fontSize: Typography.sm,
+    color: Colors.brandTeal ?? '#5DCAA5',
+    fontWeight: Typography.semibold,
+    textAlign: 'center',
+    paddingVertical: 4,
   },
   driveCard: {
     backgroundColor: Colors.bgCard,

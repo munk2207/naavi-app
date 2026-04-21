@@ -7,15 +7,51 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { Platform } from 'react-native';
+import { Platform, AppState } from 'react-native';
 import * as Linking from 'expo-linking';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const SUPABASE_URL     = process.env.EXPO_PUBLIC_SUPABASE_URL     ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
+// Supabase client with the canonical Expo-compatible auth options.
+//
+// The session is persisted in AsyncStorage so it survives app restarts, and
+// autoRefreshToken keeps the access token valid for the lifetime of the
+// session. Without this config on React Native, the client held the session
+// in memory only, auto-refresh didn't run reliably when the app backgrounded,
+// and after ~1 hour the JWT expired silently — breaking every `functions.invoke`
+// including text-to-speech. Symptom: "voice stops working mid-session, only
+// logout/login restores it." (Session 20, V54.1 build 102.)
 export const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
-  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: Platform.OS === 'web'
+        ? {
+            autoRefreshToken: true,
+            persistSession: true,
+            detectSessionInUrl: true,
+          }
+        : {
+            storage: AsyncStorage,
+            autoRefreshToken: true,
+            persistSession: true,
+            detectSessionInUrl: false,
+          },
+    })
   : null;
+
+// On native, tell Supabase to restart the refresh timer every time the app
+// foregrounds and stop it when backgrounded. Without this, the timer can
+// drift or die during long backgrounded periods, letting the JWT expire.
+if (supabase && Platform.OS !== 'web') {
+  AppState.addEventListener('change', (state) => {
+    if (state === 'active') {
+      supabase.auth.startAutoRefresh();
+    } else {
+      supabase.auth.stopAutoRefresh();
+    }
+  });
+}
 
 export function isSupabaseConfigured(): boolean {
   return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
