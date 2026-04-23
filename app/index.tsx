@@ -2359,13 +2359,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bgElevated,
     borderRadius: 10,
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 19,
-    fontWeight: '600',
+    paddingVertical: 8,
+    // Match the "WEATHER" brief-group-label: Typography.body (15) + weight 700.
+    fontSize: Typography.body,
+    fontWeight: '700',
     letterSpacing: 0.3,
     color: Colors.textPrimary,
     maxHeight: 120,
-    lineHeight: 24,
+    lineHeight: 20,
   },
   // Top-of-scroll row — holds the "← Brief" chip (only visible during an
   // active conversation) and the 3-dot menu on the right.

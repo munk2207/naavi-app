@@ -680,21 +680,21 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
 
         if (action.type === 'LIST_RULES') {
-          // Fetch count only; full management happens on the /alerts screen.
-          // Override speech so Naavi tells the user how many alerts they have
-          // and how to manage them, regardless of what Claude generated.
+          // Navigate to the Alerts screen instead of summarising inline.
+          // If Claude attached a "match" filter (e.g. "Costco"), forward it
+          // as a route param so the screen auto-expands the matching row.
+          const match = String((action as any).match ?? '').trim();
           try {
-            if (supabase) {
-              const { data } = await supabase.functions.invoke('manage-rules', { body: { op: 'list' } });
-              const rulesList = Array.isArray((data as any)?.rules) ? (data as any).rules : [];
-              const n = rulesList.length;
-              turnSpeechOverride = n === 0
-                ? "You have no alerts set up yet."
-                : `You have ${n} alert${n === 1 ? '' : 's'}. Open the three-dot menu and tap Alerts to see or delete them.`;
+            if (match) {
+              router.push({ pathname: '/alerts', params: { highlight: match } });
+              turnSpeechOverride = `Opening your ${match} alert.`;
+            } else {
+              router.push('/alerts');
+              turnSpeechOverride = 'Opening your alerts.';
             }
           } catch (err) {
-            console.error('[Orchestrator] LIST_RULES failed:', err);
-            turnSpeechOverride = "I couldn't reach your alerts right now.";
+            console.error('[Orchestrator] LIST_RULES nav failed:', err);
+            turnSpeechOverride = "Tap the three-dot menu and then Alerts to see them.";
           }
           continue;
         }
@@ -704,10 +704,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           //   1. Fetch every rule.
           //   2. Flatten trigger_type + trigger_config values + action_config
           //      values + label into a lowercase haystack per rule.
-          //   3. Score match: unique → delete. None → tell user. Multiple →
-          //      ask for a more specific identifier.
+          //   3. Score match. Single → delete. None → tell user. Multiple →
+          //      disambiguate UNLESS action.all === true (then delete all).
           const match = String((action as any).match ?? '').trim().toLowerCase();
-          if (!match) {
+          const deleteAll = (action as any).all === true;
+          if (!match && !deleteAll) {
             turnSpeechOverride = "Tell me which alert to delete — give me a place, a contact, or the trigger word.";
             continue;
           }
@@ -715,7 +716,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             if (!supabase) { turnSpeechOverride = "I'm not signed in right now."; continue; }
             const { data } = await supabase.functions.invoke('manage-rules', { body: { op: 'list' } });
             const all: Array<Record<string, any>> = Array.isArray((data as any)?.rules) ? (data as any).rules : [];
-            const needles = match.split(/\s+/).filter(Boolean);
+            const needles = match ? match.split(/\s+/).filter(Boolean) : [];
             const haystackFor = (r: Record<string, any>) => {
               const parts: string[] = [];
               parts.push(String(r.trigger_type ?? ''));
@@ -728,23 +729,26 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               }
               return parts.join(' ').toLowerCase();
             };
-            const matches = all.filter(r => {
-              const hay = haystackFor(r);
-              return needles.every(n => hay.includes(n));
-            });
+            const matches = needles.length === 0
+              ? all
+              : all.filter(r => { const hay = haystackFor(r); return needles.every(n => hay.includes(n)); });
+
             if (matches.length === 0) {
-              turnSpeechOverride = `I couldn't find an alert matching "${match}".`;
-            } else if (matches.length > 1) {
+              turnSpeechOverride = match ? `I couldn't find an alert matching "${match}".` : "You have no alerts to delete.";
+            } else if (matches.length > 1 && !deleteAll) {
               const hints = matches.slice(0, 3).map(r => String(r.trigger_type) + (r.trigger_config?.place_name ? ` ${r.trigger_config.place_name}` : r.trigger_config?.from_name ? ` ${r.trigger_config.from_name}` : ''));
-              turnSpeechOverride = `I found ${matches.length} alerts matching. Which one — ${hints.join(', or ')}?`;
+              turnSpeechOverride = `I found ${matches.length} alerts matching. Which one — ${hints.join(', or ')}? Or say "all" to delete every match.`;
             } else {
-              const target = matches[0];
-              const { error: delErr } = await supabase.functions.invoke('manage-rules', {
-                body: { op: 'delete', rule_id: target.id },
-              });
-              if (delErr) {
-                turnSpeechOverride = "I couldn't delete that alert — something went wrong.";
-              } else {
+              // Delete one or many in parallel
+              const results = await Promise.allSettled(
+                matches.map(t => supabase.functions.invoke('manage-rules', { body: { op: 'delete', rule_id: t.id } })),
+              );
+              const okCount   = results.filter(r => r.status === 'fulfilled' && !(r as any).value?.error).length;
+              const failCount = matches.length - okCount;
+              if (okCount === 0) {
+                turnSpeechOverride = "I couldn't delete those alerts — something went wrong.";
+              } else if (matches.length === 1) {
+                const target = matches[0];
                 const summary = target.trigger_type === 'location' && target.trigger_config?.place_name
                   ? `the ${target.trigger_config.place_name} alert`
                   : target.trigger_type === 'weather' && target.trigger_config?.condition
@@ -753,6 +757,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                       ? `the ${target.trigger_config.from_name} silence alert`
                       : `the ${target.trigger_type} alert`;
                 turnSpeechOverride = `Done — deleted ${summary}.`;
+              } else {
+                const label = match ? `${match} ` : '';
+                turnSpeechOverride = failCount === 0
+                  ? `Done — deleted all ${okCount} ${label}alerts.`
+                  : `Deleted ${okCount} ${label}alerts. ${failCount} couldn't be removed.`;
               }
             }
           } catch (err) {

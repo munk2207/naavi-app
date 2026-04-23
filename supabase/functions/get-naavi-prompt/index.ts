@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-23-v21-global-search-questions';
+const PROMPT_VERSION = '2026-04-23-v23-delete-rule-all';
 
 /**
  * Cache-boundary marker.
@@ -388,13 +388,17 @@ Do NOT assume a question maps to a single source ("it must be a calendar event" 
 
 RULE 20 — MANAGE ALERTS (list / delete existing rules):
 If ${userName} asks to see, show, list, delete, remove, or cancel his existing alerts or automations, emit one of:
-- LIST_RULES: { "type": "LIST_RULES" } — triggered by "show my alerts", "what alerts do I have", "list my rules", "show my reminders", "what have I set up".
-- DELETE_RULE: { "type": "DELETE_RULE", "match": "short phrase identifying the rule" } — triggered by "delete my Costco alert", "remove the weather alert", "cancel the Sarah alert", "stop the rain alert". The match string is used by the orchestrator to disambiguate — include the trigger type and/or a key identifier (place name, contact name, keyword). Examples:
-  - "delete the Costco alert" → match: "location Costco"
-  - "remove the rain alert" → match: "weather rain"
-  - "cancel the Sarah alert" → match: "Sarah"
+- LIST_RULES: { "type": "LIST_RULES", "match": "optional phrase identifying a specific rule" }
+  - Use without "match" for broad requests: "show my alerts", "list my rules", "what have I set up".
+  - Use WITH "match" when ${userName} names a specific one: "show my Costco alert" → match: "Costco"; "what is my rain alert" → match: "rain"; "tell me about the Sarah alert" → match: "Sarah". The client opens the matching alert directly (mobile) or reads only its detail aloud (voice).
+- DELETE_RULE: { "type": "DELETE_RULE", "match": "short phrase identifying the rule", "all": false } — triggered by "delete my Costco alert", "remove the weather alert", "cancel the Sarah alert", "stop the rain alert". The match string is used by the orchestrator to disambiguate — include the trigger type and/or a key identifier (place name, contact name, keyword). Set "all": true when ${userName} explicitly says "all" or "every" — this bypasses the "found multiple, which one?" disambiguation and deletes every matching rule. Examples:
+  - "delete the Costco alert" → match: "Costco", all: false
+  - "delete all my Costco alerts" → match: "Costco", all: true
+  - "remove every rain alert" → match: "rain", all: true
+  - "delete all my alerts" → match: "", all: true
+  - "remove the Sarah alert" → match: "Sarah", all: false
 
-Speech for LIST_RULES MUST be a short acknowledgement only — the client renders the list itself: "Here are your alerts." or similar.
+Speech for LIST_RULES MUST be a short acknowledgement only — the client renders the list itself: "Here are your alerts." or "Opening your Costco alert." or similar.
 Speech for DELETE_RULE MUST confirm after the action: "Done — deleted [the match]." The orchestrator intercepts and does the actual delete; if no rule matches or multiple match, it asks ${userName} to be more specific on the next turn.
 
 RULE 18 — RECORD CALL / VISIT${channel === 'voice' ? ' (TAKES PRIORITY OVER RULE 9)' : ' (APP: tell user to use Record button)'}:
