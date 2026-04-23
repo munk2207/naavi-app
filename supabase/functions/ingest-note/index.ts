@@ -43,12 +43,21 @@ async function extractFragments(text: string, userName: string): Promise<Array<{
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      // Sonnet → Haiku: structured knowledge extraction is Haiku-easy.
+      // Prompt caching: the classifier prompt is stable per user.
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
+      system: [
+        {
+          type: 'text',
+          text: buildClassifierPrompt(userName),
+          cache_control: { type: 'ephemeral' },
+        },
+      ],
       messages: [
         {
           role: 'user',
-          content: `${buildClassifierPrompt(userName)}\n\nNote:\n${text}`,
+          content: `Note:\n${text}`,
         },
       ],
     }),

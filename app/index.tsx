@@ -24,7 +24,7 @@ import {
   Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, Stack } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import * as Linking from 'expo-linking';
 
@@ -39,6 +39,10 @@ import { VoiceButton } from '@/components/VoiceButton';
 import { BriefCard } from '@/components/BriefCard';
 import { ConversationBubble } from '@/components/ConversationBubble';
 import { ConversationActionCard } from '@/components/ConversationActionCard';
+import { TopBarMenu } from '@/components/TopBarMenu';
+import { IconButton } from '@/components/IconButton';
+import { getBriefWindow, filterByWindow, pickRandomTip } from '@/lib/brief-logic';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { BriefItem, GlobalSearchResult } from '@/lib/naavi-client';
@@ -65,7 +69,14 @@ import { supabase } from '@/lib/supabase';
 
 // ─── Integrations data ────────────────────────────────────────────────────────
 
-const INTEGRATION_CATEGORIES = [
+// Integration catalogue shown in the Info modal. Items may use either an
+// Ionicons name (preferred — consistent sizing + stroke weight with the home
+// bottom bar) or an emoji fallback when no Ionicons match exists.
+type IntegrationItem =
+  | { ionIcon: string; name: string; description: string; icon?: never }
+  | { icon: string;    name: string; description: string; ionIcon?: never };
+
+const INTEGRATION_CATEGORIES: Array<{ category: string; items: IntegrationItem[] }> = [
   {
     category: 'AI Core',
     items: [
@@ -75,9 +86,11 @@ const INTEGRATION_CATEGORIES = [
         description: 'Claude-powered assistant. Robert speaks or types naturally — MyNaavi understands intent and takes action without any app switching.',
       },
       {
-        icon: '🎙',
+        // Matches the mic icon on the home screen bottom bar so the two feel
+        // connected — same glyph, same weight, same colour.
+        ionIcon: 'mic',
         name: 'Whisper Voice',
-        description: 'Tap the red button, speak, release. OpenAI Whisper transcribes the audio and MyNaavi responds. Enables fully hands-free interaction.',
+        description: 'Tap the microphone at the bottom right, speak your request, and release. OpenAI Whisper transcribes the audio and MyNaavi responds. Enables fully hands-free interaction.',
       },
     ],
   },
@@ -90,7 +103,7 @@ const INTEGRATION_CATEGORIES = [
         description: 'Surfaces important unread emails in the brief. Robert can send emails by voice ("send John a message saying I\'ll be late") — draft appears for review, one tap to send.',
       },
       {
-        icon: '👤',
+        ionIcon: 'people-circle',
         name: 'Google Contacts',
         description: 'Automatically resolves contact names to email addresses. Robert says a name — MyNaavi finds the email. Unknown contacts are saved for future use.',
       },
@@ -145,7 +158,17 @@ function IntegrationsModal({ visible, onClose }: { visible: boolean; onClose: ()
                 <Text style={intStyles.categoryLabel}>{group.category}</Text>
                 {group.items.map(int => (
                   <View key={int.name} style={intStyles.card}>
-                    <Text style={intStyles.cardIcon}>{int.icon}</Text>
+                    {int.ionIcon ? (
+                      <View style={intStyles.cardIconWrap}>
+                        <Ionicons
+                          name={int.ionIcon as React.ComponentProps<typeof Ionicons>['name']}
+                          size={28}
+                          color={Colors.accent}
+                        />
+                      </View>
+                    ) : (
+                      <Text style={intStyles.cardIcon}>{int.icon}</Text>
+                    )}
                     <View style={intStyles.cardBody}>
                       <Text style={intStyles.cardName}>{int.name}</Text>
                       <Text style={intStyles.cardDesc}>{int.description}</Text>
@@ -208,9 +231,17 @@ const intStyles = StyleSheet.create({
     borderColor: Colors.border,
   },
   cardIcon: {
-    fontSize: 26,
+    fontSize: 30,
     marginRight: 14,
     marginTop: 2,
+    width: 36,
+    textAlign: 'center',
+  },
+  cardIconWrap: {
+    width: 36,
+    marginRight: 14,
+    marginTop: 2,
+    alignItems: 'center',
   },
   cardBody: {
     flex: 1,
@@ -225,15 +256,15 @@ const intStyles = StyleSheet.create({
     marginBottom: 8,
   },
   cardName: {
-    fontSize: Typography.body,
+    fontSize: 17,
     fontWeight: '700',
     color: Colors.textPrimary,
-    marginBottom: 4,
+    marginBottom: 6,
   },
   cardDesc: {
-    fontSize: Typography.caption,
+    fontSize: 15,
     color: Colors.textSecondary,
-    lineHeight: 19,
+    lineHeight: 22,
   },
 });
 
@@ -426,6 +457,15 @@ export default function HomeScreen() {
   const [briefDays, setBriefDays] = useState<number>(1); // default: today only
   const [recordingPrompt, setRecordingPrompt] = useState<{ title: string; endMs: number } | null>(null);
 
+  // Marketing-hook tip for the empty-brief state. Picked once per mount so it
+  // doesn't flicker on re-render. Copy comes from lib/brief-logic.ts.
+  const tipRef = useRef<string>(pickRandomTip());
+  // Chat auto-clear timers — chat takes over the screen when turns > 0, and
+  // must return to the brief on (a) user saying "cancel", (b) 3-min idle, or
+  // (c) midnight rollover. Refs live here so clearTimeout works across re-renders.
+  const chatIdleTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const midnightTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Load weather immediately (no auth needed)
   useEffect(() => {
     fetchOttawaWeather().then(w => setBrief([w]));
@@ -617,6 +657,45 @@ export default function HomeScreen() {
     }
   }, [turns.length]);
 
+  // Chat auto-clear — return to the brief after 3 min of no activity so
+  // Robert doesn't come back hours later to stale bubbles. Reset on every
+  // new turn. Separate midnight timer clears at local midnight regardless
+  // of activity (day-boundary rollover).
+  useEffect(() => {
+    if (chatIdleTimerRef.current) {
+      clearTimeout(chatIdleTimerRef.current);
+      chatIdleTimerRef.current = null;
+    }
+    if (turns.length === 0) return;
+    chatIdleTimerRef.current = setTimeout(() => {
+      console.log('[Home] chat idle 3 min — auto-clearing');
+      clearHistory();
+    }, 3 * 60 * 1000);
+    return () => {
+      if (chatIdleTimerRef.current) clearTimeout(chatIdleTimerRef.current);
+    };
+  }, [turns.length, clearHistory]);
+
+  // Midnight clear — schedule once, reschedules itself daily. Runs even if
+  // no turns exist (cheap to reset a no-op at midnight).
+  useEffect(() => {
+    const scheduleMidnight = () => {
+      const now = new Date();
+      const nextMidnight = new Date(now);
+      nextMidnight.setHours(24, 0, 0, 0);
+      const ms = nextMidnight.getTime() - now.getTime();
+      midnightTimerRef.current = setTimeout(() => {
+        console.log('[Home] midnight — clearing chat');
+        clearHistory();
+        scheduleMidnight();
+      }, ms);
+    };
+    scheduleMidnight();
+    return () => {
+      if (midnightTimerRef.current) clearTimeout(midnightTimerRef.current);
+    };
+  }, [clearHistory]);
+
   // Auto-open Google Maps when a navigation result arrives
   const lastAutoOpenedTurnRef = useRef(-1);
   useEffect(() => {
@@ -782,6 +861,13 @@ export default function HomeScreen() {
     const text = inputText.trim();
     if (!text || status === 'thinking' || status === 'speaking') return;
     setInputText('');
+    // "Cancel" during an active chat returns to the brief without asking Claude.
+    // Only triggers when a conversation is actually in progress — otherwise
+    // "cancel" is a normal Claude-handled phrase.
+    if (turns.length > 0 && /^(cancel|never ?mind|stop|forget it|back)\b/i.test(text)) {
+      clearHistory();
+      return;
+    }
     // Fire calendar sync in background so next response has fresh data
     if (currentUserId) runSyncRef.current?.();
     await send(text);
@@ -821,6 +907,20 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
+      {/* Attach the 3-dot menu to the native header so it sits on the same row
+          as "MyNaavi". Callbacks close over state declared in this component. */}
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <TopBarMenu items={[
+              { label: 'Alerts',   onPress: () => router.push('/alerts') },
+              { label: 'Notes',    onPress: () => router.push('/notes') },
+              { label: 'Info',     onPress: () => setShowIntegrations(true) },
+              { label: 'Settings', onPress: () => router.push('/settings') },
+            ]} />
+          ),
+        }}
+      />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -933,135 +1033,128 @@ export default function HomeScreen() {
           </View>
         </Modal>
 
+        {/* Floating sign-in banner — absolute positioned, doesn't shift page layout.
+            Shows only when the user is not yet signed in. */}
+        {!currentUserId && (
+          <TouchableOpacity
+            style={styles.floatingSignInBanner}
+            onPress={async () => {
+              try {
+                setSigningIn(true);
+                await signInWithGoogle();
+              } catch (e) {
+                console.error('[SignIn]', e);
+              } finally {
+                setSigningIn(false);
+              }
+            }}
+            disabled={signingIn}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="key" size={18} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.floatingSignInText} numberOfLines={1}>
+              {signingIn ? 'Signing in…' : 'Sign in with Google'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
         <ScrollView
           ref={scrollRef}
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* Greeting on its own row (left-aligned, small) */}
-          <View style={styles.greetingRowLeft}>
-            <Text style={styles.greetingSmall}>{getGreeting()}</Text>
-          </View>
-
-          {/* Action buttons on a separate row, right-aligned */}
-          <View style={styles.greetingActionsRow}>
-            {turns.length > 0 && (
+          {/* "← Brief" chip — only appears during an active conversation so
+              Robert can bail back to the brief without scrolling. */}
+          {turns.length > 0 && (
+            <View style={styles.topBarRow}>
               <TouchableOpacity
                 style={styles.newChatBtn}
                 onPress={clearHistory}
-                accessibilityLabel="New chat"
+                accessibilityLabel="Return to brief"
               >
-                <Text style={styles.newChatBtnText}>+ New</Text>
+                <Text style={styles.newChatBtnText}>← Brief</Text>
               </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={styles.labeledBtn}
-              onPress={() => setShowIntegrations(true)}
-              accessibilityLabel="View integrations"
-            >
-              <View style={styles.infoBtn}><Text style={styles.infoBtnText}>?</Text></View>
-              <Text style={styles.btnLabel} numberOfLines={1}>Info</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.labeledBtn}
-              onPress={() => router.push('/notes')}
-              accessibilityLabel="Open notes"
-            >
-              <View style={styles.notesBtn}><Text style={styles.notesBtnText}>📋</Text></View>
-              <Text style={styles.btnLabel}>Notes</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.labeledBtn}
-              onPress={() => router.push('/settings')}
-              accessibilityLabel="Open settings"
-            >
-              <View style={styles.settingsBtn}><Text style={styles.settingsIcon}>⚙</Text></View>
-              <Text style={styles.btnLabel}>Settings</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Sign-in banner — only shown when not signed in on native */}
-          {!currentUserId && (
-            <TouchableOpacity
-              style={styles.signInBanner}
-              onPress={async () => {
-                try {
-                  setSigningIn(true);
-                  await signInWithGoogle();
-                } catch (e) {
-                  console.error('[SignIn]', e);
-                } finally {
-                  setSigningIn(false);
-                }
-              }}
-              disabled={signingIn}
-            >
-              <Text style={styles.signInBannerText}>
-                {signingIn ? 'Signing in…' : '🔑  Sign in with Google to unlock calendar, email & preferences'}
-              </Text>
-            </TouchableOpacity>
+            </View>
           )}
 
           {/* Morning brief — grouped by category */}
-          {turns.length === 0 && (
-            <View style={styles.briefSection}>
-              <Text style={styles.sectionTitle}>{t('home.briefTitle')}</Text>
-              <View style={styles.daySelector}>
-                {[1, 3, 7].map(d => (
-                  <TouchableOpacity
-                    key={d}
-                    style={[styles.daySelectorBtn, briefDays === d && styles.daySelectorBtnActive]}
-                    onPress={() => setBriefDays(d)}
-                  >
-                    <Text style={[styles.daySelectorText, briefDays === d && styles.daySelectorTextActive]}>
-                      {d === 1 ? 'Today' : `${d} days`}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              {[
-                { key: 'weather',  label: 'Weather' },
-                { key: 'calendar', label: 'Calendar' },
-                { key: 'task',     label: 'Tasks' },
-                { key: 'health',   label: 'Health' },
-              ].map(({ key, label }) => {
-                const items = brief.filter(i => {
-                  if (i.category !== key) return false;
-                  if (i.category === 'weather') return true;
-                  if (briefDays >= 7) return true;
-                  if (!i.startISO) return false;
-                  const itemDate = new Date(i.startISO);
-                  const cutoff = new Date();
-                  cutoff.setDate(cutoff.getDate() + briefDays - 1);
-                  cutoff.setHours(23, 59, 59, 999);
-                  return itemDate <= cutoff;
-                });
-                if (items.length === 0) return null;
-                const collapsed = collapsedGroups[key] ?? true;
-                return (
-                  <View key={key} style={styles.briefGroup}>
-                    <TouchableOpacity
-                      style={styles.briefGroupHeader}
-                      onPress={() => setCollapsedGroups(prev => ({ ...prev, [key]: !collapsed }))}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.briefGroupLabel}>{label}</Text>
-                      <Text style={styles.briefGroupCount}>{items.length}</Text>
-                      <Text style={styles.briefGroupArrow}>{collapsed ? '+' : '−'}</Text>
-                    </TouchableOpacity>
-                    {!collapsed && items.map(item => (
-                      <BriefCard
-                        key={item.id}
-                        item={item}
-                        onPress={handleBriefItemPress}
-                      />
-                    ))}
+          {turns.length === 0 && (() => {
+            // Time-window filter only applies to the "Today" selector — for
+            // 3/7-day views, show everything in range. brief-logic keeps the
+            // window rules (morning/midday/evening/night) in one place.
+            const now    = new Date();
+            const window = getBriefWindow(now);
+            const byCat: Record<string, BriefItem[]> = { weather: [], calendar: [], task: [], health: [] };
+            for (const i of brief) {
+              if (!byCat[i.category]) continue;
+              if (i.category === 'weather') { byCat.weather.push(i); continue; }
+              if (briefDays < 7 && i.startISO) {
+                const itemDate = new Date(i.startISO);
+                const cutoff = new Date();
+                cutoff.setDate(cutoff.getDate() + briefDays - 1);
+                cutoff.setHours(23, 59, 59, 999);
+                if (itemDate > cutoff) continue;
+              }
+              byCat[i.category].push(i);
+            }
+            if (briefDays === 1) {
+              // Strip past events for today-view based on current time-window.
+              for (const k of Object.keys(byCat)) {
+                byCat[k] = filterByWindow(byCat[k], window, now);
+              }
+            }
+            const totalItems = Object.values(byCat).reduce((sum, arr) => sum + arr.length, 0);
+            // "Nothing today" check — weather alone means an otherwise empty day.
+            const hasOnlyWeather = byCat.weather.length > 0
+              && byCat.calendar.length === 0
+              && byCat.task.length === 0
+              && byCat.health.length === 0;
+            return (
+              <View style={styles.briefSection}>
+                <Text style={styles.sectionTitle}>{t('home.briefTitle')}</Text>
+                {[
+                  { key: 'weather',  label: 'Weather' },
+                  { key: 'calendar', label: 'Calendar' },
+                  { key: 'task',     label: 'Tasks' },
+                  { key: 'health',   label: 'Health' },
+                ].map(({ key, label }) => {
+                  const items = byCat[key] ?? [];
+                  if (items.length === 0) return null;
+                  const collapsed = collapsedGroups[key] ?? true;
+                  return (
+                    <View key={key} style={styles.briefGroup}>
+                      <TouchableOpacity
+                        style={styles.briefGroupHeader}
+                        onPress={() => setCollapsedGroups(prev => ({ ...prev, [key]: !collapsed }))}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.briefGroupLabel}>{label}</Text>
+                        <Text style={styles.briefGroupCount}>{items.length}</Text>
+                        <Text style={styles.briefGroupArrow}>{collapsed ? '+' : '−'}</Text>
+                      </TouchableOpacity>
+                      {!collapsed && items.map(item => (
+                        <BriefCard
+                          key={item.id}
+                          item={item}
+                          onPress={handleBriefItemPress}
+                        />
+                      ))}
+                    </View>
+                  );
+                })}
+                {/* Empty state — nothing today beyond the weather anchor, show
+                    a friendly line plus a rotating example prompt. Tip picked
+                    once per mount via tipRef. */}
+                {(totalItems === 0 || hasOnlyWeather) && briefDays === 1 && (
+                  <View style={styles.briefEmpty}>
+                    <Text style={styles.briefEmptyText}>Nothing on your plate today.</Text>
+                    <Text style={styles.briefEmptyTip}>{tipRef.current}</Text>
                   </View>
-                );
-              })}
-            </View>
-          )}
+                )}
+              </View>
+            );
+          })()}
 
           {/* Conversation turns — each turn shows bubbles then its own cards */}
           {turns.map((turn, ti) => (
@@ -1418,13 +1511,15 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Input area — two rows when hands-free is inactive */}
+        {/* Input area — full-width text input + icon row (no labels).
+            Mic ↔ Send toggles on the far right based on whether text is typed.
+            Long-press any icon to see its label. */}
         {handsfree.state === 'inactive' ? (
           <View style={styles.inputArea}>
-            {/* Row 1: text input + send (full width) */}
+            {/* Row 1 — full-width text input, no embedded send */}
             <View style={styles.inputRow}>
               <TextInput
-                style={styles.input}
+                style={styles.inputFull}
                 value={inputText}
                 onChangeText={setInputText}
                 placeholder={t('home.inputPlaceholder')}
@@ -1435,102 +1530,109 @@ export default function HomeScreen() {
                 onSubmitEditing={handleSend}
                 editable={status === 'idle' || status === 'error'}
                 accessibilityLabel="Message input"
-                // Disable Android's aggressive autocomplete/autocorrect which
-                // was stripping typed digits (e.g. "Find phone 6137976679"
-                // arrived at the app as "Find phone " with the digits gone,
-                // because Android's keyboard tried to replace them with a
-                // contact suggestion). Trade-off: no word suggestions while
-                // typing. For our senior user that's a net win — reliable
-                // input matters more than typing shortcuts.
+                // Android autocomplete/autocorrect off — it was stripping typed
+                // digits (contact suggestions replacing phone numbers). Trade
+                // word-suggestions for reliable input; right call for Robert.
                 autoCorrect={false}
                 autoComplete="off"
                 spellCheck={false}
                 textContentType="none"
                 keyboardType="default"
               />
-              <TouchableOpacity
-                style={[styles.sendBtn, (!inputText.trim() || status === 'thinking' || status === 'speaking') && styles.sendBtnDisabled]}
-                onPress={handleSend}
-                disabled={!inputText.trim() || status === 'thinking' || status === 'speaking'}
-                accessibilityLabel="Send message"
-              >
-                <Text style={styles.sendBtnText}>➤</Text>
-                <Text style={styles.sendBtnLabel} numberOfLines={1} adjustsFontSizeToFit>Send</Text>
-              </TouchableOpacity>
             </View>
-            {/* Row 2: three action buttons centered */}
+            {/* Row 2 — Meet + Free on the left, Mic/Send toggle far right. */}
             <View style={styles.actionButtonsRow}>
-              {/* Naavi mic — speak a question, note, or command */}
+              {/* Meet — conversation recorder */}
               {memoSupported && (
-                <TouchableOpacity
-                  style={[styles.unifiedBtn, memoState === 'recording' && styles.unifiedBtnActive]}
-                  onPress={() => {
-                    if (memoState === 'recording') {
-                      // Ignore stop taps within 1500ms of starting — prevents double-fire on web
-                      if (Date.now() - memoStartedAtRef.current < 1500) return;
-                      stopRecording(async (transcript) => {
-                        if (!transcript.trim()) return;
-                        setMemoTranscript(transcript);
-                        await send(transcript);
-                        setTimeout(() => setMemoTranscript(null), 5000);
-                      }, voiceLang);
-                      return;
-                    }
-                    if (memoState === 'transcribing' || status === 'thinking') return;
-                    memoStartedAtRef.current = Date.now();
-                    startRecording();
-                  }}
-                  accessibilityLabel="Tap to speak to MyNaavi"
-                >
-                  <Text style={styles.unifiedBtnText}>
-                    {memoState === 'recording' ? '⏹' : memoState === 'transcribing' ? '…' : '🎙'}
-                  </Text>
-                  <Text style={styles.bottomBtnLabel}>Voice</Text>
-                </TouchableOpacity>
-              )}
-
-              {/* Hands-free button */}
-              <TouchableOpacity
-                style={[styles.unifiedBtn, { backgroundColor: '#2563EB' }]}
-                onPress={() => handsfree.activate()}
-                accessibilityLabel="Tap to start hands-free mode"
-              >
-                <Text style={styles.unifiedBtnText}>🙌</Text>
-                <Text style={styles.bottomBtnLabel}>Free</Text>
-              </TouchableOpacity>
-
-              {/* Conversation button */}
-              {memoSupported && (
-                <TouchableOpacity
-                  style={[styles.convBtn, convState === 'recording' && styles.convBtnActive]}
+                <IconButton
+                  label={convState === 'recording' ? 'Stop recording' : convState === 'labeling' ? 'Label speakers' : 'Meet'}
+                  icon={
+                    ['uploading', 'transcribing', 'extracting'].includes(convState)
+                      ? <ActivityIndicator size="small" color="#fff" />
+                      : convState === 'recording'
+                        ? <Ionicons name="stop" size={30} color="#fff" />
+                        : convState === 'labeling'
+                          ? <Ionicons name="pricetag" size={30} color="#fff" />
+                          : <Ionicons name="people" size={30} color="#fff" />
+                  }
+                  style={[
+                    { backgroundColor: Colors.moderate },
+                    convState === 'recording' && { backgroundColor: Colors.alert },
+                  ]}
                   onPress={() => {
                     if (convState === 'labeling') { setShowSpeakerModal(true); return; }
                     if (convState === 'recording') { stopConvRecording(); stopLive(); return; }
                     if (['uploading', 'transcribing', 'extracting'].includes(convState)) return;
                     resetConv(); clearLive(); startConvRecording(voiceLang); startLive();
                   }}
-                  accessibilityLabel="Tap to record a meeting or conversation"
-                >
-                  {['uploading', 'transcribing', 'extracting'].includes(convState) ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={styles.unifiedBtnText}>
-                      {convState === 'recording' ? '⏹' : convState === 'labeling' ? '🏷️' : '👥'}
-                    </Text>
-                  )}
-                  <Text style={styles.bottomBtnLabel}>Meet</Text>
-                </TouchableOpacity>
+                />
               )}
 
-              {/* Timer badge — info only, not tappable */}
+              {/* Free — hands-free mode */}
+              <IconButton
+                label="Hands-free"
+                icon={<Ionicons name="radio" size={30} color="#fff" />}
+                style={{ backgroundColor: '#2563EB', marginLeft: 12 }}
+                onPress={() => handsfree.activate()}
+              />
+
+              {/* Recording timer badge — info only */}
               {convState === 'recording' && (
-                <View style={styles.convTimerBadge} pointerEvents="none">
+                <View style={[styles.convTimerBadge, { marginLeft: 8 }]} pointerEvents="none">
                   <View style={styles.convTimerDot} />
                   <Text style={styles.convTimerText}>
                     {Math.floor(elapsedSeconds / 60)}:{String(elapsedSeconds % 60).padStart(2, '0')}
                   </Text>
                 </View>
               )}
+
+              {/* Flexible spacer so the Mic/Send toggle is pinned to the far right */}
+              <View style={{ flex: 1 }} />
+
+              {/* Mic/Send toggle — icon depends on input state.
+                    empty + idle → 🎙 (start voice)
+                    text present → ➤ (send)
+                    recording    → ⏹ (stop + transcribe)
+                    transcribing → … (busy) */}
+              {(() => {
+                const hasText        = inputText.trim().length > 0;
+                const isRecording    = memoState === 'recording';
+                const isTranscribing = memoState === 'transcribing';
+                let icon:  React.ReactNode = <Ionicons name="mic" size={30} color="#fff" />;
+                let label = 'Voice';
+                let bg    = Colors.accent;
+                if (isTranscribing)       { icon = <Ionicons name="ellipsis-horizontal" size={30} color="#fff" />; label = 'Transcribing'; }
+                else if (isRecording)     { icon = <Ionicons name="stop" size={30} color="#fff" />; label = 'Stop recording'; bg = Colors.alert; }
+                else if (hasText)         { icon = <Ionicons name="send" size={26} color="#fff" />; label = 'Send'; }
+                const disabled = status === 'thinking' || status === 'speaking' || (isTranscribing);
+                const onPress = () => {
+                  if (hasText && !isRecording && !isTranscribing) { handleSend(); return; }
+                  if (isRecording) {
+                    // Ignore stop taps within 1500ms of starting — prevents double-fire on web
+                    if (Date.now() - memoStartedAtRef.current < 1500) return;
+                    stopRecording(async (transcript) => {
+                      if (!transcript.trim()) return;
+                      setMemoTranscript(transcript);
+                      await send(transcript);
+                      setTimeout(() => setMemoTranscript(null), 5000);
+                    }, voiceLang);
+                    return;
+                  }
+                  if (!memoSupported) return;
+                  if (isTranscribing || status === 'thinking') return;
+                  memoStartedAtRef.current = Date.now();
+                  startRecording();
+                };
+                return (
+                  <IconButton
+                    label={label}
+                    icon={icon}
+                    onPress={onPress}
+                    disabled={disabled}
+                    style={{ backgroundColor: bg }}
+                  />
+                );
+              })()}
             </View>
           </View>
         ) : null}
@@ -2233,8 +2335,7 @@ const styles = StyleSheet.create({
   actionButtonsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
+    gap: 0, // rely on marginLeft between icons so the flex spacer works cleanly
   },
   input: {
     flex: 1,
@@ -2247,6 +2348,83 @@ const styles = StyleSheet.create({
     maxHeight: 120,
     lineHeight: Typography.lineHeightBody,
     height: 48,
+  },
+  // Full-width text input — replaces `input` (which was flex: 1 alongside a
+  // send button). Now a standalone row, no embedded send, so the input takes
+  // the full row width and the Mic/Send toggle lives below it.
+  // Height is tight to the font (roughly font + vertical padding) so the
+  // field doesn't dominate the bottom bar. Grows with multiline content.
+  inputFull: {
+    width: '100%',
+    backgroundColor: Colors.bgElevated,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 19,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+    color: Colors.textPrimary,
+    maxHeight: 120,
+    lineHeight: 24,
+  },
+  // Top-of-scroll row — holds the "← Brief" chip (only visible during an
+  // active conversation) and the 3-dot menu on the right.
+  topBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 2,
+    paddingVertical: 4,
+    minHeight: 40,
+  },
+  // Floating sign-in banner — absolute-positioned pill that overlays the
+  // scroll content. Visible only when the user isn't signed in. Kept short
+  // so it doesn't dominate; tapping opens the Google sign-in flow.
+  floatingSignInBanner: {
+    position: 'absolute',
+    top: 10,
+    alignSelf: 'center',
+    maxWidth: 380,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.accent,
+    borderRadius: 24,
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    zIndex: 100,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  floatingSignInText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  // Empty-state block inside the brief — "Nothing on your plate today" plus
+  // a rotating Try-this tip from lib/brief-logic.
+  briefEmpty: {
+    paddingVertical: 28,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  briefEmptyText: {
+    color: Colors.textSecondary,
+    fontSize: 17,
+    fontWeight: '500',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  briefEmptyTip: {
+    color: Colors.textMuted,
+    fontSize: 16,
+    textAlign: 'center',
+    paddingHorizontal: 16,
+    lineHeight: 22,
   },
   // ─── Live transcript panel ──────────────────────────────────────────────────
   livePanel: {

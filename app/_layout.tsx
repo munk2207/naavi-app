@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Platform, View, Text, StyleSheet } from 'react-native';
+import { Platform, View, Text, StyleSheet, Image } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -15,6 +15,7 @@ import '../lib/i18n'; // Initialise i18n before any screen renders
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { syncDeviceTimezone } from '@/lib/location';
+import { registerPushNotifications } from '@/lib/push';
 import { useGeofencing } from '@/hooks/useGeofencing';
 
 // Handle Google OAuth deep link callback (naavi://auth/callback#access_token=...)
@@ -61,19 +62,39 @@ export default function RootLayout() {
     // Get the initial session, then subscribe to auth state changes.
     let mounted = true;
 
+    // Fire-and-forget auto-register for push. Only triggers when the native
+    // permission status is "undetermined" — i.e., the user hasn't answered
+    // the OS prompt yet. On second and later launches, we never re-ask;
+    // granted stays granted, denied stays denied until the user manually
+    // taps "Enable" in Settings. AAB item #8 — push default ON.
+    const maybeAutoRegisterPush = async () => {
+      try {
+        const { status } = await Notifications.getPermissionsAsync();
+        if (status === 'undetermined') {
+          await registerPushNotifications();
+        }
+      } catch { /* silent */ }
+    };
+
     supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
       const uid = data?.session?.user?.id ?? null;
       setUserId(uid);
       // Sync device timezone to user_settings on every signin — supports
       // the global-first rule (no hardcoded timezone defaults).
-      if (uid) syncDeviceTimezone(uid).catch(() => {});
+      if (uid) {
+        syncDeviceTimezone(uid).catch(() => {});
+        maybeAutoRegisterPush();
+      }
     });
 
     const { data: authSub } = supabase.auth.onAuthStateChange((_event, session) => {
       const uid = session?.user?.id ?? null;
       setUserId(uid);
-      if (uid) syncDeviceTimezone(uid).catch(() => {});
+      if (uid) {
+        syncDeviceTimezone(uid).catch(() => {});
+        maybeAutoRegisterPush();
+      }
     });
 
     return () => {
@@ -132,6 +153,7 @@ export default function RootLayout() {
           headerStyle: { backgroundColor: Colors.bgApp },
           headerTintColor: Colors.textPrimary,
           headerTitleStyle: { fontWeight: '600', fontSize: 17 },
+          headerShadowVisible: false, // removes the thin divider line under the header
           contentStyle: { backgroundColor: Colors.bgApp },
           animation: 'slide_from_right',
         }}
@@ -159,6 +181,10 @@ export default function RootLayout() {
           options={{ title: 'My Notes', headerShown: true }}
         />
         <Stack.Screen
+          name="alerts"
+          options={{ title: 'Your Alerts', headerShown: true }}
+        />
+        <Stack.Screen
           name="permission-location"
           options={{ title: 'Location alerts', headerShown: true }}
         />
@@ -176,6 +202,10 @@ const headerStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  logo: {
+    width: 28,
+    height: 28,
   },
   title: {
     fontWeight: '600',

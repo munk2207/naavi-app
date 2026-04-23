@@ -103,12 +103,10 @@ serve(async (req) => {
 
     const client = new Anthropic({ apiKey });
 
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 512,
-      messages: [{
-        role: 'user',
-        content: `You are helping a senior user triage email. Decide whether the email below contains a real action or time-sensitive fact worth surfacing. Ignore newsletters, generic confirmations ("your order has shipped" is fine to surface; "thanks for signing up" is not), marketing, social prompts.
+    // Prompt caching: the classifier prompt below is ~1.2k tokens and identical
+    // on every email. Split into a cached system block (stable) and a short
+    // user message (just the email body). ~90% input-token reduction per call.
+    const classifierPrompt = `You are helping a senior user triage email. Decide whether the email below contains a real action or time-sensitive fact worth surfacing. Ignore newsletters, generic confirmations ("your order has shipped" is fine to surface; "thanks for signing up" is not), marketing, social prompts.
 
 Also classify the sender on its OWN merit, regardless of whether the email is actionable: personal (a friend / family member / doctor / lawyer — any real individual), institutional (a government agency, bank, insurance company, utility, telecom, hospital, property manager, employer, or other organization that matters to the user's life), or ambient (newsletters, marketing, random notifications, anything else).
 
@@ -177,8 +175,17 @@ NEVER put the same value in both fields. If only one applies, leave the other nu
 
 Rule of thumb: if the field tracks when to SHOW UP or PAY, it's due_date. If it tracks when a THING stops working, it's expiry_date. Appointments, events, and meetings are always due_date.
 
-EMAIL:
-${emailText.slice(0, 3000)}`,
+The user message will contain the email text under "EMAIL:".`;
+
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 512,
+      system: [
+        { type: 'text', text: classifierPrompt, cache_control: { type: 'ephemeral' } },
+      ] as any,
+      messages: [{
+        role: 'user',
+        content: `EMAIL:\n${emailText.slice(0, 3000)}`,
       }],
     });
 

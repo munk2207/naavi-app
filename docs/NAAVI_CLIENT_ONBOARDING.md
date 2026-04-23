@@ -33,29 +33,33 @@ All three give you the same Naavi. She remembers what you told her in one channe
 
 ## Your first five minutes — one-time setup
 
-Open the app and tap the **⚙️ Settings** icon at the top right of the home screen.
+### 1. Sign in with Google
 
-### 1. Your name
+Open the MyNaavi app. On the welcome screen, tap **Sign in with Google** and pick your Google account. This is the step that connects Naavi to your calendar, your email, and your Google Drive — nothing else in the app will work until you sign in.
+
+Once you're signed in, tap the **⚙️ Settings** icon at the top right of the home screen to finish the rest of setup.
+
+### 2. Your name
 
 Type your first name. Tap *Save name*. This is what Naavi will call you.
 
-### 2. Your phone number
+### 3. Your phone number
 
 Type your number in international format, like `+1 613 555 1234`. Tap *Save*. This is how Naavi calls you for morning briefs and reminders.
 
-### 3. Home address
+### 4. Home address
 
 Scroll down to *Location alerts*. Type your home street address (e.g., `123 Main St, Ottawa, ON`). Tap *Save home address*. This lets you say things like *"alert me when I arrive home"* and have Naavi know where "home" is.
 
-### 4. Work or office address (optional)
+### 5. Work or office address (optional)
 
 If you have a regular workplace or office, add it too. Then *"when I arrive at the office"* will work the same way.
 
-### 5. Morning brief call
+### 6. Morning brief call
 
 Scroll to *Morning Brief Call*. Turn it **On**. Pick a call time (default 8:00 AM). Tap *Save*. Naavi will call you every morning at that time with your day in one paragraph — schedule, weather, priority emails, reminders.
 
-### 6. Location permission (only if you want arrival alerts)
+### 7. Location permission (only if you want arrival alerts)
 
 On the *Location alerts* card, tap *Manage location alerts*. A permission page appears. Tap *Allow location*. When Android asks, choose **Allow all the time**. This is how Naavi knows to fire an alert when you arrive somewhere.
 

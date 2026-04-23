@@ -70,12 +70,10 @@ serve(async (req) => {
     const todayWeekday = todayTorontoParts.find(p => p.type === 'weekday')!.value;
     const todayISO = `${todayYear}-${todayMonth}-${todayDay}`;
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      messages: [{
-        role: 'user',
-        content: `You are a conversation analyst. Extract ALL action items, commitments, and next steps from this conversation transcript — regardless of topic (medical, business, personal, legal, etc.).
+    // Sonnet → Haiku: structured extraction from a transcript is Haiku-easy.
+    // Prompt caching: the stable extraction rules live in a cached system block;
+    // only the transcript varies per call.
+    const extractionRules = `You are a conversation analyst. Extract ALL action items, commitments, and next steps from a conversation transcript — regardless of topic (medical, business, personal, legal, etc.).
 
 Today's date is ${todayISO} (${todayWeekday}, America/Toronto timezone). Use this as the reference point for resolving relative timing phrases like "tomorrow", "in 3 weeks", "next Tuesday", "by end of month".
 
@@ -107,10 +105,17 @@ Use these types:
 - test / prescription → medical lab work or medication
 - reminder → something to remember but no specific action
 
-TRANSCRIPT:
-${transcript}
+Return only the JSON array. If no action items found, return [].`;
 
-Return only the JSON array. If no action items found, return [].`,
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      system: [
+        { type: 'text', text: extractionRules, cache_control: { type: 'ephemeral' } },
+      ] as any,
+      messages: [{
+        role: 'user',
+        content: `TRANSCRIPT:\n${transcript}`,
       }],
     });
 
