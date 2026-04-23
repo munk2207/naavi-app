@@ -1572,7 +1572,7 @@ export default function HomeScreen() {
               <IconButton
                 label="Hands-free"
                 icon={<Ionicons name="radio" size={30} color="#fff" />}
-                style={{ backgroundColor: '#2563EB', marginLeft: 12 }}
+                style={{ backgroundColor: '#2563EB' }}
                 onPress={() => handsfree.activate()}
               />
 
@@ -1585,9 +1585,6 @@ export default function HomeScreen() {
                   </Text>
                 </View>
               )}
-
-              {/* Flexible spacer so the Mic/Send toggle is pinned to the far right */}
-              <View style={{ flex: 1 }} />
 
               {/* Mic/Send toggle — icon depends on input state.
                     empty + idle → 🎙 (start voice)
@@ -2320,15 +2317,16 @@ const styles = StyleSheet.create({
   },
   inputArea: {
     paddingHorizontal: 20,
-    paddingTop: 12,
-    // Flush to bottom — SafeAreaView with edges=['bottom'] already handles
-    // system-gesture spacing. Zero padding here closes the gap the user
-    // flagged in V55 build 104.
-    paddingBottom: 4,
+    paddingTop: 10,
+    // Flush to the system nav — SafeAreaView edges=['bottom'] on the parent
+    // already reserves the exact gesture/nav-bar inset. Zero padding here
+    // means the icon row sits against that reserved space with nothing in
+    // between. Dynamic-viewport-aware without needing CSS dvh tricks.
+    paddingBottom: 0,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     backgroundColor: Colors.bgApp,
-    gap: 10,
+    gap: 8,
   },
   inputRow: {
     flexDirection: 'row',
@@ -2338,7 +2336,13 @@ const styles = StyleSheet.create({
   actionButtonsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 0, // rely on marginLeft between icons so the flex spacer works cleanly
+    // space-between distributes the three icons evenly across the row —
+    // Meet at left edge, Free in the middle, Mic/Send at right edge.
+    // Replaces the old flex-spacer pattern which cramped Meet and Free on
+    // the far left.
+    justifyContent: 'space-between',
+    gap: 0,
+    paddingBottom: 8,
   },
   input: {
     flex: 1,

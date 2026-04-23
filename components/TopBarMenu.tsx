@@ -63,6 +63,9 @@ export function TopBarMenu({ items }: Props) {
                 }}
               >
                 <Text style={styles.itemText}>{item.label}</Text>
+                {/* Chevron-forward is the de-facto Android/iOS indicator for
+                    a row that opens another screen — confirms tap vs toggle. */}
+                <Ionicons name="chevron-forward" size={18} color={Colors.accent} />
               </TouchableOpacity>
             ))}
           </Pressable>
@@ -103,6 +106,9 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.08)',
   },
   item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingVertical: 14,
     paddingHorizontal: 20,
     borderBottomWidth: 1,
