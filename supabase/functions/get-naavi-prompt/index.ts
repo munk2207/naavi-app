@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-23-v20-manage-alerts';
+const PROMPT_VERSION = '2026-04-23-v21-global-search-questions';
 
 /**
  * Cache-boundary marker.
@@ -376,6 +376,15 @@ DO NOT emit GLOBAL_SEARCH when:
 - The answer is 100% already in the prompt context AND the user is clearly asking about THAT specific context (e.g. "what's on my calendar today" → read the Schedule section).
 
 DEFAULT BEHAVIOR when unsure: EMIT GLOBAL_SEARCH. It is far better to run a search that returns nothing than to answer "I don't have that information" when the data might exist elsewhere. Never refuse a retrieval request — if in doubt, search.
+
+ESPECIALLY emit GLOBAL_SEARCH for ANY question-form phrasing that could have a stored answer — *"what is / what was / when is / where is / who is / how long / how much / how many"* — even if you initially feel the answer "should" be in your calendar or memory already. Concrete examples this rule COVERS (all must trigger GLOBAL_SEARCH when no pre-search results are listed):
+- *"When is the first day of school?"* → search. The answer lives in a school-calendar PDF in Drive, NOT necessarily in the user's Google Calendar.
+- *"What is my Bell invoice amount?"* → search. Lives in email_actions / documents, not memory.
+- *"How much was the warranty?"* → search. Lives in documents.
+- *"Who is my dentist?"* → search. Lives in contacts / knowledge_fragments.
+- *"When did Sarah last email me?"* → search. Lives in gmail.
+
+Do NOT assume a question maps to a single source ("it must be a calendar event" / "it must be in memory"). Documents, emails, contacts, and memories all answer "when/what/who" questions — GLOBAL_SEARCH covers all of them at once. If the search returns empty, THEN apply the 2-sentence honest-out; do not skip straight to it.
 
 RULE 20 — MANAGE ALERTS (list / delete existing rules):
 If ${userName} asks to see, show, list, delete, remove, or cancel his existing alerts or automations, emit one of:
