@@ -147,7 +147,7 @@ function IntegrationsModal({ visible, onClose }: { visible: boolean; onClose: ()
       <View style={intStyles.overlay}>
         <View style={intStyles.sheet}>
           <View style={intStyles.header}>
-            <Text style={intStyles.title}>MyNaavi Integrations</Text>
+            <Text style={intStyles.title}>MyNaavi Orchestration</Text>
             <TouchableOpacity onPress={onClose} style={intStyles.closeBtn}>
               <Text style={intStyles.closeText}>✕</Text>
             </TouchableOpacity>
