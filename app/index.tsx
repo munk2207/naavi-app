@@ -460,6 +460,11 @@ export default function HomeScreen() {
   // Marketing-hook tip for the empty-brief state. Picked once per mount so it
   // doesn't flicker on re-render. Copy comes from lib/brief-logic.ts.
   const tipRef = useRef<string>(pickRandomTip());
+  // Screen-level peek caption for the bottom-bar icons. Rendered as a wide
+  // bar above the input row so long descriptions can breathe horizontally
+  // instead of being squeezed into the 52-px icon's bubble. Any IconButton
+  // that's passed onPeek below toggles this through hover / long-press.
+  const [peekText, setPeekText] = useState<string | null>(null);
   // Chat auto-clear timers — chat takes over the screen when turns > 0, and
   // must return to the brief on (a) user saying "cancel", (b) 3-min idle, or
   // (c) midnight rollover. Refs live here so clearTimeout works across re-renders.
@@ -911,11 +916,15 @@ export default function HomeScreen() {
           as "MyNaavi". Callbacks close over state declared in this component. */}
       <Stack.Screen
         options={{
+          // Root screen — no back chevron (nothing to go back to). Overrides
+          // the default headerLeft set in app/_layout.tsx.
+          headerLeft: () => null,
           headerRight: () => (
             <TopBarMenu items={[
               { label: 'Alerts',   onPress: () => router.push('/alerts') },
               { label: 'Notes',    onPress: () => router.push('/notes') },
               { label: 'Info',     onPress: () => setShowIntegrations(true) },
+              { label: 'Help',     onPress: () => router.push('/help') },
               { label: 'Settings', onPress: () => router.push('/settings') },
             ]} />
           ),
@@ -1546,6 +1555,12 @@ export default function HomeScreen() {
               {memoSupported && (
                 <IconButton
                   label={convState === 'recording' ? 'Stop recording' : convState === 'labeling' ? 'Label speakers' : 'Meet'}
+                  description={
+                    convState === 'recording' ? 'Stop recording. MyNaavi will transcribe and save it.'
+                    : convState === 'labeling' ? 'Label who was speaking before MyNaavi files the transcript.'
+                    : 'Record a conversation or doctor visit. MyNaavi writes a clean summary afterward.'
+                  }
+                  onPeek={setPeekText}
                   icon={
                     ['uploading', 'transcribing', 'extracting'].includes(convState)
                       ? <ActivityIndicator size="small" color="#fff" />
@@ -1571,6 +1586,8 @@ export default function HomeScreen() {
               {/* Free — hands-free mode */}
               <IconButton
                 label="Hands-free"
+                description="Hands-free mode — say 'Hi Naavi' to start talking, no tapping needed. Say 'Thanks' to end."
+                onPeek={setPeekText}
                 icon={<Ionicons name="radio" size={30} color="#fff" />}
                 style={{ backgroundColor: '#2563EB' }}
                 onPress={() => handsfree.activate()}
@@ -1597,10 +1614,11 @@ export default function HomeScreen() {
                 const isTranscribing = memoState === 'transcribing';
                 let icon:  React.ReactNode = <Ionicons name="mic" size={30} color="#fff" />;
                 let label = 'Voice';
+                let description = 'Tap to speak to MyNaavi. Tap again to stop and send.';
                 let bg    = Colors.accent;
-                if (isTranscribing)       { icon = <Ionicons name="ellipsis-horizontal" size={30} color="#fff" />; label = 'Transcribing'; }
-                else if (isRecording)     { icon = <Ionicons name="stop" size={30} color="#fff" />; label = 'Stop recording'; bg = Colors.alert; }
-                else if (hasText)         { icon = <Ionicons name="send" size={26} color="#fff" />; label = 'Send'; }
+                if (isTranscribing)       { icon = <Ionicons name="ellipsis-horizontal" size={30} color="#fff" />; label = 'Transcribing'; description = 'Converting your voice to text…'; }
+                else if (isRecording)     { icon = <Ionicons name="stop" size={30} color="#fff" />; label = 'Stop recording'; description = 'Stop recording and send what you said to MyNaavi.'; bg = Colors.alert; }
+                else if (hasText)         { icon = <Ionicons name="send" size={26} color="#fff" />; label = 'Send'; description = 'Send your typed message to MyNaavi.'; }
                 const disabled = status === 'thinking' || status === 'speaking' || (isTranscribing);
                 const onPress = () => {
                   if (hasText && !isRecording && !isTranscribing) { handleSend(); return; }
@@ -1623,6 +1641,8 @@ export default function HomeScreen() {
                 return (
                   <IconButton
                     label={label}
+                    description={description}
+                    onPeek={setPeekText}
                     icon={icon}
                     onPress={onPress}
                     disabled={disabled}
@@ -1634,6 +1654,16 @@ export default function HomeScreen() {
           </View>
         ) : null}
       </KeyboardAvoidingView>
+      {/* Screen-wide peek bar — shows the IconButton's description during
+          hover / long-press. Positioned above the input row so the bottom
+          icons aren't covered. pointerEvents='none' so it doesn't interrupt
+          the press that triggered it. Long descriptions have ~90% of the
+          screen width to spread on one or two lines. */}
+      {peekText && (
+        <View style={styles.peekBar} pointerEvents="none">
+          <Text style={styles.peekText} numberOfLines={3}>{peekText}</Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -2336,12 +2366,13 @@ const styles = StyleSheet.create({
   actionButtonsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    // space-between distributes the three icons evenly across the row —
-    // Meet at left edge, Free in the middle, Mic/Send at right edge.
-    // Replaces the old flex-spacer pattern which cramped Meet and Free on
-    // the far left.
-    justifyContent: 'space-between',
-    gap: 0,
+    // All three icons grouped on the right side of the row with equal
+    // gap between them. Per-icon bg colours differentiate their purpose
+    // (Meet moderate-blue, Free blue, Mic/Send accent). Mic/Send stays
+    // last (closest to the screen edge) so the most-used button has the
+    // shortest thumb path.
+    justifyContent: 'flex-end',
+    gap: 16,
     paddingBottom: 8,
   },
   input: {
@@ -2419,6 +2450,32 @@ const styles = StyleSheet.create({
     paddingVertical: 28,
     paddingHorizontal: 8,
     alignItems: 'center',
+  },
+  // Screen-wide caption bar for bottom-icon hover / long-press. Positioned
+  // above the input area via absolute bottom offset so it stays visible
+  // while the user is interacting with an icon.
+  peekBar: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    bottom: 150, // clears the input + icon row
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    zIndex: 500,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  peekText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 20,
+    textAlign: 'center',
   },
   briefEmptyText: {
     color: Colors.textSecondary,
