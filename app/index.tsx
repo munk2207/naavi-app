@@ -1558,7 +1558,7 @@ export default function HomeScreen() {
                   description={
                     convState === 'recording' ? 'Stop recording. MyNaavi will transcribe and save it.'
                     : convState === 'labeling' ? 'Label who was speaking before MyNaavi files the transcript.'
-                    : 'Record a visit or your own thoughts — MyNaavi writes a clean summary afterward.'
+                    : 'Record a visit or your own thoughts — summary created and action taken.'
                   }
                   onPeek={setPeekText}
                   icon={
