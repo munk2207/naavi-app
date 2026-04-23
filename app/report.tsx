@@ -1,15 +1,15 @@
 /**
- * Contact Support screen
+ * Report-a-problem screen
  *
- * Simpler cousin of the Report-a-problem form. No severity picker —
- * just "What do you need?" + your email. Submits to the separate
- * Formspree form (xgorryye) so support requests are separated from
- * bug reports in the inbox.
+ * Self-contained bug-report form that POSTs to Formspree
+ * (https://formspree.io/f/mpqkkdep). Reports land in the MyNaavi team's
+ * inbox with device + user context auto-attached so we don't have to ask
+ * the user for it.
  *
- * Accessed from Help → Contact support.
+ * Accessed from the 3-dot menu → "Report a problem" on the home screen.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -30,32 +30,51 @@ import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { suggestFaq, faqUrl, type FaqEntry } from '@/lib/faq';
 
-const FORMSPREE_URL = 'https://formspree.io/f/xgorryye';
+const FORMSPREE_URL = 'https://formspree.io/f/mpqkkdep';
 
-export default function ContactScreen() {
+type Severity = 'urgent' | 'important' | 'annoying' | 'suggestion';
+
+const SEVERITY_OPTIONS: Array<{ key: Severity; label: string; sub: string; icon: string; color: string }> = [
+  { key: 'urgent',     label: 'Urgent',     sub: 'app is broken',    icon: 'alert-circle',  color: Colors.alert },
+  { key: 'important',  label: 'Important',  sub: "doesn't work",     icon: 'warning',       color: Colors.caution },
+  { key: 'annoying',   label: 'Annoying',   sub: 'glitch / typo',    icon: 'flag',          color: Colors.accent },
+  { key: 'suggestion', label: 'Suggestion', sub: 'just an idea',     icon: 'bulb',          color: Colors.moderate },
+];
+
+export default function ReportScreen() {
   const router = useRouter();
-  const [message, setMessage]     = useState('');
-  const [email, setEmail]         = useState('');
-  const [userId, setUserId]       = useState('');
-  const [userName, setUserName]   = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [success, setSuccess]     = useState(false);
-  const [errorText, setErrorText] = useState<string | null>(null);
+  const [description, setDescription] = useState('');
+  const [context, setContext]         = useState('');
+  const [severity, setSeverity]       = useState<Severity>('annoying');
+  const [email, setEmail]             = useState('');
+  const [userId, setUserId]           = useState<string>('');
+  const [userName, setUserName]       = useState<string>('');
+  const [submitting, setSubmitting]   = useState(false);
+  const [success, setSuccess]         = useState(false);
+  const [errorText, setErrorText]     = useState<string | null>(null);
+  // FAQ suggestion panel — debounced match against description + context.
+  // Dismissed flag lets the user hide the panel if the suggestions don't fit,
+  // so it doesn't keep resurfacing as they keep typing.
   const [suggestions, setSuggestions] = useState<FaqEntry[]>([]);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   useEffect(() => {
     if (suggestionsDismissed) { setSuggestions([]); return; }
+    const combined = `${description} ${context}`.trim();
     const t = setTimeout(() => {
-      setSuggestions(suggestFaq(message, { max: 2, minScore: 2 }));
+      setSuggestions(suggestFaq(combined, { max: 2, minScore: 2 }));
     }, 300);
     return () => clearTimeout(t);
-  }, [message, suggestionsDismissed]);
+  }, [description, context, suggestionsDismissed]);
 
+  // Prefill email + user identity from the signed-in session + user_settings.
+  // Falls through silently if the user is signed out — they can still submit
+  // anonymously by typing an email manually.
   useEffect(() => {
     (async () => {
       if (!supabase) return;
       const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.email) setEmail(session.user.email);
+      const authEmail = session?.user?.email ?? '';
+      if (authEmail) setEmail(authEmail);
       if (session?.user?.id) {
         setUserId(session.user.id);
         const { data } = await supabase
@@ -70,22 +89,26 @@ export default function ContactScreen() {
 
   async function handleSubmit() {
     setErrorText(null);
-    const m = message.trim();
-    if (!m) { setErrorText('Tell us what you need.'); return; }
+    const desc = description.trim();
+    if (!desc) { setErrorText('Please describe what happened.'); return; }
     if (!email.trim() || !/@/.test(email)) { setErrorText('Your email is needed so we can reply.'); return; }
 
     setSubmitting(true);
     try {
       const appVersion = `${Constants.expoConfig?.version ?? '?'} (build ${Constants.expoConfig?.android?.versionCode ?? '?'})`;
+      const platform   = `${Platform.OS} ${Platform.Version}`;
+
       const body = new URLSearchParams();
-      body.append('message',       m);
+      body.append('description',   desc);
+      body.append('context',       context.trim());
+      body.append('severity',      severity);
       body.append('email',         email.trim());
       body.append('app_version',   appVersion);
-      body.append('platform',      `${Platform.OS} ${Platform.Version}`);
+      body.append('platform',      platform);
       body.append('user_id',       userId);
       body.append('user_name',     userName);
       body.append('submitted_at',  new Date().toISOString());
-      body.append('_subject',      `MyNaavi support — ${appVersion}`);
+      body.append('_subject',      `[${severity.toUpperCase()}] MyNaavi bug report — ${appVersion}`);
 
       const res = await fetch(FORMSPREE_URL, {
         method: 'POST',
@@ -98,7 +121,7 @@ export default function ContactScreen() {
       }
       setSuccess(true);
     } catch (err) {
-      console.error('[Contact] submit failed:', err);
+      console.error('[Report] submit failed:', err);
       setErrorText(err instanceof Error ? err.message : 'Could not send — try again in a moment.');
     } finally {
       setSubmitting(false);
@@ -112,7 +135,7 @@ export default function ContactScreen() {
           <Ionicons name="checkmark-circle" size={72} color={Colors.accent} />
           <Text style={styles.successTitle}>Thanks — we got it.</Text>
           <Text style={styles.successSub}>
-            We read every message and reply within a few days. If you included your email, we'll use it.
+            We read every report and reply within a few days if we need more detail.
           </Text>
           <TouchableOpacity style={styles.successBtn} onPress={() => router.back()}>
             <Text style={styles.successBtnText}>Back to MyNaavi</Text>
@@ -133,20 +156,15 @@ export default function ContactScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.intro}>
-            Questions, feedback, or anything else — drop us a note.
-            We read every one.
-          </Text>
-
-          <Text style={styles.sectionLabel}>What do you need?</Text>
+          <Text style={styles.sectionLabel}>What happened</Text>
           <TextInput
-            style={[styles.textarea, { minHeight: 140 }]}
-            value={message}
-            onChangeText={setMessage}
-            placeholder="Describe what you'd like to know or tell us…"
+            style={[styles.textarea, { minHeight: 96 }]}
+            value={description}
+            onChangeText={setDescription}
+            placeholder="Naavi didn't do what I expected…"
             placeholderTextColor={Colors.textMuted}
             multiline
-            maxLength={1500}
+            maxLength={1200}
             autoCorrect={false}
             autoComplete="off"
             textAlignVertical="top"
@@ -157,7 +175,7 @@ export default function ContactScreen() {
               <View style={styles.suggestHeader}>
                 <View style={styles.suggestHeaderLeft}>
                   <Ionicons name="bulb" size={16} color={Colors.accent} />
-                  <Text style={styles.suggestTitle}>Maybe this answers it</Text>
+                  <Text style={styles.suggestTitle}>Maybe this helps</Text>
                 </View>
                 <TouchableOpacity
                   onPress={() => setSuggestionsDismissed(true)}
@@ -171,7 +189,7 @@ export default function ContactScreen() {
                   key={s.slug}
                   style={styles.suggestRow}
                   onPress={() => {
-                    Linking.openURL(faqUrl(s)).catch(() => { /* silent */ });
+                    Linking.openURL(faqUrl(s)).catch(() => { /* silent — no network alerts mid-form */ });
                   }}
                   activeOpacity={0.75}
                 >
@@ -181,6 +199,43 @@ export default function ContactScreen() {
               ))}
             </View>
           )}
+
+          <Text style={styles.sectionLabel}>Context — what were you doing?</Text>
+          <TextInput
+            style={[styles.textarea, { minHeight: 72 }]}
+            value={context}
+            onChangeText={setContext}
+            placeholder="Optional. E.g. 'I asked her to text my wife…'"
+            placeholderTextColor={Colors.textMuted}
+            multiline
+            maxLength={800}
+            autoCorrect={false}
+            autoComplete="off"
+            textAlignVertical="top"
+          />
+
+          <Text style={styles.sectionLabel}>How bad is this?</Text>
+          <View style={styles.severityGrid}>
+            {SEVERITY_OPTIONS.map(opt => {
+              const selected = severity === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[styles.severityCard, selected && { backgroundColor: opt.color, borderColor: opt.color }]}
+                  onPress={() => setSeverity(opt.key)}
+                  activeOpacity={0.75}
+                >
+                  <Ionicons
+                    name={opt.icon as React.ComponentProps<typeof Ionicons>['name']}
+                    size={22}
+                    color={selected ? '#fff' : opt.color}
+                  />
+                  <Text style={[styles.severityLabel, selected && styles.severityLabelSelected]}>{opt.label}</Text>
+                  <Text style={[styles.severitySub, selected && styles.severitySubSelected]}>{opt.sub}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
 
           <Text style={styles.sectionLabel}>Your email</Text>
           <TextInput
@@ -196,13 +251,13 @@ export default function ContactScreen() {
           />
 
           <TouchableOpacity
-            style={[styles.submitBtn, (!message.trim() || submitting) && styles.submitBtnDisabled]}
+            style={[styles.submitBtn, (!description.trim() || submitting) && styles.submitBtnDisabled]}
             onPress={handleSubmit}
-            disabled={!message.trim() || submitting}
+            disabled={!description.trim() || submitting}
           >
             {submitting
               ? <ActivityIndicator color="#fff" />
-              : <Text style={styles.submitBtnText}>Send</Text>}
+              : <Text style={styles.submitBtnText}>Send report</Text>}
           </TouchableOpacity>
 
           {errorText && (
@@ -210,7 +265,7 @@ export default function ContactScreen() {
           )}
 
           <Text style={styles.footerNote}>
-            Messages go to the MyNaavi team. Reply within a few days.
+            Reports go to the MyNaavi team. We read every one.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -228,12 +283,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 40,
-  },
-  intro: {
-    color: Colors.textSecondary,
-    fontSize: 16,
-    lineHeight: 22,
-    marginBottom: 8,
   },
   sectionLabel: {
     color: Colors.textSecondary,
@@ -260,6 +309,34 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: Colors.textPrimary,
   },
+  severityGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  severityCard: {
+    width: '48%',
+    backgroundColor: Colors.bgElevated,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+    padding: 12,
+    minHeight: 86,
+  },
+  severityLabel: {
+    color: Colors.textPrimary,
+    fontSize: 15,
+    fontWeight: '600',
+    marginTop: 6,
+  },
+  severitySub: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  severityLabelSelected: { color: '#fff' },
+  severitySubSelected:   { color: 'rgba(255,255,255,0.9)' },
   submitBtn: {
     marginTop: 24,
     backgroundColor: Colors.accent,
@@ -267,7 +344,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
   },
-  submitBtnDisabled: { opacity: 0.4 },
+  submitBtnDisabled: {
+    opacity: 0.4,
+  },
   submitBtnText: {
     color: '#fff',
     fontSize: 16,
@@ -285,6 +364,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 16,
   },
+  // ── FAQ suggestion panel ────────────────────────────────────────────────
   suggestBox: {
     marginTop: 10,
     backgroundColor: 'rgba(93,202,165,0.08)',
@@ -325,6 +405,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 10,
   },
+  // ── Success state ───────────────────────────────────────────────────────
   successWrap: {
     flex: 1,
     alignItems: 'center',
