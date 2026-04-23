@@ -4,8 +4,9 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Platform, View, Text, StyleSheet, Image } from 'react-native';
+import { Platform, View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { Stack, router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
@@ -154,6 +155,19 @@ export default function RootLayout() {
           headerTintColor: Colors.textPrimary,
           headerTitleStyle: { fontWeight: '600', fontSize: 17 },
           headerShadowVisible: false, // removes the thin divider line under the header
+          // Ensure a visible back chevron on every pushed screen. Some Android
+          // builds + the web preview hide the OS default, so we provide our
+          // own. Root screens override this with headerLeft: null / undefined.
+          headerBackVisible: true,
+          headerLeft: ({ canGoBack }) => canGoBack ? (
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+              accessibilityLabel="Back"
+            >
+              <Ionicons name="chevron-back" size={26} color={Colors.textPrimary} />
+            </TouchableOpacity>
+          ) : null,
           contentStyle: { backgroundColor: Colors.bgApp },
           animation: 'slide_from_right',
         }}
@@ -183,6 +197,22 @@ export default function RootLayout() {
         <Stack.Screen
           name="alerts"
           options={{ title: 'Your Alerts', headerShown: true }}
+        />
+        <Stack.Screen
+          name="help"
+          options={{ title: 'Help', headerShown: true }}
+        />
+        <Stack.Screen
+          name="report"
+          options={{ title: 'Report a problem', headerShown: true }}
+        />
+        <Stack.Screen
+          name="contact"
+          options={{ title: 'Contact support', headerShown: true }}
+        />
+        <Stack.Screen
+          name="about"
+          options={{ title: 'About & Legal', headerShown: true }}
         />
         <Stack.Screen
           name="permission-location"
