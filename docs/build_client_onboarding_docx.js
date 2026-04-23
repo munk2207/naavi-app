@@ -180,24 +180,27 @@ children.push(hr());
 
 // First five minutes — setup
 children.push(h2('Your first five minutes \u2014 one-time setup'));
-children.push(p([text('Open the app and tap the '), bold('\u2699 Settings'), text(' icon at the top right of the home screen.')]));
 
-children.push(h3('1. Your name'));
+children.push(h3('1. Sign in with Google'));
+children.push(p([text('Open the MyNaavi app. On the welcome screen, tap '), bold('Sign in with Google'), text(' and pick your Google account. This is the step that connects Naavi to your calendar, your email, and your Google Drive \u2014 nothing else in the app will work until you sign in.')]));
+children.push(p([text('Once you\u2019re signed in, tap the '), bold('\u2699 Settings'), text(' icon at the top right of the home screen to finish the rest of setup.')]));
+
+children.push(h3('2. Your name'));
 children.push(p([text('Type your first name. Tap '), italic('Save name'), text('. This is what Naavi will call you.')]));
 
-children.push(h3('2. Your phone number'));
+children.push(h3('3. Your phone number'));
 children.push(p([text('Type your number in international format, like '), new TextRun({ text: '+1 613 555 1234', font: 'Consolas' }), text('. Tap '), italic('Save'), text('. This is how Naavi calls you for morning briefs and reminders.')]));
 
-children.push(h3('3. Home address'));
+children.push(h3('4. Home address'));
 children.push(p([text('Scroll down to '), italic('Location alerts'), text('. Type your home street address (e.g., '), new TextRun({ text: '123 Main St, Ottawa, ON', font: 'Consolas' }), text('). Tap '), italic('Save home address'), text('. This lets you say things like '), italic('"alert me when I arrive home"'), text(' and have Naavi know where "home" is.')]));
 
-children.push(h3('4. Work or office address (optional)'));
+children.push(h3('5. Work or office address (optional)'));
 children.push(p([text('If you have a regular workplace or office, add it too. Then '), italic('"when I arrive at the office"'), text(' will work the same way.')]));
 
-children.push(h3('5. Morning brief call'));
+children.push(h3('6. Morning brief call'));
 children.push(p([text('Scroll to '), italic('Morning Brief Call'), text('. Turn it '), bold('On'), text('. Pick a call time (default 8:00 AM). Tap '), italic('Save'), text('. Naavi will call you every morning at that time with your day in one paragraph \u2014 schedule, weather, priority emails, reminders.')]));
 
-children.push(h3('6. Location permission (only if you want arrival alerts)'));
+children.push(h3('7. Location permission (only if you want arrival alerts)'));
 children.push(p([text('On the '), italic('Location alerts'), text(' card, tap '), italic('Manage location alerts'), text('. A permission page appears. Tap '), italic('Allow location'), text('. When Android asks, choose '), bold('Allow all the time'), text('. This is how Naavi knows to fire an alert when you arrive somewhere.')]));
 
 children.push(p([bold('That\u2019s it for setup.'), text(' You\u2019re ready to talk to her.')]));

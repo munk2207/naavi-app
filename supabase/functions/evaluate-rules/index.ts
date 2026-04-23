@@ -570,6 +570,45 @@ async function fireAction(
     }).then(res => ({ channel: 'push', ok: res.ok }))
       .catch(() => ({ channel: 'push', ok: false }));
 
+  // Outbound voice call — S12 fifth channel. Dials Twilio with Url pointing
+  // to the voice server's /speak-alert endpoint which returns TwiML that
+  // speaks the body aloud and hangs up. Only fired for self-alerts on
+  // location arrival (see branch below).
+  const callVoice = async (toNumber: string): Promise<{ channel: string; ok: boolean }> => {
+    const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID') ?? '';
+    const authToken  = Deno.env.get('TWILIO_AUTH_TOKEN')  ?? '';
+    const voiceBase  = Deno.env.get('VOICE_SERVER_URL')   ?? '';
+    const twilioFrom = '+12495235394';
+    if (!accountSid || !authToken || !voiceBase) {
+      console.error('[evaluate-rules] callVoice: missing Twilio/voice-server secrets');
+      return { channel: 'voice-call', ok: false };
+    }
+    try {
+      const twiUrl = `${voiceBase}/speak-alert?body=${encodeURIComponent(body)}&user_id=${encodeURIComponent(rule.user_id)}`;
+      const form = new URLSearchParams();
+      form.append('To',    toNumber);
+      form.append('From',  twilioFrom);
+      form.append('Url',   twiUrl);
+      form.append('Method','POST');
+      // Skip answering-machine detection — the message is short enough that
+      // voicemail delivery is acceptable; the whole point is making sure the
+      // alert lands regardless of the user's state.
+      const creds = btoa(`${accountSid}:${authToken}`);
+      const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${creds}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: form,
+      });
+      return { channel: 'voice-call', ok: res.ok };
+    } catch (err) {
+      console.error('[evaluate-rules] callVoice error:', err);
+      return { channel: 'voice-call', ok: false };
+    }
+  };
+
   const sends: Promise<{ channel: string; ok: boolean }>[] = [];
 
   if (isSelfAlert) {
@@ -584,6 +623,17 @@ async function fireAction(
     }
     // Push — function looks up tokens itself; attempt regardless.
     sends.push(callPush());
+
+    // S12 — fifth channel: outbound voice call, ONLY for location arrival
+    // alerts. Visual channels don't reach a driver parking at Costco; the
+    // phone ringing does. Leave/inside directions and non-location triggers
+    // stay visual-only — this call is expensive (~$0.02/call) and would be
+    // noise for a 7 AM rain heads-up.
+    const triggerConfig = rule.trigger_config ?? {} as Record<string, unknown>;
+    const direction     = String((triggerConfig as any).direction ?? 'arrive');
+    if (userPhone && rule.trigger_type === 'location' && direction === 'arrive') {
+      sends.push(callVoice(userPhone));
+    }
   } else if (toPhone) {
     // Third-party phone — SMS + WhatsApp fan-out to the specified number.
     sends.push(callSMS('sms', toPhone));

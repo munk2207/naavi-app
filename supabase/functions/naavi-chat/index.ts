@@ -488,16 +488,63 @@ Deno.serve(async (req) => {
 
     const claudeStart = Date.now();
     console.log(`[timing] ${elapsed()} | Claude call starting | model=claude-sonnet-4-6 | max_tokens=${max_tokens ?? 2048}`);
+    // Prompt caching — the system prompt has two markers from get-naavi-prompt:
+    //   CACHE_BOUNDARY  — separates dynamic prefix (date/time, per-request) from stable rules.
+    //   END_STABLE      — separates the cacheable rules from mobile-appended per-query
+    //                     context (brief items, knowledge fragments, health). That per-query
+    //                     context is attached by the client AFTER the end-marker.
+    //
+    // We build a 3-block system array:
+    //   [ dynamic, stable-with-cache_control, mobile-context-no-cache ]
+    // Only the middle block is cached. Repeat calls within 5 min hit the cache for
+    // the 6K+ token rules, while clock drift and per-query context don't break it.
+    const CACHE_BOUNDARY = '\n---CACHE_BOUNDARY---\n';
+    const END_STABLE     = '\n---END_STABLE_RULES---\n';
+    let cachedSystem: any;
+    if (typeof system === 'string' && system.includes(CACHE_BOUNDARY)) {
+      const idx = system.indexOf(CACHE_BOUNDARY);
+      const dynamicPart = system.slice(0, idx);
+      const afterBoundary = system.slice(idx + CACHE_BOUNDARY.length);
+      const endIdx = afterBoundary.indexOf(END_STABLE);
+      let stablePart: string;
+      let tailPart = '';
+      if (endIdx !== -1) {
+        stablePart = afterBoundary.slice(0, endIdx);
+        tailPart   = afterBoundary.slice(endIdx + END_STABLE.length);
+      } else {
+        stablePart = afterBoundary;
+      }
+      // IMPORTANT: put the cached block FIRST. Anthropic's cache key includes
+      // every content block preceding the cache_control breakpoint — so if the
+      // dynamic prefix (which changes every minute) sits in front of the stable
+      // rules, each call produces a new cache key and never hits. By putting the
+      // stable rules as block 0, cache hits become order-independent of the
+      // time/context that follows. Claude reads the blocks in order as one
+      // system message; rules-first-then-date is semantically fine.
+      cachedSystem = [
+        { type: 'text', text: stablePart, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: dynamicPart },
+      ];
+      if (tailPart.length > 0) cachedSystem.push({ type: 'text', text: tailPart });
+      console.log(`[timing] ${elapsed()} | cache split | stable=${stablePart.length} | dynamic=${dynamicPart.length} | tail=${tailPart.length}`);
+    } else {
+      // Legacy fallback: cache the whole string. Effective only if caller's prompt is stable.
+      cachedSystem = typeof system === 'string'
+        ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+        : system;
+    }
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: max_tokens ?? 2048,
-      system,
+      system: cachedSystem as any,
       messages: augmentedMessages,
     });
     const claudeMs = Date.now() - claudeStart;
 
     const rawText = response.content[0].type === 'text' ? response.content[0].text : '';
-    console.log(`[timing] ${elapsed()} | Claude call done | Claude=${claudeMs}ms | rawTextLen=${rawText.length} | total=${elapsed()}`);
+    const usage = (response as any).usage ?? {};
+    console.log(`[timing] ${elapsed()} | Claude call done | Claude=${claudeMs}ms | rawTextLen=${rawText.length}`);
+    console.log(`[cache-debug] usage=${JSON.stringify(usage)}`);
     return jsonResponse({ rawText });
 
   } catch (err) {

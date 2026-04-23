@@ -287,17 +287,19 @@ export const driveAdapter: SearchAdapter = {
       if (seenDriveIds.has(f.id)) continue; // already covered by harvested row
       const nameLower = f.name.toLowerCase();
 
-      // Name matches score higher than content-only. We can't tell from the
-      // Drive response which clause matched (name vs fullText) — infer from
-      // the local substring check.
+      // Relevance gate — live-Drive body-only matches are high-noise (any file
+      // whose fullText contains the query word, however tangentially). Require
+      // the filename itself to contain the query variant. Harvested rows
+      // (documents table) already went through the richer scoring above and
+      // aren't affected by this filter.
       const nameHit = variants.some(v => nameLower.includes(v));
-      const score = nameHit ? 0.85 : 0.65;
+      if (!nameHit) continue;
 
       hits.push({
         source: 'drive',
         title: f.name,
         snippet: '',
-        score,
+        score: 0.85,
         createdAt: f.modifiedTime,
         url: f.webViewLink,
         metadata: {

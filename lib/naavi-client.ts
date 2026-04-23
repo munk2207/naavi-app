@@ -521,11 +521,21 @@ export async function sendToNaavi(
   // Fetch user's name and phone from Supabase so the prompt is personalized
   const { userName, userPhone } = await getUserProfile();
 
-  const isBroadQuery = /\b(all|list all|list everything|everything|what do you know|preferences?|what.*know.*me|know about me|what is my|what are my)\b/i.test(userMessage);
+  // "Broad" queries load every knowledge fragment into context — expensive.
+  // The old regex matched "all", "everything", "preferences", "what is my X"
+  // which fired on any specific question ("what is my calendar" etc.) and
+  // burned ~$13-27/mo/user in wasted tokens. Narrowed to phrases that
+  // genuinely ask for a wide recall: "list everything", "what do you know
+  // about me", "tell me everything". Specific queries use the pgvector
+  // nearest-neighbour search below (5 fragments).
+  const isBroadQuery = /\b(list (all|everything)|everything you know|tell me everything|what do you know about me|what are all my|all my (preferences|memories|notes)|know about me)\b/i.test(userMessage);
   console.log('[NaaviClient] userMessage:', userMessage, '| isBroadQuery:', isBroadQuery);
   const [healthContext, knowledgeFragments, sharedBase] = await Promise.all([
     getEpicHealthContext(),
-    isBroadQuery ? fetchAllKnowledge(100) : searchKnowledge(userMessage, 5),
+    // Cap at 20 fragments even for broad queries — prior 100-cap was the
+    // other half of the cost lever; 20 is enough for "what do you know about
+    // me" without bloating the prompt. AAB cost-lever #4.
+    isBroadQuery ? fetchAllKnowledge(20) : searchKnowledge(userMessage, 5),
     fetchSharedPrompt(userName, userPhone),
   ]);
   const knowledgeContext = formatFragmentsForContext(knowledgeFragments, isBroadQuery);
@@ -611,11 +621,15 @@ function fixSentLanguage(speech: string, actions: NaaviAction[]): string {
 }
 
 function buildFallback(rawText: string): NaaviResponse {
-  // Last resort — try to pull the speech value out with a simple regex
-  // so ${userName} always gets a spoken response even if the JSON is broken
-  const speechMatch = rawText.match(/"speech"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-  const speech = speechMatch
-    ? speechMatch[1].replace(/\\n/g, ' ').replace(/\\"/g, '"')
+  // Last resort — pull a speech value out with regex so the user always gets a
+  // response even if the JSON is broken. Prefer the LAST "speech":"..." match:
+  // Claude sometimes emits a reasoning block then a final block, and the final
+  // one is what the user expects. Previous bug: first-match returned truncated
+  // mid-reasoning strings like "Nothing stored on" without the name.
+  const matches = [...rawText.matchAll(/"speech"\s*:\s*"((?:[^"\\]|\\.)*)"/g)];
+  const lastMatch = matches[matches.length - 1];
+  const speech = lastMatch
+    ? lastMatch[1].replace(/\\n/g, ' ').replace(/\\"/g, '"')
     : 'I had trouble with that — could you try again?';
   console.error('[NaaviClient] All parse attempts failed. Raw:', rawText);
   return { speech, actions: [], pendingThreads: [] };

@@ -141,12 +141,9 @@ async function claudeExtractFromText(
   todayISO: string,
 ): Promise<any | null> {
   try {
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 512,
-      messages: [{
-        role: 'user',
-        content: `You're extracting structured facts from a document for a senior user. The raw text below came from OCR — expect some transcription noise. Today is ${todayISO} (America/Toronto).
+    // Prompt caching: the extraction instructions are identical on every call.
+    // Hoist them into a cached system block; put only the OCR text in user msg.
+    const extractPrompt = `You're extracting structured facts from a document for a senior user. The raw text below came from OCR — expect some transcription noise. Today is ${todayISO} (America/Toronto).
 
 Return ONE line of JSON. No markdown. No code fences.
 
@@ -171,8 +168,17 @@ Rules:
      notice = government/institutional letter; calendar = a grid or list of many dated events
      like a school year or sports season schedule; other = none of the above fit)
 
-OCR TEXT:
-${text.slice(0, 8000)}`,
+The user message will contain the OCR text under "OCR TEXT:".`;
+
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 512,
+      system: [
+        { type: 'text', text: extractPrompt, cache_control: { type: 'ephemeral' } },
+      ] as any,
+      messages: [{
+        role: 'user',
+        content: `OCR TEXT:\n${text.slice(0, 8000)}`,
       }],
     });
     const raw = response.content[0].type === 'text' ? response.content[0].text : '';
@@ -391,19 +397,9 @@ serve(async (req) => {
       // First try Claude directly on the PDF (handles text-layer PDFs at no
       // Vision cost). If Claude reports "no readable text layer" we fall
       // back to Vision OCR.
-      const response = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 512,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: { type: 'base64', media_type: 'application/pdf', data: b64 },
-            },
-            {
-              type: 'text',
-              text: `You're extracting structured facts from a document attached to a senior user's email. Today is ${todayISO} (America/Toronto).
+      // Prompt caching: hoist the extraction prompt into a cached system
+      // block. PDF bytes stay in the user message (they're the variable part).
+      const pdfExtractPrompt = `You're extracting structured facts from a document attached to a senior user's email. Today is ${todayISO} (America/Toronto).
 
 Return ONE line of JSON. No markdown. No code fences.
 
@@ -434,7 +430,22 @@ Rules:
     ticket    = travel or event ticket, boarding pass, reservation confirmation
     notice    = government or institutional notice (gov.ca, condo AGM, official letter)
     calendar  = a recurring schedule with many dated events — school year calendar, sports season schedule, holiday list, program timetable. This is the right pick when the doc shows a grid of dates or a long list of events across a whole year.
-    other     = documentary but none of the above.`,
+    other     = documentary but none of the above.
+
+The user message will contain the PDF as an attached document.`;
+
+      const response = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 512,
+        system: [
+          { type: 'text', text: pdfExtractPrompt, cache_control: { type: 'ephemeral' } },
+        ] as any,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'document',
+              source: { type: 'base64', media_type: 'application/pdf', data: b64 },
             },
           ],
         }],

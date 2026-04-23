@@ -688,37 +688,6 @@ export default function SettingsScreen() {
 
         <View style={styles.divider} />
 
-        {/* API key */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Anthropic API Key</Text>
-          <Text style={styles.sectionNote}>
-            {apiKeySet
-              ? 'Key is saved. Enter a new one below to replace it.'
-              : 'Enter your API key to enable MyNaavi. Get one at console.anthropic.com.'}
-          </Text>
-          <TextInput
-            style={styles.keyInput}
-            value={apiKey}
-            onChangeText={setApiKey}
-            placeholder="sk-ant-..."
-            placeholderTextColor={Colors.textMuted}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            accessibilityLabel="Anthropic API key input"
-          />
-          <TouchableOpacity
-            style={[styles.saveBtn, !apiKey.trim() && styles.saveBtnDisabled]}
-            onPress={handleSaveApiKey}
-            disabled={!apiKey.trim()}
-            accessibilityRole="button"
-          >
-            <Text style={styles.saveBtnText}>Save key</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.divider} />
-
         {/* Sign Out */}
         <TouchableOpacity
           style={styles.signOutBtn}
@@ -797,7 +766,7 @@ export default function SettingsScreen() {
         <View style={styles.divider} />
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V54.2 (build 103)</Text>
+        <Text style={styles.version}>MyNaavi — V55 (build 104)</Text>
 
       </ScrollView>
     </SafeAreaView>
