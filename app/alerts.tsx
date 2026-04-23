@@ -24,6 +24,7 @@ import {
   Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
@@ -135,29 +136,98 @@ function formatActionSummary(r: ActionRule): string {
   return `→ Alert ${who}${extrasText}`;
 }
 
-function formatTriggerDetails(r: ActionRule): string[] {
-  const out: string[] = [];
-  const c = r.trigger_config ?? {};
-  for (const [k, v] of Object.entries(c)) {
-    if (v == null || v === '') continue;
-    out.push(`${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+// Plain-language "WHEN" explainer per trigger type. Hides internal fields
+// (lat/lng, fire_at_hour, IANA timezones) that mean nothing to Robert.
+function formatWhenDetail(r: ActionRule): string {
+  const c = (r.trigger_config ?? {}) as any;
+  switch (r.trigger_type) {
+    case 'location': {
+      const place = c.place_name ?? 'a place';
+      const dir = c.direction ?? 'arrive';
+      const dwell = c.dwell_minutes ?? 2;
+      if (dir === 'leave')  return `You leave ${place}.`;
+      if (dir === 'inside') return `You're at ${place} for at least ${dwell} minutes.`;
+      return `You arrive at ${place}${dwell ? ` (after staying ${dwell} minute${dwell === 1 ? '' : 's'})` : ''}.`;
+    }
+    case 'weather': {
+      const cond = c.condition ?? 'weather';
+      const threshold = c.threshold;
+      const when = c.when ?? 'today';
+      const whenText = when === 'today' ? 'today' : when === 'tomorrow' ? 'tomorrow' : String(when);
+      const condText = cond === 'temp_max_above' ? `high temperature reaches ${threshold}°C or more`
+                     : cond === 'temp_min_below' ? `low temperature drops below ${threshold}°C`
+                     : cond === 'rain' ? `rain is forecast (${threshold ?? 50}% chance or higher)`
+                     : cond === 'snow' ? `snow is forecast (${threshold ?? 50}% chance or higher)`
+                     : cond;
+      return `The ${condText} ${whenText}.`;
+    }
+    case 'email': {
+      const from = c.from_name ?? c.from_email ?? 'anyone';
+      const kw = c.subject_keyword;
+      return kw ? `A new email from ${from} about "${kw}" arrives.` : `A new email from ${from} arrives.`;
+    }
+    case 'contact_silence': {
+      const from = c.from_name ?? c.from_email ?? 'someone';
+      const days = c.days_silent ?? 30;
+      return `${from} hasn't emailed you in ${days} days.`;
+    }
+    case 'time': {
+      if (!c.datetime) return 'At a scheduled time.';
+      try {
+        const d = new Date(String(c.datetime));
+        return `On ${d.toLocaleString('en-CA', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}.`;
+      } catch { return 'At a scheduled time.'; }
+    }
+    case 'calendar': {
+      const match = c.event_match ?? 'an event';
+      const timing = c.timing ?? 'before';
+      const minutes = c.minutes ?? 30;
+      return `${minutes} minute${minutes === 1 ? '' : 's'} ${timing} your "${match}" event.`;
+    }
+    default:
+      return r.label ?? 'A condition is met.';
   }
-  return out;
 }
 
-function formatActionDetails(r: ActionRule): string[] {
-  const out: string[] = [];
-  const c = r.action_config ?? {};
-  for (const [k, v] of Object.entries(c)) {
-    if (v == null || v === '') continue;
-    out.push(`${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`);
+// Plain-language "WHAT HAPPENS" explainer. Describes the delivery channels,
+// the spoken body, and any list/task extras — never exposes to_phone digits
+// or internal config keys.
+function formatWhatHappens(r: ActionRule): { channelsLine: string; bodyLine: string | null; extraLines: string[] } {
+  const a = (r.action_config ?? {}) as any;
+  const isSelf = !!a.to_phone && !a.to;
+  const body = String(a.body ?? '').trim();
+
+  let channelsLine: string;
+  if (isSelf) {
+    // Self-alert fan-out (per CLAUDE.md ALERT FAN-OUT section).
+    const chans = ['text', 'WhatsApp', 'email', 'push'];
+    if (r.trigger_type === 'location' && (a.direction ?? r.trigger_config?.direction) === 'arrive') {
+      chans.push('voice call');
+    }
+    channelsLine = `Naavi sends you ${chans.join(', ')}${chans.length > 1 ? '' : ''} — all channels that are set up.`;
+  } else {
+    const to = a.to_name ?? a.to ?? 'a contact';
+    channelsLine = `Naavi sends ${to} a ${r.action_type === 'email' ? 'message by email' : r.action_type === 'whatsapp' ? 'WhatsApp' : 'text message'}.`;
   }
-  return out;
+
+  const bodyLine = body ? `"${body}"` : null;
+
+  const extras: string[] = [];
+  if (a.list_name) extras.push(`Plus items from your "${a.list_name}" list.`);
+  if (Array.isArray(a.tasks) && a.tasks.length > 0) {
+    const taskList = a.tasks.length === 1
+      ? `Plus a reminder: "${a.tasks[0]}".`
+      : `Plus ${a.tasks.length} reminders: ${a.tasks.map((t: string) => `"${t}"`).join(', ')}.`;
+    extras.push(taskList);
+  }
+
+  return { channelsLine, bodyLine, extraLines: extras };
 }
 
 // ─── Screen ─────────────────────────────────────────────────────────────────
 
 export default function AlertsScreen() {
+  const { highlight } = useLocalSearchParams<{ highlight?: string }>();
   const [rules, setRules]           = useState<ActionRule[]>([]);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -186,6 +256,25 @@ export default function AlertsScreen() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // When navigating in with a highlight param (e.g. from the orchestrator
+  // after "show me my Costco alert"), auto-expand the first rule whose
+  // trigger or action config contains every word of the match string.
+  useEffect(() => {
+    if (!highlight || rules.length === 0) return;
+    const needles = String(highlight).toLowerCase().split(/\s+/).filter(Boolean);
+    const haystack = (r: ActionRule) => {
+      const parts: string[] = [String(r.trigger_type ?? ''), String(r.label ?? '')];
+      for (const v of Object.values(r.trigger_config ?? {})) if (v != null) parts.push(typeof v === 'string' ? v : JSON.stringify(v));
+      for (const v of Object.values(r.action_config  ?? {})) if (v != null) parts.push(typeof v === 'string' ? v : JSON.stringify(v));
+      return parts.join(' ').toLowerCase();
+    };
+    const target = rules.find(r => {
+      const hay = haystack(r);
+      return needles.every(n => hay.includes(n));
+    });
+    if (target) setExpanded(prev => ({ ...prev, [target.id]: true }));
+  }, [highlight, rules]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -279,30 +368,31 @@ export default function AlertsScreen() {
                     />
                   </TouchableOpacity>
 
-                  {isOpen && (
-                    <View style={styles.detailBox}>
-                      <Text style={styles.detailHeader}>Trigger</Text>
-                      {formatTriggerDetails(rule).map((line, i) => (
-                        <Text key={i} style={styles.detailLine}>{line}</Text>
-                      ))}
-                      <Text style={[styles.detailHeader, { marginTop: 10 }]}>Action — {rule.action_type}</Text>
-                      {formatActionDetails(rule).map((line, i) => (
-                        <Text key={i} style={styles.detailLine}>{line}</Text>
-                      ))}
-                      {rule.one_shot ? (
-                        <Text style={styles.detailMeta}>One-shot (fires once)</Text>
-                      ) : (
-                        <Text style={styles.detailMeta}>Repeats until deleted</Text>
-                      )}
-                      <TouchableOpacity
-                        style={styles.deleteBtn}
-                        onPress={() => setPendingDelete(rule)}
-                      >
-                        <Ionicons name="trash" size={16} color="#fff" />
-                        <Text style={styles.deleteBtnText}>Delete alert</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
+                  {isOpen && (() => {
+                    const { channelsLine, bodyLine, extraLines } = formatWhatHappens(rule);
+                    return (
+                      <View style={styles.detailBox}>
+                        <Text style={styles.detailHeader}>When</Text>
+                        <Text style={styles.detailProse}>{formatWhenDetail(rule)}</Text>
+                        <Text style={[styles.detailHeader, { marginTop: 14 }]}>What happens</Text>
+                        <Text style={styles.detailProse}>{channelsLine}</Text>
+                        {bodyLine && <Text style={styles.detailProseQuote}>{bodyLine}</Text>}
+                        {extraLines.map((line, i) => (
+                          <Text key={i} style={styles.detailProse}>{line}</Text>
+                        ))}
+                        <Text style={styles.detailMeta}>
+                          {rule.one_shot ? 'Fires once, then stops.' : 'Repeats until you delete it.'}
+                        </Text>
+                        <TouchableOpacity
+                          style={styles.deleteBtn}
+                          onPress={() => setPendingDelete(rule)}
+                        >
+                          <Ionicons name="trash" size={16} color="#fff" />
+                          <Text style={styles.deleteBtnText}>Delete alert</Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })()}
                 </View>
               );
             })}
@@ -448,6 +538,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'monospace',
     marginBottom: 2,
+  },
+  // Plain-language prose detail — replaces the raw JSON dump with sentences
+  // Robert can read at a glance. No monospace, no field names, no coords.
+  detailProse: {
+    color: Colors.textPrimary,
+    fontSize: 15,
+    lineHeight: 22,
+    marginBottom: 4,
+  },
+  detailProseQuote: {
+    color: Colors.textSecondary,
+    fontSize: 15,
+    fontStyle: 'italic',
+    lineHeight: 22,
+    marginBottom: 4,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: Colors.accent,
   },
   detailMeta: {
     color: Colors.textMuted,
