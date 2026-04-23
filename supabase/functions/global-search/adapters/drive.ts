@@ -287,19 +287,21 @@ export const driveAdapter: SearchAdapter = {
       if (seenDriveIds.has(f.id)) continue; // already covered by harvested row
       const nameLower = f.name.toLowerCase();
 
-      // Relevance gate — live-Drive body-only matches are high-noise (any file
-      // whose fullText contains the query word, however tangentially). Require
-      // the filename itself to contain the query variant. Harvested rows
-      // (documents table) already went through the richer scoring above and
-      // aren't affected by this filter.
+      // Two scoring tiers — name match is high-confidence, body-only match is
+      // lower-confidence-but-still-useful. An earlier version dropped body-only
+      // hits outright to kill a condo-AGM false-positive on the word "warranty",
+      // but that also dropped legitimate hits like "first day" inside a PDF
+      // named "2025-2026 School Calendar". Let Claude apply a relevance check
+      // against the title at presentation time (prompt rule v15+) instead —
+      // it suppresses the junk without starving the useful matches.
       const nameHit = variants.some(v => nameLower.includes(v));
-      if (!nameHit) continue;
+      const score = nameHit ? 0.85 : 0.55;
 
       hits.push({
         source: 'drive',
         title: f.name,
         snippet: '',
-        score: 0.85,
+        score,
         createdAt: f.modifiedTime,
         url: f.webViewLink,
         metadata: {
