@@ -156,10 +156,13 @@ export default function RootLayout() {
           headerTitleStyle: { fontWeight: '600', fontSize: 17 },
           headerShadowVisible: false, // removes the thin divider line under the header
           // Ensure a visible back chevron on every pushed screen. Some Android
-          // builds + the web preview hide the OS default, so we provide our
-          // own. Root screens override this with headerLeft: null / undefined.
+          // builds + the web preview hide the OS default. canGoBack is unreliable
+          // in expo-router's headerLeft callback (sometimes undefined) — always
+          // render the chevron and let router.back() silently no-op if there's
+          // nothing to pop. Root screens (index.tsx) explicitly set
+          // headerLeft: () => null.
           headerBackVisible: true,
-          headerLeft: ({ canGoBack }) => canGoBack ? (
+          headerLeft: () => (
             <TouchableOpacity
               onPress={() => router.back()}
               style={{ paddingHorizontal: 8, paddingVertical: 4 }}
@@ -167,7 +170,7 @@ export default function RootLayout() {
             >
               <Ionicons name="chevron-back" size={26} color={Colors.textPrimary} />
             </TouchableOpacity>
-          ) : null,
+          ),
           contentStyle: { backgroundColor: Colors.bgApp },
           animation: 'slide_from_right',
         }}
@@ -178,6 +181,12 @@ export default function RootLayout() {
             headerShown: true,
             headerTitle: () => (
               <View style={headerStyles.container}>
+                <Image
+                  source={require('../assets/mynaavi-logo-transparent.png')}
+                  style={headerStyles.logo}
+                  resizeMode="contain"
+                  accessibilityLabel="MyNaavi logo"
+                />
                 <Text style={headerStyles.title}>
                   <Text style={headerStyles.white}>My</Text>
                   <Text style={headerStyles.teal}>Naavi</Text>
