@@ -1551,14 +1551,14 @@ export default function HomeScreen() {
             </View>
             {/* Row 2 — Meet + Free on the left, Mic/Send toggle far right. */}
             <View style={styles.actionButtonsRow}>
-              {/* Meet — conversation recorder */}
+              {/* Visits — conversation / thought recorder */}
               {memoSupported && (
                 <IconButton
-                  label={convState === 'recording' ? 'Stop recording' : convState === 'labeling' ? 'Label speakers' : 'Meet'}
+                  label={convState === 'recording' ? 'Stop recording' : convState === 'labeling' ? 'Label speakers' : 'Visits'}
                   description={
                     convState === 'recording' ? 'Stop recording. MyNaavi will transcribe and save it.'
                     : convState === 'labeling' ? 'Label who was speaking before MyNaavi files the transcript.'
-                    : 'Record a conversation or doctor visit. MyNaavi writes a clean summary afterward.'
+                    : 'Record a visit or your own thoughts — MyNaavi writes a clean summary afterward.'
                   }
                   onPeek={setPeekText}
                   icon={
@@ -1586,7 +1586,7 @@ export default function HomeScreen() {
               {/* Free — hands-free mode */}
               <IconButton
                 label="Hands-free"
-                description="Hands-free mode — say 'Hi Naavi' to start talking, no tapping needed. Say 'Thanks' to end."
+                description="Hands-free conversation — say 'Hi Naavi' to start, no tapping needed. Say 'Thanks' to end."
                 onPeek={setPeekText}
                 icon={<Ionicons name="radio" size={30} color="#fff" />}
                 style={{ backgroundColor: '#2563EB' }}
