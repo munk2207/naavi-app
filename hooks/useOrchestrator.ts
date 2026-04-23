@@ -129,6 +129,62 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     setStatus('thinking');
     setError(null);
 
+    // ── DETERMINISTIC "delete all X" INTERCEPT ─────────────────────────────
+    // Claude isn't reliably setting all=true from natural phrasing, so this
+    // regex runs FIRST and handles the explicit "delete all [keyword]" and
+    // "remove every [keyword]" cases without a round-trip to Claude. Covers
+    // "delete all", "delete every", "remove all", "cancel all", "stop all",
+    // optionally "my/the", and strips trailing " alerts"/"rules"/"of them".
+    {
+      const t = userMessage.trim();
+      const delAllRe = /^(?:please\s+)?(?:delete|remove|cancel|stop|clear)\s+(?:all|every)(?:\s+of)?(?:\s+(?:my|the))?\s*(.*?)(?:\s+alerts?|\s+rules?)?\s*[.!?]*$/i;
+      const m = t.match(delAllRe);
+      if (m && supabase) {
+        const keywordRaw = (m[1] || '').trim().toLowerCase();
+        const keyword = keywordRaw.replace(/\s+(of\s+them|of\s+it|of\s+mine)$/i, '').trim();
+        try {
+          const { data } = await supabase.functions.invoke('manage-rules', { body: { op: 'list' } });
+          const rules: Array<Record<string, any>> = Array.isArray((data as any)?.rules) ? (data as any).rules : [];
+          const needles = keyword ? keyword.split(/\s+/).filter(Boolean) : [];
+          const haystackFor = (r: Record<string, any>) => {
+            const parts: string[] = [String(r.trigger_type ?? ''), String(r.label ?? '')];
+            for (const v of Object.values(r.trigger_config ?? {})) if (v != null) parts.push(typeof v === 'string' ? v : JSON.stringify(v));
+            for (const v of Object.values(r.action_config  ?? {})) if (v != null) parts.push(typeof v === 'string' ? v : JSON.stringify(v));
+            return parts.join(' ').toLowerCase();
+          };
+          const matches = needles.length === 0
+            ? rules
+            : rules.filter(r => { const hay = haystackFor(r); return needles.every(n => hay.includes(n)); });
+          let speech: string;
+          if (matches.length === 0) {
+            speech = keyword ? `I couldn't find an alert matching "${keyword}".` : 'You have no alerts to delete.';
+          } else {
+            const results = await Promise.allSettled(matches.map(r => supabase.functions.invoke('manage-rules', { body: { op: 'delete', rule_id: r.id } })));
+            const okCount = results.filter(r => r.status === 'fulfilled' && !(r as any).value?.error).length;
+            const label = keyword ? `${keyword} ` : '';
+            speech = okCount === matches.length
+              ? `Done — deleted all ${okCount} ${label}alerts.`
+              : `Deleted ${okCount} of ${matches.length} ${label}alerts.`;
+          }
+          pendingDeleteRef.current = null;
+          setTurns(prev => [...prev, {
+            userMessage,
+            assistantSpeech: speech,
+            drafts: [], createdEvents: [], deletedEvents: [], savedDocs: [],
+            rememberedItems: [], driveFiles: [], navigationResults: [], listResults: [],
+            globalSearch: undefined,
+            timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
+                     + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
+          }]);
+          setStatus('idle');
+          return;
+        } catch (err) {
+          console.error('[Orchestrator] delete-all intercept failed:', err);
+          // Fall through to normal Claude path on error
+        }
+      }
+    }
+
     // ── PENDING DELETE — "all" / "every" / "cancel" on a multi-match ───────
     // When a previous DELETE_RULE found multiple matches, we stored the IDs.
     // If the user now says "all" / "every one" / "all of them", delete them
