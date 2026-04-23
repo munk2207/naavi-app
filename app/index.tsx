@@ -2321,11 +2321,14 @@ const styles = StyleSheet.create({
   inputArea: {
     paddingHorizontal: 20,
     paddingTop: 12,
-    paddingBottom: 12,
+    // Flush to bottom — SafeAreaView with edges=['bottom'] already handles
+    // system-gesture spacing. Zero padding here closes the gap the user
+    // flagged in V55 build 104.
+    paddingBottom: 4,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
     backgroundColor: Colors.bgApp,
-    gap: 12,
+    gap: 10,
   },
   inputRow: {
     flexDirection: 'row',

@@ -90,6 +90,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     attempts: number;
   } | null>(null);
 
+  // Cross-turn state for DELETE_RULE disambiguation. When a delete matched
+  // multiple rules and all=false, Naavi asks "which one?" Next turn the user
+  // may reply "all" / "all of them" / a specific hint — without this state
+  // the reply just triggers another fresh DELETE_RULE and loops. Pre-send()
+  // intercepts "all"/"every" here and deletes the previously-matched set.
+  const pendingDeleteRef = useRef<{
+    match: string;
+    matchIds: string[]; // rule ids shown in the disambiguation
+  } | null>(null);
+
   // Always-current ref — send() reads this so it never uses a stale brief
   const briefRef = useRef(briefItems);
   useEffect(() => { briefRef.current = briefItems; }, [briefItems]);
@@ -118,6 +128,56 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     _speechStopped = false;
     setStatus('thinking');
     setError(null);
+
+    // ── PENDING DELETE — "all" / "every" / "cancel" on a multi-match ───────
+    // When a previous DELETE_RULE found multiple matches, we stored the IDs.
+    // If the user now says "all" / "every one" / "all of them", delete them
+    // inline without going back to Claude (who often just re-emits the same
+    // disambiguating DELETE_RULE and loops).
+    if (pendingDeleteRef.current && supabase) {
+      const msg = userMessage.trim().toLowerCase();
+      const isBulk   = /\b(all|everyone|every one|every|all of them|both)\b/i.test(msg);
+      const isCancel = NEGATIVE_RE.test(msg);
+      if (isCancel) {
+        pendingDeleteRef.current = null;
+        // Fall through to normal Claude send (user may want to cancel ONLY
+        // the delete, then ask something unrelated). The cancel itself is
+        // implicit — no override speech.
+      } else if (isBulk) {
+        const ids = pendingDeleteRef.current.matchIds;
+        const label = pendingDeleteRef.current.match;
+        pendingDeleteRef.current = null;
+        try {
+          const results = await Promise.allSettled(ids.map(id =>
+            supabase.functions.invoke('manage-rules', { body: { op: 'delete', rule_id: id } }),
+          ));
+          const okCount = results.filter(r => r.status === 'fulfilled' && !(r as any).value?.error).length;
+          const speech  = okCount === ids.length
+            ? `Done — deleted all ${ids.length} ${label ? label + ' ' : ''}alerts.`
+            : `Deleted ${okCount} of ${ids.length}. ${ids.length - okCount} couldn't be removed.`;
+          setTurns(prev => [...prev, {
+            userMessage,
+            assistantSpeech: speech,
+            drafts: [], createdEvents: [], deletedEvents: [], savedDocs: [],
+            rememberedItems: [], driveFiles: [], navigationResults: [], listResults: [],
+            globalSearch: undefined,
+            timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
+                     + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
+          }]);
+          setStatus('idle');
+        } catch (err) {
+          console.error('[Orchestrator] pendingDelete bulk failed:', err);
+          setError(err instanceof Error ? err.message : String(err));
+          setStatus('error');
+        }
+        return;
+      } else {
+        // Any other reply — user is trying to narrow to a specific alert, or
+        // moved on. Clear the pending state and fall through to Claude so
+        // the new turn is interpreted fresh.
+        pendingDeleteRef.current = null;
+      }
+    }
 
     // ── PENDING LOCATION CONFIRMATION (M1 verified-address flow) ──────────────
     // If there's a pending location rule from the previous turn, handle this
@@ -735,9 +795,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
             if (matches.length === 0) {
               turnSpeechOverride = match ? `I couldn't find an alert matching "${match}".` : "You have no alerts to delete.";
+              pendingDeleteRef.current = null;
             } else if (matches.length > 1 && !deleteAll) {
               const hints = matches.slice(0, 3).map(r => String(r.trigger_type) + (r.trigger_config?.place_name ? ` ${r.trigger_config.place_name}` : r.trigger_config?.from_name ? ` ${r.trigger_config.from_name}` : ''));
               turnSpeechOverride = `I found ${matches.length} alerts matching. Which one — ${hints.join(', or ')}? Or say "all" to delete every match.`;
+              // Stash the matched IDs so a "all" / "every" reply on the next
+              // turn can delete them without going back to Claude.
+              pendingDeleteRef.current = {
+                match,
+                matchIds: matches.map(r => String(r.id)),
+              };
             } else {
               // Delete one or many in parallel
               const results = await Promise.allSettled(
@@ -763,6 +830,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                   ? `Done — deleted all ${okCount} ${label}alerts.`
                   : `Deleted ${okCount} ${label}alerts. ${failCount} couldn't be removed.`;
               }
+              pendingDeleteRef.current = null;
             }
           } catch (err) {
             console.error('[Orchestrator] DELETE_RULE failed:', err);
