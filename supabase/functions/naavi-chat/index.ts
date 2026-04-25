@@ -487,7 +487,7 @@ Deno.serve(async (req) => {
     }
 
     const claudeStart = Date.now();
-    console.log(`[timing] ${elapsed()} | Claude call starting | model=claude-sonnet-4-6 | max_tokens=${max_tokens ?? 2048}`);
+    console.log(`[timing] ${elapsed()} | Claude call starting | model=claude-haiku-4-5-20251001 | max_tokens=${max_tokens ?? 2048}`);
     // Prompt caching — the system prompt has two markers from get-naavi-prompt:
     //   CACHE_BOUNDARY  — separates dynamic prefix (date/time, per-request) from stable rules.
     //   END_STABLE      — separates the cacheable rules from mobile-appended per-query
@@ -534,7 +534,7 @@ Deno.serve(async (req) => {
         : system;
     }
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: max_tokens ?? 2048,
       system: cachedSystem as any,
       messages: augmentedMessages,
