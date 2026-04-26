@@ -84,8 +84,12 @@ serve(async (req) => {
       const accessToken = await getNewAccessToken(refresh_token);
 
       // ── Sync window ─────────────────────────────────────────────────────────
+      // 90 days back so deleted past events propagate to the local cache.
+      // Earlier the lookback was only 7 days — events older than that sat in
+      // the local table forever, even after the user deleted them in Google,
+      // because the prune step only removes rows within the active window.
       const timeMin = new Date();
-      timeMin.setDate(timeMin.getDate() - 7);
+      timeMin.setDate(timeMin.getDate() - 90);
       const timeMax = new Date();
       timeMax.setDate(timeMax.getDate() + 30);
 
@@ -103,40 +107,56 @@ serve(async (req) => {
       console.log(`[sync-calendar] Found ${calendars.length} calendars for user ${user_id}`);
 
       for (const cal of calendars) {
-        const res = await fetch(
-          `${CALENDAR_EVENTS_API}/${encodeURIComponent(cal.id)}/events` +
-          `?maxResults=100&orderBy=startTime&singleEvents=true` +
-          `&timeMin=${encodeURIComponent(timeMin.toISOString())}` +
-          `&timeMax=${encodeURIComponent(timeMax.toISOString())}`,
-          { headers: { Authorization: `Bearer ${accessToken}` } }
-        );
+        // Paginate via pageToken so a wide window with many events doesn't
+        // silently truncate at the 100-event maxResults cap. Cap at 25 pages
+        // (= 2,500 events per calendar) as a safety against runaway loops.
+        let pageToken: string | undefined = undefined;
+        let pageCount = 0;
+        do {
+          pageCount++;
+          const url = `${CALENDAR_EVENTS_API}/${encodeURIComponent(cal.id)}/events` +
+            `?maxResults=100&orderBy=startTime&singleEvents=true` +
+            `&timeMin=${encodeURIComponent(timeMin.toISOString())}` +
+            `&timeMax=${encodeURIComponent(timeMax.toISOString())}` +
+            (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
 
-        if (!res.ok) {
-          console.warn(`[sync-calendar] Calendar ${cal.id} returned ${res.status} — skipping`);
-          continue;
-        }
+          const res = await fetch(url, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
 
-        const data = await res.json();
-        const events = data.items ?? [];
+          if (!res.ok) {
+            console.warn(`[sync-calendar] Calendar ${cal.id} returned ${res.status} — skipping`);
+            break;
+          }
 
-        for (const event of events) {
-          liveIds.push(event.id);
-          const { error } = await adminClient
-            .from('calendar_events')
-            .upsert({
-              user_id,
-              google_event_id: event.id,
-              item_type:   'event',
-              title:       event.summary   ?? 'Event',
-              start_time:  event.start?.dateTime ?? event.start?.date,
-              end_time:    event.end?.dateTime   ?? event.end?.date,
-              description: event.description ?? '',
-              location:    event.location   ?? '',
-              attendees:   event.attendees  ?? [],
-              updated_at:  new Date().toISOString(),
-            }, { onConflict: 'user_id,google_event_id' });
+          const data = await res.json();
+          const events = data.items ?? [];
 
-          if (!error) eventCount++;
+          for (const event of events) {
+            liveIds.push(event.id);
+            const { error } = await adminClient
+              .from('calendar_events')
+              .upsert({
+                user_id,
+                google_event_id: event.id,
+                item_type:   'event',
+                title:       event.summary   ?? 'Event',
+                start_time:  event.start?.dateTime ?? event.start?.date,
+                end_time:    event.end?.dateTime   ?? event.end?.date,
+                description: event.description ?? '',
+                location:    event.location   ?? '',
+                attendees:   event.attendees  ?? [],
+                updated_at:  new Date().toISOString(),
+              }, { onConflict: 'user_id,google_event_id' });
+
+            if (!error) eventCount++;
+          }
+
+          pageToken = data.nextPageToken;
+        } while (pageToken && pageCount < 25);
+
+        if (pageCount >= 25 && pageToken) {
+          console.warn(`[sync-calendar] Calendar ${cal.id} hit 25-page safety cap; some events may not be synced`);
         }
       }
 
