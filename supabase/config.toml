@@ -1,3 +1,6 @@
+[functions.sync-google-calendar]
+verify_jwt = false
+
 [functions.search-google-drive]
 verify_jwt = false
 
