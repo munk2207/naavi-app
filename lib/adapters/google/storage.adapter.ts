@@ -58,8 +58,8 @@ export class GoogleStorageAdapter implements StorageAdapter {
     return raw.map(rawToStorageFile);
   }
 
-  async save(title: string, content: string, _userId: string): Promise<StorageFile> {
-    const result = await googleSave({ title, content });
+  async save(title: string, content: string, _userId: string, category?: 'transcript' | 'brief' | 'note' | 'list'): Promise<StorageFile> {
+    const result = await googleSave({ title, content, category });
     return {
       id:            result.fileId      ?? `gdrive_${Date.now()}`,
       name:          title,

@@ -64,6 +64,11 @@ export async function sendDriveFileAsEmail(opts: {
 export async function saveToDrive(opts: {
   title: string;
   content: string;
+  // Optional category — routes the file into MyNaavi/<Subfolder>/ rather
+  // than the MyNaavi root. Without it the save-to-drive Edge Function
+  // falls back to root for backwards compatibility, which is why notes
+  // and transcripts were landing in the wrong place.
+  category?: 'transcript' | 'brief' | 'note' | 'list';
 }): Promise<{ success: boolean; fileId?: string; webViewLink?: string; error?: string }> {
   if (!supabase) return { success: false, error: 'Not configured' };
 

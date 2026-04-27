@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-26-v35-bullet-format-strong';
+const PROMPT_VERSION = '2026-04-27-v38-create-event-timed-default';
 
 /**
  * Cache-boundary marker.
@@ -164,6 +164,20 @@ If ${userName} mentions scheduling, booking, or setting up a meeting/appointment
 - Use America/Toronto timezone. Infer end time as 1 hour after start if not stated.
 - For recurring: use RRULE (e.g. RRULE:FREQ=WEEKLY;BYDAY=SA). Omit recurrence for one-time events.
 
+DEFAULT FORMAT — TIMED, NOT ALL-DAY. CREATE_EVENT must use full datetime ISO format ("2026-04-28T09:00:00") in 99% of cases. The orchestrator and create-calendar-event Edge Function treat full datetime as a TIMED event (with start/end at specific clock times).
+
+Date-only format ("2026-04-28") is for ALL-DAY events ONLY, and only allowed for these specific cases:
+- Birthdays / anniversaries (per RULE 5 DATE-FACT FANOUT)
+- One-time expiry dates (passport, visa expiry — per RULE 5)
+
+For everything else — meetings, appointments, medications, doses, follow-ups, calls, tasks, daily routines — USE FULL DATETIME with specific clock time. If no time was stated, default to 09:00 local (NOT all-day). All-day events for these would render as multi-day banners and confuse the user.
+
+EXAMPLES — CREATE_EVENT format:
+- "Add a meeting tomorrow at 2 PM" → start: "2026-04-28T14:00:00", end: "2026-04-28T15:00:00" ✓ TIMED
+- "Add Sarah's birthday October 15" → start: "2026-10-15", end: "2026-10-16", recurrence: ["RRULE:FREQ=YEARLY"] ✓ ALL-DAY (birthday only)
+- "Doctor follow-up in three weeks" → start: "2026-05-18T09:00:00" (3 weeks out, default 9 AM) ✓ TIMED
+- "Take Amoxicillin daily for 10 days" → use SCHEDULE_MEDICATION action, NOT CREATE_EVENT
+
 RULE 3 — REMINDER:
 One-time reminders use SET_REMINDER. Recurring reminders use CREATE_EVENT with recurrence.
 - SET_REMINDER: { "type": "SET_REMINDER", "title": "string", "datetime": "ISO 8601", "source": "${channel}", "phoneNumber": "${userPhone}" }
@@ -192,8 +206,22 @@ If ${userName} gives a person's name with email or phone — include ADD_CONTACT
 RULE 5 — REMEMBER:
 If ${userName} says remember, don't forget, keep in mind, or shares personal info to retain — include REMEMBER.
 - REMEMBER: { "type": "REMEMBER", "text": "full text to remember" }
+- Emit REMEMBER **exactly once** per turn for a given fact. NEVER include the same REMEMBER twice in the actions array, even if a fanout rule below also applies. Two REMEMBER entries → two duplicate "Saved to Memory" cards on the user's screen.
 
-DATE-FACT FANOUT — when a REMEMBER text contains a date, ALSO emit CREATE_EVENT on the same turn. Both actions go in the actions array — never replace REMEMBER with CREATE_EVENT.
+DATE-FACT FANOUT — when a REMEMBER text contains a date, ALSO emit CREATE_EVENT on the same turn. Both actions go in the actions array (one REMEMBER + one CREATE_EVENT) — never replace REMEMBER with CREATE_EVENT, and never duplicate REMEMBER itself.
+
+SCOPE — fanout applies ONLY to these patterns:
+- Birthdays (any "birthday" mention with a date)
+- Anniversaries (wedding, work, named anniversaries)
+- One-time expiry dates (passport, visa, warranty, contract end)
+
+DO NOT FANOUT for:
+- Medications, prescriptions, dose schedules — those use SCHEDULE_MEDICATION (Rule 9)
+- Daily routines, recurring meetings, appointments — those use CREATE_EVENT directly with proper datetime + RRULE
+- Tasks, reminders to do something — use SET_REMINDER
+- Anything that has its own dedicated action in this prompt
+
+When in doubt, DO NOT emit a fanout CREATE_EVENT. The fanout is a convenience for canonical recurring personal dates, NOT a catch-all date-creator.
 
 RECURRING facts — birthdays, anniversaries, "annual", yearly milestones:
 - CREATE_EVENT with an ALL-DAY event on the stated date.
@@ -277,8 +305,15 @@ If ${userName} asks to set, change, or stop his daily briefing call — include 
 - Do NOT confuse this with SET_REMINDER. If ${userName} says "call me every day" — use UPDATE_MORNING_CALL.
 
 RULE 13 — MEDICATION SCHEDULE:
-If ${userName} describes a medication with a repeating on/off cycle (e.g. "5 days on, 3 days off"), include a SCHEDULE_MEDICATION action. Extract: medication name, dose times (default 08:00 and 20:00 if not stated), on_days, off_days, start_date (YYYY-MM-DD), and duration_days. The app creates the individual calendar events — never emit individual CREATE_EVENT actions for medications.
+If ${userName} describes ANY medication schedule — daily for N days, twice a day, every morning, on/off cycle, etc. — include a SCHEDULE_MEDICATION action. The app expands it into individual TIMED calendar events. NEVER emit CREATE_EVENT for medications; CREATE_EVENT for daily doses produces all-day banners that span weeks, which is the wrong UX.
+
+Extract: medication name, dose times (default 08:00 and 20:00 if not stated), on_days, off_days (set off_days=0 for continuous daily), start_date (YYYY-MM-DD), and duration_days.
 - SCHEDULE_MEDICATION: { "type": "SCHEDULE_MEDICATION", "name": "medication name", "dose_instruction": "e.g. Take with food", "times": ["08:00", "20:00"], "on_days": 5, "off_days": 3, "start_date": "YYYY-MM-DD", "duration_days": 30 }
+
+EXAMPLES:
+- "Amoxicillin 500mg once daily for 10 days" → times: ["09:00"], on_days: 10, off_days: 0, duration_days: 10
+- "Metformin 5 days on 3 days off" → times: ["08:00", "20:00"], on_days: 5, off_days: 3, duration_days: 30
+- "Take vitamin every morning" → times: ["08:00"], on_days: 1, off_days: 0, duration_days: 30
 
 RULE 14 — EMAIL ALERT:
 If ${userName} asks to be alerted, notified, or texted when an email arrives from a specific person or with a specific word in the subject — include a SET_EMAIL_ALERT action. At least one of fromName, fromEmail, or subjectKeyword must be set. The server-side evaluate-rules engine monitors the inbox and sends the SMS — your only job is to capture the rule.

@@ -27,6 +27,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
 
 import { getUserName } from '@/lib/naavi-client';
 import { useOrchestrator } from '@/hooks/useOrchestrator';
@@ -1220,7 +1221,7 @@ export default function HomeScreen() {
                     onPress={() => {
                       const avoid = avoidHighwaysRef.current ? '&avoid=highways' : '';
                       const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(nav.destination)}&travelmode=driving${avoid}`;
-                      Linking.openURL(url).catch(() => {});
+                      WebBrowser.openBrowserAsync(url).catch(() => {});
                     }}
                   >
                     <Text style={styles.navOpenBtnText}>Open in Google Maps →</Text>
@@ -1326,7 +1327,7 @@ export default function HomeScreen() {
 
               {/* Calendar events created */}
               {turn.createdEvents.map((ev, i) => (
-                <TouchableOpacity key={i} style={styles.eventCard} onPress={() => { if (ev.htmlLink) Linking.openURL(ev.htmlLink).catch(() => {}); }} accessibilityLabel="Open event in Google Calendar">
+                <TouchableOpacity key={i} style={styles.eventCard} onPress={() => { if (ev.htmlLink) WebBrowser.openBrowserAsync(ev.htmlLink).catch(() => {}); }} accessibilityLabel="Open event in Google Calendar">
                   <Text style={styles.eventLabel}>📅 Event added to calendar</Text>
                   <Text style={styles.eventTitle}>{ev.summary}</Text>
                   {ev.htmlLink ? <Text style={styles.eventLink}>Tap to view in Google Calendar</Text> : null}
