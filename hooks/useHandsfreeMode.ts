@@ -63,6 +63,10 @@ export const KEYWORDS = {
   SUBMIT: ['thank you', 'thank you naavi', 'thanks', 'thanks naavi', 'over'],
   EXIT: ['goodbye', 'goodbye naavi', 'stop listening', "that's all", 'thats all'],
   WAKE: ['hi naavi', 'hey naavi', 'hello naavi', 'naavi'],
+  // Barge-in interrupt — said while Naavi is speaking. Phrase must be
+  // distinctive enough that Aura's own voice won't trigger it; "naavi stop"
+  // and "naavi cancel" are unlikely to appear in Naavi's own replies.
+  STOP_INTERRUPT: ['naavi stop', 'naavi cancel', 'stop naavi', 'cancel naavi'],
 };
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -118,6 +122,10 @@ export function useHandsfreeMode(
   sendMessage: (text: string) => Promise<void>,
   speakCue: (text: string) => Promise<void>,
   onConfirmResponse?: (response: ConfirmResponse, editText?: string) => void,
+  // Optional callback fired when the user says "naavi stop" / "naavi cancel"
+  // while Naavi is speaking (orchestratorStatus === 'speaking'). Wired to
+  // useOrchestrator.stopSpeaking by the parent component.
+  onStopInterrupt?: () => void,
 ): UseHandsfreeModeResult {
   const [state, setState] = useState<HandsfreeState>('inactive');
   const [error, setError] = useState<string | null>(null);
@@ -306,6 +314,16 @@ export function useHandsfreeMode(
 
     console.log(`[Handsfree] Final transcript: "${transcript}"`);
     resetIdleTimer();
+
+    // ── #21 — Stop interrupt: while Naavi is speaking ('waiting' state),
+    //   if the user says "naavi stop" / "naavi cancel", call stopSpeaking
+    //   via the parent callback. Distinctive phrases reduce the chance that
+    //   Aura's own voice (picked up by the mic) triggers a false stop.
+    if (stateRef.current === 'waiting' && matchKeyword(transcript, KEYWORDS.STOP_INTERRUPT)) {
+      console.log('[Handsfree] #21 — STOP_INTERRUPT detected, calling onStopInterrupt');
+      onStopInterrupt?.();
+      return;
+    }
 
     // ── If in confirming state, classify the response ──
     if (stateRef.current === 'confirming') {
@@ -531,6 +549,22 @@ export function useHandsfreeMode(
       wsRef.current = null;
     }
   }
+
+  // ── #21 — Voice interrupt: when orchestrator enters 'speaking' (TTS plays),
+  //   re-open the mic so the user can say "naavi stop" / "naavi cancel" to
+  //   interrupt. Without this the mic stays closed throughout the reply and
+  //   the user has no voice path to stop Naavi.
+  useEffect(() => {
+    if (!loopActiveRef.current) return;
+    if (orchestratorStatus !== 'speaking') return;
+    if (stateRef.current !== 'waiting') return;
+    if (audioStreamActiveRef.current) return;
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    console.log('[Handsfree] #21 — orchestrator speaking, opening mic for stop-interrupt');
+    startAudioStream().catch((err) => {
+      console.warn('[Handsfree] #21 — startAudioStream during speaking failed:', err);
+    });
+  }, [orchestratorStatus]);
 
   // ── Watch orchestrator status: when it goes idle after 'waiting', resume listening ──
   useEffect(() => {

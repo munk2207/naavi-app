@@ -753,7 +753,7 @@ export default function HomeScreen() {
     }
   }, [confirmPending, cancelPending, editPending]);
 
-  const handsfree = useHandsfreeMode(status, send, speakCueRef.current, handleConfirmResponse);
+  const handsfree = useHandsfreeMode(status, send, speakCueRef.current, handleConfirmResponse, stopSpeaking);
 
   // Track hands-free active state for orchestrator (Voice-Confirm only in hands-free)
   useEffect(() => {
@@ -998,10 +998,7 @@ export default function HomeScreen() {
           animationType="slide"
           onRequestClose={() => setShowSpeakerModal(false)}
         >
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.modalOverlay}
-          >
+          <View style={styles.modalOverlay}>
             <View style={styles.speakerModal}>
               <Text style={styles.speakerModalTitle}>🎙 Conversation Recorded</Text>
               <Text style={styles.speakerModalSub}>
@@ -1052,7 +1049,7 @@ export default function HomeScreen() {
                 <Text style={styles.speakerCancelText}>Cancel</Text>
               </TouchableOpacity>
             </View>
-          </KeyboardAvoidingView>
+          </View>
         </Modal>
 
         {/* Floating sign-in banner — absolute positioned, doesn't shift page layout.
