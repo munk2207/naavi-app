@@ -19,6 +19,56 @@ import type { SearchAdapter, SearchContext, SearchResult } from './_interface.ts
 const GOOGLE_TOKEN_URL  = 'https://oauth2.googleapis.com/token';
 const DRIVE_FILES_URL   = 'https://www.googleapis.com/drive/v3/files';
 
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+// Common English stop words. Drive's fullText search splits a phrase into
+// words and matches ANY, so a query like "tell me about my upcoming week in
+// detail" returns every document containing "week" or "about" — pure noise.
+// Filtering out stop words keeps only signal-bearing terms (proper nouns,
+// vendor names, document keywords). Time-of-day / calendar phrases drop to
+// zero usable tokens after this filter, so we skip the Drive API call.
+const STOP_WORDS = new Set<string>([
+  'a','about','after','all','also','am','an','and','any','are','around','as','at',
+  'be','been','before','between','both','but','by',
+  'can','could',
+  'detail','details','did','do','does','doing','done',
+  'each','every',
+  'for','from',
+  'had','has','have','having','he','her','here','him','his','how',
+  'i','if','in','into','is','it','its','itself',
+  'just',
+  'know',
+  'like','list',
+  'me','might','more','most','my','myself',
+  'no','nor','not','now',
+  'of','off','on','once','only','or','our','ours','out','over','own',
+  'past',
+  'really',
+  'same','she','should','so','some','such',
+  'tell','than','that','the','their','them','then','there','these','they','this','those','through','to','today','tomorrow','too',
+  'under','until','up','upcoming','us',
+  'very',
+  'was','we','week','weekend','were','what','when','where','which','while','who','whom','why','will','with','would',
+  'yes','you','your','yours','yourself',
+]);
+
+function filterStopWords(variant: string): string {
+  const tokens = variant.toLowerCase().split(/\s+/).filter(t => t.length >= 3 && !STOP_WORDS.has(t));
+  return tokens.join(' ');
+}
+
+// Convert ISO date "2025-09-02..." → "September 2, 2025" so TTS reads it
+// naturally instead of "twenty twenty five dash zero nine dash zero two".
+function formatHumanDate(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return iso;
+  const year  = m[1];
+  const month = MONTHS[parseInt(m[2], 10) - 1] || '';
+  const day   = String(parseInt(m[3], 10));
+  return `${month} ${day}, ${year}`;
+}
+
 async function getAccessToken(refreshToken: string): Promise<string | null> {
   try {
     const res = await fetch(GOOGLE_TOKEN_URL, {
@@ -193,12 +243,20 @@ export const driveAdapter: SearchAdapter = {
     if (tokenRow?.refresh_token) {
       const accessToken = await getAccessToken(tokenRow.refresh_token);
       if (accessToken) {
+        // Strip common English stop words and short tokens from each variant
+        // so broad calendar/personal queries don't pull every document that
+        // contains "week" or "about". If no signal-bearing terms remain,
+        // skip the Drive API entirely.
+        const filteredVariants = variants
+          .map(filterStopWords)
+          .filter(v => v.length > 0);
         const clauses: string[] = [];
-        for (const v of variants) {
+        for (const v of filteredVariants) {
           const e = escapeForDriveQ(v);
           clauses.push(`fullText contains '${e}'`);
           clauses.push(`name contains '${e}'`);
         }
+        if (clauses.length > 0) {
         const driveQ = `(${clauses.join(' or ')}) and trashed=false`;
         const url =
           `${DRIVE_FILES_URL}?q=${encodeURIComponent(driveQ)}` +
@@ -215,6 +273,7 @@ export const driveAdapter: SearchAdapter = {
         } catch (err) {
           console.error('[drive-adapter] Drive fullText error:', err);
         }
+        } // end if (clauses.length > 0)
       }
     }
 
@@ -245,7 +304,12 @@ export const driveAdapter: SearchAdapter = {
       else if (variants.some(v => docType.includes(v))) score = 0.7;
 
       // Snippet prefers the PDF's own extracted summary when present — it
-      // tends to be more specific than the email-body summary.
+      // tends to be more specific than the email-body summary. Also surface
+      // the structured extracted_date / amount / expiry so Claude has the
+      // actual answer in the prompt without having to re-read the PDF
+      // (voice channel can't attach PDFs to Claude calls; this lets the
+      // voice answer include the same dates that mobile gets via the
+      // PDF-attachment path in naavi-chat::fetchCalendarPdfBlock).
       const snippetBits: string[] = [];
       if (d.extracted_summary) {
         snippetBits.push(d.extracted_summary);
@@ -254,7 +318,13 @@ export const driveAdapter: SearchAdapter = {
         if (ea?.vendor)       snippetBits.push(ea.vendor);
         if (ea?.reference)    snippetBits.push(ea.reference);
       }
-      const snippet = snippetBits.filter(Boolean).join(' · ') || (ea?.summary ?? '');
+      if (d.extracted_date)   snippetBits.push(`key date ${formatHumanDate(d.extracted_date)}`);
+      if (d.extracted_expiry) snippetBits.push(`expires ${formatHumanDate(d.extracted_expiry)}`);
+      if (typeof d.extracted_amount_cents === 'number' && d.extracted_amount_cents > 0) {
+        const amt = (d.extracted_amount_cents / 100).toFixed(2);
+        snippetBits.push(`amount ${d.extracted_currency || ''}${amt}`.trim());
+      }
+      const snippet = snippetBits.filter(Boolean).join(', ') || (ea?.summary ?? '');
 
       hits.push({
         source: 'drive',
@@ -283,6 +353,33 @@ export const driveAdapter: SearchAdapter = {
       });
     }
 
+    // Look up documents rows for any live Drive hits — even when the docs
+    // branch didn't match the query (e.g. extracted_summary too generic to
+    // contain "first day of school"), the row may still hold structured
+    // fields (extracted_date, document_type, extracted_summary) that turn
+    // an empty-snippet live hit into a useful one. Without this, voice
+    // channels that depend on snippet text get nothing actionable.
+    const liveIdsNeedingEnrichment = driveFiles
+      .map(f => f.id)
+      .filter(id => !seenDriveIds.has(id));
+    let liveDocMap = new Map<string, DocRow>();
+    if (liveIdsNeedingEnrichment.length > 0) {
+      const { data: liveDocs } = await ctx.supabase
+        .from('documents')
+        .select(`
+          id, gmail_message_id, file_name, mime_type, size_bytes, document_type,
+          drive_file_id, drive_web_view_link, created_at,
+          extracted_summary, extracted_amount_cents, extracted_currency,
+          extracted_date, extracted_reference, extracted_expiry,
+          email_action:email_actions(vendor, summary, reference, action_type)
+        `)
+        .eq('user_id', ctx.userId)
+        .in('drive_file_id', liveIdsNeedingEnrichment);
+      for (const d of (liveDocs ?? []) as unknown as DocRow[]) {
+        if (d.drive_file_id) liveDocMap.set(d.drive_file_id, d);
+      }
+    }
+
     for (const f of driveFiles) {
       if (seenDriveIds.has(f.id)) continue; // already covered by harvested row
       const nameLower = f.name.toLowerCase();
@@ -297,10 +394,27 @@ export const driveAdapter: SearchAdapter = {
       const nameHit = variants.some(v => nameLower.includes(v));
       const score = nameHit ? 0.85 : 0.55;
 
+      // If this live-Drive file is also in our documents table, enrich the
+      // snippet with extracted fields so voice/text Claude can answer with
+      // the actual date / amount instead of just "I have a PDF in your Drive".
+      const enrich = liveDocMap.get(f.id);
+      const enrichBits: string[] = [];
+      if (enrich) {
+        if (enrich.extracted_summary)  enrichBits.push(enrich.extracted_summary);
+        else if (enrich.document_type) enrichBits.push(enrich.document_type);
+        if (enrich.extracted_date)     enrichBits.push(`key date ${formatHumanDate(enrich.extracted_date)}`);
+        if (enrich.extracted_expiry)   enrichBits.push(`expires ${formatHumanDate(enrich.extracted_expiry)}`);
+        if (typeof enrich.extracted_amount_cents === 'number' && enrich.extracted_amount_cents > 0) {
+          const amt = (enrich.extracted_amount_cents / 100).toFixed(2);
+          enrichBits.push(`amount ${enrich.extracted_currency || ''}${amt}`.trim());
+        }
+      }
+      const enrichedSnippet = enrichBits.filter(Boolean).join(', ');
+
       hits.push({
         source: 'drive',
         title: f.name,
-        snippet: '',
+        snippet: enrichedSnippet,
         score,
         createdAt: f.modifiedTime,
         url: f.webViewLink,
@@ -308,8 +422,11 @@ export const driveAdapter: SearchAdapter = {
           drive_file_id: f.id,
           mime_type: f.mimeType,
           size_bytes: f.size ? Number(f.size) : null,
-          source_kind: 'drive_live',
+          document_type: enrich?.document_type ?? undefined,
+          source_kind: enrich ? 'drive_live_enriched' : 'drive_live',
           icon: iconForMime(f.mimeType),
+          extracted_date: enrich?.extracted_date ?? null,
+          extracted_expiry: enrich?.extracted_expiry ?? null,
         },
       });
     }

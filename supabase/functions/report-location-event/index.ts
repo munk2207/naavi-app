@@ -155,7 +155,12 @@ async function fireLocationAction(
 
   const isSelfByPhone = toPhone && userPhone && toPhone === userPhone;
   const isSelfByEmail = toEmail && userEmail && toEmail.toLowerCase() === userEmail.toLowerCase();
-  const isSelfAlert   = Boolean(isSelfByPhone || isSelfByEmail);
+  // When a location rule like "alert me at Costco" has no explicit to_phone /
+  // to_email, the intent is clearly self-alert — default to user's own
+  // channels rather than failing with "no destination". Mirrors the same
+  // fallback in evaluate-rules/fireAction (which is the cron path).
+  const noRecipient = !toPhone && !toEmail;
+  const isSelfAlert = Boolean(isSelfByPhone || isSelfByEmail || noRecipient);
 
   const callSMS = (channel: 'sms' | 'whatsapp', to: string) =>
     fetch(`${supabaseUrl}/functions/v1/send-sms`, {
@@ -188,11 +193,56 @@ async function fireLocationAction(
       }),
     }).then(res => ({ channel: 'push', ok: res.ok })).catch(() => ({ channel: 'push', ok: false }));
 
+  // S12 — outbound voice call as the 5th channel for arrival self-alerts.
+  // A driver parking at Costco won't look at SMS/WhatsApp/Email/Push; the
+  // phone ringing + speaking the alert body is the only reliable signal.
+  // Fires only for arrival (dwell/enter) + self-alert + location trigger.
+  const callVoice = async (toNumber: string): Promise<{ channel: string; ok: boolean }> => {
+    const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID') ?? '';
+    const authToken  = Deno.env.get('TWILIO_AUTH_TOKEN')  ?? '';
+    const voiceBase  = Deno.env.get('VOICE_SERVER_URL')   ?? '';
+    const twilioFrom = '+12495235394';
+    if (!accountSid || !authToken || !voiceBase) {
+      console.error('[report-location-event] callVoice: missing Twilio/voice-server secrets');
+      return { channel: 'voice-call', ok: false };
+    }
+    try {
+      const twiUrl = `${voiceBase}/speak-alert?body=${encodeURIComponent(body)}&user_id=${encodeURIComponent(rule.user_id)}`;
+      const form = new URLSearchParams();
+      form.append('To',     toNumber);
+      form.append('From',   twilioFrom);
+      form.append('Url',    twiUrl);
+      form.append('Method', 'POST');
+      form.append('MachineDetection', 'DetectMessageEnd');
+      const creds = btoa(`${accountSid}:${authToken}`);
+      const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${creds}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: form,
+      });
+      return { channel: 'voice-call', ok: res.ok };
+    } catch (err) {
+      console.error('[report-location-event] callVoice error:', err);
+      return { channel: 'voice-call', ok: false };
+    }
+  };
+
+  // Direction check matches the outer handler — arrival means direction
+  // 'arrive' (default) or 'inside'; 'leave' stays visual-only since exiting
+  // a place isn't an urgent moment.
+  const triggerConfig = rule.trigger_config ?? {};
+  const direction = String(triggerConfig.direction ?? 'arrive');
+  const isArrival = direction !== 'leave';
+
   const sends: Promise<{ channel: string; ok: boolean }>[] = [];
   if (isSelfAlert) {
     if (userPhone) { sends.push(callSMS('sms', userPhone)); sends.push(callSMS('whatsapp', userPhone)); }
     if (userEmail) { sends.push(callEmail(userEmail)); }
     sends.push(callPush());
+    if (userPhone && isArrival) sends.push(callVoice(userPhone));
   } else if (toPhone) {
     sends.push(callSMS('sms', toPhone));
     sends.push(callSMS('whatsapp', toPhone));

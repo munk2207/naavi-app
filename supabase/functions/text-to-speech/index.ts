@@ -48,6 +48,60 @@ function normalizePhoneForTTS(text: string): string {
   return text;
 }
 
+// Spell out date-context day numbers as ordinal words so Aura reads them
+// naturally instead of digit-by-digit. Aura was reading "October 15" as
+// "October one five tee etch" — the bare cardinal 15 confuses the model
+// in a date context. Forcing the ordinal word ("fifteenth") removes the
+// ambiguity and produces natural English date speech.
+//
+// Step 1: strip ordinal suffixes from numbers ("15th" → "15") so step 2
+// can match a uniform format regardless of how the source text wrote it.
+// Step 2: after any English month name, replace 1-31 with the matching
+// ordinal word.
+//
+// Phone numbers (7+ digit runs) are handled separately by
+// normalizePhoneForTTS and are unaffected by this 1-2 digit regex.
+// Years (4 digits) are unaffected.
+const DATE_ORDINAL_WORDS: Record<string, string> = {
+  '1': 'first', '2': 'second', '3': 'third', '4': 'fourth', '5': 'fifth',
+  '6': 'sixth', '7': 'seventh', '8': 'eighth', '9': 'ninth', '10': 'tenth',
+  '11': 'eleventh', '12': 'twelfth', '13': 'thirteenth', '14': 'fourteenth', '15': 'fifteenth',
+  '16': 'sixteenth', '17': 'seventeenth', '18': 'eighteenth', '19': 'nineteenth', '20': 'twentieth',
+  '21': 'twenty-first', '22': 'twenty-second', '23': 'twenty-third', '24': 'twenty-fourth',
+  '25': 'twenty-fifth', '26': 'twenty-sixth', '27': 'twenty-seventh', '28': 'twenty-eighth',
+  '29': 'twenty-ninth', '30': 'thirtieth', '31': 'thirty-first',
+};
+const MONTH_NAMES = '(?:January|February|March|April|May|June|July|August|September|October|November|December)';
+const MONTH_DAY_RE = new RegExp(`(${MONTH_NAMES})\\s+(\\d{1,2})\\b`, 'gi');
+
+// Mobile's `sanitiseForSpeech` over-splits letter+digit tokens, breaking
+// "15th" into "1 5 t h" before the text reaches TTS. Rejoin the broken
+// ordinal back into its original form so the rest of the pipeline can
+// process it normally. Mobile-side fix is queued as AAB item #18.
+function rejoinBrokenOrdinalsForTTS(text: string): string {
+  if (!text) return text;
+  // 1-digit ordinals: "1 s t" / "5 t h" / "3 r d" / "2 n d"
+  // 2-digit ordinals: "1 5 t h" / "2 1 s t" / "3 0 t h"
+  return text.replace(
+    /\b(\d)(?:\s+(\d))?\s+(s\s+t|n\s+d|r\s+d|t\s+h)\b/gi,
+    (match) => match.replace(/\s+/g, '')
+  );
+}
+
+function normalizeOrdinalsForTTS(text: string): string {
+  if (!text) return text;
+  // Step 0: rejoin ordinals broken by mobile-side over-splitting
+  text = rejoinBrokenOrdinalsForTTS(text);
+  // Step 1: strip ordinal suffixes
+  text = text.replace(/(\d+)(?:st|nd|rd|th)\b/gi, '$1');
+  // Step 2: spell out day numbers after a month name
+  text = text.replace(MONTH_DAY_RE, (_m, month, num) => {
+    const word = DATE_ORDINAL_WORDS[num];
+    return word ? `${month} ${word}` : `${month} ${num}`;
+  });
+  return text;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -72,7 +126,7 @@ serve(async (req) => {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    const normalised = normalizePhoneForTTS(text);
+    const normalised = normalizeOrdinalsForTTS(normalizePhoneForTTS(text));
     console.log('[text-to-speech] voice: aura-hera-en, text length:', text.length, 'normalised length:', normalised.length);
 
     const res = await fetch('https://api.deepgram.com/v1/speak?model=aura-hera-en&encoding=mp3', {

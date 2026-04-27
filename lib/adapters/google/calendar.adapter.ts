@@ -69,6 +69,13 @@ export class GoogleCalendarAdapter implements CalendarAdapter {
       attendees:   event.attendees?.map(a => a.email),
       recurrence:  event.recurrence,
     });
+    // Surface failure so callers see a real error and the chat UI doesn't
+    // render a misleading "EVENT ADDED TO CALENDAR" success card. Without
+    // this throw, googleCreateEvent's `{ success: false, error: ... }`
+    // outcome was silently masked by a fake CalendarEvent.
+    if (!result.success) {
+      throw new Error(result.error ?? 'createEvent failed');
+    }
     return {
       id:              `evt_${result.eventId ?? Date.now()}`,
       title:           event.title ?? '',

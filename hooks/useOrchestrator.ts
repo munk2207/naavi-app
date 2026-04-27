@@ -17,6 +17,7 @@ import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem, type GlobalSearchResult } from '@/lib/naavi-client';
+import { isVoiceEnabledSync } from '@/lib/voicePref';
 import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
 import { sendPushNotification } from '@/lib/push';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
@@ -1145,7 +1146,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         createdEvents:    turnEvents,
         deletedEvents:    turnDeleted,
         savedDocs:        turnDocs,
-        rememberedItems:  turnMemory,
+        rememberedItems:  [...turnMemory],
         driveFiles:       turnDrive,
         navigationResults: turnNav,
         listResults:      turnLists,
@@ -1414,8 +1415,14 @@ function sanitiseForSpeech(text: string): string {
     .replace(/\*+/g, '')
     .replace(/_{2,}/g, '')
     // Spell out mixed letter+digit tokens character by character
-    // so usernames like "aggan2207" are read as "a g g a n 2 2 0 7"
-    .replace(/\b([A-Za-z]+\d+[A-Za-z0-9]*|[A-Za-z0-9]*\d+[A-Za-z]+[A-Za-z0-9]*)\b/g,
+    // so usernames like "aggan2207" are read as "a g g a n 2 2 0 7".
+    // Excluded via negative lookahead: ordinal dates ("15th", "21st"),
+    // time-of-day ("5pm", "10am"). Without this exclusion the splitter
+    // turned "October 15th" into "October 1 5 t h" — TTS then read each
+    // character. Server-side `rejoinBrokenOrdinalsForTTS` is the safety
+    // net for older builds that still ship the over-broad pattern.
+    .replace(
+      /\b(?!\d+(?:st|nd|rd|th|am|pm)\b)([A-Za-z]+\d+[A-Za-z0-9]*|[A-Za-z0-9]*\d+[A-Za-z]+[A-Za-z0-9]*)\b/g,
       match => match.split('').join(' ')
     );
 }
@@ -1435,10 +1442,19 @@ export function stopSpeaking(): void {
   if (typeof window !== 'undefined' && window.speechSynthesis) {
     window.speechSynthesis.cancel();
   }
-  // Native
+  // Native — stop AND unload. Without unloadAsync the native decoder leaks;
+  // every "Naavi stop" mid-reply accumulates one leaked Sound object until
+  // Android throttles the JS thread and the UI freezes.
   if (_currentSound) {
-    try { _currentSound.stopAsync().catch(() => {}); } catch {}
+    const s = _currentSound;
     _currentSound = null;
+    try {
+      s.stopAsync()
+        .then(() => s.unloadAsync().catch(() => {}))
+        .catch(() => s.unloadAsync().catch(() => {}));
+    } catch {
+      try { s.unloadAsync().catch(() => {}); } catch {}
+    }
   }
   Speech.stop().catch(() => {});
 }
@@ -1471,6 +1487,8 @@ function playAudioUrl(url: string): Promise<void> {
 }
 
 async function speakCloud(text: string): Promise<void> {
+  // Honor global voice-playback toggle.
+  if (!isVoiceEnabledSync()) return;
   const chunks = text
     .split(/(?<=[.!?])\s+|\n+/)
     .map(s => s.trim())
@@ -1526,8 +1544,15 @@ async function playBase64AudioNative(base64: string): Promise<void> {
     const sound = new Audio.Sound();
     _currentSound = sound;
     await new Promise<void>((resolve, reject) => {
-      // Safety timeout — if playback never completes, resolve after 30s
-      const safetyTimer = setTimeout(() => { _currentSound = null; resolve(); }, 30000);
+      // Safety timeout — if playback never completes, release native resources
+      // and resolve after 30s. Without unloadAsync the native decoder leaks;
+      // accumulated leaks over a session can freeze the UI.
+      const safetyTimer = setTimeout(() => {
+        _currentSound = null;
+        sound.unloadAsync().catch(() => {});
+        FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+        resolve();
+      }, 30000);
       sound.setOnPlaybackStatusUpdate((status) => {
         if (status.isLoaded && status.didJustFinish) {
           clearTimeout(safetyTimer);
@@ -1541,12 +1566,20 @@ async function playBase64AudioNative(base64: string): Promise<void> {
         if (!status.isLoaded && (status as any).error) {
           clearTimeout(safetyTimer);
           _currentSound = null;
+          sound.unloadAsync().catch(() => {});
+          FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
           reject(new Error((status as any).error));
         }
       });
       sound.loadAsync({ uri: tempUri })
         .then(() => sound.playAsync())
-        .catch((err) => { clearTimeout(safetyTimer); _currentSound = null; reject(err); });
+        .catch((err) => {
+          clearTimeout(safetyTimer);
+          _currentSound = null;
+          sound.unloadAsync().catch(() => {});
+          FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+          reject(err);
+        });
     });
   } catch (err) {
     console.error('[TTS Native] playback error:', err);
@@ -1556,6 +1589,8 @@ async function playBase64AudioNative(base64: string): Promise<void> {
 }
 
 async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<void> {
+  // Honor global voice-playback toggle.
+  if (!isVoiceEnabledSync()) return;
   const chunks = text
     .split(/(?<=[.!?])\s+|\n+/)
     .map(s => s.trim())

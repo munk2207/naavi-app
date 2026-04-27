@@ -130,13 +130,28 @@ serve(async (req) => {
       });
     }
 
+    // TEMP DIAGNOSTIC — Session 24, prescription cross-account bug.
+    console.log('[create-calendar-event][DIAG] resolved user_id:', user.id, 'refresh_token prefix:', tokenRow.refresh_token.slice(0, 25), 'event_title:', summary);
     const accessToken = await getNewAccessToken(tokenRow.refresh_token);
+    // Verify which Google account the access token actually belongs to.
+    try {
+      const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (userInfoRes.ok) {
+        const userInfo = await userInfoRes.json();
+        console.log('[create-calendar-event][DIAG] google_account_email:', userInfo.email, 'for user_id:', user.id);
+      }
+    } catch (_) { /* diagnostic only */ }
 
+    // All-day events use { date: "YYYY-MM-DD" }; timed events use
+    // { dateTime, timeZone }. Detect format from input shape.
+    const isDateOnly = (s: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(s);
     const event: Record<string, unknown> = {
       summary,
       description: description ?? '',
-      start: { dateTime: start, timeZone: 'America/Toronto' },
-      end:   { dateTime: end,   timeZone: 'America/Toronto' },
+      start: isDateOnly(start) ? { date: start } : { dateTime: start, timeZone: 'America/Toronto' },
+      end:   isDateOnly(end)   ? { date: end }   : { dateTime: end,   timeZone: 'America/Toronto' },
     };
 
     // Only include attendees that look like email addresses
