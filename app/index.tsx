@@ -999,7 +999,12 @@ export default function HomeScreen() {
           onRequestClose={() => setShowSpeakerModal(false)}
         >
           <View style={styles.modalOverlay}>
-            <View style={styles.speakerModal}>
+            <ScrollView
+              style={styles.speakerModal}
+              contentContainerStyle={{ paddingBottom: 240 }}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
               <Text style={styles.speakerModalTitle}>🎙 Conversation Recorded</Text>
               <Text style={styles.speakerModalSub}>
                 {speakers.length} speaker{speakers.length !== 1 ? 's' : ''} detected. Give this conversation a title and name each speaker.
@@ -1048,7 +1053,7 @@ export default function HomeScreen() {
               <TouchableOpacity onPress={() => { setShowSpeakerModal(false); resetConv(); }}>
                 <Text style={styles.speakerCancelText}>Cancel</Text>
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           </View>
         </Modal>
 
