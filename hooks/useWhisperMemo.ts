@@ -65,16 +65,17 @@ export function useWhisperMemo(): UseWhisperMemoResult {
             return;
           }
 
-          // Force a clean audio session before createAsync. Previous TTS
-          // playback can leave audio focus / mode in a state where
-          // createAsync rejects with "Could not start recording". Setting
-          // recording mode OFF then ON resets the session reliably.
-          try {
-            await Audio.setAudioModeAsync({
-              allowsRecordingIOS: false,
-              playsInSilentModeIOS: true,
-            });
-          } catch (_) { /* best-effort reset */ }
+          // Defensive: stop any stale recording resource that may have been
+          // left over from a previous session that didn't shut down cleanly.
+          // Without this, Audio.Recording.createAsync below can either
+          // reject ("Could not start recording") or silently start without
+          // capturing audio because the mic is held by the prior recording.
+          const stale = nativeRecordingRef.current;
+          nativeRecordingRef.current = null;
+          if (stale) {
+            try { await stale.stopAndUnloadAsync(); } catch (_) { /* may already be stopped */ }
+          }
+
           await Audio.setAudioModeAsync({
             allowsRecordingIOS: true,
             playsInSilentModeIOS: true,

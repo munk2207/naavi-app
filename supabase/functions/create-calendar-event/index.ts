@@ -184,6 +184,9 @@ serve(async (req) => {
 
     const created = await createRes.json();
     console.log(`[create-calendar-event] Created "${summary}" — ${created.id}`);
+    // TEMP DIAGNOSTIC — capture the htmlLink Google returns so we can
+    // diagnose why Linking.openURL is failing to open it on the phone.
+    console.log(`[create-calendar-event][DIAG] htmlLink: ${created.htmlLink}`);
 
     // Save to Supabase calendar_events table with priority flag
     await adminClient.from('calendar_events').upsert({

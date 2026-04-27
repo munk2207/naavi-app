@@ -62,8 +62,10 @@ export interface ContactAdapter {
 export interface StorageAdapter {
   /** Search files by query string */
   search(query: string, userId: string): Promise<StorageFile[]>;
-  /** Save a new document with title and plain text content */
-  save(title: string, content: string, userId: string): Promise<StorageFile>;
+  /** Save a new document with title and plain text content. Optional category routes the file
+   *  into MyNaavi/<Subfolder>/ (transcript → Transcripts/, brief → Briefs/, note → Notes/,
+   *  list → Lists/). Without category, files land in MyNaavi/ root (legacy). */
+  save(title: string, content: string, userId: string, category?: 'transcript' | 'brief' | 'note' | 'list'): Promise<StorageFile>;
   /** Send a file as an email attachment */
   sendAsEmailAttachment(params: {
     fileId: string;

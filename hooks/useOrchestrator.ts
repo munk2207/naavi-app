@@ -581,7 +581,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         if (action.type === 'SAVE_TO_DRIVE') {
           const title = String(action.title ?? 'Naavi Note');
           try {
-            const file = await registry.storage.save(title, String(action.content ?? ''), '');
+            // Route SAVE_TO_DRIVE actions into MyNaavi/Notes/ — they're text
+            // notes the user asked to save. Without the category they'd land
+            // in MyNaavi/ root.
+            const file = await registry.storage.save(title, String(action.content ?? ''), '', 'note');
             turnDocs.push({ title, webViewLink: file.webViewLink });
             await saveDriveNote({ title, webViewLink: file.webViewLink });
           } catch (err) {

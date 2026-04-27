@@ -357,19 +357,29 @@ export function useConversationRecorder(): UseConversationRecorderResult {
           if (createdTitles.has(eventTitle.toLowerCase())) continue; // skip duplicates
           createdTitles.add(eventTitle.toLowerCase());
           try {
-            // Use tomorrow at 9 AM local time as default if no specific time mentioned
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            tomorrow.setHours(9, 0, 0, 0);
-            const end = new Date(tomorrow.getTime() + 60 * 60 * 1000); // 1 hour
+            // Honor extracted start_date / start_time when present (e.g.
+            // "follow-up in three weeks" resolves to a date 3 weeks out).
+            // Falls back to tomorrow 9 AM only when extract-actions did not
+            // resolve a specific date — preserves prior default behavior.
+            let start: Date;
+            if (action.start_date) {
+              const [hh, mm] = (action.start_time ?? '09:00').split(':').map(Number);
+              start = new Date(`${action.start_date}T00:00:00`);
+              start.setHours(Number.isFinite(hh) ? hh : 9, Number.isFinite(mm) ? mm : 0, 0, 0);
+            } else {
+              start = new Date();
+              start.setDate(start.getDate() + 1);
+              start.setHours(9, 0, 0, 0);
+            }
+            const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour
             await registry.calendar.createEvent({
               title:       eventTitle,
               description: `${action.description}\n\nTiming: ${action.timing}\nSuggested by: ${action.suggested_by}`,
-              startISO:    toLocalISO(tomorrow),
+              startISO:    toLocalISO(start),
               endISO:      toLocalISO(end),
               attendees:   [],
             });
-            console.log('[ConvRecorder] Auto-created calendar event:', eventTitle);
+            console.log('[ConvRecorder] Auto-created calendar event:', eventTitle, 'at', toLocalISO(start));
           } catch (err) {
             console.error('[ConvRecorder] Failed to create event:', eventTitle, err);
           }
@@ -408,7 +418,9 @@ export function useConversationRecorder(): UseConversationRecorderResult {
       ].join('\n');
 
       // Step 3 — save to Google Drive
-      const driveResult = await saveToDrive({ title, content: docContent });
+      // category='transcript' routes the file into MyNaavi/Transcripts/.
+      // Without it the conversation record lands in MyNaavi/ root.
+      const driveResult = await saveToDrive({ title, content: docContent, category: 'transcript' });
       if (driveResult.success && driveResult.webViewLink) {
         setSavedDocLink(driveResult.webViewLink);
         await saveDriveNote({ title, webViewLink: driveResult.webViewLink });
