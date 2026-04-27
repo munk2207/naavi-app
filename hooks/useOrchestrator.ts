@@ -559,7 +559,25 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
       // ── Execute actions ────────────────────────────────────────────────────────
 
-      for (const action of response.actions) {
+      // Dedupe REMEMBER actions on identical text — Haiku occasionally emits
+      // the same REMEMBER twice in one response (possibly conflating the
+      // user's request with the date-fact fanout instruction). Without this
+      // guard the user sees two "SAVED TO MEMORY" cards for one fact.
+      const dedupedActions = (() => {
+        const seenRemember = new Set<string>();
+        const out: NaaviAction[] = [];
+        for (const a of response.actions) {
+          if (a.type === 'REMEMBER') {
+            const key = String(a.text ?? '').trim().toLowerCase();
+            if (key && seenRemember.has(key)) continue;
+            if (key) seenRemember.add(key);
+          }
+          out.push(a);
+        }
+        return out;
+      })();
+
+      for (const action of dedupedActions) {
         if (action.type === 'SAVE_TO_DRIVE') {
           const title = String(action.title ?? 'Naavi Note');
           try {

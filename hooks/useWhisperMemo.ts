@@ -65,6 +65,16 @@ export function useWhisperMemo(): UseWhisperMemoResult {
             return;
           }
 
+          // Force a clean audio session before createAsync. Previous TTS
+          // playback can leave audio focus / mode in a state where
+          // createAsync rejects with "Could not start recording". Setting
+          // recording mode OFF then ON resets the session reliably.
+          try {
+            await Audio.setAudioModeAsync({
+              allowsRecordingIOS: false,
+              playsInSilentModeIOS: true,
+            });
+          } catch (_) { /* best-effort reset */ }
           await Audio.setAudioModeAsync({
             allowsRecordingIOS: true,
             playsInSilentModeIOS: true,
