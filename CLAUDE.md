@@ -102,15 +102,19 @@ If in doubt, ASK before creating parallel config.
 
 12. **NEVER ACT ON THE OUTSIDE WORLD WITHOUT EXPLICIT POSITIVE APPROVAL.** Any action that sends to or creates a record for a third party — SMS, WhatsApp, email, calendar events with attendees, voice messages, deletions — MUST receive a clear affirmative from the user before executing. Acceptable approvals: *"yes"*, *"approved"*, *"send it"*, *"confirm"*, *"go ahead"*. NOT acceptable: *"ok"*, *"sure"*, *"sounds good"*, silence, or any ambiguous reply — Naavi re-asks. Additionally, if any input referenced in the action is **unresolved** (*"my wife"* without a known contact, a date without a year, a place not verified) the action is BLOCKED until the input is clarified by the user — never fall back silently, never guess, never default to the user's own phone/email. Internal actions (rule/alert creation, memory writes, lookups, drafts, solo calendar events on the user's own schedule) do NOT require approval and should flow naturally.
 
+13. **"# N" MEANS THE USER PICKED OPTION N.** When you offer numbered choices and the user replies with `# 2`, `# 5`, etc., the digit after the `#` is the option they chose. The user prefixes the hash because the chat interface auto-renumbers a bare number reply (typing just `2` can render as `1`). Always honor this convention literally — `# 2` = option 2, never something else, never ask what it means.
+
 ### WHERE TO START
 
-**Most recent handoff:** `docs/SESSION_20_END_TO_END_VALIDATION.md` — read this first. It captures Session 20's work, the 11-of-11 test results, deferred bugs, and the Session 21 agenda (end-to-end test and validation).
+**Most recent handoff:** `docs/SESSION_22_HANDOFF.md` — read this first. It captures Session 22's work (Slices 1+2+3 in build 108, S12 voice dial-out, Help hub + forms, website FAQ/Contact, graceful shutdown, voice unification on phone) and names **Session 23: Sync between Voice server and Mobile Voice** as the next session with a 7-item scope.
 
-**Current build:** V54.2 (build 103) on Google Play Internal Testing.
+Prior handoffs for context: `docs/SESSION_21_HANDOFF.md`, `docs/SESSION_20_END_TO_END_VALIDATION.md`.
 
-**Current Claude prompt version:** `2026-04-21-v13-location-clarify-cap` (via `get-naavi-prompt` Edge Function).
+**Current build:** V55.4 (build 108) on Google Play Internal Testing.
 
-**Then read memory files listed in §7 of SESSION_20_END_TO_END_VALIDATION.md** — the short list that future sessions need (alert fan-out rule, verified-address rule, context fields pattern, location-trigger plan, feedback/test discipline).
+**Current Claude prompt version:** `2026-04-23-v24-delete-all-keyword` (via `get-naavi-prompt` Edge Function).
+
+**Then read memory files listed in the MEMORY.md index** — the short list that future sessions need (alert fan-out rule, verified-address rule, context fields pattern, location-trigger plan, feedback/test discipline).
 
 **Older background:** `docs/SESSION_8_DETAILED_REPORT.md` for the early Twilio voice architecture; most of 9-19 are also in `docs/` for context.
 

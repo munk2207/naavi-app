@@ -17,6 +17,7 @@ import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from './supabase';
+import { isVoiceEnabledSync } from './voicePref';
 
 async function fetchCueAudio(text: string): Promise<string | null> {
   try {
@@ -95,6 +96,8 @@ export async function speakCue(
   language: 'en' | 'fr' = 'en',
 ): Promise<void> {
   if (!text?.trim()) return;
+  // Honor the global voice-playback toggle (Settings → Voice).
+  if (!isVoiceEnabledSync()) return;
 
   // Web: use browser speech synthesis. Cues on web are rare; skip the round-trip.
   if (Platform.OS === 'web') {

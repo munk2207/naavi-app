@@ -44,19 +44,28 @@ export function IconButton({ icon, label, description, onPress, onLongPress, onP
   const tooltipText = description || label;
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track whether the long-press has activated the peek so we know when to
+  // dismiss on release. Prevents a normal short tap from showing the peek.
+  const longPressActive = useRef(false);
 
-  // Long-press fallback for mobile (no hover). Web uses onHoverIn below.
+  // Long-press shows the peek caption; releasing the press dismisses it.
+  // No auto-timeout — the peek stays visible as long as the user is holding.
   const handleLongPress = (_e: GestureResponderEvent) => {
+    longPressActive.current = true;
     if (onPeek) {
       onPeek(tooltipText);
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => onPeek(null), 1800);
     } else {
       setTooltipVisible(true);
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setTooltipVisible(false), 1800);
     }
     if (onLongPress) onLongPress();
+  };
+
+  // Dismiss the peek caption as soon as the finger lifts after a long-press.
+  const handlePressOut = () => {
+    if (!longPressActive.current) return;
+    longPressActive.current = false;
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    if (onPeek) onPeek(null); else setTooltipVisible(false);
   };
 
   return (
@@ -75,6 +84,7 @@ export function IconButton({ icon, label, description, onPress, onLongPress, onP
         ]}
         onPress={onPress}
         onLongPress={handleLongPress}
+        onPressOut={handlePressOut}
         delayLongPress={400}
         disabled={disabled}
         accessibilityLabel={label}

@@ -35,20 +35,12 @@ export function ConversationBubble({ role, content, timestamp }: Props) {
         <Text style={styles.label}>MyNaavi</Text>
       )}
       {isNaavi ? (
-        <View style={styles.naaviPlain}>
-          {content.split('\n').map((line, i) => (
-            <Text key={i} style={styles.naaviText}>
-              {line}
-            </Text>
-          ))}
+        <View style={[styles.naaviPlain, styles.textRow]}>
+          <Text style={[styles.naaviText, styles.textFlex]}>{content}</Text>
         </View>
       ) : (
-        <View style={[styles.bubble, styles.robertBubble]}>
-          {content.split('\n').map((line, i) => (
-            <Text key={i} style={styles.robertText}>
-              {line}
-            </Text>
-          ))}
+        <View style={[styles.bubble, styles.robertBubble, styles.textRow]}>
+          <Text style={[styles.robertText, styles.textFlex]}>{content}</Text>
         </View>
       )}
       {timestamp && (
@@ -62,6 +54,19 @@ const styles = StyleSheet.create({
   container: {
     marginVertical: 6,
     maxWidth: BUBBLE_MAX_WIDTH,
+  },
+  // Row-flex wrapper around the Text — gifted-chat-style. Forces a stable
+  // width context on Android so Yoga measures correctly and Text wraps
+  // instead of silently truncating ("What is my calendar next" instead of
+  // "What is my calendar next\nweek"). Combined with `textFlex` below,
+  // this is the battle-tested pattern from react-native-gifted-chat.
+  textRow: {
+    flexDirection: 'row',
+  },
+  // `flex: 0` (don't grow) + `flexShrink: 1` (allow shrink to fit row) on
+  // the Text itself is what lets Android wrap correctly inside the row.
+  textFlex: {
+    flex: 0,
     flexShrink: 1,
   },
   naaviContainer: {

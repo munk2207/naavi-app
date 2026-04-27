@@ -21,6 +21,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserNameAsync, syncUserNameToSupabase } from '@/lib/naavi-client';
+import { isVoiceEnabledSync, refreshVoicePref, setVoicePref } from '@/lib/voicePref';
 import { signOut, supabase } from '@/lib/supabase';
 import { isCalendarConnected, connectGoogleCalendar, disconnectGoogleCalendar } from '@/lib/calendar';
 import { saveNotionToken, getNotionToken, removeNotionToken, hasNotionToken } from '@/lib/notion';
@@ -101,6 +102,7 @@ export default function SettingsScreen() {
   const [epicLoading, setEpicLoading]             = useState(false);
   const [pushEnabled, setPushEnabled]             = useState(false);
   const [pushLoading, setPushLoading]             = useState(false);
+  const [voicePlayback, setVoicePlayback]         = useState(true);
   const [morningCallEnabled, setMorningCallEnabled] = useState(true);
   const [morningCallTime, setMorningCallTime]       = useState('08:00');
   const [morningCallLoading, setMorningCallLoading] = useState(false);
@@ -139,6 +141,8 @@ export default function SettingsScreen() {
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setPushEnabled(Notification.permission === 'granted');
     }
+    // Voice playback preference — Supabase-backed, falls back to AsyncStorage.
+    refreshVoicePref().then(setVoicePlayback);
     // Load user-scoped settings from Supabase (name + morning call + phone).
     // Server value wins over SecureStore for name — prevents a stale cached
     // name from a previous Google account leaking into the current session.
@@ -593,6 +597,28 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Voice Playback */}
+          <View style={styles.toolRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.toolLabel}>Voice Playback</Text>
+              <Text style={styles.toolStatus}>
+                {voicePlayback
+                  ? 'On — MyNaavi speaks her replies aloud'
+                  : 'Off — replies appear as text only, no audio'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.connectBtn}
+              onPress={async () => {
+                const next = !voicePlayback;
+                setVoicePlayback(next);
+                await setVoicePref(next);
+              }}
+            >
+              <Text style={styles.connectBtnText}>{voicePlayback ? 'Turn Off' : 'Turn On'}</Text>
+            </TouchableOpacity>
+          </View>
+
           {/* Push Notifications */}
           <View style={styles.toolRow}>
             <View>
@@ -766,7 +792,7 @@ export default function SettingsScreen() {
         <View style={styles.divider} />
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V55.4 (build 108)</Text>
+        <Text style={styles.version}>MyNaavi — V56 (build 109)</Text>
 
       </ScrollView>
     </SafeAreaView>

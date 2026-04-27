@@ -38,6 +38,7 @@ import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { VoiceButton } from '@/components/VoiceButton';
 import { BriefCard } from '@/components/BriefCard';
 import { ConversationBubble } from '@/components/ConversationBubble';
+import { isVoiceEnabledSync, hydrateVoicePref, refreshVoicePref } from '@/lib/voicePref';
 import { ConversationActionCard } from '@/components/ConversationActionCard';
 import { TopBarMenu } from '@/components/TopBarMenu';
 import { IconButton } from '@/components/IconButton';
@@ -476,6 +477,13 @@ export default function HomeScreen() {
     fetchOttawaWeather().then(w => setBrief([w]));
   }, []);
 
+  // Hydrate voice playback preference at app start (AsyncStorage cache),
+  // then refresh from Supabase. Without this, every cold start would briefly
+  // act as if voice is enabled even when the user has it turned off.
+  useEffect(() => {
+    hydrateVoicePref().then(() => { refreshVoicePref(); });
+  }, []);
+
   // Resolve user ID — from getSession on mount OR onAuthStateChange
   useEffect(() => {
     if (!supabase) return;
@@ -662,24 +670,26 @@ export default function HomeScreen() {
     }
   }, [turns.length]);
 
-  // Chat auto-clear — return to the brief after 3 min of no activity so
-  // Robert doesn't come back hours later to stale bubbles. Reset on every
-  // new turn. Separate midnight timer clears at local midnight regardless
-  // of activity (day-boundary rollover).
-  useEffect(() => {
-    if (chatIdleTimerRef.current) {
-      clearTimeout(chatIdleTimerRef.current);
-      chatIdleTimerRef.current = null;
-    }
-    if (turns.length === 0) return;
-    chatIdleTimerRef.current = setTimeout(() => {
-      console.log('[Home] chat idle 3 min — auto-clearing');
-      clearHistory();
-    }, 3 * 60 * 1000);
-    return () => {
-      if (chatIdleTimerRef.current) clearTimeout(chatIdleTimerRef.current);
-    };
-  }, [turns.length, clearHistory]);
+  // 3-minute idle auto-clear DISABLED 2026-04-26 (Session 24, Wael's request).
+  // Original intent: return to brief after 3 min of inactivity so the user
+  // doesn't return to stale bubbles. Re-enable later if the freeze
+  // investigation rules out clearHistory + concurrent timers as the cause.
+  // The midnight clear (effect below) still runs.
+  //
+  // useEffect(() => {
+  //   if (chatIdleTimerRef.current) {
+  //     clearTimeout(chatIdleTimerRef.current);
+  //     chatIdleTimerRef.current = null;
+  //   }
+  //   if (turns.length === 0) return;
+  //   chatIdleTimerRef.current = setTimeout(() => {
+  //     console.log('[Home] chat idle 3 min — auto-clearing');
+  //     clearHistory();
+  //   }, 3 * 60 * 1000);
+  //   return () => {
+  //     if (chatIdleTimerRef.current) clearTimeout(chatIdleTimerRef.current);
+  //   };
+  // }, [turns.length, clearHistory]);
 
   // Midnight clear — schedule once, reschedules itself daily. Runs even if
   // no turns exist (cheap to reset a no-op at midnight).
@@ -988,7 +998,10 @@ export default function HomeScreen() {
           animationType="slide"
           onRequestClose={() => setShowSpeakerModal(false)}
         >
-          <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.modalOverlay}
+          >
             <View style={styles.speakerModal}>
               <Text style={styles.speakerModalTitle}>🎙 Conversation Recorded</Text>
               <Text style={styles.speakerModalSub}>
@@ -1039,7 +1052,7 @@ export default function HomeScreen() {
                 <Text style={styles.speakerCancelText}>Cancel</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* Floating sign-in banner — absolute positioned, doesn't shift page layout.
@@ -1205,9 +1218,7 @@ export default function HomeScreen() {
                     onPress={() => {
                       const avoid = avoidHighwaysRef.current ? '&avoid=highways' : '';
                       const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(nav.destination)}&travelmode=driving${avoid}`;
-                      const a = document.createElement('a');
-                      a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
-                      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                      Linking.openURL(url).catch(() => {});
                     }}
                   >
                     <Text style={styles.navOpenBtnText}>Open in Google Maps →</Text>
@@ -1313,7 +1324,7 @@ export default function HomeScreen() {
 
               {/* Calendar events created */}
               {turn.createdEvents.map((ev, i) => (
-                <TouchableOpacity key={i} style={styles.eventCard} onPress={() => { if (ev.htmlLink) { const a = document.createElement('a'); a.href = ev.htmlLink; a.target = '_blank'; a.rel = 'noopener noreferrer'; document.body.appendChild(a); a.click(); document.body.removeChild(a); } }} accessibilityLabel="Open event in Google Calendar">
+                <TouchableOpacity key={i} style={styles.eventCard} onPress={() => { if (ev.htmlLink) Linking.openURL(ev.htmlLink).catch(() => {}); }} accessibilityLabel="Open event in Google Calendar">
                   <Text style={styles.eventLabel}>📅 Event added to calendar</Text>
                   <Text style={styles.eventTitle}>{ev.summary}</Text>
                   {ev.htmlLink ? <Text style={styles.eventLink}>Tap to view in Google Calendar</Text> : null}
@@ -1458,8 +1469,10 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Stop speaking button — visible only while Naavi is talking */}
-        {status === 'speaking' && (
+        {/* Stop speaking button — visible only while Naavi is talking AND
+            voice playback is enabled (no point showing it when nothing is
+            audible). */}
+        {status === 'speaking' && isVoiceEnabledSync() && (
           <TouchableOpacity
             style={styles.stopSpeakingBtn}
             onPress={stopSpeaking}
