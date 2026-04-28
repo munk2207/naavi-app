@@ -118,8 +118,25 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     ]);
   }, [turns]);
 
+  // Synchronous in-flight guard — React state (status) updates asynchronously,
+  // so rapid-fire sends (e.g. four Tap-to-Speak STT results landing within a
+  // single render tick) all see status='idle' and slip past the guard,
+  // producing overlapping replies. The ref is set synchronously and blocks
+  // the very next send.
+  const sendInFlightRef = useRef(false);
+
+  // Clear the in-flight guard when the orchestrator returns to idle (TTS
+  // finished, user can ask the next thing) or hits an error state.
+  useEffect(() => {
+    if (status === 'idle' || status === 'error') {
+      sendInFlightRef.current = false;
+    }
+  }, [status]);
+
   const send = useCallback(async (userMessage: string) => {
+    if (sendInFlightRef.current) return;
     if (status === 'thinking' || status === 'speaking' || status === 'pending_confirm') return;
+    sendInFlightRef.current = true;
     // Clear any pending confirm when a new message comes in (edit flow)
     if (pendingActionRef.current) {
       pendingActionRef.current = null;

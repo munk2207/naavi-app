@@ -1368,7 +1368,13 @@ export default function HomeScreen() {
                   key={i}
                   action={action}
                   onCalendar={(a) => send(`Create a calendar event: ${a.calendar_title ?? a.title}, ${a.timing}`)}
-                  onEmail={(a) => setInputText(`Draft an email to book: ${a.title}. ${a.email_draft ?? a.description}`)}
+                  onEmail={(a) => {
+                    // Auto-send the draft request so the user gets an email
+                    // composer flow instead of silently populating the input.
+                    const msg = `Draft an email to book: ${a.title}. ${a.email_draft ?? a.description}`;
+                    setInputText('');
+                    send(msg);
+                  }}
                 />
               ))}
               {savedDocLink ? (
