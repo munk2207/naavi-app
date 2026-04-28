@@ -428,174 +428,32 @@ export default function SettingsScreen() {
 
         <View style={styles.divider} />
 
-        {/* Providers */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Providers</Text>
-          <Text style={styles.sectionNote}>
-            MyNaavi routes through whichever provider you select. Additional providers unlock in Phase 8.
-          </Text>
-
-          <ProviderRow label="Calendar">
-            {CALENDAR_PROVIDERS.map(p => (
-              <ProviderChip
-                key={p.value}
-                label={p.label}
-                active={calendarProvider === p.value}
-                phase={p.phase}
-                onPress={() => setCalendarProvider(p.value)}
-              />
-            ))}
-          </ProviderRow>
-
-          <ProviderRow label="Email">
-            {EMAIL_PROVIDERS.map(p => (
-              <ProviderChip
-                key={p.value}
-                label={p.label}
-                active={emailProvider === p.value}
-                phase={p.phase}
-                onPress={() => setEmailProvider(p.value)}
-              />
-            ))}
-          </ProviderRow>
-
-          <ProviderRow label="Storage">
-            {STORAGE_PROVIDERS.map(p => (
-              <ProviderChip
-                key={p.value}
-                label={p.label}
-                active={storageProvider === p.value}
-                phase={p.phase}
-                onPress={() => setStorageProvider(p.value)}
-              />
-            ))}
-          </ProviderRow>
-
-          <ProviderRow label="Maps">
-            {MAPS_PROVIDERS.map(p => (
-              <ProviderChip
-                key={p.value}
-                label={p.label}
-                active={mapsProvider === p.value}
-                phase={p.phase}
-                onPress={() => setMapsProvider(p.value)}
-              />
-            ))}
-          </ProviderRow>
-        </View>
-
-        <View style={styles.divider} />
-
         {/* Connected services */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Connected Services</Text>
 
-          {/* Calendar */}
-          <View style={styles.toolRow}>
-            <View>
-              <Text style={styles.toolLabel}>Calendar</Text>
-              <Text style={styles.toolStatus}>
-                {calendarConnected ? 'Connected — real events in brief' : 'Not connected'}
-              </Text>
+          {/* Google sign-in covers Gmail, Calendar, Drive, and Maps with one
+              login. We list each as a status row so the user can see what's
+              live; there's no per-service Disconnect — to switch accounts,
+              sign out from the user profile / 3-dot menu. */}
+          {[
+            { label: 'Gmail',    on: 'Connected — emails surfaced in brief and search' },
+            { label: 'Calendar', on: 'Connected — real events in brief' },
+            { label: 'Drive',    on: 'Connected — documents searched for context' },
+            { label: 'Maps',     on: 'Connected — travel-time and directions live' },
+          ].map(svc => (
+            <View key={svc.label} style={styles.toolRow}>
+              <View>
+                <Text style={styles.toolLabel}>{svc.label}</Text>
+                <Text style={styles.toolStatus}>
+                  {calendarConnected ? svc.on : 'Not connected — sign in with Google'}
+                </Text>
+              </View>
+              {calendarConnected && (
+                <Text style={[styles.connectBtnText, { color: Colors.accent }]}>✓ On</Text>
+              )}
             </View>
-            <TouchableOpacity
-              style={[styles.connectBtn, calendarConnected && styles.connectBtnActive]}
-              disabled={calendarLoading}
-              onPress={async () => {
-                if (calendarLoading) return;
-                setCalendarLoading(true);
-                try {
-                  if (calendarConnected) {
-                    await disconnectGoogleCalendar();
-                    setCalendarConnected(false);
-                  } else {
-                    await connectGoogleCalendar();
-                    setCalendarConnected(true);
-                  }
-                } finally {
-                  setCalendarLoading(false);
-                }
-              }}
-            >
-              <Text style={styles.connectBtnText}>
-                {calendarLoading ? '...' : calendarConnected ? 'Disconnect' : 'Connect'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Notion */}
-          <View style={styles.toolRow}>
-            <View style={{ flex: 1, marginRight: 12 }}>
-              <Text style={styles.toolLabel}>Notion</Text>
-              <Text style={styles.toolStatus}>
-                {notionConnected ? 'Connected — pages searched for context' : 'Paste your integration token below'}
-              </Text>
-            </View>
-            {notionConnected && (
-              <TouchableOpacity
-                style={[styles.connectBtn, styles.connectBtnActive]}
-                onPress={handleDisconnectNotion}
-              >
-                <Text style={styles.connectBtnText}>Disconnect</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          {!notionConnected && (
-            <View style={{ marginBottom: 8 }}>
-              <TextInput
-                style={styles.keyInput}
-                value={notionToken}
-                onChangeText={setNotionToken}
-                placeholder="secret_..."
-                placeholderTextColor={Colors.textMuted}
-                secureTextEntry
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <TouchableOpacity
-                style={[styles.saveBtn, !notionToken.trim() && styles.saveBtnDisabled]}
-                onPress={handleSaveNotionToken}
-                disabled={!notionToken.trim()}
-              >
-                <Text style={styles.saveBtnText}>Connect Notion</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* MyChart (Epic FHIR) */}
-          <View style={styles.toolRow}>
-            <View>
-              <Text style={styles.toolLabel}>MyChart (Health Records)</Text>
-              <Text style={styles.toolStatus}>
-                {epicConnected
-                  ? 'Connected — medications, appointments & vitals in brief'
-                  : 'Connect your Epic MyChart to share health records with MyNaavi'}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.connectBtn, epicConnected && styles.connectBtnActive]}
-              disabled={epicLoading}
-              onPress={async () => {
-                if (epicLoading) return;
-                setEpicLoading(true);
-                try {
-                  if (epicConnected) {
-                    disconnectEpic();
-                    setEpicConnected(false);
-                  } else {
-                    await connectEpic();
-                    // page will redirect to Epic; status updates on return via isEpicConnected
-                  }
-                } finally {
-                  setEpicLoading(false);
-                }
-              }}
-            >
-              <Text style={styles.connectBtnText}>
-                {epicLoading ? '...' : epicConnected ? 'Disconnect' : 'Connect'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+          ))}
 
           {/* Voice Playback */}
           <View style={styles.toolRow}>
@@ -646,16 +504,6 @@ export default function SettingsScreen() {
             )}
           </View>
 
-          {/* Coming soon */}
-          {[
-            { label: 'Health Wearables' },
-            { label: 'Smart Home' },
-          ].map(tool => (
-            <View key={tool.label} style={styles.toolRow}>
-              <Text style={styles.toolLabel}>{tool.label}</Text>
-              <Text style={styles.comingSoon}>Phase 8</Text>
-            </View>
-          ))}
         </View>
 
         <View style={styles.divider} />
@@ -711,21 +559,6 @@ export default function SettingsScreen() {
             <Text style={styles.saveBtnText}>{morningCallLoading ? 'Saving...' : 'Save'}</Text>
           </TouchableOpacity>
         </View>
-
-        <View style={styles.divider} />
-
-        {/* Sign Out */}
-        <TouchableOpacity
-          style={styles.signOutBtn}
-          onPress={() => {
-            Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Sign Out', style: 'destructive', onPress: async () => { await signOut(); router.replace('/'); } },
-            ]);
-          }}
-        >
-          <Text style={styles.signOutBtnText}>Sign Out</Text>
-        </TouchableOpacity>
 
         <View style={styles.divider} />
 
@@ -791,8 +624,21 @@ export default function SettingsScreen() {
 
         <View style={styles.divider} />
 
+        {/* Sign Out — last interactive element, sits at the bottom of Settings. */}
+        <TouchableOpacity
+          style={styles.signOutBtn}
+          onPress={() => {
+            Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Sign Out', style: 'destructive', onPress: async () => { await signOut(); router.replace('/'); } },
+            ]);
+          }}
+        >
+          <Text style={styles.signOutBtnText}>Sign Out</Text>
+        </TouchableOpacity>
+
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V56.5 (build 114)</Text>
+        <Text style={styles.version}>MyNaavi — V56.6 (build 115)</Text>
 
       </ScrollView>
     </SafeAreaView>
