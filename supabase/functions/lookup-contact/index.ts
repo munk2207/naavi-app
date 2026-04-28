@@ -148,22 +148,30 @@ serve(async (req) => {
 
     if (results.length === 0) {
       console.log(`[lookup-contact] No results found for "${name}"`);
-      return new Response(JSON.stringify({ contact: null }), {
+      return new Response(JSON.stringify({ contact: null, contacts: [] }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Return the best match
-    const person = results[0].person;
-    const contact = {
-      name:  person.names?.[0]?.displayName ?? name,
-      email: person.emailAddresses?.[0]?.value ?? null,
-      phone: person.phoneNumbers?.[0]?.value ?? null,
-    };
+    // Map all matches into Contact shape. Caller picks best (single match) or
+    // shows a picker (multi). Used by the recipient-resolution chain in
+    // Session 26 — DraftCard needs every match for the picker UI.
+    const contacts = results.map((r: any) => {
+      const person = r.person ?? {};
+      return {
+        name:  person.names?.[0]?.displayName ?? name,
+        email: person.emailAddresses?.[0]?.value ?? null,
+        phone: person.phoneNumbers?.[0]?.value ?? null,
+      };
+    });
 
-    console.log(`[lookup-contact] Found "${contact.name}" — ${contact.email ?? 'no email'}`);
+    // Backwards compatible: also return a single `contact` field so older
+    // callers that don't read `contacts[]` keep working.
+    const contact = contacts[0];
 
-    return new Response(JSON.stringify({ contact }), {
+    console.log(`[lookup-contact] Found ${contacts.length} match(es); best: "${contact.name}" — ${contact.email ?? 'no email'}`);
+
+    return new Response(JSON.stringify({ contact, contacts }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 

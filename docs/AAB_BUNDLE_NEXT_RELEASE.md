@@ -101,6 +101,135 @@ Bugs surfaced in Session 21 that deploy as Edge Function / prompt changes.
 
 ---
 
+## Session 26 design lock (2026-04-29) — supersedes items 24, 25
+
+The kill-and-replace approach in items 24, 25 (and the V56.7 staged change) is the WRONG model. Discussion in Session 26 produced the correct design — captured here as the source of truth. **V56.7 working-tree changes (`_speechGen` counter, `currentSendIdRef` checks in `send()`) must NOT be pushed.**
+
+### Foundational principle (governs every detail below)
+
+> While Robert is consuming an answer (listening or reading), no input channel should open. To start a new session, he must explicitly terminate the current one.
+
+This rule applies in **both tap-to-talk AND hands-free modes**. Hands-free is not exempt.
+
+---
+
+### Block A — Voice / Send lock during Naavi's reply
+
+#### State machine
+
+| State | Orange button | Mic / Hands-free / Visits | Send | TextInput | Cards |
+|---|---|---|---|---|---|
+| **Idle** | hidden | normal | enabled | editable | tappable |
+| **Thinking** | ⏹ Stop | LOCKED (greyed) | LOCKED (greyed) | editable | tappable |
+| **Speaking** | ⏹ Stop | LOCKED (greyed) | LOCKED (greyed) | editable | tappable |
+| **Answer-active** (10s window) | ✕ Cancel | LOCKED (greyed) | LOCKED (greyed) | editable | tappable |
+| **Pending_confirm** (hands-free draft yes/no) | hidden | EXEMPT — directed yes/no/edit listening | LOCKED | editable | tappable |
+
+#### Transitions
+
+- **Idle → Thinking:** `send()` fires. Orange ⏹ Stop visible.
+- **Thinking → Idle (cancel):** Robert taps orange ⏹ Stop. In-flight Claude request marked stale, response discarded when it arrives. Goes straight to Idle (no Answer-active buffer — there's no answer to consume).
+- **Thinking → Speaking:** Naavi's response arrives, TTS starts.
+- **Speaking → Idle (path A — natural):** voice plays to its natural end. Orange hides, all locks release in one move. **No Cancel button shown, no timer.**
+- **Speaking → Answer-active:** Robert taps orange ⏹ Stop mid-speech. Orange morphs to ✕ Cancel. Locks stay. 10-second timer starts.
+- **Answer-active → Idle (path B — manual):** Cancel tap OR 10-second timer expires.
+- **Speaking → Pending_confirm:** hands-free only, after a draft message turn that includes "Should I send it?". Mic stays in directed yes/no/edit listening (the only exception to the lock model). After Robert resolves it, normal lock applies.
+
+#### Hands-free unification
+
+- During **Speaking** and **Answer-active**: mic is closed (audio-pickup prevention) — already true today.
+- After return to **Idle** in hands-free mode: mic opens in **wake-word-only** mode. Listens only for "Hi Naavi" — all other speech ignored. Robert says "Hi Naavi" → next session opens. Or taps End to deactivate hands-free.
+- **No auto-listen between turns.** Today's "mic auto-opens after Naavi finishes for the next utterance" is REMOVED. Wake-word gate is the explicit-intent signal for every turn, not just the first.
+- This is more conservative than today's hands-free (one extra "Hi Naavi" per turn) but consistent with the rest of the app and eliminates phantom-command risk between turns.
+
+#### Visual feedback
+
+- Locked buttons render at reduced opacity (greyed out). They remain visible so Robert knows they exist; the disabled appearance prevents him from tapping accidentally.
+- Hidden-entirely is rejected — for a senior user, disappearing controls feel like the app is broken.
+
+#### Why this design
+
+- **Voice channels lock during Speaking + Thinking + Answer-active** — opening any voice channel while Naavi's audio is playing captures her own voice as a phantom command. Locking is the only reliable prevention.
+- **Manual orange-Stop interrupt is ambiguous** — Robert silenced the voice but didn't say "I want to ask new." The 10-second buffer + explicit Cancel prevents accidental new sessions.
+- **Natural completion is unambiguous** — straight to Idle, no extra UI.
+- **TextInput always editable** — typing has no audio-pickup risk. Send is the gate.
+- **Card buttons always tappable** — DraftCard Send/Cancel etc. are not voice channels.
+- **Single physical button** — orange morphs ⏹ Stop → ✕ Cancel; minimum cognitive load.
+- **Discipline rule** — every code path that exits Speaking (success, error, timeout) MUST release the lock. Errored TTS must not leave Robert with all buttons disabled.
+
+---
+
+### Block B — Record-a-visit pipeline
+
+#### Speaker labeling card (replaces fixed-N slots)
+
+Mirrors the voice-server's iterative ask pattern.
+
+1. Recording finishes. Card appears with title + "**How would you like to label the speakers — Voice or Type?**" and two buttons.
+2. Robert taps one. Choice **locks for the entire visit flow** (labeling + email recipient ask, etc.). No mixing.
+3. Iterative ask: "Who was speaker 1?" → name → "Anyone else?" → loop until done.
+4. **Type mode UI:** card shows the prompt as text + input field. Robert types name + Save. Name appears as a chip at the top. Card now shows [Add another] / [Done] buttons. Chips are **editable** — tap ✕ to remove, tap chip body to edit name in place.
+5. **Voice mode UI:** Naavi speaks each prompt. Mic opens in directed listening for the name. Naavi reads heard name back to confirm ("John?"). Robert says yes / corrects. Chip then added — **final once confirmed**, no post-commit voice correction.
+6. AssemblyAI 1-speaker diarization bug becomes a non-issue — Robert can add as many names as he wants regardless of what diarization reports.
+
+#### DRAFT_MESSAGE prompt change
+
+Server-side: `get-naavi-prompt/index.ts` must reliably emit `DRAFT_MESSAGE` action when the user message follows the pattern `Draft an email to {recipient} about {subject}. Body: {body}` — even if the recipient's email is unknown. Don't return only conversational acknowledgment.
+
+#### Recipient resolution chain
+
+When Robert taps Draft Email card, recipient name is known (a speaker chip). Naavi resolves the email in this order:
+
+1. **Google People API (live)** — search Robert's actual Google contacts.
+   - **Multi-match:** show a picker (channel-aware: Voice mode reads list aloud + Robert says number; Type mode = tap).
+   - **Single match:** **always read back for confirmation** ("Send to John Smith at john@example.com?"). Privacy/correctness over speed.
+2. **Calendar lookup** — only on contacts miss. Search **attendees of events from the last 6 months**. Take most recent matching attendee. Title/description NOT searched (low signal-to-noise).
+3. **Ask Robert** — only on calendar miss too. Channel rule below.
+
+#### Channel-consistency rule
+
+The channel for any "ask Robert" follow-up depends on context:
+
+- **Visit flow (Robert tapped Draft Email card after Record-a-visit):** use the channel he chose at the start of speaker labeling. One choice covers the whole visit.
+- **General chat (Robert typed/spoke "draft an email to John" with no recording):** match the **originating input mode** of the question. He typed → text card. He spoke → voice (TTS + directed mic). **Fallback rule:** if Voice Playback is OFF in Settings, always use text regardless.
+
+#### Recipient email saved on resolution
+
+When Robert provides an email address (the "ask" path), save it as a contact augmentation for next time — but **only after a successful send**, not on draft.
+
+---
+
+### Per-item ship status (the V56.6 test list)
+
+| # | Status | Notes |
+|---|---|---|
+| 1, 2, 3, 4 | **REWRITE under Block A locked design** | Mobile rewrite of `useOrchestrator.ts` + `app/index.tsx`. Remove `_speechGen`, `currentSendIdRef`, kill-and-replace logic from V56.7 staged change. Add `thinking` orange-Stop visibility + cancel handling, `answer_active` status, 10s timer, orange button morph, voice-channel greyed-disabled predicates, hands-free wake-word-only between turns. |
+| 5 | **REWRITE as Block B Record-a-visit pipeline** | Iterative speaker labeling card with Voice/Type channel choice up-front; chip rules per channel; Naavi prompt update for `DRAFT_MESSAGE`; recipient resolution chain (People API → calendar attendees 6mo → ask); multi-match picker + single-match readback; channel-consistency rule for visit-flow vs general-chat. |
+| 6 | **DEFERRED** | Right-edge clipping confirmed real on phone for Connected Services + Push Notifications rows. Parked until full Settings revamp. Voice Playback row already correct. |
+| 7 | **No work** — confirmed working on phone. |
+| 8 | **No work** — confirmed working (Google sign-out + screen clear is the right behavior). Cache-leak / push-token / wording concerns out of scope. |
+| 9 | **Discipline rule** — every code path that exits Thinking or Speaking (success, error, timeout) MUST release the lock. Single Q+A regression smoke test on every AAB. |
+
+### Critical pre-build rule
+
+V56.7 working-tree changes (`app.json`, `app/settings.tsx`, `hooks/useOrchestrator.ts`) carry the WRONG model. They must be discarded before building the locked-design AAB. The version bump in `app.json` may be reused, but the orchestrator changes must be reverted.
+
+### Bundle decision
+
+Block A + Block B ship together as **one AAB** (decided in Session 26). Single, larger diff; one round of phone testing.
+
+### V57 deferrals (Session 26 implementation note)
+
+When implementation began, the Voice-mode portions of Block B turned out to be a 2–3 day rewrite (Naavi TTS + directed STT inside the labeling flow + state machine). To keep the AAB shippable, two pieces were deferred to V58:
+
+1. **Voice-mode speaker labeling.** The channel-choice card in V57 shows both buttons but Voice is greyed out / "coming soon". Type mode is fully iterative + chip-based per the locked design.
+2. **Pure voice-channel email ask.** When the DraftCard needs an email address it doesn't have, the Naavi prompt (RULE 1a) speaks "what is it?" aloud (when Voice Playback is on), but the actual entry happens via a TextInput on the card. Robert in hands-free must tap End to use the keyboard. Pure voice capture (Robert speaks the email, Naavi captures via directed STT) ships in V58.
+3. **Calendar attendee fallback in `lib/recipientLookup.ts`.** Stubbed for V57 (`lookupRecipientFromCalendar` returns `[]`). People API's `otherContacts` fallback covers most real-world cases; V58 adds a `lookup-calendar-contact` Edge Function that pulls events from the last 180 days and matches attendee emails by local-part / display name.
+
+These deferrals are deliberate. Block A (lock model) + the Type-mode portion of Block B + DRAFT_MESSAGE prompt + recipient resolution chain (People API) all ship together in V57. Voice-mode labeling + voice-channel email ask + calendar fallback ship together in V58 (a separate, focused AAB).
+
+---
+
 ## Pre-ship checks (before the AAB uploads)
 
 - [ ] versionCode in `app.json` matches version text in `app/settings.tsx`

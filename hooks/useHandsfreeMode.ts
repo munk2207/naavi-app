@@ -41,11 +41,24 @@ import { classifyConfirmation, CONFIRM_TIMEOUT_MS } from '@/lib/voice-confirm';
 
 export type ConfirmResponse = 'confirm' | 'cancel' | 'timeout' | 'edit';
 
+// Hands-free state machine.
+//   inactive    — hands-free is off
+//   listening   — mic open, accumulating any speech as the next message
+//   processing  — captured transcript being prepared for submission
+//   waiting     — waiting for orchestrator (Naavi thinking + speaking)
+//   wake_listen — mic open, but ONLY the WAKE keyword counts. All other speech
+//                 is ignored. This is the inter-turn state under the Session 26
+//                 design lock — explicit "Hi Naavi" required to start the next
+//                 question. (Eliminates phantom commands from ambient noise or
+//                 Robert thinking out loud between turns.)
+//   paused      — mic closed entirely, user must Tap Resume on the banner
+//   confirming  — directed yes/no/edit listening for hands-free draft confirm
 export type HandsfreeState =
   | 'inactive'
   | 'listening'
   | 'processing'
   | 'waiting'
+  | 'wake_listen'
   | 'paused'
   | 'confirming';
 
@@ -348,7 +361,8 @@ export function useHandsfreeMode(
       return;
     }
 
-    // EXIT: goodbye
+    // EXIT: goodbye — accepted in any state (lets Robert end hands-free even
+    // from wake_listen without first saying "Hi Naavi").
     if (matchKeyword(transcript, KEYWORDS.EXIT)) {
       console.log('[Handsfree] EXIT keyword detected');
       loopActiveRef.current = false;
@@ -357,6 +371,27 @@ export function useHandsfreeMode(
         stateRef.current = 'inactive';
         speakCue('Goodbye Robert. Talk to you soon.');
       });
+      return;
+    }
+
+    // ── wake_listen — between-turn state under Session 26 design lock.
+    //   Mic is open but ONLY the WAKE keyword counts. All other speech is
+    //   discarded. On WAKE, transition to 'listening' and seed pendingText
+    //   with anything Robert said after the wake phrase (so "Hi Naavi, what
+    //   time is it" works in one breath).
+    if (stateRef.current === 'wake_listen') {
+      if (matchKeyword(transcript, KEYWORDS.WAKE)) {
+        console.log('[Handsfree] WAKE in wake_listen — opening listening');
+        pendingTextRef.current = '';
+        const cleaned = stripKeywords(transcript);
+        if (cleaned) pendingTextRef.current = cleaned;
+        setState('listening');
+        stateRef.current = 'listening';
+        resetIdleTimer();
+        return;
+      }
+      // Anything else: ignore. Robert must say "Hi Naavi" first.
+      console.log('[Handsfree] wake_listen — ignored non-wake speech');
       return;
     }
 
@@ -373,7 +408,8 @@ export function useHandsfreeMode(
       return;
     }
 
-    // WAKE: hi naavi — reset and start fresh
+    // WAKE: hi naavi — reset and start fresh (used inside an existing
+    // 'listening' session, e.g. Robert wants to start over mid-utterance).
     if (matchKeyword(transcript, KEYWORDS.WAKE)) {
       console.log('[Handsfree] WAKE keyword — starting fresh');
       pendingTextRef.current = '';
@@ -394,6 +430,9 @@ export function useHandsfreeMode(
     // In confirming state, UtteranceEnd after speech is handled by processTranscript
     // (classification already fired). Nothing extra needed here.
     if (stateRef.current === 'confirming') return;
+    // In wake_listen state, never auto-submit. Only the WAKE keyword (handled
+    // in processTranscript) advances out of this state. (Session 26 design lock.)
+    if (stateRef.current === 'wake_listen') return;
 
     // Normal mode — auto-submit accumulated text
     const messageToSend = pendingTextRef.current.trim();
@@ -489,7 +528,7 @@ export function useHandsfreeMode(
         wsRef.current = null;
 
         // If still supposed to be active, try to reconnect
-        if (loopActiveRef.current && (stateRef.current === 'listening' || stateRef.current === 'confirming')) {
+        if (loopActiveRef.current && (stateRef.current === 'listening' || stateRef.current === 'wake_listen' || stateRef.current === 'confirming')) {
           handleReconnect();
         }
       };
@@ -524,7 +563,7 @@ export function useHandsfreeMode(
 
     await new Promise(resolve => setTimeout(resolve, delay));
 
-    if (loopActiveRef.current && (stateRef.current === 'listening' || stateRef.current === 'confirming')) {
+    if (loopActiveRef.current && (stateRef.current === 'listening' || stateRef.current === 'wake_listen' || stateRef.current === 'confirming')) {
       loopActiveRef.current = false; // Reset so startStreaming can set it
       await startStreaming();
     }
@@ -574,23 +613,32 @@ export function useHandsfreeMode(
       stopKeepAlive();
       clearConfirmTimeout();
 
-      // Delay before reopening mic (prevents picking up TTS audio)
+      // Delay before reopening mic (prevents picking up TTS audio).
+      // Session 26 design lock: between turns, return to wake_listen — mic
+      // is open but only "Hi Naavi" counts. Robert must explicitly engage
+      // before the next question. No more auto-listening for any speech.
       setTimeout(async () => {
         if (stateRef.current === 'waiting' || stateRef.current === 'paused' || stateRef.current === 'confirming') {
-          console.log('[Handsfree] Orchestrator done, resuming listening');
+          console.log('[Handsfree] Orchestrator done, entering wake_listen (say "Hi Naavi" to continue)');
           pendingTextRef.current = '';
 
-          setState('listening');
-          stateRef.current = 'listening';
+          setState('wake_listen');
+          stateRef.current = 'wake_listen';
 
           // If WebSocket is still open, just restart audio
           if (wsRef.current?.readyState === WebSocket.OPEN) {
             await startAudioStream();
-            resetIdleTimer();
+            // No idle timer in wake_listen — mic stays open indefinitely
+            // until WAKE keyword or EXIT keyword is heard. Robert taps End
+            // on the banner to deactivate hands-free fully.
           } else {
             // WebSocket was closed during TTS — reconnect
             loopActiveRef.current = false;
             await startStreaming();
+            // startStreaming sets state to 'listening'; immediately switch
+            // to wake_listen so we don't auto-capture between turns.
+            setState('wake_listen');
+            stateRef.current = 'wake_listen';
           }
         }
       }, POST_TTS_DELAY_MS);
