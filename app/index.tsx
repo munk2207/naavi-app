@@ -30,7 +30,7 @@ import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 
 import { getUserName } from '@/lib/naavi-client';
-import { useOrchestrator } from '@/hooks/useOrchestrator';
+import { useOrchestrator, isInputLocked, isOrangeButtonVisible, orangeButtonLabel } from '@/hooks/useOrchestrator';
 import { useVoice } from '@/hooks/useVoice';
 import { useWhisperMemo } from '@/hooks/useWhisperMemo';
 import { useHandsfreeMode } from '@/hooks/useHandsfreeMode';
@@ -63,7 +63,8 @@ function emailToBriefItem(email: Email): BriefItem {
 }
 import { fetchOttawaWeather } from '@/lib/weather';
 import { sendDriveFileAsEmail } from '@/lib/drive';
-import { lookupContact } from '@/lib/contacts';
+import { lookupContact, type Contact } from '@/lib/contacts';
+import { resolveRecipient } from '@/lib/recipientLookup';
 import { saveContact, loadTodayConversation, signInWithGoogle, signOut } from '@/lib/supabase';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
@@ -310,21 +311,47 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
   const [sendError, setSendError] = useState<string | null>(null);
   const [resolvedContact, setResolvedContact] = useState<string | null>(null);
 
+  // Email recipient resolution (Session 26 design lock).
+  //   recipientCandidates  — all matches returned by resolveRecipient()
+  //   selectedRecipientIdx — picker selection (0 by default, multi-match only)
+  //   manualEmail          — fallback typed email when no contact match
+  // Messaging (SMS/WhatsApp) keeps the existing single-match flow for V57.
+  const [recipientCandidates, setRecipientCandidates] = useState<Contact[]>([]);
+  const [selectedRecipientIdx, setSelectedRecipientIdx] = useState<number>(0);
+  const [manualEmail, setManualEmail] = useState<string>('');
+
   const channel = String(action.channel ?? 'email').toLowerCase() as 'email' | 'sms' | 'whatsapp';
   const isMessaging = channel === 'sms' || channel === 'whatsapp';
   const channelLabel = channel === 'whatsapp' ? 'WhatsApp' : channel === 'sms' ? 'SMS' : 'Email';
   const channelIcon = channel === 'whatsapp' ? '💬' : channel === 'sms' ? '📱' : '✉';
 
-  // Auto-lookup contact on mount
+  // Auto-lookup contact on mount.
+  // Email path uses resolveRecipient (multi-match capable + calendar fallback).
+  // Messaging path uses single-match lookupContact (unchanged for V57).
   React.useEffect(() => {
     const to = String(action.to ?? '').trim();
-    if (!to.includes('@') && !to.startsWith('+')) {
+    if (!to || to.includes('@') || to.startsWith('+')) return;
+
+    if (isMessaging) {
       lookupContact(to).then(contact => {
-        if (isMessaging && contact?.phone) setResolvedContact(contact.phone);
-        else if (!isMessaging && contact?.email) setResolvedContact(contact.email);
+        if (contact?.phone) setResolvedContact(contact.phone);
       });
+      return;
     }
-  }, [action.to]);
+
+    // Email — full multi-match resolution
+    resolveRecipient(to).then(({ matches }) => {
+      setRecipientCandidates(matches);
+      if (matches.length > 0) {
+        setSelectedRecipientIdx(0);
+        // Mirror into the legacy resolvedContact so the inline "(email)"
+        // readback still renders for the single-match case.
+        if (matches.length === 1 && matches[0].email) {
+          setResolvedContact(matches[0].email);
+        }
+      }
+    });
+  }, [action.to, isMessaging]);
 
   async function handleSend() {
     // If voice-confirm is active for this draft, clear it (tap overrides voice)
@@ -374,15 +401,22 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
         setSendError(err instanceof Error ? err.message : `${channelLabel} send failed`);
       }
     } else {
-      // Email
-      let email = to.includes('@') ? to : null;
-      if (!email) {
-        const contact = await lookupContact(to);
-        email = contact?.email ?? null;
+      // Email — recipient resolution per Session 26 design lock:
+      //   1. `to` is already an email      → use directly
+      //   2. Manual email typed by Robert  → use that (multi-channel fallback)
+      //   3. Selected from picker          → use that
+      //   4. Single contact match          → use it (already shown inline)
+      //   5. Nothing                       → ask Robert (block send)
+      let email: string | null = to.includes('@') ? to : null;
+      if (!email && manualEmail.trim().includes('@')) {
+        email = manualEmail.trim();
+      }
+      if (!email && recipientCandidates.length > 0) {
+        email = recipientCandidates[selectedRecipientIdx]?.email ?? null;
       }
       if (!email) {
         setSending(false);
-        setSendError(`No email address found for ${to}. Try saying "Remember ${to}'s email is name@example.com" first.`);
+        setSendError(`No email address found for ${to}. Type one above or say "Remember ${to}'s email is name@example.com".`);
         return;
       }
 
@@ -401,6 +435,23 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
     }
   }
 
+  // Email-only — show a picker when there are multiple matches, or a manual
+  // input field when there are no matches and `to` isn't already an address.
+  //
+  // Channel-consistency rule (Session 26 design lock):
+  //   - The Naavi prompt (RULE 1a) speaks "I don't have their email — what is
+  //     it?" when emitting DRAFT_MESSAGE without an address. When Voice Playback
+  //     is ON, that line is announced via TTS.
+  //   - This card is the text-channel fallback: Robert types the email here.
+  //   - Pure voice-channel asking (Robert speaks the email, Naavi captures via
+  //     directed STT) is DEFERRED to V58 along with Voice-mode speaker labeling.
+  //   - Hands-free users who land here must tap End to use the keyboard. UX gap
+  //     is documented; full voice-channel email ask ships in V58.
+  const toRaw = String(action.to ?? '');
+  const toIsEmail = toRaw.includes('@');
+  const showPicker = !isMessaging && !toIsEmail && recipientCandidates.length > 1 && !sent;
+  const showManualInput = !isMessaging && !toIsEmail && recipientCandidates.length === 0 && !sent;
+
   return (
     <View style={styles.draftCard}>
       <Text style={styles.draftLabel}>
@@ -408,11 +459,58 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
       </Text>
       <Text style={styles.draftField}>
         <Text style={styles.draftFieldLabel}>To: </Text>
-        {String(action.to ?? '')}
-        {resolvedContact && !String(action.to ?? '').includes('@') && !String(action.to ?? '').startsWith('+')
+        {toRaw}
+        {resolvedContact && !toIsEmail && !toRaw.startsWith('+')
           ? <Text style={styles.contactResolved}> ({resolvedContact})</Text>
           : null}
       </Text>
+      {/* Multi-match picker — Robert taps the right John. */}
+      {showPicker && (
+        <View style={{ marginTop: 6, marginBottom: 4 }}>
+          <Text style={[styles.draftFieldLabel, { marginBottom: 4 }]}>
+            I found {recipientCandidates.length} matches — tap the right one:
+          </Text>
+          {recipientCandidates.map((c, idx) => (
+            <TouchableOpacity
+              key={`${c.email ?? 'no-email'}-${idx}`}
+              onPress={() => setSelectedRecipientIdx(idx)}
+              accessibilityLabel={`Select ${c.name}`}
+              style={{
+                flexDirection: 'row', alignItems: 'center',
+                paddingVertical: 6, paddingHorizontal: 10,
+                marginBottom: 4, borderRadius: 6,
+                backgroundColor: idx === selectedRecipientIdx ? Colors.accent : 'rgba(0,0,0,0.05)',
+              }}
+            >
+              <Text style={{ color: idx === selectedRecipientIdx ? '#fff' : Colors.text, fontWeight: '600' }}>
+                {idx === selectedRecipientIdx ? '● ' : '○ '}{c.name}
+              </Text>
+              <Text style={{ color: idx === selectedRecipientIdx ? '#fff' : Colors.textMuted, marginLeft: 8 }}>
+                {c.email}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+      {/* No-match manual entry — Robert types the email himself. */}
+      {showManualInput && (
+        <View style={{ marginTop: 6, marginBottom: 4 }}>
+          <Text style={[styles.draftFieldLabel, { marginBottom: 4 }]}>
+            I don't have an email for {toRaw} — type it here:
+          </Text>
+          <TextInput
+            style={styles.speakerInput}
+            placeholder="name@example.com"
+            placeholderTextColor={Colors.textMuted}
+            value={manualEmail}
+            onChangeText={setManualEmail}
+            autoCorrect={false}
+            autoComplete="email"
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+        </View>
+      )}
       {!isMessaging && (
         <Text style={styles.draftField}>
           <Text style={styles.draftFieldLabel}>Subject: </Text>
@@ -639,7 +737,12 @@ export default function HomeScreen() {
   }, [brief]);
 
   const [handsfreeActive, setHandsfreeActive] = useState(false);
-  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, pendingAction, confirmPending, cancelPending, editPending } = useOrchestrator('en', brief, avoidHighwaysRef.current, handsfreeActive);
+  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, onOrangeButtonPressed, pendingAction, confirmPending, cancelPending, editPending } = useOrchestrator('en', brief, avoidHighwaysRef.current, handsfreeActive);
+
+  // Lock-model derived flags — wired into every voice-channel button below.
+  const inputLocked = isInputLocked(status);
+  const orangeVisible = isOrangeButtonVisible(status);
+  const orangeLabel = orangeButtonLabel(status);
 
   // Per-(turn, source) expanded state for Global Search "N more" groups.
   // Key format: `${turnIndex}:${source}`. When a key is present, show all
@@ -817,53 +920,92 @@ export default function HomeScreen() {
 
   const [showSpeakerModal, setShowSpeakerModal] = useState(false);
   const voiceLang = 'en';
-  // Local state + refs for speaker-naming modal
-  // Refs are updated on every keystroke — guaranteed latest value at confirm time
-  const [localNames, setLocalNames]   = useState<Record<string, string>>({});
+  // Local state + refs for speaker-naming modal.
+  // Session 26 design lock: iterative speaker labeling. Robert taps a channel
+  // (Voice / Type) up-front; in Type mode he adds chips one at a time. Voice
+  // is greyed out for V57 — ships in the next AAB.
+  const [labelingChannel, setLabelingChannel] = useState<'unset' | 'type' | 'voice'>('unset');
+  const [chipNames, setChipNames]     = useState<string[]>([]);
+  const [currentInput, setCurrentInput] = useState<string>('');
   const [localTitle, setLocalTitle]   = useState('');
-  const localNamesRef = useRef<Record<string, string>>({});
+  const chipNamesRef = useRef<string[]>([]);
+  const currentInputRef = useRef<string>('');
   const localTitleRef = useRef<string>('');
-  // committedNamesRef — set at the exact moment the user presses confirm.
+  // committedNamesRef — set at the exact moment the user presses Done.
   // Used for transcript display: avoids any async state/hook lag.
   const committedNamesRef = useRef<Record<string, string>>({});
 
-  function updateLocalName(spk: string, v: string) {
-    localNamesRef.current = { ...localNamesRef.current, [spk]: v };
-    setLocalNames({ ...localNamesRef.current });
-  }
   function updateLocalTitle(v: string) {
     localTitleRef.current = v;
     setLocalTitle(v);
   }
+  function updateCurrentInput(v: string) {
+    currentInputRef.current = v;
+    setCurrentInput(v);
+  }
+  function setChipNamesBoth(arr: string[]) {
+    chipNamesRef.current = arr;
+    setChipNames(arr);
+  }
+  // Add the typed name to the chip list, clear input. Used by the [Add] button
+  // and by [Done] when there's pending input.
+  function commitCurrentInputAsChip() {
+    const name = currentInputRef.current.trim();
+    if (!name) return;
+    const next = [...chipNamesRef.current, name];
+    setChipNamesBoth(next);
+    updateCurrentInput('');
+  }
+  // Remove a chip by index. Used by the chip's ✕ button.
+  function removeChipAt(idx: number) {
+    const next = chipNamesRef.current.filter((_, i) => i !== idx);
+    setChipNamesBoth(next);
+  }
+  // Edit a chip in place: pull its text into the input, remove from chip list.
+  // Robert can re-type and re-Add. Used by tap-on-chip-body.
+  function editChipAt(idx: number) {
+    const name = chipNamesRef.current[idx] ?? '';
+    const next = chipNamesRef.current.filter((_, i) => i !== idx);
+    setChipNamesBoth(next);
+    updateCurrentInput(name);
+  }
+  // Map chip names → speaker_id dict for confirmSpeakers. First N chips map to
+  // AssemblyAI's detected speakers in order; any extras map to synthetic
+  // participant_N keys (kept for global-search tagging, won't match utterances).
+  function mapChipsToNames(chips: string[]): Record<string, string> {
+    const names: Record<string, string> = {};
+    chips.forEach((name, idx) => {
+      const key = speakers[idx] ?? `participant_${idx + 1}`;
+      names[key] = name;
+    });
+    return names;
+  }
 
-  // When transcription finishes, auto-label or pre-fill using saved user name
+  // When transcription finishes, auto-label or pre-fill using saved user name.
+  // Session 26 design lock: chips, not fixed-grid. Pre-fill the user's name as
+  // the first chip when there are 2+ speakers; if there's only one speaker, skip
+  // the modal entirely.
   useEffect(() => {
     if (convState !== 'labeling') return;
 
     const savedName = getUserName();
-    const init: Record<string, string> = {};
-    speakers.forEach(s => { init[s] = ''; });
 
     if (savedName && speakers.length === 1) {
-      // Only the user in the recording — skip the modal entirely
+      // Only the user in the recording — skip the modal entirely.
       const names = { [speakers[0]]: savedName };
       committedNamesRef.current = names;
-      localNamesRef.current = names;
-      setLocalNames(names);
       confirmSpeakers(names, '').catch(() => {});
       return;
     }
 
-    if (savedName && speakers.length >= 2) {
-      // Pre-fill the first speaker as the user; ask for the rest
-      init[speakers[0]] = savedName;
-    }
-
-    localNamesRef.current = { ...init };
+    // Reset modal state for a fresh labeling session.
+    const initialChips = savedName && speakers.length >= 2 ? [savedName] : [];
+    setChipNamesBoth(initialChips);
+    updateCurrentInput('');
     localTitleRef.current = '';
     committedNamesRef.current = {};
-    setLocalNames(init);
     setLocalTitle('');
+    setLabelingChannel('unset');
   }, [convState, speakers]);
 
   function getGreeting(): string {
@@ -875,10 +1017,13 @@ export default function HomeScreen() {
 
   async function handleSend() {
     const text = inputText.trim();
-    // Allow during 'speaking' — the orchestrator kill-and-replace will stop
-    // the current reply. Block during 'thinking' (network in flight, no easy
-    // abort yet) to avoid stale-network overlap.
-    if (!text || status === 'thinking') return;
+    // Lock model: Send is gated whenever the input lock is engaged
+    // (thinking/speaking/answer_active/pending_confirm). The IconButton
+    // disabled prop already prevents the on-screen Send tap, but the
+    // TextInput onSubmitEditing (Enter key) also calls handleSend, so we
+    // re-enforce the gate here. Robert must release the lock first
+    // (orange Cancel tap or 10s timeout). (Session 26 design lock.)
+    if (!text || isInputLocked(status)) return;
     setInputText('');
     // "Cancel" during an active chat returns to the brief without asking Claude.
     // Only triggers when a conversation is actually in progress — otherwise
@@ -995,7 +1140,12 @@ export default function HomeScreen() {
 
         <IntegrationsModal visible={showIntegrations} onClose={() => setShowIntegrations(false)} />
 
-        {/* Speaker labeling modal — appears after transcription completes */}
+        {/* Speaker labeling modal — Session 26 design lock.
+            Step 1: Robert picks a channel (Voice or Type) up-front.
+            Step 2 (Type): iterative growing-list — title input + chips + one
+            input field at the bottom. [Add] saves the typed name as a chip;
+            [Done] commits and extracts actions.
+            Voice mode is greyed out for V57 — ships in the next AAB. */}
         <Modal
           visible={showSpeakerModal || convState === 'labeling'}
           transparent
@@ -1010,53 +1160,123 @@ export default function HomeScreen() {
               showsVerticalScrollIndicator={false}
             >
               <Text style={styles.speakerModalTitle}>🎙 Conversation Recorded</Text>
-              <Text style={styles.speakerModalSub}>
-                {speakers.length} speaker{speakers.length !== 1 ? 's' : ''} detected. Give this conversation a title and name each speaker.
-              </Text>
-              <View style={styles.speakerRow}>
-                <Text style={styles.speakerLabel}>Title</Text>
-                <TextInput
-                  style={styles.speakerInput}
-                  placeholder="e.g. Dr. Ahmed — Blood Work"
-                  placeholderTextColor={Colors.textMuted}
-                  value={localTitle}
-                  onChangeText={updateLocalTitle}
-                  autoCorrect={false}
-                />
-              </View>
-              {speakers.map((spk, idx) => (
-                <View key={spk} style={styles.speakerRow}>
-                  <Text style={styles.speakerLabel}>Speaker {idx + 1}</Text>
-                  <TextInput
-                    style={styles.speakerInput}
-                    placeholder={idx === 0 ? 'e.g. Dr. Ahmed' : 'e.g. Robert'}
-                    placeholderTextColor={Colors.textMuted}
-                    value={localNames[spk] ?? ''}
-                    onChangeText={(v) => updateLocalName(spk, v)}
-                    autoCorrect={false}
-                  />
-                </View>
-              ))}
-              <TouchableOpacity
-                style={styles.speakerConfirmBtn}
-                onPress={async () => {
-                  // Read from refs — always the latest typed values
-                  const names = { ...localNamesRef.current };
-                  const title = localTitleRef.current;
-                  console.log('[SpeakerModal] names:', JSON.stringify(names), 'title:', title);
-                  // Commit names to component ref immediately — used by transcript display
-                  committedNamesRef.current = { ...names };
-                  setShowSpeakerModal(false);
-                  await confirmSpeakers(names, title);
-                }}
-              >
-                {convState === 'extracting'
-                  ? <ActivityIndicator color="#fff" />
-                  : <Text style={styles.speakerConfirmText}>Extract Action Items →</Text>}
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => { setShowSpeakerModal(false); resetConv(); }}>
-                <Text style={styles.speakerCancelText}>Cancel</Text>
-              </TouchableOpacity>
+
+              {labelingChannel === 'unset' && (
+                <>
+                  <Text style={styles.speakerModalSub}>
+                    How would you like to label the speakers?
+                  </Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }}>
+                    <TouchableOpacity
+                      style={[styles.speakerConfirmBtn, { flex: 1, marginRight: 6, opacity: 0.4 }]}
+                      disabled
+                      accessibilityLabel="Voice (coming soon)"
+                    >
+                      <Text style={styles.speakerConfirmText}>🎤 Voice (coming soon)</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.speakerConfirmBtn, { flex: 1, marginLeft: 6 }]}
+                      onPress={() => setLabelingChannel('type')}
+                      accessibilityLabel="Type"
+                    >
+                      <Text style={styles.speakerConfirmText}>⌨ Type</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity onPress={() => { setShowSpeakerModal(false); resetConv(); }}>
+                    <Text style={styles.speakerCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {labelingChannel === 'type' && (
+                <>
+                  <Text style={styles.speakerModalSub}>
+                    Give this conversation a title, then add the speakers one by one.
+                  </Text>
+
+                  {/* Title input — kept as before */}
+                  <View style={styles.speakerRow}>
+                    <Text style={styles.speakerLabel}>Title</Text>
+                    <TextInput
+                      style={styles.speakerInput}
+                      placeholder="e.g. Dr. Ahmed — Blood Work"
+                      placeholderTextColor={Colors.textMuted}
+                      value={localTitle}
+                      onChangeText={updateLocalTitle}
+                      autoCorrect={false}
+                    />
+                  </View>
+
+                  {/* Chips — growing list of speakers entered so far. Tap ✕ to
+                      remove. Tap chip body to edit (loads back into input). */}
+                  {chipNames.length > 0 && (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 8, marginBottom: 4 }}>
+                      {chipNames.map((name, idx) => (
+                        <View key={`${name}-${idx}`} style={styles.speakerChip}>
+                          <TouchableOpacity onPress={() => editChipAt(idx)} accessibilityLabel={`Edit ${name}`}>
+                            <Text style={styles.speakerChipText}>{name}</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => removeChipAt(idx)}
+                            accessibilityLabel={`Remove ${name}`}
+                            style={styles.speakerChipRemove}
+                          >
+                            <Text style={styles.speakerChipRemoveText}>✕</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  {/* Current speaker input — prompt updates with the next number */}
+                  <View style={styles.speakerRow}>
+                    <Text style={styles.speakerLabel}>{`Speaker ${chipNames.length + 1}`}</Text>
+                    <TextInput
+                      style={styles.speakerInput}
+                      placeholder="Who was speaking?"
+                      placeholderTextColor={Colors.textMuted}
+                      value={currentInput}
+                      onChangeText={updateCurrentInput}
+                      onSubmitEditing={commitCurrentInputAsChip}
+                      returnKeyType="next"
+                      autoCorrect={false}
+                    />
+                  </View>
+
+                  <TouchableOpacity
+                    style={[styles.speakerConfirmBtn, { backgroundColor: Colors.moderate }]}
+                    onPress={commitCurrentInputAsChip}
+                    disabled={!currentInput.trim()}
+                  >
+                    <Text style={styles.speakerConfirmText}>+ Add another speaker</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.speakerConfirmBtn}
+                    onPress={async () => {
+                      // If there's pending text in the input, treat it as the
+                      // last chip so Robert doesn't have to tap Add first.
+                      const finalChips = currentInputRef.current.trim()
+                        ? [...chipNamesRef.current, currentInputRef.current.trim()]
+                        : chipNamesRef.current;
+                      const names = mapChipsToNames(finalChips);
+                      const title = localTitleRef.current;
+                      console.log('[SpeakerModal] names:', JSON.stringify(names), 'title:', title, 'chips:', finalChips.length);
+                      committedNamesRef.current = { ...names };
+                      setShowSpeakerModal(false);
+                      await confirmSpeakers(names, title);
+                    }}
+                  >
+                    {convState === 'extracting'
+                      ? <ActivityIndicator color="#fff" />
+                      : <Text style={styles.speakerConfirmText}>Done — Extract Action Items →</Text>}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity onPress={() => { setShowSpeakerModal(false); resetConv(); }}>
+                    <Text style={styles.speakerCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </ScrollView>
           </View>
         </Modal>
@@ -1407,7 +1627,12 @@ export default function HomeScreen() {
             <View style={styles.convTranscript}>
               <Text style={styles.convActionsHeader}>🎙 Conversation Transcript</Text>
               {convUtterances.map((u, i) => {
-                const name = committedNamesRef.current[u.speaker] || confirmedNames[u.speaker] || localNames[u.speaker] || `Speaker ${u.speaker}`;
+                // Live preview from the chips Robert is currently typing —
+                // shown before he taps Done so the transcript reflects partial
+                // labeling. After Done, committedNamesRef/confirmedNames take
+                // over.
+                const livePreview = mapChipsToNames(chipNames);
+                const name = committedNamesRef.current[u.speaker] || confirmedNames[u.speaker] || livePreview[u.speaker] || `Speaker ${u.speaker}`;
                 const isFirst = speakers[0] === u.speaker;
                 return (
                   <View key={i} style={[styles.utteranceRow, isFirst ? styles.utteranceLeft : styles.utteranceRight]}>
@@ -1491,16 +1716,20 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Stop speaking button — visible only while Naavi is talking AND
-            voice playback is enabled (no point showing it when nothing is
-            audible). */}
-        {status === 'speaking' && isVoiceEnabledSync() && (
+        {/* Orange button — single touch point for the lock model.
+            ⏹ Stop in thinking / speaking → cancels in-flight or silences voice.
+            ✕ Cancel in answer_active     → releases the 10s lock buffer.
+            Hidden in idle / pending_confirm / error.
+            Visible regardless of Voice Playback setting — its role goes beyond
+            silencing audio (cancelling thinking, releasing the answer-active
+            lock). See Session 26 design lock. */}
+        {orangeVisible && orangeLabel && (
           <TouchableOpacity
             style={styles.stopSpeakingBtn}
-            onPress={stopSpeaking}
-            accessibilityLabel="Stop speaking"
+            onPress={onOrangeButtonPressed}
+            accessibilityLabel={orangeLabel}
           >
-            <Text style={styles.stopSpeakingText}>⏹ Stop</Text>
+            <Text style={styles.stopSpeakingText}>{orangeLabel}</Text>
           </TouchableOpacity>
         )}
 
@@ -1572,7 +1801,10 @@ export default function HomeScreen() {
                 maxLength={500}
                 returnKeyType="send"
                 onSubmitEditing={handleSend}
-                editable={status !== 'thinking' && status !== 'pending_confirm'}
+                // Always editable — typing has no audio-pickup risk and Robert
+                // can pre-compose his next question while reading. Send is the
+                // gate, not the input. (Session 26 design lock.)
+                editable={true}
                 accessibilityLabel="Message input"
                 // Android autocomplete/autocorrect off — it was stripping typed
                 // digits (contact suggestions replacing phone numbers). Trade
@@ -1586,7 +1818,11 @@ export default function HomeScreen() {
             </View>
             {/* Row 2 — Meet + Free on the left, Mic/Send toggle far right. */}
             <View style={styles.actionButtonsRow}>
-              {/* Visits — conversation / thought recorder */}
+              {/* Visits — conversation / thought recorder.
+                  Locked while a Naavi reply is in flight (thinking/speaking/
+                  answer_active/pending_confirm). Stays tappable mid-recording
+                  so Robert can always stop a conversation he's already
+                  recording. (Session 26 design lock.) */}
               {memoSupported && (
                 <IconButton
                   label={convState === 'recording' ? 'Stop recording' : convState === 'labeling' ? 'Label speakers' : 'Visits'}
@@ -1609,6 +1845,10 @@ export default function HomeScreen() {
                     { backgroundColor: Colors.moderate },
                     convState === 'recording' && { backgroundColor: Colors.alert },
                   ]}
+                  // Lock when input lock engaged AND we're not already inside a
+                  // recording / processing flow. Mid-flow taps (stop recording,
+                  // label speakers) must still work.
+                  disabled={inputLocked && convState === 'idle'}
                   onPress={() => {
                     if (convState === 'labeling') { setShowSpeakerModal(true); return; }
                     if (convState === 'recording') { stopConvRecording(); stopLive(); return; }
@@ -1618,13 +1858,17 @@ export default function HomeScreen() {
                 />
               )}
 
-              {/* Free — hands-free mode */}
+              {/* Free — hands-free mode.
+                  Locked while a Naavi reply is in flight — opening hands-free
+                  during speech would capture Naavi's audio as a phantom
+                  command. (Session 26 design lock.) */}
               <IconButton
                 label="Hands-free"
                 description="Hands-free conversation — say 'Hi Naavi' to start, no tapping needed. Say 'Thanks' to end."
                 onPeek={setPeekText}
                 icon={<Ionicons name="radio" size={30} color="#fff" />}
                 style={{ backgroundColor: '#2563EB' }}
+                disabled={inputLocked}
                 onPress={() => handsfree.activate()}
               />
 
@@ -1654,10 +1898,13 @@ export default function HomeScreen() {
                 if (isTranscribing)       { icon = <Ionicons name="ellipsis-horizontal" size={30} color="#fff" />; label = 'Transcribing'; description = 'Converting your voice to text…'; }
                 else if (isRecording)     { icon = <Ionicons name="stop" size={30} color="#fff" />; label = 'Stop recording'; description = 'Stop recording and send what you said to MyNaavi.'; bg = Colors.alert; }
                 else if (hasText)         { icon = <Ionicons name="send" size={26} color="#fff" />; label = 'Send'; description = 'Send your typed message to MyNaavi.'; }
-                // Allow tapping while Naavi is speaking — the orchestrator's
-                // send() kills the current reply (kill-and-replace). Only block
-                // while transcribing (mid-STT round-trip).
-                const disabled = isTranscribing;
+                // Locked while Naavi reply is in flight (thinking/speaking/
+                // answer_active/pending_confirm). Stays tappable mid-recording
+                // so Robert can always stop. The lock prevents this code path
+                // from running during an active reply, so the previous
+                // stopSpeaking() safety call is no longer needed.
+                // (Session 26 design lock.)
+                const disabled = isTranscribing || (inputLocked && !isRecording);
                 const onPress = () => {
                   if (hasText && !isRecording && !isTranscribing) { handleSend(); return; }
                   if (isRecording) {
@@ -1673,9 +1920,6 @@ export default function HomeScreen() {
                   }
                   if (!memoSupported) return;
                   if (isTranscribing) return;
-                  // Kill any current TTS playback BEFORE the mic opens, so
-                  // Naavi's voice doesn't bleed into the user's recording.
-                  if (status === 'speaking' || status === 'thinking') stopSpeaking();
                   memoStartedAtRef.current = Date.now();
                   startRecording();
                 };
@@ -2345,6 +2589,39 @@ const styles = StyleSheet.create({
     fontSize: Typography.sm,
     textAlign: 'center',
     paddingVertical: 8,
+  },
+  // Speaker chip — pill showing a name already added to the labeling list.
+  // Tap body → load text into input and remove chip (in-place edit).
+  // Tap ✕ → remove chip outright.
+  speakerChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.moderate,
+    borderRadius: 16,
+    paddingLeft: 12,
+    paddingRight: 6,
+    paddingVertical: 6,
+    marginRight: 6,
+    marginBottom: 6,
+  },
+  speakerChipText: {
+    color: '#fff',
+    fontSize: Typography.body,
+    fontWeight: '600',
+  },
+  speakerChipRemove: {
+    marginLeft: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  speakerChipRemoveText: {
+    color: '#fff',
+    fontSize: 12,
+    lineHeight: 14,
   },
   convBtn: {
     width: 52,

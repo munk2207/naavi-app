@@ -44,7 +44,58 @@ const NEGATIVE_RE    = /^(no|nope|cancel|never ?mind|stop|forget it|don[']?t)[.!
 // the "home + Alert me when I arrive to my office" concatenation bug.
 const FRESH_COMMAND_RE = /^\s*(alert|text|notify|remind|tell)\s+(me|my|the|him|her|us|them)\b/i;
 
-export type OrchestratorStatus = 'idle' | 'thinking' | 'speaking' | 'pending_confirm' | 'error';
+// Status state machine — see docs/AAB_BUNDLE_NEXT_RELEASE.md "Session 26 design lock".
+//   idle            — no active turn. All inputs unlocked.
+//   thinking        — send() called, awaiting Naavi's response. Voice channels +
+//                     Send + Visits LOCKED. Orange ⏹ Stop visible — taps cancel
+//                     the in-flight request and return to idle (no answer_active
+//                     buffer, since there's no answer to consume yet).
+//   speaking        — Naavi's TTS is playing. Voice channels + Send + Visits
+//                     LOCKED. Orange ⏹ Stop visible — taps silence voice and
+//                     transition to answer_active.
+//   answer_active   — voice was manually silenced via orange Stop. 10-second
+//                     buffer before auto-release. Voice channels + Send + Visits
+//                     remain LOCKED. Orange morphs to ✕ Cancel — tap or 10s
+//                     timeout returns to idle.
+//   pending_confirm — hands-free draft yes/no/edit listening (the only exception
+//                     to the lock — directed listening for a specific answer).
+//   error           — terminal failure state. Released same as idle.
+export type OrchestratorStatus =
+  | 'idle'
+  | 'thinking'
+  | 'speaking'
+  | 'answer_active'
+  | 'pending_confirm'
+  | 'error';
+
+// Lock predicates — UI uses these to decide button states.
+//
+// Voice channels (mic, hands-free, Visits) and the Send button are locked in
+// every state except idle and error. pending_confirm counts as "locked" for
+// these — Robert resolves the draft via the DraftCard buttons, not via the
+// chat input row.
+export function isInputLocked(s: OrchestratorStatus): boolean {
+  return s === 'thinking' || s === 'speaking' || s === 'answer_active' || s === 'pending_confirm';
+}
+
+// TextInput is NEVER locked — typing has no audio-pickup risk and pre-composing
+// while reading is a feature. Helper kept for symmetry / future-proofing.
+export function isTextInputLocked(_s: OrchestratorStatus): boolean {
+  return false;
+}
+
+// Orange ⏹ Stop / ✕ Cancel button visibility. Visible in thinking, speaking,
+// answer_active. Not visible in idle / pending_confirm / error.
+export function isOrangeButtonVisible(s: OrchestratorStatus): boolean {
+  return s === 'thinking' || s === 'speaking' || s === 'answer_active';
+}
+
+// Orange button label morphs based on state.
+export function orangeButtonLabel(s: OrchestratorStatus): '⏹ Stop' | '✕ Cancel' | null {
+  if (s === 'thinking' || s === 'speaking') return '⏹ Stop';
+  if (s === 'answer_active') return '✕ Cancel';
+  return null;
+}
 
 export interface ConversationTurn {
   userMessage: string;
@@ -67,6 +118,21 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const pendingActionRef = useRef<PendingAction | null>(null);
+
+  // Always-current status ref — callbacks (like onOrangeButtonPressed) need
+  // to read the current status without being recreated on every status change.
+  const statusRef = useRef<OrchestratorStatus>('idle');
+  useEffect(() => { statusRef.current = status; }, [status]);
+
+  // 10-second timer that releases the answer_active state. Cleared if Robert
+  // taps Cancel before it fires, or if a new turn starts.
+  const answerActiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearAnswerActiveTimer = useCallback(() => {
+    if (answerActiveTimerRef.current) {
+      clearTimeout(answerActiveTimerRef.current);
+      answerActiveTimerRef.current = null;
+    }
+  }, []);
 
   // Pending location rule — between the "Found X, shall I set?" turn and the
   // user's yes/no confirmation. Supports the verified-address-only rule
@@ -118,23 +184,29 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     ]);
   }, [turns]);
 
-  // Generation counter — every call to send() takes the next id. Anywhere we
-  // would set status or speak after an await, we check that we're still the
-  // current generation; if a newer send has started, the older one bails out
-  // silently. This is the kill-and-replace model: a new question stops the
-  // current reply mid-stream rather than being blocked.
-  const currentSendIdRef = useRef(0);
+  // Turn id counter — every call to send() captures the next id and uses it
+  // to detect cancel-during-thinking. If Robert taps orange ⏹ Stop while
+  // status is 'thinking', we increment this counter to invalidate the in-flight
+  // turn; when the response arrives, send() sees the mismatch and discards it.
+  // This is NOT kill-and-replace — under the lock model, send() can never run
+  // while a previous reply is still active. The UI guarantees that.
+  const currentTurnIdRef = useRef(0);
 
   const send = useCallback(async (userMessage: string) => {
+    // Pending_confirm is the directed yes/no/edit listening state — it has its
+    // own resolution paths (confirmPending, cancelPending, editPending). Don't
+    // start a new turn from here; the lock UI shouldn't allow it anyway.
     if (status === 'pending_confirm') return;
 
-    const sendId = ++currentSendIdRef.current;
-    const isStale = () => currentSendIdRef.current !== sendId;
+    // Capture this turn's id. If Robert taps orange Stop during thinking,
+    // currentTurnIdRef will be bumped, and isCancelled() will return true at
+    // each await checkpoint so we discard the stale response.
+    const turnId = ++currentTurnIdRef.current;
+    const isCancelled = () => currentTurnIdRef.current !== turnId;
 
-    // Kill any current TTS playback. _speechStopped is reset below so the new
-    // reply can speak. The old speakResponse loop sees _speechStopped briefly
-    // true and exits its chunk loop without scheduling further audio.
-    stopSpeaking();
+    // Cancel any pending answer_active timer — we're starting a fresh turn,
+    // the previous answer is officially terminated.
+    clearAnswerActiveTimer();
 
     // Clear any pending confirm when a new message comes in (edit flow)
     if (pendingActionRef.current) {
@@ -142,7 +214,9 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       setPendingAction(null);
     }
 
-    _speechStopped = false;
+    // Lock model: enter Thinking. UI shows orange ⏹ Stop, voice/Send buttons
+    // grey out. send() does NOT call stopSpeaking() — under the lock the UI
+    // prevents this code path from running while a previous reply is active.
     setStatus('thinking');
     setError(null);
 
@@ -184,6 +258,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               : `Deleted ${okCount} of ${matches.length} ${label}alerts.`;
           }
           pendingDeleteRef.current = null;
+          // If Robert tapped orange Stop during the supabase round-trip, abort
+          // — don't add the turn (he asked for cancel, not for the deletion to
+          // be rendered) and don't override his cancel-set idle status.
+          if (isCancelled()) return;
           setTurns(prev => [...prev, {
             userMessage,
             assistantSpeech: speech,
@@ -228,6 +306,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           const speech  = okCount === ids.length
             ? `Done — deleted all ${ids.length} ${label ? label + ' ' : ''}alerts.`
             : `Deleted ${okCount} of ${ids.length}. ${ids.length - okCount} couldn't be removed.`;
+          // Cancel-during-thinking guard — see delete-all intercept comment.
+          if (isCancelled()) return;
           setTurns(prev => [...prev, {
             userMessage,
             assistantSpeech: speech,
@@ -239,6 +319,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           }]);
           setStatus('idle');
         } catch (err) {
+          if (isCancelled()) return;
           console.error('[Orchestrator] pendingDelete bulk failed:', err);
           setError(err instanceof Error ? err.message : String(err));
           setStatus('error');
@@ -570,6 +651,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language),
         isBroadQuery ? fetchAllKnowledge(100) : Promise.resolve([]),
       ]);
+      // Cancel-during-thinking guard — if Robert tapped orange Stop while we
+      // were waiting on Claude, abandon the response. Status is already idle
+      // (set by the orange-button handler); rendering would re-add cards and
+      // start TTS the user explicitly cancelled.
+      if (isCancelled()) return;
       console.log('[Orchestrator] actions:', JSON.stringify(response.actions));
       console.log('[Orchestrator] knowledgeItems from direct fetch:', knowledgeResult.length);
 
@@ -1328,12 +1414,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       }
 
       // Speak concurrently — text appears and voice starts at the same time.
-      // If a newer send is already in flight (kill-and-replace), bail out so
-      // we don't speak a stale reply or stomp on the new send's status.
-      if (isStale()) return;
+      // If Robert tapped orange Stop during thinking, isCancelled() is true and
+      // we abandon this turn (the response is already discarded above; here
+      // we'd otherwise stomp the post-cancel idle state).
+      if (isCancelled()) return;
       setStatus('speaking');
       speakResponse(finalSpeech, language).then(() => {
-        if (isStale()) return;
+        if (isCancelled()) return;
+        // If user tapped orange Stop during speaking, status is now 'answer_active'
+        // (the timer is running) — DON'T override it back to idle.
+        if (statusRef.current === 'answer_active') return;
         // Only enter voice-confirm flow if hands-free is active
         // In tap-to-talk mode, Robert uses the Send button on the DraftCard
         if (pendingActionRef.current && handsfreeRef.current) {
@@ -1347,7 +1437,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           setStatus('idle');
         }
       }).catch(() => {
-        if (isStale()) return;
+        if (isCancelled()) return;
+        if (statusRef.current === 'answer_active') return;
         setStatus('idle');
       });
 
@@ -1427,14 +1518,65 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
   const stopAndReset = useCallback(() => {
     stopSpeaking();
+    clearAnswerActiveTimer();
     pendingActionRef.current = null;
     setPendingAction(null);
     setStatus('idle');
-  }, []);
+  }, [clearAnswerActiveTimer]);
+
+  // ── Lock-model orange button dispatcher ────────────────────────────────────
+  // The UI's orange ⏹ Stop / ✕ Cancel button calls this. Behavior depends on
+  // current status — see the OrchestratorStatus type docs at the top.
+  //   thinking      → cancel in-flight turn, return to idle (no answer_active
+  //                   buffer because there's no answer to consume yet)
+  //   speaking      → silence voice, enter answer_active with 10s timer
+  //   answer_active → cancel early (clear timer, return to idle)
+  //   other         → no-op (defensive — UI shouldn't render the button anyway)
+  const onOrangeButtonPressed = useCallback(() => {
+    const s = statusRef.current;
+    if (s === 'thinking') {
+      // Invalidate the in-flight turn — when sendToNaavi resolves, isCancelled()
+      // will be true and the response will be discarded.
+      currentTurnIdRef.current++;
+      // Also stop any speech that might have already started in race conditions
+      stopSpeaking();
+      clearAnswerActiveTimer();
+      pendingActionRef.current = null;
+      setPendingAction(null);
+      setStatus('idle');
+    } else if (s === 'speaking') {
+      // Manual interrupt — silence voice, enter answer_active for 10s.
+      stopSpeaking();
+      setStatus('answer_active');
+      // Start the 10-second auto-release timer.
+      clearAnswerActiveTimer();
+      answerActiveTimerRef.current = setTimeout(() => {
+        // Only release if still in answer_active (a new send() would have
+        // bumped us out of it already; this is a defensive check).
+        if (statusRef.current === 'answer_active') {
+          setStatus('idle');
+        }
+        answerActiveTimerRef.current = null;
+      }, 10_000);
+    } else if (s === 'answer_active') {
+      // Manual cancel — release the lock immediately.
+      clearAnswerActiveTimer();
+      setStatus('idle');
+    }
+    // idle / pending_confirm / error: no-op. The UI shouldn't show the
+    // orange button in these states; this branch is a safety net.
+  }, [clearAnswerActiveTimer]);
+
+  // Cleanup on unmount — make sure no stray timer fires after the hook unmounts.
+  useEffect(() => {
+    return () => clearAnswerActiveTimer();
+  }, [clearAnswerActiveTimer]);
 
   return {
     status, turns, error, send, clearHistory, loadHistory,
     stopSpeaking: stopAndReset,
+    // Lock-model orange button — UI calls this when Robert taps ⏹ Stop / ✕ Cancel.
+    onOrangeButtonPressed,
     // Voice-confirm
     pendingAction, confirmPending, cancelPending, editPending,
   };
@@ -1472,12 +1614,21 @@ function sanitiseForSpeech(text: string): string {
 }
 
 // ─── Stop speaking ───────────────────────────────────────────────────────────
-let _speechStopped = false;
+// _speechGen — module-level loop-bail counter for in-flight TTS. Every call to
+// stopSpeaking() bumps it, which makes any in-flight speakCloud{,Native} loop
+// bail at its next check. Each speak invocation captures its own myGen on
+// entry (also bumping the counter) so concurrent calls can't share a gen.
+//
+// Under the lock model (Session 26 design lock) send() never starts while a
+// previous reply is still active — the UI gate prevents that. So the counter
+// is mainly a safety net for stopSpeaking + a defense against future code
+// paths that might inadvertently overlap. Not a kill-and-replace mechanism.
+let _speechGen = 0;
 let _currentAudio: HTMLAudioElement | null = null;
 let _currentSound: any = null;
 
 export function stopSpeaking(): void {
-  _speechStopped = true;
+  _speechGen++;  // invalidate any in-flight speakResponse
   // Web
   if (_currentAudio) {
     _currentAudio.pause();
@@ -1519,9 +1670,9 @@ async function fetchTTSBase64(chunk: string): Promise<string | null> {
 }
 
 // ── Web playback ──────────────────────────────────────────────────────────────
-function playAudioUrl(url: string): Promise<void> {
+function playAudioUrl(url: string, isStale: () => boolean): Promise<void> {
   return new Promise((resolve) => {
-    if (_speechStopped) { resolve(); return; }
+    if (isStale()) { resolve(); return; }
     const audio = new (window as any).Audio(url);
     _currentAudio = audio;
     audio.onended = () => { _currentAudio = null; URL.revokeObjectURL(url); resolve(); };
@@ -1533,6 +1684,8 @@ function playAudioUrl(url: string): Promise<void> {
 async function speakCloud(text: string): Promise<void> {
   // Honor global voice-playback toggle.
   if (!isVoiceEnabledSync()) return;
+  const myGen = ++_speechGen;
+  const isStale = () => _speechGen !== myGen;
   const chunks = text
     .split(/(?<=[.!?])\s+|\n+/)
     .map(s => s.trim())
@@ -1549,15 +1702,15 @@ async function speakCloud(text: string): Promise<void> {
   try {
     const audioPromises = chunks.map(chunk => fetchTTSBase64(chunk));
     for (const promise of audioPromises) {
-      if (_speechStopped) break;
+      if (isStale()) break;
       const base64 = await promise;
-      if (!base64 || _speechStopped) continue;
+      if (!base64 || isStale()) continue;
       const binary = atob(base64);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       const blob = new Blob([bytes], { type: 'audio/mpeg' });
       const url = URL.createObjectURL(blob);
-      await playAudioUrl(url);
+      await playAudioUrl(url, isStale);
     }
   } catch {
     // Browser TTS fallback
@@ -1635,6 +1788,10 @@ async function playBase64AudioNative(base64: string): Promise<void> {
 async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<void> {
   // Honor global voice-playback toggle.
   if (!isVoiceEnabledSync()) return;
+  // Capture our generation. stopSpeaking() and any newer speakCloud{,Native}
+  // call will increment _speechGen, making this loop bail at the next check.
+  const myGen = ++_speechGen;
+  const isStale = () => _speechGen !== myGen;
   const chunks = text
     .split(/(?<=[.!?])\s+|\n+/)
     .map(s => s.trim())
@@ -1652,20 +1809,20 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
     const audioPromises = chunks.map(chunk => fetchTTSBase64(chunk));
     let playedAny = false;
     for (const promise of audioPromises) {
-      if (_speechStopped) break;
+      if (isStale()) break;
       const base64 = await promise;
-      if (base64 && !_speechStopped) {
+      if (base64 && !isStale()) {
         await playBase64AudioNative(base64);
         playedAny = true;
       }
     }
     // If no cloud TTS chunks played (all returned null), fall back to expo-speech
-    if (!playedAny && !_speechStopped) {
+    if (!playedAny && !isStale()) {
       console.log('[TTS Native] No cloud TTS chunks played, falling back to expo-speech');
       throw new Error('No TTS audio available');
     }
   } catch (err) {
-    if (_speechStopped) return;
+    if (isStale()) return;
     // Fall back to expo-speech if cloud TTS fails
     console.error('[TTS Native] cloud TTS failed, using expo-speech:', err);
     await Speech.stop();

@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-27-v38-create-event-timed-default';
+const PROMPT_VERSION = '2026-04-29-v39-draft-email-card';
 
 /**
  * Cache-boundary marker.
@@ -157,6 +157,17 @@ If ${userName} uses ANY of: write, draft, compose, send, email, message, text, W
 - Channel: "email" if he says email, "whatsapp" if WhatsApp, "sms" if text/SMS. Default: "email"
 - Speech MUST end with: "I've drafted a message to {name}. Say yes to send, or tell me what to change."
 - NEVER say you cannot access contacts. Contact resolution happens automatically.
+
+RULE 1a — DRAFT EMAIL CARD AUTO-PHRASING (Record-a-visit follow-up):
+When ${userName} taps the Draft Email card on a recorded visit, the mobile app sends a structured message in this exact shape:
+  "Draft an email to {recipient} about {subject}. Body: {body}"
+  or, when the recipient is unknown:
+  "Draft an email about {subject}. Ask me who to send it to. Body: {body}"
+You MUST recognize this pattern and emit DRAFT_MESSAGE — NOT a conversational acknowledgment. Use {recipient} as "to", {subject} as "subject", and {body} as "body". Channel = "email".
+
+If the recipient is given but you don't know their email address: STILL emit DRAFT_MESSAGE with the recipient name in "to". The mobile app resolves contacts and asks for the email if needed. Speech: "I've drafted the email to {recipient}. I don't have their email address — what is it?" Do NOT skip the DRAFT_MESSAGE action just because the email is unknown.
+
+If the message says "Ask me who to send it to" (recipient unknown), emit DRAFT_MESSAGE with "to": "Unknown" and ask: "I've drafted the email about {subject}. Who should I send it to?"
 
 RULE 2 — CALENDAR EVENT:
 If ${userName} mentions scheduling, booking, or setting up a meeting/appointment — include a CREATE_EVENT action.
