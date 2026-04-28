@@ -875,7 +875,10 @@ export default function HomeScreen() {
 
   async function handleSend() {
     const text = inputText.trim();
-    if (!text || status === 'thinking' || status === 'speaking') return;
+    // Allow during 'speaking' — the orchestrator kill-and-replace will stop
+    // the current reply. Block during 'thinking' (network in flight, no easy
+    // abort yet) to avoid stale-network overlap.
+    if (!text || status === 'thinking') return;
     setInputText('');
     // "Cancel" during an active chat returns to the brief without asking Claude.
     // Only triggers when a conversation is actually in progress — otherwise
@@ -1369,9 +1372,19 @@ export default function HomeScreen() {
                   action={action}
                   onCalendar={(a) => send(`Create a calendar event: ${a.calendar_title ?? a.title}, ${a.timing}`)}
                   onEmail={(a) => {
-                    // Auto-send the draft request so the user gets an email
-                    // composer flow instead of silently populating the input.
-                    const msg = `Draft an email to book: ${a.title}. ${a.email_draft ?? a.description}`;
+                    // Auto-send the draft request. Use suggested_by (the speaker
+                    // who proposed the action — usually the doctor / professional
+                    // we'd email back) as the explicit recipient, so Claude emits
+                    // a DRAFT_MESSAGE instead of a conversational reply. If
+                    // suggested_by is missing or "Unknown", fall back to asking
+                    // Claude to ask for the recipient.
+                    const recipient = a.suggested_by && a.suggested_by !== 'Unknown'
+                      ? a.suggested_by
+                      : null;
+                    const body = a.email_draft ?? a.description;
+                    const msg = recipient
+                      ? `Draft an email to ${recipient} about ${a.title}. Body: ${body}`
+                      : `Draft an email about ${a.title}. Ask me who to send it to. Body: ${body}`;
                     setInputText('');
                     send(msg);
                   }}
@@ -1559,7 +1572,7 @@ export default function HomeScreen() {
                 maxLength={500}
                 returnKeyType="send"
                 onSubmitEditing={handleSend}
-                editable={status === 'idle' || status === 'error'}
+                editable={status !== 'thinking' && status !== 'pending_confirm'}
                 accessibilityLabel="Message input"
                 // Android autocomplete/autocorrect off — it was stripping typed
                 // digits (contact suggestions replacing phone numbers). Trade
@@ -1641,7 +1654,10 @@ export default function HomeScreen() {
                 if (isTranscribing)       { icon = <Ionicons name="ellipsis-horizontal" size={30} color="#fff" />; label = 'Transcribing'; description = 'Converting your voice to text…'; }
                 else if (isRecording)     { icon = <Ionicons name="stop" size={30} color="#fff" />; label = 'Stop recording'; description = 'Stop recording and send what you said to MyNaavi.'; bg = Colors.alert; }
                 else if (hasText)         { icon = <Ionicons name="send" size={26} color="#fff" />; label = 'Send'; description = 'Send your typed message to MyNaavi.'; }
-                const disabled = status === 'thinking' || status === 'speaking' || (isTranscribing);
+                // Allow tapping while Naavi is speaking — the orchestrator's
+                // send() kills the current reply (kill-and-replace). Only block
+                // while transcribing (mid-STT round-trip).
+                const disabled = isTranscribing;
                 const onPress = () => {
                   if (hasText && !isRecording && !isTranscribing) { handleSend(); return; }
                   if (isRecording) {
@@ -1656,7 +1672,10 @@ export default function HomeScreen() {
                     return;
                   }
                   if (!memoSupported) return;
-                  if (isTranscribing || status === 'thinking') return;
+                  if (isTranscribing) return;
+                  // Kill any current TTS playback BEFORE the mic opens, so
+                  // Naavi's voice doesn't bleed into the user's recording.
+                  if (status === 'speaking' || status === 'thinking') stopSpeaking();
                   memoStartedAtRef.current = Date.now();
                   startRecording();
                 };
