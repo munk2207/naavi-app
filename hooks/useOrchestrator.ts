@@ -118,25 +118,24 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     ]);
   }, [turns]);
 
-  // Synchronous in-flight guard — React state (status) updates asynchronously,
-  // so rapid-fire sends (e.g. four Tap-to-Speak STT results landing within a
-  // single render tick) all see status='idle' and slip past the guard,
-  // producing overlapping replies. The ref is set synchronously and blocks
-  // the very next send.
-  const sendInFlightRef = useRef(false);
-
-  // Clear the in-flight guard when the orchestrator returns to idle (TTS
-  // finished, user can ask the next thing) or hits an error state.
-  useEffect(() => {
-    if (status === 'idle' || status === 'error') {
-      sendInFlightRef.current = false;
-    }
-  }, [status]);
+  // Generation counter — every call to send() takes the next id. Anywhere we
+  // would set status or speak after an await, we check that we're still the
+  // current generation; if a newer send has started, the older one bails out
+  // silently. This is the kill-and-replace model: a new question stops the
+  // current reply mid-stream rather than being blocked.
+  const currentSendIdRef = useRef(0);
 
   const send = useCallback(async (userMessage: string) => {
-    if (sendInFlightRef.current) return;
-    if (status === 'thinking' || status === 'speaking' || status === 'pending_confirm') return;
-    sendInFlightRef.current = true;
+    if (status === 'pending_confirm') return;
+
+    const sendId = ++currentSendIdRef.current;
+    const isStale = () => currentSendIdRef.current !== sendId;
+
+    // Kill any current TTS playback. _speechStopped is reset below so the new
+    // reply can speak. The old speakResponse loop sees _speechStopped briefly
+    // true and exits its chunk loop without scheduling further audio.
+    stopSpeaking();
+
     // Clear any pending confirm when a new message comes in (edit flow)
     if (pendingActionRef.current) {
       pendingActionRef.current = null;
@@ -1328,9 +1327,13 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
       }
 
-      // Speak concurrently — text appears and voice starts at the same time
+      // Speak concurrently — text appears and voice starts at the same time.
+      // If a newer send is already in flight (kill-and-replace), bail out so
+      // we don't speak a stale reply or stomp on the new send's status.
+      if (isStale()) return;
       setStatus('speaking');
       speakResponse(finalSpeech, language).then(() => {
+        if (isStale()) return;
         // Only enter voice-confirm flow if hands-free is active
         // In tap-to-talk mode, Robert uses the Send button on the DraftCard
         if (pendingActionRef.current && handsfreeRef.current) {
@@ -1343,7 +1346,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           }
           setStatus('idle');
         }
-      }).catch(() => setStatus('idle'));
+      }).catch(() => {
+        if (isStale()) return;
+        setStatus('idle');
+      });
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
