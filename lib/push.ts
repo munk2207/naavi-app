@@ -11,6 +11,7 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './invokeWithTimeout';
 
 const VAPID_PUBLIC_KEY = 'BLFs0BQ3pY83UL4XsckjlG3CUDJEVuN8c2H1g5hRIf-lp_5rpn2Cj0LfOCTCWHrCdZrueFldikCuFUZm862niW0';
 
@@ -59,9 +60,9 @@ async function registerWebPush(): Promise<boolean> {
     });
 
     if (!supabase) return false;
-    const { error } = await supabase.functions.invoke('save-push-subscription', {
+    const { error } = await invokeWithTimeout('save-push-subscription', {
       body: { platform: 'web', subscription: subscription.toJSON() },
-    });
+    }, 10_000);
 
     if (error) {
       console.error('[Push] Failed to save web subscription:', error.message);
@@ -111,9 +112,9 @@ async function registerNativePush(): Promise<boolean> {
     const fcmToken  = tokenData.data as string;
 
     if (!supabase) return false;
-    const { error } = await supabase.functions.invoke('save-push-subscription', {
+    const { error } = await invokeWithTimeout('save-push-subscription', {
       body: { platform: 'android', fcm_token: fcmToken },
-    });
+    }, 10_000);
 
     if (error) {
       console.error('[Push] Failed to save FCM token:', error.message);
@@ -152,9 +153,9 @@ export async function sendPushNotification(
 ): Promise<boolean> {
   if (!supabase) return false;
   try {
-    const { error } = await supabase.functions.invoke('send-push-notification', {
+    const { error } = await invokeWithTimeout('send-push-notification', {
       body: { title, body, url },
-    });
+    }, 10_000);
     if (error) {
       console.error('[Push] Send failed:', error.message);
       return false;

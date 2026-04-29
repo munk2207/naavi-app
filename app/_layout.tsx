@@ -15,6 +15,7 @@ import * as Updates from 'expo-updates';
 import '../lib/i18n'; // Initialise i18n before any screen renders
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
+import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
 import { syncDeviceTimezone } from '@/lib/location';
 import { registerPushNotifications } from '@/lib/push';
 import { useGeofencing } from '@/hooks/useGeofencing';
@@ -41,9 +42,9 @@ async function handleAuthCallback(url: string) {
     }
 
     if (googleToken) {
-      supabase.functions.invoke('store-google-token', {
+      invokeWithTimeout('store-google-token', {
         body: { refresh_token: googleToken },
-      }).catch(() => {});
+      }, 15_000).catch(() => {});
     }
   }
 }

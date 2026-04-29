@@ -33,6 +33,7 @@ const ExpoPlayAudioStream: any = Platform.OS === 'web'
     }
   : require('@mykin-ai/expo-audio-stream').ExpoPlayAudioStream;
 import { supabase } from '@/lib/supabase';
+import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
 import { loadKeyterms } from '@/lib/loadKeyterms';
 import type { OrchestratorStatus } from '@/hooks/useOrchestrator';
 import { classifyConfirmation, CONFIRM_TIMEOUT_MS } from '@/lib/voice-confirm';
@@ -226,7 +227,7 @@ export function useHandsfreeMode(
   // ── Get Deepgram temporary token ──
   async function getDeepgramToken(): Promise<string> {
     if (!supabase) throw new Error('Supabase not configured');
-    const { data, error: fnError } = await supabase.functions.invoke('deepgram-token');
+    const { data, error: fnError } = await invokeWithTimeout('deepgram-token', {}, 10_000);
     if (fnError || !data?.token) {
       throw new Error(`Failed to get Deepgram token: ${fnError?.message ?? 'no token'}`);
     }

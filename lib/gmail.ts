@@ -7,6 +7,7 @@
  */
 
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './invokeWithTimeout';
 
 const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL      ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -82,12 +83,7 @@ export async function sendEmail(opts: {
   if (!supabase) return { success: false, error: 'Not configured' };
 
   try {
-    // Race against 15-second timeout — Edge Function sometimes hangs with no response
-    const invokePromise = supabase.functions.invoke('send-email', { body: opts });
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Connection timed out — please try again')), 15000)
-    );
-    const { data, error } = await Promise.race([invokePromise, timeoutPromise]);
+    const { data, error } = await invokeWithTimeout('send-email', { body: opts }, 30_000);
     if (error) {
       // Try to extract the real server error message
       let detail = error.message ?? 'Send failed';

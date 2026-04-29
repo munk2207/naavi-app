@@ -6,6 +6,7 @@
  */
 
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './invokeWithTimeout';
 
 export interface KnowledgeFragment {
   id: string;
@@ -26,9 +27,9 @@ export async function ingestNote(
   if (!supabase || !text.trim()) return [];
 
   try {
-    const { data, error } = await supabase.functions.invoke('ingest-note', {
+    const { data, error } = await invokeWithTimeout('ingest-note', {
       body: { text, source },
-    });
+    }, 30_000);
     if (error) {
       console.error('[Knowledge] Ingest error:', error.message ?? error);
       return [];
@@ -54,9 +55,9 @@ export async function searchKnowledge(
   if (!supabase || !query.trim()) return [];
 
   try {
-    const { data, error } = await supabase.functions.invoke('search-knowledge', {
+    const { data, error } = await invokeWithTimeout('search-knowledge', {
       body: { q: query, top_k: topK },
-    });
+    }, 15_000);
     if (error || !data?.results) return [];
     return data.results;
   } catch (err) {

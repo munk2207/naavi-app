@@ -10,6 +10,7 @@ import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Speech from 'expo-speech';
 import { supabase } from '@/lib/supabase';
+import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
 import { Colors } from '@/constants/Colors';
 import { speakCue } from '@/lib/tts';
 
@@ -30,9 +31,9 @@ export default function ContactsScreen() {
 
     (async () => {
       try {
-        const { data, error } = await supabase.functions.invoke('assistant-fulfillment', {
+        const { data, error } = await invokeWithTimeout('assistant-fulfillment', {
           body: { intent: 'contacts', name: name.trim() },
-        });
+        }, 30_000);
 
         if (cancelled) return;
         if (error) throw error;

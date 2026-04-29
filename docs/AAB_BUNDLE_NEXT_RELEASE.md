@@ -236,6 +236,6 @@ These deferrals are deliberate. Block A (lock model) + the Type-mode portion of 
 - [ ] Both are higher than anything already on Google Play
 - [ ] `git merge origin/main` clean in `C:\Users\waela\naavi-mobile`
 - [ ] `npm install` ran after any package.json change
-- [ ] Build: `npx eas build --platform android --profile production --non-interactive`
-- [ ] AAB downloaded, uploaded to Google Play → Internal Testing
+- [ ] Build + auto-submit: `npx eas build --platform android --profile production --auto-submit --non-interactive`
+- [ ] Auto-submit pushes the AAB to Google Play → Internal Testing automatically (no manual download / upload)
 - [ ] Run pre-ship smoke test (Session 20 §5 item 2 — to be built)

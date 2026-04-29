@@ -18,6 +18,7 @@
  */
 
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './invokeWithTimeout';
 import type { Contact } from './contacts';
 
 export type RecipientSource = 'contacts' | 'calendar' | 'none';
@@ -35,9 +36,11 @@ export async function lookupRecipientCandidates(name: string): Promise<Contact[]
   if (!supabase || !name.trim()) return [];
 
   try {
-    const { data, error } = await supabase.functions.invoke('lookup-contact', {
-      body: { name },
-    });
+    const { data, error } = await invokeWithTimeout<any>(
+      'lookup-contact',
+      { body: { name } },
+      15_000,
+    );
     if (error || data?.error) return [];
 
     // The Edge Function returns `contacts: Contact[]` (Session 26). Older

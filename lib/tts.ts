@@ -17,14 +17,15 @@ import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './invokeWithTimeout';
 import { isVoiceEnabledSync } from './voicePref';
 
 async function fetchCueAudio(text: string): Promise<string | null> {
   try {
     if (!supabase) return null;
-    const { data, error } = await supabase.functions.invoke('text-to-speech', {
+    const { data, error } = await invokeWithTimeout('text-to-speech', {
       body: { text, voice: 'shimmer' }, // voice param ignored server-side; always aura-hera-en
-    });
+    }, 30_000);
     if (error || !data?.audio) return null;
     return data.audio as string;
   } catch {

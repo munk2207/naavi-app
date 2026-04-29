@@ -106,13 +106,17 @@ If in doubt, ASK before creating parallel config.
 
 ### WHERE TO START
 
-**Most recent handoff:** `docs/SESSION_22_HANDOFF.md` — read this first. It captures Session 22's work (Slices 1+2+3 in build 108, S12 voice dial-out, Help hub + forms, website FAQ/Contact, graceful shutdown, voice unification on phone) and names **Session 23: Sync between Voice server and Mobile Voice** as the next session with a 7-item scope.
+**Most recent handoff:** `docs/SESSION_25_HANDOFF.md` — read this first. It captures Session 25's work (V56.4 testing → V56.5 kill-and-replace → V56.6 UI gate fix + Draft Email + Settings cleanup → V56.7 race fix STAGED LOCALLY) and names the open V56.6 test list + the V56.7 commit-and-push step the next session must request approval for before doing.
 
-Prior handoffs for context: `docs/SESSION_21_HANDOFF.md`, `docs/SESSION_20_END_TO_END_VALIDATION.md`.
+**Next session: "Complete review of MV & MT bugs"** — a full structured sweep of Mobile Voice and Mobile Text defects across every input mode. Begins by approving + shipping V56.7, then a top-to-bottom audit.
 
-**Current build:** V55.4 (build 108) on Google Play Internal Testing.
+**V56.7 IS UNCOMMITTED AND UNPUSHED.** Working-tree changes in `app.json`, `app/settings.tsx`, and `hooks/useOrchestrator.ts` are the staged race-fix. Do NOT push without the user explicitly approving — they ended Session 25 mid-verification.
 
-**Current Claude prompt version:** `2026-04-23-v24-delete-all-keyword` (via `get-naavi-prompt` Edge Function).
+Prior handoffs for context: `docs/SESSION_22_HANDOFF.md`, `docs/SESSION_21_HANDOFF.md`, `docs/SESSION_20_END_TO_END_VALIDATION.md`.
+
+**Last AAB on Robert's phone:** V56.6 build 115 (installed 2026-04-28). V56.7 build 116 not yet built.
+
+**Current Claude prompt version:** `2026-04-23-v24-delete-all-keyword` (via `get-naavi-prompt` Edge Function). Session 24 experimented with v25–v38; verify deployed version with the Edge Function log if Naavi behavior diverges.
 
 **Then read memory files listed in the MEMORY.md index** — the short list that future sessions need (alert fan-out rule, verified-address rule, context fields pattern, location-trigger plan, feedback/test discipline).
 
@@ -187,10 +191,11 @@ The old Anthropic API key leaked in session 8 was deleted in session 9. A new ke
 5. In `C:\Users\waela\naavi-mobile`: `git fetch origin && git merge origin/main`
 6. Resolve any merge conflicts (usually version-bump files — keep the newer version)
 7. `npm install` (picks up any package.json changes)
-8. Build: `npx eas build --platform android --profile production --non-interactive`
-9. Download the AAB when EAS finishes
-10. Upload AAB to Google Play Console → Internal Testing
-11. User installs from Google Play on phone
+8. Build + auto-submit: `npx eas build --platform android --profile production --auto-submit --non-interactive`
+   - `--auto-submit` builds the AAB AND pushes it to Google Play Internal Testing in one command (uses `submit.production.android` config in `eas.json`).
+   - No manual download / upload step. Skips Chrome/Edge Safe Browsing warnings entirely.
+9. Wait for the auto-submit step to finish (EAS prints a Play Console link).
+10. User installs from Google Play on phone (Internal Testing track).
 
 ### MUST USE GOOGLE PLAY (not direct APK)
 

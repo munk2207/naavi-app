@@ -7,6 +7,7 @@
  */
 
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './invokeWithTimeout';
 import type { BriefItem } from './naavi-client';
 
 const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL      ?? '';
@@ -339,9 +340,9 @@ export async function createCalendarEvent(opts: {
   if (!supabase) return { success: false, error: 'Not configured' };
 
   try {
-    const { data, error } = await supabase.functions.invoke('create-calendar-event', {
+    const { data, error } = await invokeWithTimeout('create-calendar-event', {
       body: opts,
-    });
+    }, 30_000);
     if (error) return { success: false, error: error.message ?? 'Create failed' };
     return { success: true, eventId: data?.eventId, htmlLink: data?.htmlLink };
   } catch (err) {
@@ -354,9 +355,9 @@ export async function createCalendarEvent(opts: {
 export async function deleteCalendarEvent(query: string): Promise<{ deleted: number; titles: string[] }> {
   if (!supabase) return { deleted: 0, titles: [] };
   try {
-    const { data, error } = await supabase.functions.invoke('delete-calendar-event', {
+    const { data, error } = await invokeWithTimeout('delete-calendar-event', {
       body: { query },
-    });
+    }, 30_000);
     if (error) {
       console.error('[Calendar] deleteCalendarEvent error:', error.message);
       return { deleted: 0, titles: [] };

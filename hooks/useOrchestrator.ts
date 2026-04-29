@@ -19,6 +19,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem, type GlobalSearchResult } from '@/lib/naavi-client';
 import { isVoiceEnabledSync } from '@/lib/voicePref';
 import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
+import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
 import { sendPushNotification } from '@/lib/push';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
 import { lookupContact, lookupContactByPhone } from '@/lib/contacts';
@@ -43,6 +44,30 @@ const NEGATIVE_RE    = /^(no|nope|cancel|never ?mind|stop|forget it|don[']?t)[.!
 // rule-creation command rather than clarifying the pending one. Prevents
 // the "home + Alert me when I arrive to my office" concatenation bug.
 const FRESH_COMMAND_RE = /^\s*(alert|text|notify|remind|tell)\s+(me|my|the|him|her|us|them)\b/i;
+
+/**
+ * fetchWithTimeout — wraps fetch with an AbortController so a hung Edge Function
+ * (Google Places API stall, network blip, etc.) can't lock the UI for minutes.
+ *
+ * V57.4 fix: a 3-4 minute hang on the location-rule path was traced to bare
+ * fetch() calls to resolve-place with no timeout. All resolve-place calls in
+ * this file now go through this helper. Default timeout 30s — Google Places
+ * usually responds in <2s; anything past 30s is a stall and we surface it as
+ * a friendly error instead of leaving the user stuck.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number = 30000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // Status state machine — see docs/AAB_BUNDLE_NEXT_RELEASE.md "Session 26 design lock".
 //   idle            — no active turn. All inputs unlocked.
@@ -129,6 +154,11 @@ export interface ConversationTurn {
   navigationResults: NavigationResult[];
   listResults: { action: string; listName: string; items?: string[]; webViewLink?: string }[];
   globalSearch?: { query: string; results: GlobalSearchResult[] };
+  // V57.4 — location rules created in this turn. Renders an inline card
+  // showing the alert + a "Make it recurring / Make it one-time" toggle so
+  // Robert can flip the mode with a tap instead of having to re-issue a
+  // verbal command. Empty array on every other turn type.
+  locationRules: { ruleId: string; placeName: string; oneShot: boolean }[];
   timestamp?: string;
 }
 
@@ -282,7 +312,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         const keywordRaw = (m[1] || '').trim().toLowerCase();
         const keyword = keywordRaw.replace(/\s+(of\s+them|of\s+it|of\s+mine)$/i, '').trim();
         try {
-          const { data } = await supabase.functions.invoke('manage-rules', { body: { op: 'list' } });
+          const { data } = await invokeWithTimeout('manage-rules', { body: { op: 'list' } }, 15_000);
           const rules: Array<Record<string, any>> = Array.isArray((data as any)?.rules) ? (data as any).rules : [];
           const needles = keyword ? keyword.split(/\s+/).filter(Boolean) : [];
           const haystackFor = (r: Record<string, any>) => {
@@ -298,7 +328,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           if (matches.length === 0) {
             speech = keyword ? `I couldn't find an alert matching "${keyword}".` : 'You have no alerts to delete.';
           } else {
-            const results = await Promise.allSettled(matches.map(r => supabase.functions.invoke('manage-rules', { body: { op: 'delete', rule_id: r.id } })));
+            const results = await Promise.allSettled(matches.map(r => invokeWithTimeout('manage-rules', { body: { op: 'delete', rule_id: r.id } }, 15_000)));
             const okCount = results.filter(r => r.status === 'fulfilled' && !(r as any).value?.error).length;
             const label = keyword ? `${keyword} ` : '';
             speech = okCount === matches.length
@@ -314,7 +344,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             userMessage,
             assistantSpeech: speech,
             drafts: [], createdEvents: [], deletedEvents: [], savedDocs: [],
-            rememberedItems: [], driveFiles: [], navigationResults: [], listResults: [],
+            rememberedItems: [], driveFiles: [], navigationResults: [], listResults: [], locationRules: [],
             globalSearch: undefined,
             timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
                      + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
@@ -348,7 +378,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         pendingDeleteRef.current = null;
         try {
           const results = await Promise.allSettled(ids.map(id =>
-            supabase.functions.invoke('manage-rules', { body: { op: 'delete', rule_id: id } }),
+            invokeWithTimeout('manage-rules', { body: { op: 'delete', rule_id: id } }, 15_000),
           ));
           const okCount = results.filter(r => r.status === 'fulfilled' && !(r as any).value?.error).length;
           const speech  = okCount === ids.length
@@ -360,7 +390,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             userMessage,
             assistantSpeech: speech,
             drafts: [], createdEvents: [], deletedEvents: [], savedDocs: [],
-            rememberedItems: [], driveFiles: [], navigationResults: [], listResults: [],
+            rememberedItems: [], driveFiles: [], navigationResults: [], listResults: [], locationRules: [],
             globalSearch: undefined,
             timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
                      + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
@@ -391,13 +421,18 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       const isYes = AFFIRMATIVE_RE.test(msg);
       const isNo  = NEGATIVE_RE.test(msg);
 
-      // Helper — emit a text-only turn and reset status. No cards, no actions.
-      const emitPendingTurn = (speech: string) => {
+      // Helper — emit a text-only turn and reset status. Optionally accepts
+      // a location-rule card to attach (V57.4 Part B).
+      const emitPendingTurn = (
+        speech: string,
+        locationRules: { ruleId: string; placeName: string; oneShot: boolean }[] = [],
+      ) => {
         setTurns(prev => [...prev, {
           userMessage,
           assistantSpeech: speech,
           drafts: [], createdEvents: [], deletedEvents: [], savedDocs: [],
           rememberedItems: [], driveFiles: [], navigationResults: [], listResults: [],
+          locationRules,
           globalSearch: undefined,
           timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
                    + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
@@ -406,30 +441,42 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       };
 
       // Helper — commit the pending rule (used by yes-path AND clarification-memory-hit-path).
-      const commitPending = async (sessionUserId: string, sourceLabel: 'confirmed' | 'memory') => {
-        if (!pending.resolved) return false;
+      // V57.4 Part B — returns the inserted rule id so callers can render the
+      // toggle card.
+      const commitPending = async (
+        sessionUserId: string,
+        sourceLabel: 'confirmed' | 'memory',
+      ): Promise<{ ok: boolean; ruleId: string | null }> => {
+        if (!pending.resolved) return { ok: false, ruleId: null };
         const triggerConfig = {
           ...(pending.originalAction?.trigger_config ?? {}),
           place_name: pending.resolved.place_name,
           resolved_lat: pending.resolved.lat,
           resolved_lng: pending.resolved.lng,
         };
-        const { error } = await supabase.from('action_rules').insert({
-          user_id:        sessionUserId,
-          trigger_type:   'location',
-          trigger_config: triggerConfig,
-          action_type:    String(pending.originalAction?.action_type ?? 'sms'),
-          action_config:  pending.originalAction?.action_config ?? {},
-          label:          String(pending.originalAction?.label ?? 'Location alert'),
-          one_shot:       pending.originalAction?.one_shot ?? false,
-        });
+        // V57.4 — location alerts default to ONE-TIME (one_shot=true). See
+        // matching note in the SET_ACTION_RULE intercept below.
+        const oneShot = pending.originalAction?.one_shot ?? true;
+        const { data: insertedRule, error } = await supabase
+          .from('action_rules')
+          .insert({
+            user_id:        sessionUserId,
+            trigger_type:   'location',
+            trigger_config: triggerConfig,
+            action_type:    String(pending.originalAction?.action_type ?? 'sms'),
+            action_config:  pending.originalAction?.action_config ?? {},
+            label:          String(pending.originalAction?.label ?? 'Location alert'),
+            one_shot:       oneShot,
+          })
+          .select('id')
+          .single();
         if (error) {
           console.error('[Orchestrator] pending location insert failed:', error.message);
-          return false;
+          return { ok: false, ruleId: null };
         }
         // Only write to cache on explicit user confirmation (not on memory-hit during clarification).
         if (sourceLabel === 'confirmed') {
-          await fetch(`${SUPABASE_URL}/functions/v1/resolve-place`, {
+          await fetchWithTimeout(`${SUPABASE_URL}/functions/v1/resolve-place`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON}` },
             body: JSON.stringify({
@@ -438,7 +485,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               save_to_cache: true,
               canonical_alias: pending.resolved.canonical_alias,
             }),
-          }).catch((err) => console.error('[Orchestrator] save-to-cache failed:', err));
+          }, 30000).catch((err) => console.error('[Orchestrator] save-to-cache failed:', err));
         }
         try {
           const { syncGeofencesForUser } = await import('@/hooks/useGeofencing');
@@ -446,7 +493,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         } catch (err) {
           console.error('[Orchestrator] geofence sync after confirmed location rule:', err);
         }
-        return true;
+        return { ok: true, ruleId: insertedRule?.id ? String(insertedRule.id) : null };
       };
 
       // ── CASE: yes + we have a resolved place → commit
@@ -457,12 +504,20 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           emitPendingTurn("I'm not signed in. Please sign in and try again.");
           return;
         }
-        const ok = await commitPending(session.user.id, 'confirmed');
+        const { ok, ruleId } = await commitPending(session.user.id, 'confirmed');
+        // V57.4 — speech now states one-time vs every-time so Robert always
+        // knows which mode the rule is in.
+        const oneShot = pending.originalAction?.one_shot ?? true;
+        const modeText = oneShot ? 'one time' : 'every time';
         const speech = ok
-          ? `Alert set — ${pending.resolved.place_name}.`
+          ? `Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.`
           : `Couldn't save the rule — something went wrong. Try again?`;
+        // V57.4 Part B — attach the toggle card when the rule was saved.
+        const cards = ok && ruleId
+          ? [{ ruleId, placeName: pending.resolved.place_name, oneShot }]
+          : [];
         pendingLocationRef.current = null;
-        emitPendingTurn(speech);
+        emitPendingTurn(speech, cards);
         return;
       }
 
@@ -502,11 +557,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         const combinedQuery = `${pending.placeName} ${msg}`.trim();
 
         try {
-          const res = await fetch(`${SUPABASE_URL}/functions/v1/resolve-place`, {
+          const res = await fetchWithTimeout(`${SUPABASE_URL}/functions/v1/resolve-place`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON}` },
             body: JSON.stringify({ user_id: session.user.id, place_name: combinedQuery, save_to_cache: false }),
-          });
+          }, 30000);
           const data = await res.json();
 
           if (data?.status === 'ok' && (data.source === 'fresh' || data.source === 'memory' || data.source === 'settings_home' || data.source === 'settings_work')) {
@@ -523,14 +578,20 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
             if (data.source === 'memory' || data.source === 'settings_home' || data.source === 'settings_work') {
               // Already in memory/settings — treat as verified without re-asking.
-              const ok = await commitPending(session.user.id, 'memory');
+              const { ok, ruleId } = await commitPending(session.user.id, 'memory');
+              const oneShot = pending.originalAction?.one_shot ?? true;
               pendingLocationRef.current = null;
               const sourceText = data.source === 'memory' ? 'from your saved locations' :
                                  data.source === 'settings_home' ? 'from Settings (home)' :
                                  'from Settings (work)';
-              emitPendingTurn(ok
-                ? `${data.place_name} ${sourceText} — I'll alert you when you arrive.`
-                : `Couldn't save the rule — something went wrong.`);
+              const modeText = oneShot ? 'one time' : 'every time';
+              const speech = ok
+                ? `${data.place_name} ${sourceText} — alert set ${modeText} you arrive.`
+                : `Couldn't save the rule — something went wrong.`;
+              const cards = ok && ruleId
+                ? [{ ruleId, placeName: data.place_name, oneShot }]
+                : [];
+              emitPendingTurn(speech, cards);
               return;
             }
 
@@ -578,6 +639,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     const turnDocs: { title: string; webViewLink?: string }[] = [];
     const turnMemory: { text: string; count: number }[] = [];
     const turnLists: { action: string; listName: string; items?: string[]; webViewLink?: string }[] = [];
+    // V57.4 Part B — location rules created in this turn. Filled by the
+    // SET_ACTION_RULE intercept after a successful insert; rendered as an
+    // inline card with a "Make it recurring / Make it one-time" toggle.
+    const turnLocationRules: { ruleId: string; placeName: string; oneShot: boolean }[] = [];
     let turnGlobalSearch: {
       query: string;
       results: GlobalSearchResult[];
@@ -818,9 +883,9 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             try {
               const { data: { session } } = await supabase.auth.getSession();
               if (session?.user) {
-                const { data, error } = await supabase.functions.invoke('global-search', {
+                const { data, error } = await invokeWithTimeout('global-search', {
                   body: { query, user_id: session.user.id, limit: 8 },
-                });
+                }, 15_000);
                 if (error) {
                   console.error('[Orchestrator] GLOBAL_SEARCH failed:', error.message);
                 } else if (data?.ranked) {
@@ -1012,7 +1077,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           }
           try {
             if (!supabase) { turnSpeechOverride = "I'm not signed in right now."; continue; }
-            const { data } = await supabase.functions.invoke('manage-rules', { body: { op: 'list' } });
+            const { data } = await invokeWithTimeout('manage-rules', { body: { op: 'list' } }, 15_000);
             const all: Array<Record<string, any>> = Array.isArray((data as any)?.rules) ? (data as any).rules : [];
             const needles = match ? match.split(/\s+/).filter(Boolean) : [];
             const haystackFor = (r: Record<string, any>) => {
@@ -1046,7 +1111,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             } else {
               // Delete one or many in parallel
               const results = await Promise.allSettled(
-                matches.map(t => supabase.functions.invoke('manage-rules', { body: { op: 'delete', rule_id: t.id } })),
+                matches.map(t => invokeWithTimeout('manage-rules', { body: { op: 'delete', rule_id: t.id } }, 15_000)),
               );
               const okCount   = results.filter(r => r.status === 'fulfilled' && !(r as any).value?.error).length;
               const failCount = matches.length - okCount;
@@ -1191,7 +1256,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                   continue;
                 }
                 try {
-                  const res = await fetch(`${SUPABASE_URL}/functions/v1/resolve-place`, {
+                  const res = await fetchWithTimeout(`${SUPABASE_URL}/functions/v1/resolve-place`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON}` },
                     body: JSON.stringify({
@@ -1199,7 +1264,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                       place_name: placeName,
                       save_to_cache: false,
                     }),
-                  });
+                  }, 30000);
                   const data = await res.json();
 
                   // 1. Memory / Settings hit → insert immediately with resolved coords.
@@ -1210,18 +1275,39 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                       resolved_lat: data.lat,
                       resolved_lng: data.lng,
                     };
-                    const { error: insertErr } = await supabase.from('action_rules').insert({
-                      user_id:        session.user.id,
-                      trigger_type:   'location',
-                      trigger_config: triggerConfig,
-                      action_type:    actionType,
-                      action_config:  actionConfig,
-                      label:          String(action.label ?? 'Location alert'),
-                      one_shot:       action.one_shot ?? false,
-                    });
+                    // V57.4 — location alerts default to ONE-TIME (one_shot=true).
+                    // Naavi only flips this to recurring if Robert says
+                    // "every time" / "always" / similar. The server prompt v41
+                    // is supposed to emit one_shot=true on default location
+                    // requests, but we also default to true here as a safety
+                    // net so a forgotten field can't silently downgrade the
+                    // rule to recurring.
+                    const oneShot = action.one_shot ?? true;
+                    // V57.4 Part B — capture the inserted rule's id so the
+                    // turn can render a "Make it recurring / one-time" toggle.
+                    const { data: insertedRule, error: insertErr } = await supabase
+                      .from('action_rules')
+                      .insert({
+                        user_id:        session.user.id,
+                        trigger_type:   'location',
+                        trigger_config: triggerConfig,
+                        action_type:    actionType,
+                        action_config:  actionConfig,
+                        label:          String(action.label ?? 'Location alert'),
+                        one_shot:       oneShot,
+                      })
+                      .select('id')
+                      .single();
                     if (insertErr) {
                       console.error('[Orchestrator] memory-hit insert failed:', insertErr.message);
                     } else {
+                      if (insertedRule?.id) {
+                        turnLocationRules.push({
+                          ruleId: String(insertedRule.id),
+                          placeName: data.place_name,
+                          oneShot,
+                        });
+                      }
                       try {
                         const { syncGeofencesForUser } = await import('@/hooks/useGeofencing');
                         await syncGeofencesForUser(session.user.id);
@@ -1230,10 +1316,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                       }
                     }
                     locationIntercepted = true;
-                    const sourceText = data.source === 'memory'
-                      ? 'from your saved locations'
-                      : data.source === 'settings_home' ? 'from Settings (home)' : 'from Settings (work)';
-                    turnSpeechOverride = `${data.place_name} ${sourceText} — I'll alert you when you arrive.`;
+                    // V57.4 — speech now states one-time vs every-time so
+                    // Robert always knows which mode the rule is in.
+                    const modeText = oneShot ? 'one time' : 'every time';
+                    turnSpeechOverride = `Alert set — ${modeText} you arrive at ${data.place_name}.`;
                     continue;
                   }
 
@@ -1331,6 +1417,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         driveFiles:       turnDrive,
         navigationResults: turnNav,
         listResults:      turnLists,
+        locationRules:    turnLocationRules,
         globalSearch:     turnGlobalSearch,
         timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' }) + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
       };
@@ -1441,9 +1528,9 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               try {
                 if (isMsg) {
                   console.log(`[VoiceConfirm] Sending ${channel} to ${resolvedPhone}, body: "${String(action.body ?? '').slice(0, 30)}"`);
-                  const { data, error: fnErr } = await supabase.functions.invoke('send-sms', {
+                  const { data, error: fnErr } = await invokeWithTimeout('send-sms', {
                     body: { to: resolvedPhone, body: String(action.body ?? ''), channel },
-                  });
+                  }, 30_000);
                   console.log(`[VoiceConfirm] send-sms result:`, JSON.stringify({ data, error: fnErr?.message }));
                   if (fnErr || !data?.success) return { ok: false, speech: SPEECH.GENERIC_ERROR };
                   return { ok: true, speech: SPEECH.SENT };
@@ -1733,9 +1820,9 @@ export function stopSpeaking(): void {
 // Fetch TTS audio as base64 from OpenAI sage voice
 async function fetchTTSBase64(chunk: string): Promise<string | null> {
   try {
-    const { data, error } = await supabase.functions.invoke('text-to-speech', {
+    const { data, error } = await invokeWithTimeout('text-to-speech', {
       body: { text: chunk, voice: 'shimmer' },
-    });
+    }, 30_000);
     if (error) {
       console.error(`[TTS fetch] Edge Function error for chunk "${chunk.slice(0, 40)}...":`, error?.message ?? error);
       return null;

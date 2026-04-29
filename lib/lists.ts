@@ -7,6 +7,7 @@
  */
 
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './invokeWithTimeout';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -47,18 +48,18 @@ async function findListByName(userId: string, name: string): Promise<ListRecord 
 
 async function readDriveFile(fileId: string): Promise<string> {
   if (!supabase) return '';
-  const { data, error } = await supabase.functions.invoke('read-drive-file', {
+  const { data, error } = await invokeWithTimeout('read-drive-file', {
     body: { fileId },
-  });
+  }, 30_000);
   if (error) { console.error('[Lists] Read Drive failed:', error); return ''; }
   return data?.content ?? '';
 }
 
 async function updateDriveFile(fileId: string, content: string): Promise<boolean> {
   if (!supabase) return false;
-  const { data, error } = await supabase.functions.invoke('update-drive-file', {
+  const { data, error } = await invokeWithTimeout('update-drive-file', {
     body: { fileId, content },
-  });
+  }, 30_000);
   if (error) { console.error('[Lists] Update Drive failed:', error); return false; }
   return data?.success ?? false;
 }
@@ -77,9 +78,9 @@ export async function createList(name: string, category: string = 'other'): Prom
   // Doc into MyNaavi/Lists/ instead of the MyNaavi root; save-to-drive
   // deliberately does NOT also create a documents row for lists because
   // the lists table + lists adapter already cover them in Global Search.
-  const { data, error } = await supabase.functions.invoke('save-to-drive', {
+  const { data, error } = await invokeWithTimeout('save-to-drive', {
     body: { title: name, content: '', category: 'list' },
-  });
+  }, 60_000);
   if (error || !data?.fileId) {
     return { success: false, error: error?.message ?? 'Failed to create Drive doc' };
   }

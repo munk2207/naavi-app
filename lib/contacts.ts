@@ -10,6 +10,7 @@
  */
 
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './invokeWithTimeout';
 
 export interface Contact {
   name: string;
@@ -33,9 +34,7 @@ export async function lookupContactByPhone(phone: string): Promise<Contact | nul
 
   for (const query of queries) {
     try {
-      const { data, error } = await supabase.functions.invoke('lookup-contact', {
-        body: { name: query },
-      });
+      const { data, error } = await invokeWithTimeout<any>('lookup-contact', { body: { name: query } }, 15_000);
       if (!error && !data?.error && data?.contact) {
         console.log('[contacts] Phone lookup found via Google People API:', data.contact.name);
         return data.contact;
@@ -58,9 +57,7 @@ export async function lookupContact(name: string): Promise<Contact | null> {
   //    voice transcript (seen with Fatma — "+20261" was pulled out of a
   //    Test Drive recording by a greedy digit regex).
   try {
-    const { data, error } = await supabase.functions.invoke('lookup-contact', {
-      body: { name },
-    });
+    const { data, error } = await invokeWithTimeout<any>('lookup-contact', { body: { name } }, 15_000);
     if (!error && !data?.error && data?.contact) {
       console.log('[contacts] Found via Google People API:', data.contact.name);
       return data.contact;

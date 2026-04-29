@@ -12,6 +12,7 @@ import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '@/lib/supabase';
+import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
 import { saveToDrive } from '@/lib/drive';
 import { saveDriveNote } from '@/lib/supabase';
 import { ingestNote } from '@/lib/knowledge';
@@ -217,9 +218,9 @@ export function useConversationRecorder(): UseConversationRecorderResult {
 
         if (!supabase) throw new Error('Supabase not configured');
 
-        const { data, error } = await supabase.functions.invoke('upload-conversation', {
+        const { data, error } = await invokeWithTimeout('upload-conversation', {
           body: { audio: base64, mimeType: 'audio/m4a', language: languageRef.current },
-        });
+        }, 60_000);
 
         if (error || !data?.transcript_id) {
           throw new Error(error?.message ?? 'Upload failed');
@@ -258,9 +259,9 @@ export function useConversationRecorder(): UseConversationRecorderResult {
 
         if (!supabase) throw new Error('Supabase not configured');
 
-        const { data, error } = await supabase.functions.invoke('upload-conversation', {
+        const { data, error } = await invokeWithTimeout('upload-conversation', {
           body: { audio: base64, mimeType: 'audio/webm', language: languageRef.current },
-        });
+        }, 60_000);
 
         if (error || !data?.transcript_id) {
           throw new Error(error?.message ?? 'Upload failed');
@@ -286,9 +287,9 @@ export function useConversationRecorder(): UseConversationRecorderResult {
     if (!tid || !supabase) return;
 
     try {
-      const { data, error } = await supabase.functions.invoke('poll-conversation', {
+      const { data, error } = await invokeWithTimeout('poll-conversation', {
         body: { transcript_id: tid },
-      });
+      }, 15_000);
 
       if (error) throw new Error(error.message);
 
@@ -342,9 +343,9 @@ export function useConversationRecorder(): UseConversationRecorderResult {
 
     try {
       // Step 1 — extract action items via Claude
-      const { data, error } = await supabase.functions.invoke('extract-actions', {
+      const { data, error } = await invokeWithTimeout('extract-actions', {
         body: { utterances: currentUtterances, speaker_names: currentNames },
-      });
+      }, 30_000);
 
       if (error) throw new Error(error.message);
 
