@@ -103,23 +103,42 @@ export async function callNaaviEdgeFunction(
   const session = supabase ? (await supabase.auth.getSession()).data.session : null;
   const authToken = session?.access_token ?? SUPABASE_ANON_KEY;
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${authToken}`,
-    },
-    body: JSON.stringify({ system, messages, max_tokens: 2048 }),
-  });
+  // Hard timeout on the main Claude round-trip. V57.1 testing reproduced
+  // requests that hung indefinitely with no error — without an AbortController
+  // the JS process never recovers. 60s covers Claude's worst-case latency
+  // with comfortable margin; a real Claude reply is 5-15s. After 60s we
+  // throw so the orchestrator can show an error instead of "Thinking..." forever.
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), 60_000);
 
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Edge Function error ${res.status}: ${body}`);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ system, messages, max_tokens: 2048 }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Edge Function error ${res.status}: ${body}`);
+    }
+
+    const { rawText, error } = await res.json();
+    if (error) throw new Error(`Edge Function returned error: ${error}`);
+    return rawText as string;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('aborted') || msg.includes('AbortError')) {
+      throw new Error('Naavi took too long to respond. Please try again.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(abortTimer);
   }
-
-  const { rawText, error } = await res.json();
-  if (error) throw new Error(`Edge Function returned error: ${error}`);
-  return rawText as string;
 }
 
 // ─── Database helpers ──────────────────────────────────────────────────────────

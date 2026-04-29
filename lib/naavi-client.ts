@@ -73,12 +73,61 @@ export async function syncUserNameToSupabase(name: string): Promise<void> {
 }
 
 /**
+ * Wrap a Promise so it never hangs forever. If the promise doesn't settle
+ * within `ms`, resolves with `fallback` and logs a warning. Used throughout
+ * the send() pipeline to keep a stuck network call from freezing the UI.
+ *
+ * V57.2: added after V57.1 testing surfaced multi-minute hangs caused by
+ * fetch / supabase calls that never resolved. Without this, a hung request
+ * blocks the entire send pipeline and stacks up across send taps.
+ */
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  fallback: T,
+  label: string,
+): Promise<T> {
+  return new Promise<T>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        console.warn(`[withTimeout] "${label}" timed out after ${ms}ms — using fallback`);
+        resolve(fallback);
+      }
+    }, ms);
+    promise.then(
+      (value) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        }
+      },
+      (err) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          console.warn(`[withTimeout] "${label}" rejected — using fallback:`, err instanceof Error ? err.message : err);
+          resolve(fallback);
+        }
+      },
+    );
+  });
+}
+
+/**
  * Fetch the canonical Claude system prompt from the get-naavi-prompt Edge Function.
  * Returns null on any failure — caller should fall back to local buildSystemPrompt.
  *
  * This is the "shared source of truth" path. Voice server does the same.
+ *
+ * V57.2: added AbortController + 8s timeout. Standard fetch has no default
+ * timeout, so a hung connection would freeze the send pipeline forever.
  */
 async function fetchSharedPrompt(userName: string, userPhone: string): Promise<string | null> {
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), 8_000);
   try {
     const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
     const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -90,13 +139,21 @@ async function fetchSharedPrompt(userName: string, userPhone: string): Promise<s
         'Authorization': `Bearer ${key}`,
       },
       body: JSON.stringify({ channel: 'app', userName, userPhone }),
+      signal: controller.signal,
     });
     if (!res.ok) return null;
     const data = await res.json();
     return typeof data?.prompt === 'string' && data.prompt.length > 100 ? data.prompt : null;
   } catch (err) {
-    console.warn('[fetchSharedPrompt] failed:', err instanceof Error ? err.message : err);
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('aborted') || msg.includes('AbortError')) {
+      console.warn('[fetchSharedPrompt] aborted after 8s timeout — falling back to local prompt');
+    } else {
+      console.warn('[fetchSharedPrompt] failed:', msg);
+    }
     return null;
+  } finally {
+    clearTimeout(abortTimer);
   }
 }
 
@@ -518,8 +575,15 @@ export async function sendToNaavi(
     { role: 'user' as const, content: userMessage },
   ];
 
-  // Fetch user's name and phone from Supabase so the prompt is personalized
-  const { userName, userPhone } = await getUserProfile();
+  // Fetch user's name and phone from Supabase so the prompt is personalized.
+  // 5s timeout — if Supabase auth/DB query hangs we proceed with safe defaults
+  // rather than blocking the whole send pipeline.
+  const { userName, userPhone } = await withTimeout(
+    getUserProfile(),
+    5_000,
+    { userName: 'there', userPhone: '' },
+    'getUserProfile',
+  );
 
   // "Broad" queries load every knowledge fragment into context — expensive.
   // The old regex matched "all", "everything", "preferences", "what is my X"
@@ -530,13 +594,23 @@ export async function sendToNaavi(
   // nearest-neighbour search below (5 fragments).
   const isBroadQuery = /\b(list (all|everything)|everything you know|tell me everything|what do you know about me|what are all my|all my (preferences|memories|notes)|know about me)\b/i.test(userMessage);
   console.log('[NaaviClient] userMessage:', userMessage, '| isBroadQuery:', isBroadQuery);
+  // Each of these three is wrapped in withTimeout — if any hangs (which V57.1
+  // testing showed can happen with no warning), we proceed with safe fallbacks
+  // instead of freezing the whole send pipeline. Without these timeouts, a
+  // single stuck request blocks every subsequent send (V57.1 Hi/schedule
+  // hangs of 3–9 minutes were reproducible — see Session 26 testing).
   const [healthContext, knowledgeFragments, sharedBase] = await Promise.all([
-    getEpicHealthContext(),
+    withTimeout(getEpicHealthContext(), 6_000, '', 'getEpicHealthContext'),
     // Cap at 20 fragments even for broad queries — prior 100-cap was the
     // other half of the cost lever; 20 is enough for "what do you know about
     // me" without bloating the prompt. AAB cost-lever #4.
-    isBroadQuery ? fetchAllKnowledge(20) : searchKnowledge(userMessage, 5),
-    fetchSharedPrompt(userName, userPhone),
+    withTimeout(
+      isBroadQuery ? fetchAllKnowledge(20) : searchKnowledge(userMessage, 5),
+      6_000,
+      [],
+      isBroadQuery ? 'fetchAllKnowledge' : 'searchKnowledge',
+    ),
+    withTimeout(fetchSharedPrompt(userName, userPhone), 9_000, null, 'fetchSharedPrompt'),
   ]);
   const knowledgeContext = formatFragmentsForContext(knowledgeFragments, isBroadQuery);
 

@@ -82,13 +82,18 @@ export function IconButton({ icon, label, description, onPress, onLongPress, onP
           disabled && styles.btnDisabled,
           pressed && { opacity: 0.7 },
         ]}
-        onPress={onPress}
+        // V57.2: don't pass `disabled` to Pressable. We still suppress the
+        // primary tap action (onPress short-circuits when disabled) but the
+        // long-press peek + hover peek still fire so the user can read what
+        // the button does even when it's locked. V57.1 testing surfaced this:
+        // disabled buttons swallowed everything including the description.
+        onPress={() => { if (!disabled) onPress(); }}
         onLongPress={handleLongPress}
         onPressOut={handlePressOut}
         delayLongPress={400}
-        disabled={disabled}
         accessibilityLabel={label}
         accessibilityRole="button"
+        accessibilityState={{ disabled: !!disabled }}
         // Desktop / web only — mouse enter/leave toggles the caption.
         // Pressable ignores these on mobile (no hover concept), so long-press
         // remains the on-device fallback. Prefer onPeek (screen-level) when
