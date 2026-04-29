@@ -1123,6 +1123,14 @@ export default function HomeScreen() {
 
   async function handleSend() {
     const text = inputText.trim();
+    // V57.6 diagnostic — log the actual text passed in so we can find the
+    // truncation bug Wael flagged on V57.5. If the bubble shows
+    // "Alert me when I arrive" but this log shows
+    // "Alert me when I arrive home", bug is in the bubble (Android Yoga
+    // wrap regression). If the log itself shows the truncated string,
+    // bug is in the TextInput state (onChangeText not committing the
+    // last character before Send fires).
+    console.log('[handleSend] inputText raw=', JSON.stringify(inputText), 'trimmed=', JSON.stringify(text));
     // Lock model: Send is gated whenever the input lock is engaged
     // (thinking/speaking/answer_active/pending_confirm). The IconButton
     // disabled prop already prevents the on-screen Send tap, but the
