@@ -21,3 +21,6 @@ docs/*.docx
 # Web build
 web/
 mynaavi-website/
+
+# Google Play service account key — used by EAS Submit. NEVER commit.
+google-play-key.json
