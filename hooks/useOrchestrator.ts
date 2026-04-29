@@ -19,7 +19,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem, type GlobalSearchResult } from '@/lib/naavi-client';
 import { isVoiceEnabledSync } from '@/lib/voicePref';
 import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
-import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout } from '@/lib/invokeWithTimeout';
 import { sendPushNotification } from '@/lib/push';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
 import { lookupContact, lookupContactByPhone } from '@/lib/contacts';
@@ -457,19 +457,23 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         // V57.4 — location alerts default to ONE-TIME (one_shot=true). See
         // matching note in the SET_ACTION_RULE intercept below.
         const oneShot = pending.originalAction?.one_shot ?? true;
-        const { data: insertedRule, error } = await supabase
-          .from('action_rules')
-          .insert({
-            user_id:        sessionUserId,
-            trigger_type:   'location',
-            trigger_config: triggerConfig,
-            action_type:    String(pending.originalAction?.action_type ?? 'sms'),
-            action_config:  pending.originalAction?.action_config ?? {},
-            label:          String(pending.originalAction?.label ?? 'Location alert'),
-            one_shot:       oneShot,
-          })
-          .select('id')
-          .single();
+        const { data: insertedRule, error } = await queryWithTimeout(
+          supabase
+            .from('action_rules')
+            .insert({
+              user_id:        sessionUserId,
+              trigger_type:   'location',
+              trigger_config: triggerConfig,
+              action_type:    String(pending.originalAction?.action_type ?? 'sms'),
+              action_config:  pending.originalAction?.action_config ?? {},
+              label:          String(pending.originalAction?.label ?? 'Location alert'),
+              one_shot:       oneShot,
+            })
+            .select('id')
+            .single(),
+          15_000,
+          'insert-location-rule',
+        );
         if (error) {
           console.error('[Orchestrator] pending location insert failed:', error.message);
           return { ok: false, ruleId: null };
@@ -1198,25 +1202,33 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               // Resolve phone dynamically from user_settings — never hardcode.
               let toPhone = action.phoneNumber ? String(action.phoneNumber) : '';
               if (!toPhone) {
-                const { data: settings } = await supabase
-                  .from('user_settings')
-                  .select('phone')
-                  .eq('user_id', session.user.id)
-                  .single();
+                const { data: settings } = await queryWithTimeout(
+                  supabase
+                    .from('user_settings')
+                    .select('phone')
+                    .eq('user_id', session.user.id)
+                    .single(),
+                  15_000,
+                  'select-user-phone',
+                );
                 toPhone = settings?.phone ?? '';
               }
 
               const label = String(action.label ?? 'Email alert');
-              const { error } = await supabase.from('action_rules').insert({
-                user_id:        session.user.id,
-                trigger_type:   'email',
-                trigger_config: triggerConfig,
-                action_type:    'sms',
-                action_config:  { to_phone: toPhone, body: `New email alert: ${label}` },
-                label,
-                one_shot:       false,
-                enabled:        true,
-              });
+              const { error } = await queryWithTimeout(
+                supabase.from('action_rules').insert({
+                  user_id:        session.user.id,
+                  trigger_type:   'email',
+                  trigger_config: triggerConfig,
+                  action_type:    'sms',
+                  action_config:  { to_phone: toPhone, body: `New email alert: ${label}` },
+                  label,
+                  one_shot:       false,
+                  enabled:        true,
+                }),
+                15_000,
+                'insert-email-alert-rule',
+              );
               if (error) console.error('[Orchestrator] SET_EMAIL_ALERT failed:', error.message);
               else console.log('[Orchestrator] SET_EMAIL_ALERT saved to action_rules:', label);
             }
@@ -1285,19 +1297,23 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                     const oneShot = action.one_shot ?? true;
                     // V57.4 Part B — capture the inserted rule's id so the
                     // turn can render a "Make it recurring / one-time" toggle.
-                    const { data: insertedRule, error: insertErr } = await supabase
-                      .from('action_rules')
-                      .insert({
-                        user_id:        session.user.id,
-                        trigger_type:   'location',
-                        trigger_config: triggerConfig,
-                        action_type:    actionType,
-                        action_config:  actionConfig,
-                        label:          String(action.label ?? 'Location alert'),
-                        one_shot:       oneShot,
-                      })
-                      .select('id')
-                      .single();
+                    const { data: insertedRule, error: insertErr } = await queryWithTimeout(
+                      supabase
+                        .from('action_rules')
+                        .insert({
+                          user_id:        session.user.id,
+                          trigger_type:   'location',
+                          trigger_config: triggerConfig,
+                          action_type:    actionType,
+                          action_config:  actionConfig,
+                          label:          String(action.label ?? 'Location alert'),
+                          one_shot:       oneShot,
+                        })
+                        .select('id')
+                        .single(),
+                      15_000,
+                      'insert-location-rule-memory-hit',
+                    );
                     if (insertErr) {
                       console.error('[Orchestrator] memory-hit insert failed:', insertErr.message);
                     } else {
@@ -1378,15 +1394,19 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               }
 
               // ── Non-location triggers: original insert path ──────────────
-              const { error } = await supabase.from('action_rules').insert({
-                user_id:        session.user.id,
-                trigger_type:   triggerType,
-                trigger_config: action.trigger_config ?? {},
-                action_type:    actionType,
-                action_config:  actionConfig,
-                label:          String(action.label ?? 'Action rule'),
-                one_shot:       action.one_shot ?? false,
-              });
+              const { error } = await queryWithTimeout(
+                supabase.from('action_rules').insert({
+                  user_id:        session.user.id,
+                  trigger_type:   triggerType,
+                  trigger_config: action.trigger_config ?? {},
+                  action_type:    actionType,
+                  action_config:  actionConfig,
+                  label:          String(action.label ?? 'Action rule'),
+                  one_shot:       action.one_shot ?? false,
+                }),
+                15_000,
+                'insert-action-rule',
+              );
               if (error) console.error('[Orchestrator] SET_ACTION_RULE failed:', error.message);
               else console.log('[Orchestrator] SET_ACTION_RULE saved:', action.label);
             }

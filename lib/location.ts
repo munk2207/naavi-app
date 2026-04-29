@@ -10,6 +10,7 @@
 
 import * as Location from 'expo-location';
 import { supabase } from './supabase';
+import { queryWithTimeout } from './invokeWithTimeout';
 
 export type PermissionStatus = 'granted' | 'denied' | 'undetermined';
 
@@ -86,23 +87,31 @@ export async function syncDeviceTimezone(userId: string): Promise<void> {
 
   try {
     // Read current server value
-    const { data } = await supabase
-      .from('user_settings')
-      .select('timezone')
-      .eq('user_id', userId)
-      .maybeSingle();
+    const { data } = await queryWithTimeout(
+      supabase
+        .from('user_settings')
+        .select('timezone')
+        .eq('user_id', userId)
+        .maybeSingle(),
+      15_000,
+      'select-user-timezone',
+    );
 
     const serverTz = data?.timezone ?? null;
     if (serverTz === deviceTz) {
       return; // already in sync
     }
 
-    await supabase
-      .from('user_settings')
-      .upsert(
-        { user_id: userId, timezone: deviceTz, updated_at: new Date().toISOString() },
-        { onConflict: 'user_id' },
-      );
+    await queryWithTimeout(
+      supabase
+        .from('user_settings')
+        .upsert(
+          { user_id: userId, timezone: deviceTz, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id' },
+        ),
+      15_000,
+      'upsert-user-timezone',
+    );
 
     console.log(`[location] synced device timezone: ${deviceTz} (was ${serverTz ?? 'null'})`);
   } catch (err) {

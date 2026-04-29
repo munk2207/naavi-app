@@ -23,6 +23,7 @@ import { useRouter } from 'expo-router';
 import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserNameAsync, syncUserNameToSupabase } from '@/lib/naavi-client';
 import { isVoiceEnabledSync, refreshVoicePref, setVoicePref } from '@/lib/voicePref';
 import { signOut, supabase } from '@/lib/supabase';
+import { queryWithTimeout } from '@/lib/invokeWithTimeout';
 import { isCalendarConnected, connectGoogleCalendar, disconnectGoogleCalendar } from '@/lib/calendar';
 import { saveNotionToken, getNotionToken, removeNotionToken, hasNotionToken } from '@/lib/notion';
 import { isEpicConnected, connectEpic, disconnectEpic } from '@/lib/epic';
@@ -150,11 +151,15 @@ export default function SettingsScreen() {
       (async () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
-        const { data } = await supabase
-          .from('user_settings')
-          .select('name, morning_call_enabled, morning_call_time, phone, home_address, work_address')
-          .eq('user_id', user.id)
-          .maybeSingle();
+        const { data } = await queryWithTimeout(
+          supabase
+            .from('user_settings')
+            .select('name, morning_call_enabled, morning_call_time, phone, home_address, work_address')
+            .eq('user_id', user.id)
+            .maybeSingle(),
+          15_000,
+          'load-user-settings',
+        );
         if (data) {
           if (data.name) {
             setUserName(data.name);
@@ -213,12 +218,16 @@ export default function SettingsScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setMorningCallLoading(false); return; }
-      await supabase.from('user_settings').upsert({
-        user_id: user.id,
-        morning_call_enabled: morningCallEnabled,
-        morning_call_time: morningCallTime,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
+      await queryWithTimeout(
+        supabase.from('user_settings').upsert({
+          user_id: user.id,
+          morning_call_enabled: morningCallEnabled,
+          morning_call_time: morningCallTime,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' }),
+        15_000,
+        'upsert-morning-call',
+      );
       Alert.alert('Saved', `Morning call ${morningCallEnabled ? `set for ${morningCallTime}` : 'disabled'}.`);
     } catch (err) {
       Alert.alert('Error', 'Could not save morning call settings.');
@@ -242,11 +251,15 @@ export default function SettingsScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setPhoneLoading(false); return; }
-      const { error } = await supabase.from('user_settings').upsert({
-        user_id: user.id,
-        phone: raw,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
+      const { error } = await queryWithTimeout(
+        supabase.from('user_settings').upsert({
+          user_id: user.id,
+          phone: raw,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' }),
+        15_000,
+        'upsert-user-phone',
+      );
       if (error) throw error;
       setPhone(raw);
       setPhoneSaved(true);
@@ -280,11 +293,15 @@ export default function SettingsScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setHomeAddressLoading(false); return; }
-      const { error } = await supabase.from('user_settings').upsert({
-        user_id: user.id,
-        home_address: addr,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
+      const { error } = await queryWithTimeout(
+        supabase.from('user_settings').upsert({
+          user_id: user.id,
+          home_address: addr,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' }),
+        15_000,
+        'upsert-home-address',
+      );
       if (error) throw error;
       setHomeAddress(addr);
       Alert.alert('Saved', 'Home address saved. Naavi will use this for "home" alerts.');
@@ -305,11 +322,15 @@ export default function SettingsScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setWorkAddressLoading(false); return; }
-      const { error } = await supabase.from('user_settings').upsert({
-        user_id: user.id,
-        work_address: addr,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
+      const { error } = await queryWithTimeout(
+        supabase.from('user_settings').upsert({
+          user_id: user.id,
+          work_address: addr,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' }),
+        15_000,
+        'upsert-work-address',
+      );
       if (error) throw error;
       setWorkAddress(addr);
       Alert.alert('Saved', 'Work address saved. Naavi will use this for "office" alerts.');
@@ -375,11 +396,15 @@ export default function SettingsScreen() {
                 if (supabase) {
                   const { data: { user } } = await supabase.auth.getUser();
                   if (user) {
-                    const { data } = await supabase
-                      .from('user_settings')
-                      .select('name')
-                      .eq('user_id', user.id)
-                      .maybeSingle();
+                    const { data } = await queryWithTimeout(
+                      supabase
+                        .from('user_settings')
+                        .select('name')
+                        .eq('user_id', user.id)
+                        .maybeSingle(),
+                      15_000,
+                      'reload-user-name',
+                    );
                     if (data?.name) setUserName(data.name);
                   }
                 }
@@ -638,7 +663,7 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V57.4 (build 121)</Text>
+        <Text style={styles.version}>MyNaavi — V57.5 (build 122)</Text>
 
       </ScrollView>
     </SafeAreaView>

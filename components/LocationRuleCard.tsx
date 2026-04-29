@@ -16,6 +16,7 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { supabase } from '@/lib/supabase';
+import { queryWithTimeout } from '@/lib/invokeWithTimeout';
 import { Colors } from '@/constants/Colors';
 
 interface Props {
@@ -35,10 +36,14 @@ export function LocationRuleCard({ ruleId, placeName, initialOneShot }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const { error: err } = await supabase
-        .from('action_rules')
-        .update({ one_shot: next })
-        .eq('id', ruleId);
+      const { error: err } = await queryWithTimeout(
+        supabase
+          .from('action_rules')
+          .update({ one_shot: next })
+          .eq('id', ruleId),
+        15_000,
+        'update-rule-one-shot',
+      );
       if (err) throw err;
       setOneShot(next);
     } catch (e: any) {

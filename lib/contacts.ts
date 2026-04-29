@@ -10,7 +10,7 @@
  */
 
 import { supabase } from './supabase';
-import { invokeWithTimeout } from './invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout } from './invokeWithTimeout';
 
 export interface Contact {
   name: string;
@@ -67,11 +67,15 @@ export async function lookupContact(name: string): Promise<Contact | null> {
   // 2. Local `people` table — populated by the ADD_CONTACT action when the
   //    user asks Naavi to save someone. Structured, safe.
   try {
-    const { data } = await supabase
-      .from('people')
-      .select('name, phone, email')
-      .ilike('name', `%${nameLower}%`)
-      .limit(1);
+    const { data } = await queryWithTimeout(
+      supabase
+        .from('people')
+        .select('name, phone, email')
+        .ilike('name', `%${nameLower}%`)
+        .limit(1),
+      15_000,
+      'select-people-by-name',
+    );
 
     if (data && data.length > 0 && (data[0].phone || data[0].email)) {
       console.log('[contacts] Found in people table:', data[0].name);
@@ -82,12 +86,16 @@ export async function lookupContact(name: string): Promise<Contact | null> {
   // 3. Gmail sender cache — email-only fallback when the person has emailed
   //    the user but isn't in their Google contacts yet.
   try {
-    const { data } = await supabase
-      .from('gmail_messages')
-      .select('sender_name, sender_email')
-      .ilike('sender_name', `%${nameLower}%`)
-      .not('sender_email', 'is', null)
-      .limit(1);
+    const { data } = await queryWithTimeout(
+      supabase
+        .from('gmail_messages')
+        .select('sender_name, sender_email')
+        .ilike('sender_name', `%${nameLower}%`)
+        .not('sender_email', 'is', null)
+        .limit(1),
+      15_000,
+      'select-gmail-sender',
+    );
 
     if (data && data.length > 0 && data[0].sender_email) {
       return { name: data[0].sender_name ?? name, email: data[0].sender_email, phone: null };
@@ -98,11 +106,15 @@ export async function lookupContact(name: string): Promise<Contact | null> {
   //    phone column here. This table is sparse and being deprecated in
   //    favour of Google People API (step 1).
   try {
-    const { data } = await supabase
-      .from('contacts')
-      .select('name, email')
-      .ilike('name', `%${nameLower}%`)
-      .limit(1);
+    const { data } = await queryWithTimeout(
+      supabase
+        .from('contacts')
+        .select('name, email')
+        .ilike('name', `%${nameLower}%`)
+        .limit(1),
+      15_000,
+      'select-contacts-by-name',
+    );
 
     if (data && data.length > 0 && data[0].email) {
       return { name: data[0].name, email: data[0].email, phone: null };

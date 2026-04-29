@@ -32,6 +32,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { supabase } from '@/lib/supabase';
+import { queryWithTimeout } from '@/lib/invokeWithTimeout';
 
 const GEOFENCE_TASK = 'naavi-geofence-v1';
 
@@ -82,11 +83,15 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: any) => {
 
   try {
     // Look up the rule to get user_id + created_at
-    const { data: ruleRow } = await supabase
-      .from('action_rules')
-      .select('id, user_id, created_at, enabled')
-      .eq('id', ruleId)
-      .maybeSingle();
+    const { data: ruleRow } = await queryWithTimeout(
+      supabase
+        .from('action_rules')
+        .select('id, user_id, created_at, enabled')
+        .eq('id', ruleId)
+        .maybeSingle(),
+      15_000,
+      'select-action-rule-for-geofence',
+    );
 
     if (!ruleRow || !ruleRow.enabled) {
       console.log(`[geofence-task] rule ${ruleId} not found or disabled`);
@@ -163,12 +168,16 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
     }
 
     // Load this user's active location rules
-    const { data: rules, error } = await supabase
-      .from('action_rules')
-      .select('id, user_id, trigger_type, trigger_config, enabled, created_at')
-      .eq('user_id', userId)
-      .eq('trigger_type', 'location')
-      .eq('enabled', true);
+    const { data: rules, error } = await queryWithTimeout(
+      supabase
+        .from('action_rules')
+        .select('id, user_id, trigger_type, trigger_config, enabled, created_at')
+        .eq('user_id', userId)
+        .eq('trigger_type', 'location')
+        .eq('enabled', true),
+      15_000,
+      'select-location-rules',
+    );
 
     if (error) {
       console.error('[geofence-sync] failed to load rules:', error.message);

@@ -10,6 +10,7 @@
  */
 
 import { supabase } from './supabase';
+import { queryWithTimeout } from './invokeWithTimeout';
 
 export async function loadKeyterms(): Promise<string[]> {
   const fixed = ['Naavi', 'MyNaavi', 'Robert'];
@@ -17,10 +18,14 @@ export async function loadKeyterms(): Promise<string[]> {
   if (!supabase) return fixed;
 
   try {
-    const { data } = await supabase
-      .from('people')
-      .select('name')
-      .limit(50);
+    const { data } = await queryWithTimeout(
+      supabase
+        .from('people')
+        .select('name')
+        .limit(50),
+      15_000,
+      'select-people-keyterms',
+    );
 
     if (!data || data.length === 0) return fixed;
 

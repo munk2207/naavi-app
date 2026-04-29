@@ -11,6 +11,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
+import { queryWithTimeout } from './invokeWithTimeout';
 
 const CACHE_KEY = 'naavi.voice_playback';
 let cached: boolean | null = null;
@@ -31,11 +32,15 @@ export async function refreshVoicePref(): Promise<boolean> {
       cached = local === 'false' ? false : true;
       return cached;
     }
-    const { data, error } = await supabase
-      .from('user_settings')
-      .select('voice_playback')
-      .eq('user_id', session.user.id)
-      .maybeSingle();
+    const { data, error } = await queryWithTimeout(
+      supabase
+        .from('user_settings')
+        .select('voice_playback')
+        .eq('user_id', session.user.id)
+        .maybeSingle(),
+      15_000,
+      'select-voice-playback',
+    );
     if (error) {
       const local = await AsyncStorage.getItem(CACHE_KEY);
       cached = local === 'false' ? false : true;
@@ -58,12 +63,16 @@ export async function setVoicePref(enabled: boolean): Promise<void> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return;
-    await supabase
-      .from('user_settings')
-      .upsert(
-        { user_id: session.user.id, voice_playback: enabled },
-        { onConflict: 'user_id' },
-      );
+    await queryWithTimeout(
+      supabase
+        .from('user_settings')
+        .upsert(
+          { user_id: session.user.id, voice_playback: enabled },
+          { onConflict: 'user_id' },
+        ),
+      15_000,
+      'upsert-voice-playback',
+    );
   } catch {
     /* keep local cache; will reconcile on next refresh */
   }
