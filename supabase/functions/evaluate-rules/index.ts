@@ -97,30 +97,85 @@ serve(async (req) => {
   const fired: { rule_id: string; label: string; trigger_ref: string }[] = [];
   const errors: string[] = [];
 
+  // Rate limit cap — even if the per-(rule, trigger) dedup somehow misses,
+  // never fire the same rule more than RATE_LIMIT_PER_HOUR times in any
+  // rolling 60-minute window. Catches the Hussein-style 100+ pushes for one
+  // email failure mode. User intent (every email from sender X) is honored
+  // up to the cap; pathological loops are stopped.
+  const RATE_LIMIT_PER_HOUR = 20;
+  const oneHourAgoIso = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+
   for (const rule of rules as ActionRule[]) {
     try {
       const triggers = await findTriggers(adminClient, rule, now);
+      console.log(`[evaluate-rules] Rule ${rule.id} ("${rule.label}") matched ${triggers.length} trigger(s)`);
+
+      // Per-rule rate limit: count fires in the last hour BEFORE iterating
+      // triggers. Subsequent iterations decrement the headroom in memory.
+      const { count: recentFires, error: countErr } = await adminClient
+        .from('action_rule_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('rule_id', rule.id)
+        .gte('fired_at', oneHourAgoIso);
+
+      if (countErr) {
+        console.error(`[evaluate-rules] Rate-limit count failed for rule ${rule.id}:`, countErr.message);
+      }
+      let headroom = Math.max(0, RATE_LIMIT_PER_HOUR - (recentFires ?? 0));
+      console.log(`[evaluate-rules] Rule ${rule.id} rate-limit: ${recentFires ?? 0}/${RATE_LIMIT_PER_HOUR} fires in last hour, headroom=${headroom}`);
+
+      if (headroom === 0) {
+        console.warn(`[evaluate-rules] RATE LIMIT HIT for rule ${rule.id} ("${rule.label}") — skipping all ${triggers.length} trigger(s) until window opens`);
+        errors.push(`Rule ${rule.id} rate-limited: ${recentFires}/${RATE_LIMIT_PER_HOUR} fires/hour cap reached`);
+        continue;
+      }
 
       for (const triggerRef of triggers) {
-        // Dedup check
-        const { data: existing } = await adminClient
+        // Per-(rule, trigger) dedup check — primary safeguard.
+        const { data: existing, error: dedupErr } = await adminClient
           .from('action_rule_log')
           .select('id')
           .eq('rule_id', rule.id)
           .eq('trigger_ref', triggerRef)
           .maybeSingle();
 
-        if (existing) continue;
+        if (dedupErr) {
+          console.error(`[evaluate-rules] Dedup check failed for rule ${rule.id} trigger ${triggerRef}:`, dedupErr.message);
+          // Don't fire on dedup error — safer to miss than spam.
+          continue;
+        }
+
+        if (existing) {
+          console.log(`[evaluate-rules] Dedup HIT — rule ${rule.id} already fired for trigger ${triggerRef}, skipping`);
+          continue;
+        }
+
+        // Belt-and-suspenders rate-limit re-check (in case multiple triggers
+        // for the same rule eat headroom within this loop).
+        if (headroom === 0) {
+          console.warn(`[evaluate-rules] RATE LIMIT HIT mid-loop for rule ${rule.id} — skipping remaining trigger ${triggerRef}`);
+          errors.push(`Rule ${rule.id} rate-limited mid-loop`);
+          break;
+        }
 
         // Fire the action
+        console.log(`[evaluate-rules] Firing rule ${rule.id} for trigger ${triggerRef}`);
         const success = await fireAction(rule, adminClient, supabaseUrl, interFnKey);
 
         if (success) {
-          // Log to prevent re-firing
-          await adminClient.from('action_rule_log').insert({
+          // Log to prevent re-firing. Failures here are LOUDLY logged — a
+          // silent insert error is exactly how the Hussein incident slipped
+          // past dedup.
+          const { error: logErr } = await adminClient.from('action_rule_log').insert({
             rule_id: rule.id,
             trigger_ref: triggerRef,
           });
+          if (logErr) {
+            console.error(`[evaluate-rules] CRITICAL: action_rule_log INSERT FAILED for rule ${rule.id} trigger ${triggerRef}:`, logErr.message, '— next cron run WILL re-fire this rule');
+            errors.push(`Log insert failed: rule ${rule.id} trigger ${triggerRef}: ${logErr.message}`);
+          } else {
+            headroom -= 1;
+          }
 
           // Update last_fired_at
           await adminClient
@@ -138,6 +193,8 @@ serve(async (req) => {
 
           fired.push({ rule_id: rule.id, label: rule.label, trigger_ref: triggerRef });
           console.log(`[evaluate-rules] Fired: "${rule.label}" (trigger: ${triggerRef})`);
+        } else {
+          console.warn(`[evaluate-rules] fireAction returned false for rule ${rule.id} trigger ${triggerRef} — no log entry written, rule may re-fire next cron run`);
         }
       }
     } catch (err) {
@@ -196,6 +253,20 @@ async function findEmailTriggers(
     now.getTime() - 24 * 60 * 60 * 1000
   )).toISOString();
 
+  // Recursion guard: when a rule fires a self-alert, the email-channel fan-out
+  // sends a message FROM the user's own Gmail account back to themselves. If
+  // that subject matches the rule's subject_keyword, it triggers the rule
+  // AGAIN, producing an infinite loop (Hussein's "Irrigation invoice" → 100+
+  // pushes incident, 2026-04-28). Skip emails sent BY the user themselves so
+  // self-alert emails can never re-trigger the rule that produced them.
+  let userEmailLower: string | null = null;
+  try {
+    const { data: authData } = await client.auth.admin.getUserById(rule.user_id);
+    userEmailLower = authData?.user?.email?.toLowerCase() ?? null;
+  } catch (err) {
+    console.error(`[findEmailTriggers] Failed to fetch user email for ${rule.user_id}:`, err);
+  }
+
   const { data: messages, error } = await client
     .from('gmail_messages')
     .select('gmail_message_id, subject, sender_name, sender_email, snippet, received_at')
@@ -208,6 +279,10 @@ async function findEmailTriggers(
 
   return (messages as GmailMessage[])
     .filter(msg => {
+      // Recursion guard — skip self-sent emails (see comment above).
+      if (userEmailLower && msg.sender_email && msg.sender_email.toLowerCase() === userEmailLower) {
+        return false;
+      }
       const nameMatch = fromName
         ? msg.sender_name.toLowerCase().includes(fromName.toLowerCase())
         : false;
@@ -533,7 +608,13 @@ async function fireAction(
 
   const isSelfByPhone = toPhone && userPhone && toPhone === userPhone;
   const isSelfByEmail = toEmail && userEmail && toEmail.toLowerCase() === userEmail.toLowerCase();
-  const isSelfAlert   = Boolean(isSelfByPhone || isSelfByEmail);
+  // When the user creates a rule like "alert me at Costco" with no explicit
+  // recipient, both to_phone and to_email are empty. The intent is clearly
+  // self-alert — default to the user's own channels rather than failing
+  // with "no destination". Without this, every "alert me ..." rule silently
+  // never fires.
+  const noRecipient   = !toPhone && !toEmail;
+  const isSelfAlert   = Boolean(isSelfByPhone || isSelfByEmail || noRecipient);
 
   // Channel call helpers
   const callSMS = (channel: 'sms' | 'whatsapp', to: string) =>

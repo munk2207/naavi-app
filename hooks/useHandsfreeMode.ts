@@ -605,6 +605,29 @@ export function useHandsfreeMode(
     });
   }, [orchestratorStatus]);
 
+  // ── Recursion + spam guard: close the mic the moment the orchestrator
+  //   enters answer_active or cooldown. The #21 effect above opened the mic
+  //   during speaking for the voice barge-in. After Robert taps orange Stop,
+  //   the mic must close immediately so it can't catch:
+  //     - Naavi's residual TTS tail (her own voice)
+  //     - Ambient noise during the silent answer-active window
+  //     - Anything during the 10-second cooldown
+  //   Without this, the open mic was auto-submitting accumulated noise as a
+  //   new question and Naavi was responding "I didn't quite catch that" —
+  //   the bug Robert observed during V57 testing on 2026-04-29.
+  useEffect(() => {
+    if (orchestratorStatus !== 'answer_active' && orchestratorStatus !== 'cooldown') return;
+    if (!audioStreamActiveRef.current) return;
+    console.log(`[Handsfree] Orchestrator entered ${orchestratorStatus} — closing mic + clearing pending text`);
+    pendingTextRef.current = '';
+    stopAudioStream().catch((err) => {
+      console.warn('[Handsfree] stopAudioStream during answer_active/cooldown failed:', err);
+    });
+    // Keep the WebSocket alive so we don't have to reconnect when status
+    // returns to idle. The existing keep-alive interval handles that.
+    startKeepAlive();
+  }, [orchestratorStatus]);
+
   // ── Watch orchestrator status: when it goes idle after 'waiting', resume listening ──
   useEffect(() => {
     if (!waitingForOrchestratorRef.current) return;

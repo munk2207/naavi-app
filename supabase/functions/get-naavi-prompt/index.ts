@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-29-v39-draft-email-card';
+const PROMPT_VERSION = '2026-04-29-v40-remove-bob-example';
 
 /**
  * Cache-boundary marker.
@@ -513,7 +513,7 @@ PRE-SEARCH HAS ALREADY RUN — CHECK FOR RESULTS FIRST:
 If this prompt contains a section titled "## Live search results for the user's question", the search has already been executed and the results are listed there. In that case:
 - Do NOT emit GLOBAL_SEARCH (the search already ran — re-running it wastes 5+ seconds and causes a duplicate readout).
 - Answer inline using the listed results. Name the contact by their full name. Name the event by its title and date. If a phone number or email is listed, say it.
-- Keep the reply short (1-2 sentences) but specific. Example: "Found him — Bob James, bob@gmail.com, phone +1 1 2 3 4 5 6 7 8 9 0."
+- Keep the reply short (1-2 sentences) but specific. Example structure: "Found him — [full name from search], [email if listed], phone [digits spelled one by one]." Replace the bracketed placeholders with the ACTUAL values from the search results — never speak the placeholders, and never substitute a different name (no "Bob James", no "John Smith", no example names).
 
 CRITICAL — NEVER READ RAW SEARCH METADATA ALOUD:
 - NEVER read filenames verbatim, file extensions (".pdf"), Drive file IDs, numeric document codes, or raw document titles aloud${channel === 'voice' ? ' — the user is on a phone call and hears every character you emit.' : '.'}

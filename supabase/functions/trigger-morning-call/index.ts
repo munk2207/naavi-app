@@ -26,15 +26,32 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
+    // Optional debug body. Cron passes `{}`; manual calls can pass:
+    //   { force: true }                    — bypass time + same-day-status checks
+    //   { force: true, user_id: '<uuid>' } — restrict to a single user
+    // The `force` path lets us fire a brief on demand for debugging without
+    // waiting for the scheduled minute window.
+    let force = false;
+    let forceUserId: string | null = null;
+    try {
+      if (req.method === 'POST') {
+        const body = await req.clone().json().catch(() => ({}));
+        force = body?.force === true;
+        forceUserId = typeof body?.user_id === 'string' ? body.user_id : null;
+      }
+    } catch { /* ignore — cron sends empty body */ }
+
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
 
-    const { data: settings, error } = await supabase
+    let query = supabase
       .from('user_settings')
       .select('user_id, morning_call_time, morning_call_phone, timezone, last_morning_call_date, morning_call_status, morning_call_attempts, morning_call_last_attempt')
       .eq('morning_call_enabled', true);
+    if (forceUserId) query = query.eq('user_id', forceUserId);
+    const { data: settings, error } = await query;
 
     if (error || !settings?.length) {
       return new Response(JSON.stringify({ triggered: 0 }), {
@@ -67,34 +84,46 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Already answered today — skip
-      if (s.last_morning_call_date === todayStr && s.morning_call_status === 'answered') {
-        continue;
-      }
-
-      // Already exhausted retries today — skip
-      if (s.last_morning_call_date === todayStr && s.morning_call_status === 'missed') {
-        continue;
-      }
-
-      // Max 3 attempts per day — voice server sends first alert at 2, final at 3.
-      if (s.morning_call_attempts >= 3) {
-        continue;
-      }
-
-      // Check if it's time for first attempt or retry
+      // FORCE path bypasses all the "already answered today" / "scheduled time
+      // window" gates so we can fire a brief on demand for debugging. We still
+      // require morning_call_phone to be set (no point dialing nowhere) and
+      // morning_call_enabled (already filtered above).
       const attempts = s.morning_call_attempts || 0;
-
-      if (attempts === 0) {
-        // First attempt — only at scheduled time
-        if (currentTime !== callTime) continue;
-      } else {
-        // Retry — wait 5 minutes since last attempt
-        if (s.morning_call_last_attempt) {
-          const lastAttempt = new Date(s.morning_call_last_attempt);
-          const minutesSince = (now.getTime() - lastAttempt.getTime()) / 60000;
-          if (minutesSince < 5) continue;
+      if (!force) {
+        // Already answered today — skip
+        if (s.last_morning_call_date === todayStr && s.morning_call_status === 'answered') {
+          continue;
         }
+
+        // Already exhausted retries today — skip
+        if (s.last_morning_call_date === todayStr && s.morning_call_status === 'missed') {
+          continue;
+        }
+
+        // Max 3 attempts per day — voice server sends first alert at 2, final at 3.
+        if (s.morning_call_attempts >= 3) {
+          continue;
+        }
+
+        // Check if it's time for first attempt or retry
+        if (attempts === 0) {
+          // First attempt — only at scheduled time
+          if (currentTime !== callTime) continue;
+        } else {
+          // Retry — wait 5 minutes since last attempt
+          if (s.morning_call_last_attempt) {
+            const lastAttempt = new Date(s.morning_call_last_attempt);
+            const minutesSince = (now.getTime() - lastAttempt.getTime()) / 60000;
+            if (minutesSince < 5) continue;
+          }
+        }
+      } else {
+        console.log(`[trigger-morning-call] FORCE mode for user ${s.user_id} — bypassing time + status gates`);
+      }
+
+      if (!s.morning_call_phone) {
+        console.warn(`[trigger-morning-call] Skip user ${s.user_id} — morning_call_phone is empty`);
+        continue;
       }
 
       // Initiate Twilio outbound call

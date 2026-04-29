@@ -3,7 +3,15 @@
  *
  * Displays a single extracted action from a recorded conversation.
  * Dark theme with semantic ramp color-coding.
- * Robert can tap "Add to Calendar" or "Draft Email" directly from the card.
+ *
+ * Action items of types appointment / meeting / call / test / prescription /
+ * follow_up are AUTO-CREATED as Google Calendar events the moment the user
+ * confirms speakers (see useConversationRecorder.confirmSpeakers). The card
+ * shows a "✓ In your calendar" badge for those types — tapping it would
+ * create duplicates, so there is no add-to-calendar button anymore.
+ *
+ * The "Draft Email" button is kept — drafting a follow-up email is a
+ * deliberate user action, not something we auto-do.
  */
 
 import React from 'react';
@@ -27,12 +35,19 @@ const TYPE_CONFIG: Record<string, { icon: string; color: string }> = {
 
 interface Props {
   action: ConversationAction;
+  /** Reserved for future "open this event in Google Calendar" wiring.
+   *  Not currently called — the badge is informational only. */
   onCalendar?: (action: ConversationAction) => void;
   onEmail?: (action: ConversationAction) => void;
 }
 
-export function ConversationActionCard({ action, onCalendar, onEmail }: Props) {
+// Types that confirmSpeakers auto-creates calendar events for.
+// Keep in sync with useConversationRecorder.ts:calendarTypes.
+const AUTO_CALENDAR_TYPES = ['appointment', 'meeting', 'call', 'test', 'prescription', 'follow_up'];
+
+export function ConversationActionCard({ action, onEmail }: Props) {
   const cfg = TYPE_CONFIG[action.type] ?? TYPE_CONFIG.task;
+  const wasAutoAdded = AUTO_CALENDAR_TYPES.includes(action.type);
 
   return (
     <View style={[styles.card, { borderLeftColor: cfg.color }]}>
@@ -54,14 +69,10 @@ export function ConversationActionCard({ action, onCalendar, onEmail }: Props) {
       </View>
 
       <View style={styles.actions}>
-        {action.calendar_title && onCalendar && (
-          <TouchableOpacity
-            style={styles.btn}
-            onPress={() => onCalendar(action)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.btnText}>📅 Add to Calendar</Text>
-          </TouchableOpacity>
+        {wasAutoAdded && (
+          <View style={styles.calendarBadge}>
+            <Text style={styles.calendarBadgeText}>✓ In your calendar</Text>
+          </View>
         )}
         {onEmail && (
           <TouchableOpacity
@@ -135,16 +146,20 @@ const styles = StyleSheet.create({
     marginTop: 4,
     flexWrap: 'wrap',
   },
-  btn: {
-    backgroundColor: Colors.accent,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+  // Read-only badge replacing the old "Add to Calendar" button. Shows when the
+  // action's calendar event was auto-created at confirmSpeakers time.
+  calendarBadge: {
+    backgroundColor: 'rgba(108, 196, 161, 0.18)', // Colors.accent at 18% alpha
+    borderWidth: 0.5,
+    borderColor: Colors.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 14,
   },
-  btnText: {
-    fontSize: Typography.body,
+  calendarBadgeText: {
+    fontSize: Typography.caption,
     fontWeight: '600',
-    color: Colors.accentDark,
+    color: Colors.accent,
   },
   btnOutline: {
     backgroundColor: 'transparent',
