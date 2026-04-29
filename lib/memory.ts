@@ -11,6 +11,7 @@
  */
 
 import { supabase } from './supabase';
+import { queryWithTimeout } from './invokeWithTimeout';
 import { fetchNotionNotesForPerson } from './notion';
 import { fetchEmailsFromPerson } from './gmail';
 import { searchDriveFiles, type DriveFile } from './drive';
@@ -112,15 +113,19 @@ async function getCalendarEventsForPerson(name: string): Promise<CalendarEntry[]
   threeMonthsAhead.setMonth(threeMonthsAhead.getMonth() + 3);
 
   try {
-    const { data: events, error } = await supabase
-      .from('calendar_events')
-      .select('title, start_time, location')
-      .eq('user_id', userId)
-      .gte('start_time', sixMonthsAgo.toISOString())
-      .lte('start_time', threeMonthsAhead.toISOString())
-      .or(`title.ilike.%${nameLower}%,description.ilike.%${nameLower}%,location.ilike.%${nameLower}%,attendees.cs.[{"displayName":"${name}"}]`)
-      .order('start_time', { ascending: true })
-      .limit(50);
+    const { data: events, error } = await queryWithTimeout(
+      supabase
+        .from('calendar_events')
+        .select('title, start_time, location')
+        .eq('user_id', userId)
+        .gte('start_time', sixMonthsAgo.toISOString())
+        .lte('start_time', threeMonthsAhead.toISOString())
+        .or(`title.ilike.%${nameLower}%,description.ilike.%${nameLower}%,location.ilike.%${nameLower}%,attendees.cs.[{"displayName":"${name}"}]`)
+        .order('start_time', { ascending: true })
+        .limit(50),
+      15_000,
+      'select-calendar-for-person',
+    );
 
     if (error || !events) return [];
 
@@ -208,19 +213,31 @@ export async function savePerson(person: {
   if (!supabase) return;
 
   // Upsert — update if exists, insert if not
-  const { data: existing } = await supabase
-    .from('people')
-    .select('id')
-    .ilike('name', person.name)
-    .limit(1);
+  const { data: existing } = await queryWithTimeout(
+    supabase
+      .from('people')
+      .select('id')
+      .ilike('name', person.name)
+      .limit(1),
+    15_000,
+    'select-person-by-name',
+  );
 
   if (existing && existing.length > 0) {
-    await supabase
-      .from('people')
-      .update({ ...person, updated_at: new Date().toISOString() })
-      .eq('id', existing[0].id);
+    await queryWithTimeout(
+      supabase
+        .from('people')
+        .update({ ...person, updated_at: new Date().toISOString() })
+        .eq('id', existing[0].id),
+      15_000,
+      'update-person',
+    );
   } else {
-    await supabase.from('people').insert(person);
+    await queryWithTimeout(
+      supabase.from('people').insert(person),
+      15_000,
+      'insert-person',
+    );
   }
 }
 
@@ -232,7 +249,11 @@ export async function saveInteraction(interaction: {
   source: string;
 }): Promise<void> {
   if (!supabase) return;
-  await supabase.from('interactions').insert(interaction);
+  await queryWithTimeout(
+    supabase.from('interactions').insert(interaction),
+    15_000,
+    'insert-interaction',
+  );
 }
 
 export async function saveTopic(topic: {
@@ -241,7 +262,11 @@ export async function saveTopic(topic: {
   category: string;
 }): Promise<void> {
   if (!supabase) return;
-  await supabase.from('topics').insert(topic);
+  await queryWithTimeout(
+    supabase.from('topics').insert(topic),
+    15_000,
+    'insert-topic',
+  );
 }
 
 // ─── Person name detector ─────────────────────────────────────────────────────

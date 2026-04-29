@@ -55,3 +55,49 @@ export async function invokeWithTimeout<T = any>(
 
   return Promise.race([invokePromise, timeoutPromise]);
 }
+
+/**
+ * queryWithTimeout — wraps a Postgrest query (supabase.from(...).select/insert/
+ * update/delete) with a hard timeout cap.
+ *
+ * Why this exists (V57.5):
+ *   The Supabase JS SDK's PostgrestBuilder also has NO client-side timeout.
+ *   V57.4 audited and wrapped every supabase.functions.invoke() call, but
+ *   missed direct .from() queries. The LocationRuleCard toggle hung for 4+
+ *   minutes because supabase.from('action_rules').update(...).eq('id', x)
+ *   stalled with no fallback. Same bug class.
+ *
+ * Usage:
+ *   const { data, error } = await queryWithTimeout(
+ *     supabase.from('action_rules').update({ one_shot: true }).eq('id', ruleId),
+ *     15_000,
+ *     'update-rule-one-shot',
+ *   );
+ *
+ * Default 15s — reads/writes typically return in < 2s. 15s is comfortable
+ * headroom. On timeout the call resolves with `{ data: null, error: 'timeout' }`
+ * so callers can show an error instead of leaving the user staring at a frozen
+ * UI.
+ *
+ * Recommended timeouts per query type:
+ *   - select / read:                10-15s
+ *   - insert / update / delete:     15s
+ *   - bulk insert (>50 rows):       30s
+ */
+export async function queryWithTimeout<T = any>(
+  query: PromiseLike<{ data: T | null; error: any }>,
+  timeoutMs: number = 15_000,
+  label?: string,
+): Promise<{ data: T | null; error: any }> {
+  const queryPromise: Promise<{ data: T | null; error: any }> = Promise.resolve(query);
+
+  const timeoutPromise: Promise<{ data: null; error: any }> = new Promise((resolve) => {
+    setTimeout(() => {
+      const msg = `${label ?? 'query'} timed out after ${timeoutMs}ms`;
+      console.warn(`[queryWithTimeout] ${msg}`);
+      resolve({ data: null, error: { name: 'TimeoutError', message: msg } });
+    }, timeoutMs);
+  });
+
+  return Promise.race([queryPromise, timeoutPromise]);
+}

@@ -74,7 +74,7 @@ import { getBackgroundPermission, requestLocationPermissions } from '@/lib/locat
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
-import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout } from '@/lib/invokeWithTimeout';
 
 // ─── Integrations data ────────────────────────────────────────────────────────
 
@@ -681,14 +681,17 @@ export default function HomeScreen() {
   // turns-based re-check is declared below after useOrchestrator is called)
   useEffect(() => {
     if (!supabase || !currentUserId) return;
-    supabase.from('knowledge_fragments')
-      .select('content')
-      .eq('user_id', currentUserId)
-      .ilike('content', '%highway%')
-      .limit(5)
-      .then(({ data }) => {
-        avoidHighwaysRef.current = !!(data && data.length > 0);
-      });
+    queryWithTimeout(
+      supabase.from('knowledge_fragments')
+        .select('content')
+        .eq('user_id', currentUserId)
+        .ilike('content', '%highway%')
+        .limit(5),
+      15_000,
+      'select-highway-prefs',
+    ).then(({ data }) => {
+      avoidHighwaysRef.current = !!(data && data.length > 0);
+    });
   }, [currentUserId]);
 
   // Check location permission whenever the user signs in (or changes user).
@@ -859,12 +862,15 @@ export default function HomeScreen() {
   // Re-check highway preference after each turn so DELETE_MEMORY takes effect immediately
   useEffect(() => {
     if (!supabase || !currentUserId) return;
-    supabase.from('knowledge_fragments')
-      .select('content')
-      .eq('user_id', currentUserId)
-      .ilike('content', '%highway%')
-      .limit(5)
-      .then(({ data }) => { avoidHighwaysRef.current = !!(data && data.length > 0); });
+    queryWithTimeout(
+      supabase.from('knowledge_fragments')
+        .select('content')
+        .eq('user_id', currentUserId)
+        .ilike('content', '%highway%')
+        .limit(5),
+      15_000,
+      'recheck-highway-prefs',
+    ).then(({ data }) => { avoidHighwaysRef.current = !!(data && data.length > 0); });
   }, [turns, currentUserId]);
 
   // Auto-scroll to bottom when new conversation turns arrive

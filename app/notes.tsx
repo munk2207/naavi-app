@@ -26,6 +26,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { queryWithTimeout } from '@/lib/invokeWithTimeout';
 import { searchDriveFiles, type DriveFile } from '@/lib/drive';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
@@ -108,18 +109,26 @@ export default function NotesScreen() {
     if (!session?.user) return;
 
     const [memRes, driveRes] = await Promise.all([
-      supabase
-        .from('knowledge_fragments')
-        .select('id, type, content, source, classification, created_at')
-        .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false })
-        .limit(100),
-      supabase
-        .from('naavi_notes')
-        .select('id, title, web_view_link, created_at')
-        .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false })
-        .limit(100),
+      queryWithTimeout(
+        supabase
+          .from('knowledge_fragments')
+          .select('id, type, content, source, classification, created_at')
+          .eq('user_id', session.user.id)
+          .order('created_at', { ascending: false })
+          .limit(100),
+        15_000,
+        'select-memory-notes',
+      ),
+      queryWithTimeout(
+        supabase
+          .from('naavi_notes')
+          .select('id, title, web_view_link, created_at')
+          .eq('user_id', session.user.id)
+          .order('created_at', { ascending: false })
+          .limit(100),
+        15_000,
+        'select-drive-notes',
+      ),
     ]);
 
     if (memRes.data)   setMemoryNotes(memRes.data);
@@ -204,10 +213,14 @@ export default function NotesScreen() {
     if (!supabase || selectedMemory.size === 0) return;
     setDeleting(true);
     const ids = Array.from(selectedMemory);
-    const { error } = await supabase
-      .from('knowledge_fragments')
-      .delete()
-      .in('id', ids);
+    const { error } = await queryWithTimeout(
+      supabase
+        .from('knowledge_fragments')
+        .delete()
+        .in('id', ids),
+      15_000,
+      'delete-memory-notes',
+    );
 
     if (error) {
       Alert.alert('Error', 'Could not delete. Please try again.');
@@ -234,10 +247,14 @@ export default function NotesScreen() {
     if (!supabase || selectedDrive.size === 0) return;
     setDeleting(true);
     const ids = Array.from(selectedDrive);
-    const { error } = await supabase
-      .from('naavi_notes')
-      .delete()
-      .in('id', ids);
+    const { error } = await queryWithTimeout(
+      supabase
+        .from('naavi_notes')
+        .delete()
+        .in('id', ids),
+      15_000,
+      'delete-drive-notes',
+    );
 
     if (error) {
       Alert.alert('Error', 'Could not remove. Please try again.');

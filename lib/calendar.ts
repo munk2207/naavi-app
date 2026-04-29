@@ -7,7 +7,7 @@
  */
 
 import { supabase } from './supabase';
-import { invokeWithTimeout } from './invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout } from './invokeWithTimeout';
 import type { BriefItem } from './naavi-client';
 
 const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL      ?? '';
@@ -32,12 +32,16 @@ export async function isCalendarConnected(): Promise<boolean> {
   if (!supabase) return false;
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) return false;
-  const { data } = await supabase
-    .from('user_tokens')
-    .select('id')
-    .eq('user_id', session.user.id)
-    .eq('provider', 'google')
-    .limit(1);
+  const { data } = await queryWithTimeout(
+    supabase
+      .from('user_tokens')
+      .select('id')
+      .eq('user_id', session.user.id)
+      .eq('provider', 'google')
+      .limit(1),
+    15_000,
+    'select-user-tokens-google',
+  );
   const connected = Boolean(data && data.length > 0);
   if (connected) markCalendarConnected(); // sync localStorage flag
   return connected;
@@ -78,11 +82,15 @@ export async function disconnectGoogleCalendar(): Promise<void> {
   const { data: { session } } = await supabase.auth.getSession();
   console.log('[Calendar] Disconnecting — session user:', session?.user?.id ?? 'none');
   if (session?.user) {
-    const { error } = await supabase
-      .from('user_tokens')
-      .delete()
-      .eq('user_id', session.user.id)
-      .eq('provider', 'google');
+    const { error } = await queryWithTimeout(
+      supabase
+        .from('user_tokens')
+        .delete()
+        .eq('user_id', session.user.id)
+        .eq('provider', 'google'),
+      15_000,
+      'delete-user-tokens-google',
+    );
     if (error) console.error('[Calendar] Disconnect delete error:', error.message, error.code);
     else console.log('[Calendar] Token deleted successfully');
   }
@@ -235,14 +243,18 @@ export async function fetchTodayEvents(): Promise<BriefItem[]> {
   endOfDay.setHours(23, 59, 59, 999);
 
   try {
-    const { data: events, error } = await supabase
-      .from('calendar_events')
-      .select('google_event_id, title, start_time, end_time, location, description')
-      .eq('user_id', userId)
-      .gte('start_time', startOfDay.toISOString())
-      .lte('start_time', endOfDay.toISOString())
-      .order('start_time', { ascending: true })
-      .limit(10);
+    const { data: events, error } = await queryWithTimeout(
+      supabase
+        .from('calendar_events')
+        .select('google_event_id, title, start_time, end_time, location, description')
+        .eq('user_id', userId)
+        .gte('start_time', startOfDay.toISOString())
+        .lte('start_time', endOfDay.toISOString())
+        .order('start_time', { ascending: true })
+        .limit(10),
+      15_000,
+      'select-today-events',
+    );
 
     if (error || !events) return [];
     return events.map(e => mapEventToBriefItem(e));
@@ -263,24 +275,32 @@ export async function fetchUpcomingEvents(days = 30, passedUserId?: string): Pro
   future.setDate(future.getDate() + days);
 
   try {
-    const { data: events, error: evError } = await supabase
-      .from('calendar_events')
-      .select('google_event_id, title, start_time, end_time, location, description, item_type')
-      .eq('user_id', userId)
-      .neq('item_type', 'task')
-      .gte('start_time', startOfDay.toISOString())
-      .lte('start_time', future.toISOString())
-      .order('start_time', { ascending: true })
-      .limit(20);
+    const { data: events, error: evError } = await queryWithTimeout(
+      supabase
+        .from('calendar_events')
+        .select('google_event_id, title, start_time, end_time, location, description, item_type')
+        .eq('user_id', userId)
+        .neq('item_type', 'task')
+        .gte('start_time', startOfDay.toISOString())
+        .lte('start_time', future.toISOString())
+        .order('start_time', { ascending: true })
+        .limit(20),
+      15_000,
+      'select-upcoming-events',
+    );
 
     // Fetch all incomplete tasks — sync only stores incomplete tasks
-    const { data: tasks, error: taskError } = await supabase
-      .from('calendar_events')
-      .select('google_event_id, title, start_time, end_time, location, description, item_type')
-      .eq('user_id', userId)
-      .eq('item_type', 'task')
-      .order('start_time', { ascending: true, nullsFirst: false })
-      .limit(20);
+    const { data: tasks, error: taskError } = await queryWithTimeout(
+      supabase
+        .from('calendar_events')
+        .select('google_event_id, title, start_time, end_time, location, description, item_type')
+        .eq('user_id', userId)
+        .eq('item_type', 'task')
+        .order('start_time', { ascending: true, nullsFirst: false })
+        .limit(20),
+      15_000,
+      'select-tasks',
+    );
 
     console.log('[Calendar] fetchUpcomingEvents — events:', events?.length ?? 0, 'tasks:', tasks?.length ?? 0);
     if (evError) console.error('[Calendar] events error:', evError.message);
@@ -380,15 +400,19 @@ export async function fetchUpcomingBirthdays(passedUserId?: string): Promise<Bri
   future.setDate(future.getDate() + 30);
 
   try {
-    const { data: events, error } = await supabase
-      .from('calendar_events')
-      .select('google_event_id, title, start_time, end_time, location, description')
-      .eq('user_id', userId)
-      .ilike('title', '%birthday%')
-      .gte('start_time', now.toISOString())
-      .lte('start_time', future.toISOString())
-      .order('start_time', { ascending: true })
-      .limit(10);
+    const { data: events, error } = await queryWithTimeout(
+      supabase
+        .from('calendar_events')
+        .select('google_event_id, title, start_time, end_time, location, description')
+        .eq('user_id', userId)
+        .ilike('title', '%birthday%')
+        .gte('start_time', now.toISOString())
+        .lte('start_time', future.toISOString())
+        .order('start_time', { ascending: true })
+        .limit(10),
+      15_000,
+      'select-upcoming-birthdays',
+    );
 
     if (error || !events) return [];
 

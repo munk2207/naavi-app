@@ -7,7 +7,7 @@
  */
 
 import { supabase } from './supabase';
-import { invokeWithTimeout } from './invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout } from './invokeWithTimeout';
 import * as Location from 'expo-location';
 
 export interface TravelTime {
@@ -26,13 +26,17 @@ async function getStoredHomeAddress(): Promise<string | null> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return null;
-    const { data } = await supabase
-      .from('knowledge_fragments')
-      .select('content')
-      .eq('user_id', session.user.id)
-      .or('content.ilike.%home address%,content.ilike.%i live at%,content.ilike.%my address%,content.ilike.%home is at%')
-      .limit(1)
-      .single();
+    const { data } = await queryWithTimeout(
+      supabase
+        .from('knowledge_fragments')
+        .select('content')
+        .eq('user_id', session.user.id)
+        .or('content.ilike.%home address%,content.ilike.%i live at%,content.ilike.%my address%,content.ilike.%home is at%')
+        .limit(1)
+        .single(),
+      15_000,
+      'select-home-address-fragment',
+    );
     if (!data?.content) return null;
     // Extract the address portion after common phrases
     const match = data.content.match(/(?:home address is|i live at|my address is|home is at)\s+(.+)/i);

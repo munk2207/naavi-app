@@ -7,7 +7,7 @@
  */
 
 import { supabase } from './supabase';
-import { invokeWithTimeout } from './invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout } from './invokeWithTimeout';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -36,12 +36,16 @@ async function getUserId(): Promise<string | null> {
 
 async function findListByName(userId: string, name: string): Promise<ListRecord | null> {
   if (!supabase) return null;
-  const { data, error } = await supabase
-    .from('lists')
-    .select('id, name, category, drive_file_id, web_view_link')
-    .eq('user_id', userId)
-    .ilike('name', name)
-    .maybeSingle();
+  const { data, error } = await queryWithTimeout(
+    supabase
+      .from('lists')
+      .select('id, name, category, drive_file_id, web_view_link')
+      .eq('user_id', userId)
+      .ilike('name', name)
+      .maybeSingle(),
+    15_000,
+    'select-list-by-name',
+  );
   if (error) { console.error('[Lists] Lookup failed:', error.message); return null; }
   return data;
 }
@@ -88,24 +92,32 @@ export async function createList(name: string, category: string = 'other'): Prom
   const webViewLink = data.webViewLink ?? `https://docs.google.com/document/d/${data.fileId}/edit`;
 
   // Save mapping to lists table
-  const { error: insertError } = await supabase.from('lists').insert({
-    user_id: userId,
-    name,
-    category,
-    drive_file_id: data.fileId,
-    web_view_link: webViewLink,
-  });
+  const { error: insertError } = await queryWithTimeout(
+    supabase.from('lists').insert({
+      user_id: userId,
+      name,
+      category,
+      drive_file_id: data.fileId,
+      web_view_link: webViewLink,
+    }),
+    15_000,
+    'insert-list',
+  );
   if (insertError) {
     console.error('[Lists] Insert failed:', insertError.message);
     return { success: false, error: insertError.message };
   }
 
   // Also insert into naavi_notes so the list shows in Drive Notes tab
-  await supabase.from('naavi_notes').insert({
-    user_id: userId,
-    title: name,
-    web_view_link: webViewLink,
-  }).then(({ error: notesErr }) => {
+  await queryWithTimeout(
+    supabase.from('naavi_notes').insert({
+      user_id: userId,
+      title: name,
+      web_view_link: webViewLink,
+    }),
+    15_000,
+    'insert-naavi-note-for-list',
+  ).then(({ error: notesErr }) => {
     if (notesErr) console.error('[Lists] naavi_notes insert failed:', notesErr.message);
   });
 
@@ -141,7 +153,11 @@ export async function addToList(listName: string, items: string[]): Promise<List
 
   // Update timestamp
   if (supabase) {
-    await supabase.from('lists').update({ updated_at: new Date().toISOString() }).eq('id', list.id);
+    await queryWithTimeout(
+      supabase.from('lists').update({ updated_at: new Date().toISOString() }).eq('id', list.id),
+      15_000,
+      'update-list-touch-add',
+    );
   }
 
   console.log(`[Lists] Added ${items.length} items to "${listName}"`);
@@ -170,7 +186,11 @@ export async function removeFromList(listName: string, items: string[]): Promise
   if (!ok) return { success: false, error: 'Failed to update Drive doc' };
 
   if (supabase) {
-    await supabase.from('lists').update({ updated_at: new Date().toISOString() }).eq('id', list.id);
+    await queryWithTimeout(
+      supabase.from('lists').update({ updated_at: new Date().toISOString() }).eq('id', list.id),
+      15_000,
+      'update-list-touch-remove',
+    );
   }
 
   console.log(`[Lists] Removed ${items.length} items from "${listName}"`);
@@ -202,11 +222,15 @@ export async function getAllLists(): Promise<ListRecord[]> {
   const userId = await getUserId();
   if (!userId || !supabase) return [];
 
-  const { data, error } = await supabase
-    .from('lists')
-    .select('id, name, category, drive_file_id, web_view_link')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true });
+  const { data, error } = await queryWithTimeout(
+    supabase
+      .from('lists')
+      .select('id, name, category, drive_file_id, web_view_link')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true }),
+    15_000,
+    'select-all-lists',
+  );
 
   if (error) { console.error('[Lists] Fetch all failed:', error.message); return []; }
   return data ?? [];

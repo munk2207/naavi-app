@@ -14,6 +14,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { isSupabaseConfigured, callNaaviEdgeFunction, supabase } from './supabase';
+import { queryWithTimeout } from './invokeWithTimeout';
 import { getEpicHealthContext } from './epic';
 import { searchKnowledge, fetchAllKnowledge, formatFragmentsForContext } from './knowledge';
 
@@ -63,12 +64,16 @@ export async function syncUserNameToSupabase(name: string): Promise<void> {
   if (!supabase) throw new Error('Supabase not configured');
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) throw new Error('Not signed in');
-  const { error } = await supabase
-    .from('user_settings')
-    .upsert(
-      { user_id: session.user.id, name, updated_at: new Date().toISOString() },
-      { onConflict: 'user_id' }
-    );
+  const { error } = await queryWithTimeout(
+    supabase
+      .from('user_settings')
+      .upsert(
+        { user_id: session.user.id, name, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id' }
+      ),
+    15_000,
+    'upsert-user-name',
+  );
   if (error) throw new Error(error.message);
 }
 
@@ -172,11 +177,15 @@ async function getUserProfile(): Promise<{ userName: string; userPhone: string }
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) return { userName, userPhone };
 
-    const { data } = await supabase
-      .from('user_settings')
-      .select('name, phone')
-      .eq('user_id', session.user.id)
-      .single();
+    const { data } = await queryWithTimeout(
+      supabase
+        .from('user_settings')
+        .select('name, phone')
+        .eq('user_id', session.user.id)
+        .single(),
+      15_000,
+      'select-user-profile',
+    );
 
     if (data?.name) userName = data.name;
     if (data?.phone) userPhone = data.phone;

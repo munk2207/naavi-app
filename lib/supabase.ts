@@ -10,6 +10,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Platform, AppState } from 'react-native';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { queryWithTimeout } from './invokeWithTimeout';
 
 const SUPABASE_URL     = process.env.EXPO_PUBLIC_SUPABASE_URL     ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -160,12 +161,16 @@ export async function saveContact(contact: {
   // table has a phone column (migration 20260419_contacts_phone.sql) and
   // the Global Search contacts adapter matches on it. `phone || null`
   // avoids inserting an empty string when Claude didn't extract one.
-  const { error } = await supabase.from('contacts').insert({
-    user_id: userId,
-    name: contact.name,
-    email: contact.email || null,
-    phone: contact.phone?.trim() || null,
-  });
+  const { error } = await queryWithTimeout(
+    supabase.from('contacts').insert({
+      user_id: userId,
+      name: contact.name,
+      email: contact.email || null,
+      phone: contact.phone?.trim() || null,
+    }),
+    15_000,
+    'insert-contact',
+  );
   if (error) console.error('[Supabase] Failed to save contact:', error.message);
   else console.log('[Supabase] Contact saved:', contact.name);
 }
@@ -179,10 +184,14 @@ export async function saveReminder(reminder: {
   if (!supabase) return;
   const { data: { session } } = await supabase.auth.getSession();
   const userId = session?.user?.id;
-  const { error } = await supabase.from('reminders').insert({
-    ...reminder,
-    user_id: userId ?? null,
-  });
+  const { error } = await queryWithTimeout(
+    supabase.from('reminders').insert({
+      ...reminder,
+      user_id: userId ?? null,
+    }),
+    15_000,
+    'insert-reminder',
+  );
   if (error) console.error('[Supabase] Failed to save reminder:', error.message);
   else console.log('[Supabase] Reminder saved:', reminder.title);
 }
@@ -198,24 +207,36 @@ export async function saveConversationTurn(turn: object): Promise<void> {
   const today = new Date().toISOString().split('T')[0];
 
   // Try to update today's existing session first
-  const { data: existing } = await supabase
-    .from('conversations')
-    .select('id, turns')
-    .eq('user_id', userId)
-    .eq('session_date', today)
-    .maybeSingle();
+  const { data: existing } = await queryWithTimeout(
+    supabase
+      .from('conversations')
+      .select('id, turns')
+      .eq('user_id', userId)
+      .eq('session_date', today)
+      .maybeSingle(),
+    15_000,
+    'select-today-conversation',
+  );
 
   if (existing) {
     const turns = Array.isArray(existing.turns) ? existing.turns : [];
     turns.push(turn);
-    await supabase
-      .from('conversations')
-      .update({ turns, updated_at: new Date().toISOString() })
-      .eq('id', existing.id);
+    await queryWithTimeout(
+      supabase
+        .from('conversations')
+        .update({ turns, updated_at: new Date().toISOString() })
+        .eq('id', existing.id),
+      15_000,
+      'update-conversation-turns',
+    );
   } else {
-    await supabase
-      .from('conversations')
-      .insert({ user_id: userId, session_date: today, turns: [turn] });
+    await queryWithTimeout(
+      supabase
+        .from('conversations')
+        .insert({ user_id: userId, session_date: today, turns: [turn] }),
+      15_000,
+      'insert-conversation',
+    );
   }
 }
 
@@ -226,12 +247,16 @@ export async function loadTodayConversation(): Promise<object[]> {
   if (!userId) return [];
 
   const today = new Date().toISOString().split('T')[0];
-  const { data } = await supabase
-    .from('conversations')
-    .select('turns')
-    .eq('user_id', userId)
-    .eq('session_date', today)
-    .maybeSingle();
+  const { data } = await queryWithTimeout(
+    supabase
+      .from('conversations')
+      .select('turns')
+      .eq('user_id', userId)
+      .eq('session_date', today)
+      .maybeSingle(),
+    15_000,
+    'load-today-conversation',
+  );
 
   return Array.isArray(data?.turns) ? data.turns : [];
 }
@@ -244,11 +269,15 @@ export async function saveDriveNote(note: {
   const { data: { session } } = await supabase.auth.getSession();
   const userId = session?.user?.id;
   if (!userId) return;
-  const { error } = await supabase.from('naavi_notes').insert({
-    user_id: userId,
-    title: note.title,
-    web_view_link: note.webViewLink ?? null,
-  });
+  const { error } = await queryWithTimeout(
+    supabase.from('naavi_notes').insert({
+      user_id: userId,
+      title: note.title,
+      web_view_link: note.webViewLink ?? null,
+    }),
+    15_000,
+    'insert-drive-note',
+  );
   if (error) console.error('[Supabase] Failed to save drive note:', error.message);
   else console.log('[Supabase] Drive note saved:', note.title);
 }

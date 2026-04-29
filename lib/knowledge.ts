@@ -6,7 +6,7 @@
  */
 
 import { supabase } from './supabase';
-import { invokeWithTimeout } from './invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout } from './invokeWithTimeout';
 
 export interface KnowledgeFragment {
   id: string;
@@ -73,12 +73,16 @@ export async function fetchAllKnowledge(limit = 100): Promise<KnowledgeFragment[
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return [];
-    const { data, error } = await supabase
-      .from('knowledge_fragments')
-      .select('id, type, content, classification, source, confidence')
-      .eq('user_id', session.user.id)
-      .order('created_at', { ascending: false })
-      .limit(limit);
+    const { data, error } = await queryWithTimeout(
+      supabase
+        .from('knowledge_fragments')
+        .select('id, type, content, classification, source, confidence')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false })
+        .limit(limit),
+      15_000,
+      'select-all-knowledge',
+    );
     if (error || !data) return [];
     return data as KnowledgeFragment[];
   } catch (err) {
@@ -94,12 +98,16 @@ export async function deleteKnowledge(keyword: string): Promise<number> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) return 0;
-    const { data, error } = await supabase
-      .from('knowledge_fragments')
-      .delete()
-      .eq('user_id', session.user.id)
-      .ilike('content', `%${keyword.trim()}%`)
-      .select('id');
+    const { data, error } = await queryWithTimeout(
+      supabase
+        .from('knowledge_fragments')
+        .delete()
+        .eq('user_id', session.user.id)
+        .ilike('content', `%${keyword.trim()}%`)
+        .select('id'),
+      15_000,
+      'delete-knowledge-by-keyword',
+    );
     if (error) { console.error('[Knowledge] Delete failed:', error.message); return 0; }
     console.log(`[Knowledge] Deleted ${data?.length ?? 0} fragments matching "${keyword}"`);
     return data?.length ?? 0;

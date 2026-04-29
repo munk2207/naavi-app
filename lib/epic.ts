@@ -10,6 +10,7 @@
  */
 
 import { supabase } from './supabase';
+import { queryWithTimeout } from './invokeWithTimeout';
 
 // ─── Epic OAuth endpoints (sandbox) ──────────────────────────────────────────
 
@@ -50,11 +51,15 @@ export async function isEpicConnected(): Promise<boolean> {
   if (!supabase) return false;
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) return false;
-  const { data } = await supabase
-    .from('epic_tokens')
-    .select('id')
-    .eq('user_id', session.user.id)
-    .limit(1);
+  const { data } = await queryWithTimeout(
+    supabase
+      .from('epic_tokens')
+      .select('id')
+      .eq('user_id', session.user.id)
+      .limit(1),
+    15_000,
+    'select-epic-tokens',
+  );
   const connected = Boolean(data && data.length > 0);
   if (connected) markEpicConnected();
   return connected;
@@ -153,20 +158,32 @@ export async function getEpicHealthContext(): Promise<string> {
   if (!supabase) return '';
   try {
     const [medsRes, apptsRes, condsRes] = await Promise.all([
-      supabase
-        .from('epic_medications')
-        .select('name, dosage, status')
-        .eq('status', 'active')
-        .order('name'),
-      supabase
-        .from('epic_appointments')
-        .select('title, start_iso, location')
-        .order('start_iso', { ascending: false })
-        .limit(5),
-      supabase
-        .from('epic_conditions')
-        .select('name, status')
-        .order('name'),
+      queryWithTimeout(
+        supabase
+          .from('epic_medications')
+          .select('name, dosage, status')
+          .eq('status', 'active')
+          .order('name'),
+        15_000,
+        'select-epic-medications',
+      ),
+      queryWithTimeout(
+        supabase
+          .from('epic_appointments')
+          .select('title, start_iso, location')
+          .order('start_iso', { ascending: false })
+          .limit(5),
+        15_000,
+        'select-epic-appointments',
+      ),
+      queryWithTimeout(
+        supabase
+          .from('epic_conditions')
+          .select('name, status')
+          .order('name'),
+        15_000,
+        'select-epic-conditions',
+      ),
     ]);
 
     const lines: string[] = [];

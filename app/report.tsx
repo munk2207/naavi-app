@@ -28,6 +28,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
+import { queryWithTimeout } from '@/lib/invokeWithTimeout';
 import { suggestFaq, faqUrl, type FaqEntry } from '@/lib/faq';
 
 const FORMSPREE_URL = 'https://formspree.io/f/mpqkkdep';
@@ -77,11 +78,15 @@ export default function ReportScreen() {
       if (authEmail) setEmail(authEmail);
       if (session?.user?.id) {
         setUserId(session.user.id);
-        const { data } = await supabase
-          .from('user_settings')
-          .select('name')
-          .eq('user_id', session.user.id)
-          .maybeSingle();
+        const { data } = await queryWithTimeout(
+          supabase
+            .from('user_settings')
+            .select('name')
+            .eq('user_id', session.user.id)
+            .maybeSingle(),
+          15_000,
+          'select-user-settings-name',
+        );
         if (data?.name) setUserName(data.name);
       }
     })();

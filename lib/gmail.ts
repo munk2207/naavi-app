@@ -7,7 +7,7 @@
  */
 
 import { supabase } from './supabase';
-import { invokeWithTimeout } from './invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout } from './invokeWithTimeout';
 
 const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL      ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -56,13 +56,17 @@ export async function fetchImportantEmails(passedUserId?: string): Promise<Gmail
   startOfToday.setHours(0, 0, 0, 0);
 
   try {
-    const { data: messages, error } = await supabase
-      .from('gmail_messages')
-      .select('gmail_message_id, subject, sender_name, sender_email, snippet, received_at, is_important, labels, is_unread')
-      .eq('user_id', userId)
-      .gte('received_at', startOfToday.toISOString())
-      .order('received_at', { ascending: false })
-      .limit(10);
+    const { data: messages, error } = await queryWithTimeout(
+      supabase
+        .from('gmail_messages')
+        .select('gmail_message_id, subject, sender_name, sender_email, snippet, received_at, is_important, labels, is_unread')
+        .eq('user_id', userId)
+        .gte('received_at', startOfToday.toISOString())
+        .order('received_at', { ascending: false })
+        .limit(10),
+      15_000,
+      'select-important-emails',
+    );
 
     if (error || !messages || messages.length === 0) return [];
     return messages as GmailMessageRow[];
@@ -115,13 +119,17 @@ export async function fetchEmailsFromPerson(name: string, userId: string): Promi
   const nameLower = name.toLowerCase();
 
   try {
-    const { data, error } = await supabase
-      .from('gmail_messages')
-      .select('subject, snippet, received_at, is_unread, sender_name, sender_email')
-      .eq('user_id', userId)
-      .or(`sender_name.ilike.%${nameLower}%,sender_email.ilike.%${nameLower}%,subject.ilike.%${nameLower}%`)
-      .order('received_at', { ascending: false })
-      .limit(10);
+    const { data, error } = await queryWithTimeout(
+      supabase
+        .from('gmail_messages')
+        .select('subject, snippet, received_at, is_unread, sender_name, sender_email')
+        .eq('user_id', userId)
+        .or(`sender_name.ilike.%${nameLower}%,sender_email.ilike.%${nameLower}%,subject.ilike.%${nameLower}%`)
+        .order('received_at', { ascending: false })
+        .limit(10),
+      15_000,
+      'select-emails-from-person',
+    );
 
     if (error || !data) return [];
     return data;
