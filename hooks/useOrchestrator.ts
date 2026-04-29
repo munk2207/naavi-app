@@ -674,9 +674,19 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         try {
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user) {
-            const { data, error } = await supabase.functions.invoke('global-search', {
+            // 8-second hard cap on pre-search. V57.2 — if global-search hangs
+            // we proceed without pre-search results rather than freezing the
+            // whole send pipeline.
+            const searchPromise = supabase.functions.invoke('global-search', {
               body: { query: searchQuery, user_id: session.user.id, limit: 8 },
             });
+            const timeoutPromise = new Promise<{ data: any; error: any }>((resolve) => {
+              setTimeout(() => {
+                console.warn('[Orchestrator] pre-search timed out after 8s — proceeding without results');
+                resolve({ data: null, error: 'timeout' });
+              }, 8_000);
+            });
+            const { data, error } = await Promise.race([searchPromise, timeoutPromise]);
             if (!error && Array.isArray(data?.ranked)) {
               preSearchResults = (data.ranked as GlobalSearchResult[]).slice(0, 8);
               console.log('[Orchestrator] pre-search query=', JSON.stringify(searchQuery), 'returned', preSearchResults.length, 'results');
@@ -1799,6 +1809,19 @@ async function speakCloud(text: string): Promise<void> {
 }
 
 // ── Native playback ───────────────────────────────────────────────────────────
+//
+// V57.2 rewrite — V57.1 testing surfaced multi-minute gaps between TTS chunks
+// because the previous implementation relied on a 30-second flat safety timer
+// PLUS the unreliable `didJustFinish` callback. On Android, `didJustFinish`
+// often doesn't fire even when playback ends cleanly, so each chunk waited
+// the full 30s before resolving. With 4 chunks that's 2 minutes of silence.
+//
+// New approach:
+//   - Resolve via THREE signals, whichever fires first:
+//       (a) status.didJustFinish — when Android cooperates
+//       (b) positionMillis >= durationMillis (with small tolerance)
+//       (c) dynamic safety timer = audio duration + 2s padding (clamped 4-15s)
+//   - Always clean up the Sound object and temp file before resolving.
 async function playBase64AudioNative(base64: string): Promise<void> {
   const tempUri = (FileSystem.cacheDirectory ?? '') + `tts_${Date.now()}.mp3`;
   try {
@@ -1813,42 +1836,80 @@ async function playBase64AudioNative(base64: string): Promise<void> {
     const sound = new Audio.Sound();
     _currentSound = sound;
     await new Promise<void>((resolve, reject) => {
-      // Safety timeout — if playback never completes, release native resources
-      // and resolve after 30s. Without unloadAsync the native decoder leaks;
-      // accumulated leaks over a session can freeze the UI.
-      const safetyTimer = setTimeout(() => {
-        _currentSound = null;
+      let resolved = false;
+      let safetyTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanupAndResolve = (reason: string) => {
+        if (resolved) return;
+        resolved = true;
+        if (safetyTimer) clearTimeout(safetyTimer);
+        if (_currentSound === sound) _currentSound = null;
         sound.unloadAsync().catch(() => {});
         FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+        console.log(`[TTS Native] chunk done — ${reason}`);
         resolve();
-      }, 30000);
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
+      };
+
+      const cleanupAndReject = (err: any) => {
+        if (resolved) return;
+        resolved = true;
+        if (safetyTimer) clearTimeout(safetyTimer);
+        if (_currentSound === sound) _currentSound = null;
+        sound.unloadAsync().catch(() => {});
+        FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
+        reject(err);
+      };
+
+      // Initial safety timer — fires before we know the audio duration. Once
+      // the audio loads we replace this with a duration-based timer.
+      safetyTimer = setTimeout(() => cleanupAndResolve('initial-safety-15s'), 15_000);
+
+      sound.setOnPlaybackStatusUpdate((status: any) => {
+        if (resolved) return;
+
+        // Loaded successfully — replace the initial 15s safety timer with one
+        // calibrated to actual audio duration. Avoids both the V57.1 hang
+        // (didJustFinish never fires → 30s flat wait) and cutting off long
+        // chunks (a 5s flat timer would).
+        if (status.isLoaded && status.durationMillis && safetyTimer) {
+          const duration = status.durationMillis;
+          // duration + 2s padding, clamped to a sensible range. A 60-character
+          // sentence is roughly 4-6 seconds of audio; clamp lower bound at 4s
+          // to give every chunk room. Upper bound 15s catches even long
+          // sentences without hanging too long if didJustFinish never fires.
+          const clamped = Math.min(15_000, Math.max(4_000, duration + 2_000));
           clearTimeout(safetyTimer);
-          _currentSound = null;
-          sound.unloadAsync().then(() => {
-            FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-            resolve();
-          });
+          safetyTimer = setTimeout(() => cleanupAndResolve(`safety-${clamped}ms`), clamped);
         }
-        // If loading failed, reject so the caller can fall back to expo-speech
-        if (!status.isLoaded && (status as any).error) {
-          clearTimeout(safetyTimer);
-          _currentSound = null;
-          sound.unloadAsync().catch(() => {});
-          FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-          reject(new Error((status as any).error));
+
+        // Cleanest end-of-playback signal when Android cooperates.
+        if (status.isLoaded && status.didJustFinish) {
+          cleanupAndResolve('didJustFinish');
+          return;
+        }
+
+        // Position-based end detection — works even when didJustFinish doesn't
+        // fire. When position is within 100ms of duration, we're effectively done.
+        if (
+          status.isLoaded
+          && typeof status.positionMillis === 'number'
+          && typeof status.durationMillis === 'number'
+          && status.durationMillis > 0
+          && status.positionMillis >= status.durationMillis - 100
+        ) {
+          cleanupAndResolve('position-reached-duration');
+          return;
+        }
+
+        // Loading failed — reject so the caller can fall back to expo-speech
+        if (!status.isLoaded && status.error) {
+          cleanupAndReject(new Error(String(status.error)));
         }
       });
+
       sound.loadAsync({ uri: tempUri })
         .then(() => sound.playAsync())
-        .catch((err) => {
-          clearTimeout(safetyTimer);
-          _currentSound = null;
-          sound.unloadAsync().catch(() => {});
-          FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
-          reject(err);
-        });
+        .catch((err) => cleanupAndReject(err));
     });
   } catch (err) {
     console.error('[TTS Native] playback error:', err);
