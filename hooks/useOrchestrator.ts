@@ -474,8 +474,14 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           15_000,
           'insert-location-rule',
         );
-        if (error) {
-          console.error('[Orchestrator] pending location insert failed:', error.message);
+        // V57.6 — strict success requires BOTH no error AND a real row id.
+        // queryWithTimeout returns { data: null, error: TimeoutError } on
+        // timeout, so the !error guard catches that. But we also defend
+        // against the rare case where Postgrest returns { data: null,
+        // error: null } (older supabase-js versions did this on RLS
+        // rejection silently).
+        if (error || !insertedRule?.id) {
+          console.error('[Orchestrator] pending location insert failed:', error?.message ?? 'no row returned');
           return { ok: false, ruleId: null };
         }
         // Only write to cache on explicit user confirmation (not on memory-hit during clarification).
@@ -663,6 +669,21 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       origin: 'pre-search' | 'claude-action';
     } | undefined;
 
+    // V57.6 — diagnostic timing for the turn-2-slowness bug. Tag each step
+    // with a turn-local label so we can read the timeline from logs:
+    //   [orch:T#1] step-1-person-ctx 23ms
+    //   [orch:T#1] step-4-naavi-chat 1245ms
+    //   [orch:T#2] step-1-person-ctx 156ms   ← slow on turn 2
+    //   [orch:T#2] step-4-naavi-chat 88321ms ← very slow
+    // We piggyback on currentTurnIdRef which was already bumped above.
+    const turnNumber = currentTurnIdRef.current;
+    const t0 = Date.now();
+    const stepLog = (step: string) => {
+      const ms = Date.now() - t0;
+      console.log(`[orch:T#${turnNumber}] ${step} ${ms}ms`);
+    };
+    console.log(`[orch:T#${turnNumber}] start userMessage=${JSON.stringify(userMessage).slice(0, 80)}`);
+
     try {
       let enrichedMessage = userMessage;
 
@@ -774,10 +795,12 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
       }
 
+      stepLog('pre-naavi-chat done');
       const [response, knowledgeResult] = await Promise.all([
         sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language),
         isBroadQuery ? fetchAllKnowledge(100) : Promise.resolve([]),
       ]);
+      stepLog('naavi-chat returned');
       // Cancel-during-thinking guard — if Robert tapped orange Stop while we
       // were waiting on Claude, abandon the response. Status is already idle
       // (set by the orange-button handler); rendering would re-add cards and
@@ -1314,16 +1337,20 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                       15_000,
                       'insert-location-rule-memory-hit',
                     );
+                    // V57.6 — only confirm the alert was set if the insert
+                    // actually returned a row. Previously we set "Alert set"
+                    // speech unconditionally, which lied to Robert when the
+                    // insert timed out or RLS-failed silently.
+                    const insertSucceeded = !insertErr && !!insertedRule?.id;
                     if (insertErr) {
-                      console.error('[Orchestrator] memory-hit insert failed:', insertErr.message);
-                    } else {
-                      if (insertedRule?.id) {
-                        turnLocationRules.push({
-                          ruleId: String(insertedRule.id),
-                          placeName: data.place_name,
-                          oneShot,
-                        });
-                      }
+                      console.error('[Orchestrator] memory-hit insert failed:', insertErr.message ?? insertErr);
+                    }
+                    if (insertSucceeded) {
+                      turnLocationRules.push({
+                        ruleId: String(insertedRule!.id),
+                        placeName: data.place_name,
+                        oneShot,
+                      });
                       try {
                         const { syncGeofencesForUser } = await import('@/hooks/useGeofencing');
                         await syncGeofencesForUser(session.user.id);
@@ -1334,8 +1361,12 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                     locationIntercepted = true;
                     // V57.4 — speech now states one-time vs every-time so
                     // Robert always knows which mode the rule is in.
+                    // V57.6 — fall back to a candid error if the insert
+                    // didn't land. Speech-truthfulness rule.
                     const modeText = oneShot ? 'one time' : 'every time';
-                    turnSpeechOverride = `Alert set — ${modeText} you arrive at ${data.place_name}.`;
+                    turnSpeechOverride = insertSucceeded
+                      ? `Alert set — ${modeText} you arrive at ${data.place_name}.`
+                      : `I couldn't save the alert — please try again in a moment.`;
                     continue;
                   }
 
@@ -1443,6 +1474,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       };
       setTurns(prev => [...prev, newTurn]);
       saveConversationTurn(newTurn).catch(() => {});
+      stepLog('actions done, turn rendered');
 
       // Build final speech — append list items for LIST_READ so Naavi reads them aloud
       // Location intercept takes precedence over Claude's speech (no list-append).

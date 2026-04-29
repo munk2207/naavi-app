@@ -287,9 +287,13 @@ export function useConversationRecorder(): UseConversationRecorderResult {
     if (!tid || !supabase) return;
 
     try {
+      // V57.6 — was 15_000 ms, but conversation processing (AssemblyAI
+      // transcription + Claude analysis) regularly takes 30-60s. 15s
+      // was always firing before the poll completed and failing the
+      // visit recorder entirely. 90s is comfortable headroom.
       const { data, error } = await invokeWithTimeout('poll-conversation', {
         body: { transcript_id: tid },
-      }, 15_000);
+      }, 90_000);
 
       if (error) throw new Error(error.message);
 
@@ -343,9 +347,11 @@ export function useConversationRecorder(): UseConversationRecorderResult {
 
     try {
       // Step 1 — extract action items via Claude
+      // V57.6 — was 30_000 ms, but Claude action extraction over a long
+      // visit transcript can take 45-60s. 60s is comfortable headroom.
       const { data, error } = await invokeWithTimeout('extract-actions', {
         body: { utterances: currentUtterances, speaker_names: currentNames },
-      }, 30_000);
+      }, 60_000);
 
       if (error) throw new Error(error.message);
 

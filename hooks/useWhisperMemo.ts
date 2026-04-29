@@ -160,9 +160,11 @@ export function useWhisperMemo(): UseWhisperMemoResult {
           const mimeMap: Record<string, string> = { m4a: 'audio/m4a', mp4: 'audio/mp4', '3gp': 'audio/3gp', wav: 'audio/wav' };
           const mimeType = mimeMap[ext] ?? 'audio/m4a';
 
+          // V57.6 — was 30_000 ms, but Whisper API can take 30-60s on
+          // longer audio. 60s is comfortable headroom.
           const { data, error } = await invokeWithTimeout('transcribe-memo', {
             body: { audio: base64, mimeType, language },
-          }, 30_000);
+          }, 60_000);
 
           if (error || !data?.transcript) {
             const ctxJson  = (error as any)?.context?.json?.error;
