@@ -278,15 +278,6 @@ export default function NotesScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
 
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.replace('/')} style={styles.backBtn}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Notes</Text>
-        <View style={{ width: 64 }} />
-      </View>
-
       {/* Tab bar */}
       <View style={styles.tabBar}>
         <TouchableOpacity

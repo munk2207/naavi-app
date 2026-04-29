@@ -28,6 +28,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
+import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -242,9 +243,9 @@ export default function AlertsScreen() {
       if (!supabase) { setLoading(false); return; }
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) { setLoading(false); return; }
-      const { data, error: err } = await supabase.functions.invoke('manage-rules', {
+      const { data, error: err } = await invokeWithTimeout('manage-rules', {
         body: { op: 'list' },
-      });
+      }, 15_000);
       if (err) throw err;
       setRules(Array.isArray((data as any)?.rules) ? (data as any).rules : []);
     } catch (e: unknown) {
@@ -286,9 +287,9 @@ export default function AlertsScreen() {
     setDeleting(true);
     try {
       if (!supabase) throw new Error('No Supabase client');
-      const { error: err } = await supabase.functions.invoke('manage-rules', {
+      const { error: err } = await invokeWithTimeout('manage-rules', {
         body: { op: 'delete', rule_id: pendingDelete.id },
-      });
+      }, 15_000);
       if (err) throw err;
       setRules(prev => prev.filter(r => r.id !== pendingDelete.id));
       setPendingDelete(null);

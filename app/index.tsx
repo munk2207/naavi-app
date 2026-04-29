@@ -46,6 +46,7 @@ import { isVoiceEnabledSync, hydrateVoicePref, refreshVoicePref } from '@/lib/vo
 import { ConversationActionCard } from '@/components/ConversationActionCard';
 import { TopBarMenu } from '@/components/TopBarMenu';
 import { IconButton } from '@/components/IconButton';
+import { LocationRuleCard } from '@/components/LocationRuleCard';
 import { getBriefWindow, filterByWindow, pickRandomTip } from '@/lib/brief-logic';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
@@ -73,6 +74,7 @@ import { getBackgroundPermission, requestLocationPermissions } from '@/lib/locat
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
+import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
 
 // ─── Integrations data ────────────────────────────────────────────────────────
 
@@ -395,9 +397,9 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
 
       try {
         console.log(`[Send] ${channelLabel} to ${phone}, body: ${String(action.body ?? '').slice(0, 30)}`);
-        const { data, error } = await supabase.functions.invoke('send-sms', {
+        const { data, error } = await invokeWithTimeout('send-sms', {
           body: { to: phone, body: String(action.body ?? ''), channel },
-        });
+        }, 30_000);
         console.log('[Send] Response:', JSON.stringify({ data, error: error?.message }));
         setSending(false);
         if (error || !data?.success) {
@@ -1707,6 +1709,16 @@ export default function HomeScreen() {
                   <Text style={styles.memoryText}>{item.text}</Text>
                   {item.count > 0 && <Text style={styles.memoryMeta}>{item.count} fragment{item.count !== 1 ? 's' : ''} stored</Text>}
                 </View>
+              ))}
+
+              {/* Location rules — V57.4 Part B toggle card */}
+              {(turn.locationRules ?? []).map((rule, i) => (
+                <LocationRuleCard
+                  key={`loc-${rule.ruleId}-${i}`}
+                  ruleId={rule.ruleId}
+                  placeName={rule.placeName}
+                  initialOneShot={rule.oneShot}
+                />
               ))}
 
               {/* List results */}

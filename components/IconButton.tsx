@@ -74,7 +74,12 @@ export function IconButton({ icon, label, description, onPress, onLongPress, onP
       longPressTimer.current = null;
     }
     if (longPressFired.current) {
-      longPressFired.current = false;
+      // V57.4 fix — DO NOT reset longPressFired here. React Native fires
+      // onPressOut BEFORE onPress, so resetting here causes the onPress
+      // short-circuit check to see false and the button action runs anyway
+      // (the exact bug Wael reported on V57.3 build 120: long-press peeks
+      // AND triggers the action). Reset happens on the NEXT onPressIn so
+      // onPress sees the flag as true and correctly suppresses the click.
       hidePeek();
     }
   };

@@ -7,6 +7,7 @@
  */
 
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './invokeWithTimeout';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 
@@ -25,9 +26,9 @@ export async function searchDriveFiles(query: string): Promise<DriveFile[]> {
   if (!supabase || !query.trim()) return [];
 
   try {
-    const { data, error } = await supabase.functions.invoke('search-google-drive', {
+    const { data, error } = await invokeWithTimeout('search-google-drive', {
       body: { query },
-    });
+    }, 30_000);
     if (error) { console.error('[Drive] Search failed:', error); return []; }
     return data?.files ?? [];
   } catch (err) {
@@ -49,9 +50,9 @@ export async function sendDriveFileAsEmail(opts: {
   if (!supabase) return { success: false, error: 'Not configured' };
 
   try {
-    const { data, error } = await supabase.functions.invoke('send-drive-file', {
+    const { data, error } = await invokeWithTimeout('send-drive-file', {
       body: opts,
-    });
+    }, 60_000);
     if (error) return { success: false, error: error.message ?? 'Send failed' };
     return { success: true };
   } catch (err) {
@@ -73,9 +74,9 @@ export async function saveToDrive(opts: {
   if (!supabase) return { success: false, error: 'Not configured' };
 
   try {
-    const { data, error } = await supabase.functions.invoke('save-to-drive', {
+    const { data, error } = await invokeWithTimeout('save-to-drive', {
       body: opts,
-    });
+    }, 60_000);
     if (error) return { success: false, error: error.message ?? 'Save failed' };
     if (data?.error) return { success: false, error: String(data.error) };
     return { success: true, fileId: data?.fileId, webViewLink: data?.webViewLink };

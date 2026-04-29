@@ -7,6 +7,7 @@
  */
 
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './invokeWithTimeout';
 import * as Location from 'expo-location';
 
 export interface TravelTime {
@@ -81,7 +82,7 @@ export async function fetchTravelTime(
       getStoredHomeAddress(),
     ]);
 
-    const { data, error } = await supabase.functions.invoke('get-travel-time', {
+    const { data, error } = await invokeWithTimeout('get-travel-time', {
       body: {
         destination,
         originLat: location?.lat,
@@ -89,7 +90,7 @@ export async function fetchTravelTime(
         originAddress: (!location && homeAddress) ? homeAddress : undefined,
         avoidHighways,
       },
-    });
+    }, 15_000);
 
     if (error || !data || data.durationMinutes == null) return null;
 

@@ -10,6 +10,7 @@ import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
 import * as Speech from 'expo-speech';
 import { supabase } from '@/lib/supabase';
+import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
 import { Colors } from '@/constants/Colors';
 // speakCue uses Deepgram aura-hera-en so this screen sounds like Naavi's
 // main voice (falls back to expo-speech if the network is down).
@@ -26,9 +27,9 @@ export default function BriefScreen() {
 
     (async () => {
       try {
-        const { data, error } = await supabase.functions.invoke('assistant-fulfillment', {
+        const { data, error } = await invokeWithTimeout('assistant-fulfillment', {
           body: { intent: 'brief' },
-        });
+        }, 30_000);
 
         if (cancelled) return;
         if (error) throw error;

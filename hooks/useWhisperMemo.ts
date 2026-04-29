@@ -14,6 +14,7 @@ import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '@/lib/supabase';
+import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
 
 export type MemoState = 'idle' | 'recording' | 'transcribing' | 'error';
 
@@ -159,9 +160,9 @@ export function useWhisperMemo(): UseWhisperMemoResult {
           const mimeMap: Record<string, string> = { m4a: 'audio/m4a', mp4: 'audio/mp4', '3gp': 'audio/3gp', wav: 'audio/wav' };
           const mimeType = mimeMap[ext] ?? 'audio/m4a';
 
-          const { data, error } = await supabase.functions.invoke('transcribe-memo', {
+          const { data, error } = await invokeWithTimeout('transcribe-memo', {
             body: { audio: base64, mimeType, language },
-          });
+          }, 30_000);
 
           if (error || !data?.transcript) {
             const ctxJson  = (error as any)?.context?.json?.error;
@@ -210,9 +211,9 @@ export function useWhisperMemo(): UseWhisperMemoResult {
 
           if (!supabase) throw new Error('Supabase not configured');
 
-          const { data, error } = await supabase.functions.invoke('transcribe-memo', {
+          const { data, error } = await invokeWithTimeout('transcribe-memo', {
             body: { audio: base64, mimeType: 'audio/webm', language },
-          });
+          }, 30_000);
 
           if (error || !data?.transcript) {
             throw new Error(error?.message ?? 'Transcription failed');

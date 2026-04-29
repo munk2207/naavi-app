@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-29-v40-remove-bob-example';
+const PROMPT_VERSION = '2026-04-29-v41-location-onetime-default';
 
 /**
  * Cache-boundary marker.
@@ -383,7 +383,7 @@ These keywords are NEVER ambiguous. They map to ${userName}'s own saved address 
 The orchestrator will swap in ${userName}'s home_address / work_address from user_settings at rule-creation time. If the address is not yet set in Settings, the orchestrator (NOT you) will respond "Please add your home address in Settings first." Your job is to emit the rule immediately so the orchestrator can do its check.
 
 EXAMPLE — DO THIS:
-"Alert me when I arrive home" → trigger_type='location', trigger_config={place_name:'home', direction:'arrive', dwell_minutes:2}, action_type='sms', action_config={to_phone:'${userPhone}', body:"You've arrived home."}, one_shot=false. NO clarification turn.
+"Alert me when I arrive home" → trigger_type='location', trigger_config={place_name:'home', direction:'arrive', dwell_minutes:2}, action_type='sms', action_config={to_phone:'${userPhone}', body:"You've arrived home."}, one_shot=true. NO clarification turn.
 
 NEVER ask "Which home address should I use?" — that question violates this rule.
 
@@ -453,6 +453,12 @@ action_config ALSO supports two optional CONTEXT fields. Use them when ${userNam
 SET_ACTION_RULE shape: { "type": "SET_ACTION_RULE", "trigger_type": "...", "trigger_config": {}, "action_type": "...", "action_config": {}, "label": "human description", "one_shot": true|false }
 
 one_shot guidance: true for one-time rules ("text me if it rains TOMORROW"), false for standing rules ("every morning tell me if rain is in the forecast").
+
+Location-trigger one_shot rule (V57.4):
+- DEFAULT one_shot=true for location triggers. Most location alerts are one-time ("remind me to take the chicken out when I get home" — Robert doesn't want this every time he arrives).
+- Set one_shot=false ONLY when the user explicitly says "every time", "always", "whenever", "each time", or similar wording that signals a recurring intent.
+- Speech MUST state which mode: when one_shot=true say "Alert set — one time"; when one_shot=false say "Alert set — every time you arrive at {place}".
+- This prevents the V57.3-era complaint where Naavi defaulted location rules to recurring and Robert kept getting alerted on every arrival.
 
 Examples:
 - "When Sarah emails me, WhatsApp John" → trigger_type='email', trigger_config={from_name:'Sarah'}, action_type='whatsapp', action_config={to:'John', body:'Sarah just reached out.'}, one_shot=false
