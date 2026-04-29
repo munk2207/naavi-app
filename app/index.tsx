@@ -22,6 +22,9 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Modal,
+  AppState,
+  Alert,
+  Linking as RNLinking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
@@ -66,6 +69,7 @@ import { sendDriveFileAsEmail } from '@/lib/drive';
 import { lookupContact, type Contact } from '@/lib/contacts';
 import { resolveRecipient } from '@/lib/recipientLookup';
 import { saveContact, loadTodayConversation, signInWithGoogle, signOut } from '@/lib/supabase';
+import { getBackgroundPermission, requestLocationPermissions } from '@/lib/location';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
@@ -553,6 +557,16 @@ export default function HomeScreen() {
   const [showIntegrations, setShowIntegrations] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
+
+  // Location permission state. Tracks whether the device has BACKGROUND
+  // location ("Always allow") — the level required for geofencing to fire
+  // when the app is closed. Re-checked on sign-in and on app foreground in
+  // case the user changed it via system settings. (Session 26 design lock,
+  // V57.1 Bug 7: explicit value-permission framing tied to sign-in instead of
+  // a hidden Settings toggle.)
+  const [locationGranted, setLocationGranted] = useState<boolean>(true); // optimistic default; corrected on first check
+  const [locationCheckDone, setLocationCheckDone] = useState<boolean>(false);
+  const [locationBusy, setLocationBusy] = useState<boolean>(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [briefDays, setBriefDays] = useState<number>(1); // default: today only
   const [recordingPrompt, setRecordingPrompt] = useState<{ title: string; endMs: number } | null>(null);
@@ -620,6 +634,37 @@ export default function HomeScreen() {
       .then(({ data }) => {
         avoidHighwaysRef.current = !!(data && data.length > 0);
       });
+  }, [currentUserId]);
+
+  // Check location permission whenever the user signs in (or changes user).
+  // Background "Always allow" is required for geofencing to fire when the
+  // app is closed. If not granted, a persistent banner in the home screen
+  // explains the value and offers to enable. The banner stays until the
+  // permission is granted — no hidden Settings toggle. (Bug 7, V57.1.)
+  useEffect(() => {
+    if (!currentUserId) return;
+    let cancelled = false;
+    (async () => {
+      const status = await getBackgroundPermission();
+      if (cancelled) return;
+      setLocationGranted(status === 'granted');
+      setLocationCheckDone(true);
+    })();
+    return () => { cancelled = true; };
+  }, [currentUserId]);
+
+  // Re-check location permission on every app foreground — the user may have
+  // changed it via system settings while away. Without this we'd keep showing
+  // the "Enable location" banner even after the user granted from Settings.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (state) => {
+      if (state === 'active' && currentUserId) {
+        const status = await getBackgroundPermission();
+        setLocationGranted(status === 'granted');
+        setLocationCheckDone(true);
+      }
+    });
+    return () => sub.remove();
   }, [currentUserId]);
 
   // Load calendar data whenever user ID becomes available
@@ -737,11 +782,11 @@ export default function HomeScreen() {
   }, [brief]);
 
   const [handsfreeActive, setHandsfreeActive] = useState(false);
-  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, onOrangeButtonPressed, pendingAction, confirmPending, cancelPending, editPending } = useOrchestrator('en', brief, avoidHighwaysRef.current, handsfreeActive);
+  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, onOrangeButtonPressed, isAudioPlaying, pendingAction, confirmPending, cancelPending, editPending } = useOrchestrator('en', brief, avoidHighwaysRef.current, handsfreeActive);
 
   // Lock-model derived flags — wired into every voice-channel button below.
   const inputLocked = isInputLocked(status);
-  const orangeVisible = isOrangeButtonVisible(status);
+  const orangeVisible = isOrangeButtonVisible(status, isAudioPlaying);
   const orangeLabel = orangeButtonLabel(status);
 
   // Per-(turn, source) expanded state for Global Search "N more" groups.
@@ -1306,6 +1351,51 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
+        {/* Persistent location-permission banner. Shows ONLY when the user is
+            signed in AND we've checked permission AND it's not granted.
+            Explicit value framing per the design principle: state what value
+            the permission unlocks, not just the system name. The banner stays
+            visible until the user enables (no dismiss) — a missed alert is
+            worse than a visible reminder. (V57.1, Bug 7.) */}
+        {currentUserId && locationCheckDone && !locationGranted && (
+          <TouchableOpacity
+            style={styles.locationBanner}
+            onPress={async () => {
+              if (locationBusy) return;
+              setLocationBusy(true);
+              try {
+                const { background } = await requestLocationPermissions();
+                setLocationGranted(background === 'granted');
+                if (background !== 'granted' && Platform.OS !== 'web') {
+                  // Foreground granted but not "Always allow" — Android requires
+                  // the user to flip it via system settings.
+                  Alert.alert(
+                    'One more step',
+                    'To send arrival alerts even when MyNaavi is closed, the system needs "Allow all the time". Tap Settings, find MyNaavi, and switch Location to "Allow all the time".',
+                    [
+                      { text: 'Maybe later', style: 'cancel' },
+                      { text: 'Open Settings', onPress: () => RNLinking.openSettings().catch(() => {}) },
+                    ]
+                  );
+                }
+              } catch (e) {
+                console.error('[Location] permission request failed:', e);
+              } finally {
+                setLocationBusy(false);
+              }
+            }}
+            disabled={locationBusy}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="location" size={18} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.locationBannerText} numberOfLines={2}>
+              {locationBusy
+                ? 'Requesting location access…'
+                : 'To receive arrival alerts (e.g. "leave for the doctor in 10 minutes", "arriving at Costco — your list"), you must enable Location. Tap to enable.'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
         <ScrollView
           ref={scrollRef}
           style={styles.scroll}
@@ -1590,7 +1680,12 @@ export default function HomeScreen() {
                 <ConversationActionCard
                   key={i}
                   action={action}
-                  onCalendar={(a) => send(`Create a calendar event: ${a.calendar_title ?? a.title}, ${a.timing}`)}
+                  /* onCalendar removed in V57.1 — calendar events for the
+                     auto-created types (appointment / meeting / call / test /
+                     prescription / follow_up) are created during
+                     confirmSpeakers, so re-firing through Naavi here would
+                     produce duplicates and a redundant time prompt. The card
+                     now shows a read-only "✓ In your calendar" badge. */
                   onEmail={(a) => {
                     // Auto-send the draft request. Use suggested_by (the speaker
                     // who proposed the action — usually the doctor / professional
@@ -2761,6 +2856,35 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  // Persistent location-permission banner. Same horizontal placement as the
+  // sign-in banner but a different color (warning amber-ish) and a longer
+  // multiline value-framing text. Stays visible until permission is granted
+  // — no dismiss button. (V57.1 Bug 7.)
+  locationBanner: {
+    position: 'absolute',
+    top: 10,
+    left: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#B45309', // amber-700 — distinct from sign-in (accent) and Stop (alert)
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    zIndex: 99,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  locationBannerText: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
   },
   // Empty-state block inside the brief — "Nothing on your plate today" plus
   // a rotating Try-this tip from lib/brief-logic.

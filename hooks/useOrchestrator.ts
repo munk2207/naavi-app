@@ -48,15 +48,21 @@ const FRESH_COMMAND_RE = /^\s*(alert|text|notify|remind|tell)\s+(me|my|the|him|h
 //   idle            — no active turn. All inputs unlocked.
 //   thinking        — send() called, awaiting Naavi's response. Voice channels +
 //                     Send + Visits LOCKED. Orange ⏹ Stop visible — taps cancel
-//                     the in-flight request and return to idle (no answer_active
-//                     buffer, since there's no answer to consume yet).
-//   speaking        — Naavi's TTS is playing. Voice channels + Send + Visits
-//                     LOCKED. Orange ⏹ Stop visible — taps silence voice and
-//                     transition to answer_active.
-//   answer_active   — voice was manually silenced via orange Stop. 10-second
-//                     buffer before auto-release. Voice channels + Send + Visits
-//                     remain LOCKED. Orange morphs to ✕ Cancel — tap or 10s
-//                     timeout returns to idle.
+//                     the in-flight request and return to idle (no buffer since
+//                     there's no answer to consume yet).
+//   speaking        — Naavi's TTS is playing OR text is rendering. Voice
+//                     channels + Send + Visits LOCKED. Orange ⏹ Stop visible
+//                     ONLY while audio is actually emitting (see _isAudioPlaying).
+//                     Taps silence voice and transition to answer_active.
+//   answer_active   — voice was manually silenced via orange Stop. The answer
+//                     keeps working silently (text continues filling). NO timer
+//                     yet. Voice channels + Send + Visits LOCKED. Orange shows
+//                     ✕ Cancel. Robert taps Cancel OR the answer finishes
+//                     silently — either trigger transitions to cooldown.
+//   cooldown        — 10-second buffer that runs AFTER Cancel tap or AFTER the
+//                     silent answer completes. Voice channels + Send + Visits
+//                     stay LOCKED. Orange button hidden. When the timer
+//                     expires, status flips to idle.
 //   pending_confirm — hands-free draft yes/no/edit listening (the only exception
 //                     to the lock — directed listening for a specific answer).
 //   error           — terminal failure state. Released same as idle.
@@ -65,6 +71,7 @@ export type OrchestratorStatus =
   | 'thinking'
   | 'speaking'
   | 'answer_active'
+  | 'cooldown'
   | 'pending_confirm'
   | 'error';
 
@@ -73,9 +80,14 @@ export type OrchestratorStatus =
 // Voice channels (mic, hands-free, Visits) and the Send button are locked in
 // every state except idle and error. pending_confirm counts as "locked" for
 // these — Robert resolves the draft via the DraftCard buttons, not via the
-// chat input row.
+// chat input row. Cooldown also counts as locked — buttons unlock only after
+// the 10-second buffer ends.
 export function isInputLocked(s: OrchestratorStatus): boolean {
-  return s === 'thinking' || s === 'speaking' || s === 'answer_active' || s === 'pending_confirm';
+  return s === 'thinking'
+      || s === 'speaking'
+      || s === 'answer_active'
+      || s === 'cooldown'
+      || s === 'pending_confirm';
 }
 
 // TextInput is NEVER locked — typing has no audio-pickup risk and pre-composing
@@ -84,10 +96,18 @@ export function isTextInputLocked(_s: OrchestratorStatus): boolean {
   return false;
 }
 
-// Orange ⏹ Stop / ✕ Cancel button visibility. Visible in thinking, speaking,
-// answer_active. Not visible in idle / pending_confirm / error.
-export function isOrangeButtonVisible(s: OrchestratorStatus): boolean {
-  return s === 'thinking' || s === 'speaking' || s === 'answer_active';
+// Orange ⏹ Stop / ✕ Cancel button visibility.
+//   thinking          → ⏹ Stop (cancel in-flight request)
+//   speaking + audio  → ⏹ Stop (silence voice)
+//   speaking + silent → hidden  (nothing audible to stop)
+//   answer_active     → ✕ Cancel (release the lock)
+//   cooldown          → hidden  (lock is auto-releasing)
+//   idle/pending/err  → hidden
+export function isOrangeButtonVisible(s: OrchestratorStatus, isAudioPlaying: boolean): boolean {
+  if (s === 'thinking') return true;
+  if (s === 'speaking') return isAudioPlaying;
+  if (s === 'answer_active') return true;
+  return false;
 }
 
 // Orange button label morphs based on state.
@@ -124,15 +144,43 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const statusRef = useRef<OrchestratorStatus>('idle');
   useEffect(() => { statusRef.current = status; }, [status]);
 
-  // 10-second timer that releases the answer_active state. Cleared if Robert
-  // taps Cancel before it fires, or if a new turn starts.
-  const answerActiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const clearAnswerActiveTimer = useCallback(() => {
-    if (answerActiveTimerRef.current) {
-      clearTimeout(answerActiveTimerRef.current);
-      answerActiveTimerRef.current = null;
+  // True ONLY while TTS is actively emitting audio. Drives the orange Stop
+  // button visibility — the button hides when nothing is being spoken, even
+  // if status is still 'speaking' (e.g., text rendering after audio finished,
+  // or Voice Playback OFF in Settings). Set true at the top of speakCloud /
+  // speakCloudNative, false when those resolve. UI re-renders via setIsAudioPlaying.
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const isAudioPlayingRef = useRef(false);
+  // Always reflects the latest value. Used by speakResponse paths to update
+  // synchronously before re-render.
+  const setAudioPlaying = useCallback((v: boolean) => {
+    isAudioPlayingRef.current = v;
+    setIsAudioPlaying(v);
+  }, []);
+
+  // 10-second cooldown timer. Started when Robert taps ✕ Cancel during
+  // answer_active OR when the silent answer finishes processing. Releases the
+  // lock to idle when it expires. Cleared if a new turn starts.
+  const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearCooldownTimer = useCallback(() => {
+    if (cooldownTimerRef.current) {
+      clearTimeout(cooldownTimerRef.current);
+      cooldownTimerRef.current = null;
     }
   }, []);
+  // Start the 10-second cooldown. Status flips to 'cooldown' immediately;
+  // when the timer fires, it flips to 'idle' (only if still in cooldown — a
+  // new turn that already moved status forward wins).
+  const startCooldown = useCallback(() => {
+    clearCooldownTimer();
+    setStatus('cooldown');
+    cooldownTimerRef.current = setTimeout(() => {
+      if (statusRef.current === 'cooldown') {
+        setStatus('idle');
+      }
+      cooldownTimerRef.current = null;
+    }, 10_000);
+  }, [clearCooldownTimer]);
 
   // Pending location rule — between the "Found X, shall I set?" turn and the
   // user's yes/no confirmation. Supports the verified-address-only rule
@@ -204,9 +252,9 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     const turnId = ++currentTurnIdRef.current;
     const isCancelled = () => currentTurnIdRef.current !== turnId;
 
-    // Cancel any pending answer_active timer — we're starting a fresh turn,
-    // the previous answer is officially terminated.
-    clearAnswerActiveTimer();
+    // Cancel any pending cooldown timer — we're starting a fresh turn, the
+    // previous cooldown is officially obsolete.
+    clearCooldownTimer();
 
     // Clear any pending confirm when a new message comes in (edit flow)
     if (pendingActionRef.current) {
@@ -1419,13 +1467,24 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       // we'd otherwise stomp the post-cancel idle state).
       if (isCancelled()) return;
       setStatus('speaking');
+      setAudioPlaying(true);
       speakResponse(finalSpeech, language).then(() => {
+        // Audio finished (or never started in voice-off mode). Either way the
+        // playback path is done.
+        setAudioPlaying(false);
         if (isCancelled()) return;
-        // If user tapped orange Stop during speaking, status is now 'answer_active'
-        // (the timer is running) — DON'T override it back to idle.
-        if (statusRef.current === 'answer_active') return;
-        // Only enter voice-confirm flow if hands-free is active
-        // In tap-to-talk mode, Robert uses the Send button on the DraftCard
+        // If user tapped orange Stop during speaking, status is 'answer_active'.
+        // The silent answer just finished — kick off the 10s cooldown so the
+        // lock auto-releases. (Session 26 design lock — Robert's correction:
+        // timer fires from end-of-silent-answer, NOT from Stop tap.)
+        if (statusRef.current === 'answer_active') {
+          startCooldown();
+          return;
+        }
+        // If user tapped Cancel earlier, status is 'cooldown' — don't override.
+        if (statusRef.current === 'cooldown') return;
+        // Only enter voice-confirm flow if hands-free is active.
+        // In tap-to-talk mode, Robert uses the Send button on the DraftCard.
         if (pendingActionRef.current && handsfreeRef.current) {
           setStatus('pending_confirm');
         } else {
@@ -1437,8 +1496,13 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           setStatus('idle');
         }
       }).catch(() => {
+        setAudioPlaying(false);
         if (isCancelled()) return;
-        if (statusRef.current === 'answer_active') return;
+        if (statusRef.current === 'answer_active') {
+          startCooldown();
+          return;
+        }
+        if (statusRef.current === 'cooldown') return;
         setStatus('idle');
       });
 
@@ -1518,65 +1582,65 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
   const stopAndReset = useCallback(() => {
     stopSpeaking();
-    clearAnswerActiveTimer();
+    setAudioPlaying(false);
+    clearCooldownTimer();
     pendingActionRef.current = null;
     setPendingAction(null);
     setStatus('idle');
-  }, [clearAnswerActiveTimer]);
+  }, [clearCooldownTimer, setAudioPlaying]);
 
   // ── Lock-model orange button dispatcher ────────────────────────────────────
   // The UI's orange ⏹ Stop / ✕ Cancel button calls this. Behavior depends on
-  // current status — see the OrchestratorStatus type docs at the top.
-  //   thinking      → cancel in-flight turn, return to idle (no answer_active
-  //                   buffer because there's no answer to consume yet)
-  //   speaking      → silence voice, enter answer_active with 10s timer
-  //   answer_active → cancel early (clear timer, return to idle)
-  //   other         → no-op (defensive — UI shouldn't render the button anyway)
+  // current status (Session 26 design lock — Robert's correction):
+  //   thinking      → cancel in-flight turn, return to idle. No buffer because
+  //                   there's no answer to consume yet.
+  //   speaking      → silence voice, enter answer_active. NO timer yet — the
+  //                   silent answer keeps working in the background. The timer
+  //                   only starts when (a) Robert taps ✕ Cancel or (b) the
+  //                   answer finishes silent processing.
+  //   answer_active → tap interpreted as ✕ Cancel. Start the 10-second
+  //                   cooldown timer; status flips to 'cooldown'.
+  //   cooldown      → no-op (orange should be hidden — defensive).
+  //   other         → no-op (defensive — UI shouldn't render the button).
   const onOrangeButtonPressed = useCallback(() => {
     const s = statusRef.current;
     if (s === 'thinking') {
-      // Invalidate the in-flight turn — when sendToNaavi resolves, isCancelled()
-      // will be true and the response will be discarded.
       currentTurnIdRef.current++;
-      // Also stop any speech that might have already started in race conditions
       stopSpeaking();
-      clearAnswerActiveTimer();
+      setAudioPlaying(false);
+      clearCooldownTimer();
       pendingActionRef.current = null;
       setPendingAction(null);
       setStatus('idle');
     } else if (s === 'speaking') {
-      // Manual interrupt — silence voice, enter answer_active for 10s.
+      // Silence voice. Status → answer_active with NO timer. The timer starts
+      // only when Cancel is tapped OR when the silent answer finishes (the
+      // speakResponse .then() / .catch() handlers detect the end-of-answer
+      // and call startCooldown()).
       stopSpeaking();
+      setAudioPlaying(false);
       setStatus('answer_active');
-      // Start the 10-second auto-release timer.
-      clearAnswerActiveTimer();
-      answerActiveTimerRef.current = setTimeout(() => {
-        // Only release if still in answer_active (a new send() would have
-        // bumped us out of it already; this is a defensive check).
-        if (statusRef.current === 'answer_active') {
-          setStatus('idle');
-        }
-        answerActiveTimerRef.current = null;
-      }, 10_000);
     } else if (s === 'answer_active') {
-      // Manual cancel — release the lock immediately.
-      clearAnswerActiveTimer();
-      setStatus('idle');
+      // Tap = ✕ Cancel. Start the 10-second cooldown buffer.
+      startCooldown();
     }
-    // idle / pending_confirm / error: no-op. The UI shouldn't show the
-    // orange button in these states; this branch is a safety net.
-  }, [clearAnswerActiveTimer]);
+    // cooldown / idle / pending_confirm / error: no-op.
+  }, [clearCooldownTimer, setAudioPlaying, startCooldown]);
 
   // Cleanup on unmount — make sure no stray timer fires after the hook unmounts.
   useEffect(() => {
-    return () => clearAnswerActiveTimer();
-  }, [clearAnswerActiveTimer]);
+    return () => clearCooldownTimer();
+  }, [clearCooldownTimer]);
 
   return {
     status, turns, error, send, clearHistory, loadHistory,
     stopSpeaking: stopAndReset,
     // Lock-model orange button — UI calls this when Robert taps ⏹ Stop / ✕ Cancel.
     onOrangeButtonPressed,
+    // True only while TTS is actively emitting audio. UI uses this to hide
+    // the orange Stop button when Voice Playback is off or audio has stopped
+    // even though status is still 'speaking'.
+    isAudioPlaying,
     // Voice-confirm
     pendingAction, confirmPending, cancelPending, editPending,
   };
@@ -1662,9 +1726,17 @@ async function fetchTTSBase64(chunk: string): Promise<string | null> {
     const { data, error } = await supabase.functions.invoke('text-to-speech', {
       body: { text: chunk, voice: 'shimmer' },
     });
-    if (error || !data?.audio) return null;
+    if (error) {
+      console.error(`[TTS fetch] Edge Function error for chunk "${chunk.slice(0, 40)}...":`, error?.message ?? error);
+      return null;
+    }
+    if (!data?.audio) {
+      console.warn(`[TTS fetch] Edge Function returned no audio for chunk "${chunk.slice(0, 40)}...":`, JSON.stringify(data).slice(0, 200));
+      return null;
+    }
     return data.audio as string;
-  } catch {
+  } catch (err) {
+    console.error(`[TTS fetch] Exception for chunk "${chunk.slice(0, 40)}...":`, err);
     return null;
   }
 }
@@ -1786,8 +1858,21 @@ async function playBase64AudioNative(base64: string): Promise<void> {
 }
 
 async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<void> {
+  // Diagnostic logging — Bug 4 (V57.1): Robert observed Voice Playback ON in
+  // Settings but no TTS audible during a DraftCard turn. These logs help
+  // pinpoint whether the toggle, the TTS fetch, the audio playback, or the
+  // staleness check is the culprit.
+  const voiceEnabled = isVoiceEnabledSync();
+  console.log(`[TTS Native] speakCloudNative entry — voiceEnabled=${voiceEnabled}, textLen=${text?.length ?? 0}, textPreview="${(text ?? '').slice(0, 60)}"`);
   // Honor global voice-playback toggle.
-  if (!isVoiceEnabledSync()) return;
+  if (!voiceEnabled) {
+    console.log('[TTS Native] Skipped — voice playback disabled in Settings');
+    return;
+  }
+  if (!text || text.trim().length === 0) {
+    console.warn('[TTS Native] Skipped — empty text');
+    return;
+  }
   // Capture our generation. stopSpeaking() and any newer speakCloud{,Native}
   // call will increment _speechGen, making this loop bail at the next check.
   const myGen = ++_speechGen;
@@ -1804,23 +1889,40 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
       }
       return acc;
     }, []);
-  if (chunks.length === 0) return;
+  console.log(`[TTS Native] chunked into ${chunks.length} pieces`);
+  if (chunks.length === 0) {
+    console.warn('[TTS Native] Skipped — text produced 0 chunks after split');
+    return;
+  }
   try {
     const audioPromises = chunks.map(chunk => fetchTTSBase64(chunk));
     let playedAny = false;
+    let chunkIdx = 0;
     for (const promise of audioPromises) {
-      if (isStale()) break;
-      const base64 = await promise;
-      if (base64 && !isStale()) {
-        await playBase64AudioNative(base64);
-        playedAny = true;
+      chunkIdx++;
+      if (isStale()) {
+        console.log(`[TTS Native] chunk ${chunkIdx}/${chunks.length} skipped — stale (gen mismatch)`);
+        break;
       }
+      const base64 = await promise;
+      if (!base64) {
+        console.warn(`[TTS Native] chunk ${chunkIdx}/${chunks.length} fetch returned null — text-to-speech Edge Function may be failing`);
+        continue;
+      }
+      if (isStale()) {
+        console.log(`[TTS Native] chunk ${chunkIdx}/${chunks.length} stale after fetch, skipping playback`);
+        continue;
+      }
+      console.log(`[TTS Native] playing chunk ${chunkIdx}/${chunks.length} (${base64.length} bytes base64)`);
+      await playBase64AudioNative(base64);
+      playedAny = true;
     }
     // If no cloud TTS chunks played (all returned null), fall back to expo-speech
     if (!playedAny && !isStale()) {
-      console.log('[TTS Native] No cloud TTS chunks played, falling back to expo-speech');
+      console.warn(`[TTS Native] All ${chunks.length} chunks returned null — falling back to expo-speech`);
       throw new Error('No TTS audio available');
     }
+    if (playedAny) console.log(`[TTS Native] Done — played ${chunks.length} chunks successfully`);
   } catch (err) {
     if (isStale()) return;
     // Fall back to expo-speech if cloud TTS fails
