@@ -19,5 +19,13 @@
       "ios": {}
     }
   },
-  "submit": {}
+  "submit": {
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "./google-play-key.json",
+        "track": "internal",
+        "releaseStatus": "draft"
+      }
+    }
+  }
 }
