@@ -498,14 +498,13 @@ Deno.serve(async (req) => {
     }
 
     const claudeStart = Date.now();
-    // V57.7 — switched from Haiku to Sonnet. Haiku 4.5 consistently failed
-    // to follow the SPEECH-ACTION CONSISTENCY rule for "Alert me when X
-    // emails me" patterns (auto-tester case chat.email-alert-rule-from-oclcc
-    // failed 5/5 times across 4 prompt iterations). Sonnet's stronger
-    // instruction-following resolves the entire class of phantom-action
-    // bugs. Per stability-over-cost rule: missed alerts are unacceptable;
-    // 5x token cost is.
-    console.log(`[timing] ${elapsed()} | Claude call starting | model=claude-sonnet-4-5-20250929 | max_tokens=${max_tokens ?? 2048}`);
+    // V57.7 — kept on Haiku 4.5. We briefly switched to Sonnet to chase
+    // the OCLCC phantom-action bug, but it turned out the bug was a
+    // multi-user resolution issue in resolveUserId() (missing body
+    // user_id fallback). Once user resolution was fixed, Haiku works
+    // fine — naavi-chat's server-side saveAlertRule() pipeline handles
+    // "alert me when X" without going through Claude at all.
+    console.log(`[timing] ${elapsed()} | Claude call starting | model=claude-haiku-4-5-20251001 | max_tokens=${max_tokens ?? 2048}`);
     // Prompt caching — the system prompt has two markers from get-naavi-prompt:
     //   CACHE_BOUNDARY  — separates dynamic prefix (date/time, per-request) from stable rules.
     //   END_STABLE      — separates the cacheable rules from mobile-appended per-query
@@ -552,7 +551,7 @@ Deno.serve(async (req) => {
         : system;
     }
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: max_tokens ?? 2048,
       system: cachedSystem as any,
       messages: augmentedMessages,
