@@ -16,7 +16,6 @@ import {
   Text,
   StyleSheet,
   ViewStyle,
-  GestureResponderEvent,
 } from 'react-native';
 import { Colors } from '@/constants/Colors';
 
@@ -43,29 +42,41 @@ type Props = {
 export function IconButton({ icon, label, description, onPress, onLongPress, onPeek, style, disabled }: Props) {
   const tooltipText = description || label;
   const [tooltipVisible, setTooltipVisible] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Track whether the long-press has activated the peek so we know when to
-  // dismiss on release. Prevents a normal short tap from showing the peek.
-  const longPressActive = useRef(false);
+  // Manual long-press timer. V57.3 — Pressable's built-in onLongPress is
+  // unreliable on Android (testing showed it never fires regardless of how
+  // long the user holds). Instead we start a timer in onPressIn and trigger
+  // the peek ourselves at 500ms. onPressOut cancels the timer.
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFired = useRef(false);
 
-  // Long-press shows the peek caption; releasing the press dismisses it.
-  // No auto-timeout — the peek stays visible as long as the user is holding.
-  const handleLongPress = (_e: GestureResponderEvent) => {
-    longPressActive.current = true;
-    if (onPeek) {
-      onPeek(tooltipText);
-    } else {
-      setTooltipVisible(true);
-    }
+  const showPeek = () => {
+    longPressFired.current = true;
+    if (onPeek) onPeek(tooltipText); else setTooltipVisible(true);
     if (onLongPress) onLongPress();
   };
 
-  // Dismiss the peek caption as soon as the finger lifts after a long-press.
-  const handlePressOut = () => {
-    if (!longPressActive.current) return;
-    longPressActive.current = false;
-    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+  const hidePeek = () => {
     if (onPeek) onPeek(null); else setTooltipVisible(false);
+  };
+
+  const handlePressIn = () => {
+    longPressFired.current = false;
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    longPressTimer.current = setTimeout(() => {
+      showPeek();
+      longPressTimer.current = null;
+    }, 500);
+  };
+
+  const handlePressOut = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    if (longPressFired.current) {
+      longPressFired.current = false;
+      hidePeek();
+    }
   };
 
   return (
@@ -87,20 +98,21 @@ export function IconButton({ icon, label, description, onPress, onLongPress, onP
         // long-press peek + hover peek still fire so the user can read what
         // the button does even when it's locked. V57.1 testing surfaced this:
         // disabled buttons swallowed everything including the description.
-        onPress={() => { if (!disabled) onPress(); }}
-        onLongPress={handleLongPress}
+        // V57.3: Pressable's onLongPress doesn't fire reliably on Android, so
+        // we run our own timer via onPressIn/onPressOut.
+        onPress={() => {
+          // If long-press already fired, suppress the click entirely (the
+          // user's intent was the peek, not the button action).
+          if (longPressFired.current) return;
+          if (!disabled) onPress();
+        }}
+        onPressIn={handlePressIn}
         onPressOut={handlePressOut}
-        delayLongPress={400}
         accessibilityLabel={label}
         accessibilityRole="button"
         accessibilityState={{ disabled: !!disabled }}
         // Desktop / web only — mouse enter/leave toggles the caption.
-        // Pressable ignores these on mobile (no hover concept), so long-press
-        // remains the on-device fallback. Prefer onPeek (screen-level) when
-        // supplied, so the caption can render as a wide bar instead of a
-        // button-width bubble.
         onHoverIn={() => {
-          if (timer.current) { clearTimeout(timer.current); timer.current = null; }
           if (onPeek) onPeek(tooltipText); else setTooltipVisible(true);
         }}
         onHoverOut={() => {
