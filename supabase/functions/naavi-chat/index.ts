@@ -243,16 +243,27 @@ async function lookupContactsByName(
 
 // ── Resolve user ID ───────────────────────────────────────────────────────────
 
-async function resolveUserId(supabase: ReturnType<typeof createClient>, token: string): Promise<string | null> {
-  // Attempt 1: JWT
+async function resolveUserId(
+  supabase: ReturnType<typeof createClient>,
+  token: string,
+  bodyUserId?: string | null,
+): Promise<string | null> {
+  // Attempt 1: JWT (mobile app path)
   try {
     const { data: { user } } = await supabase.auth.getUser(token);
     if (user) return user.id;
   } catch (_) { /* ignore */ }
 
-  // Attempt 2: find user from user_tokens (single-user fallback).
+  // Attempt 2: explicit body user_id (voice server / server-side caller path).
+  // CLAUDE.md Rule 4 — required step (b) in the user-resolution chain.
+  // V57.7 fix: was missing, causing tests with anon key + body user_id to
+  // silently bind to whoever happened to be first in user_tokens (Hussein).
+  if (bodyUserId && typeof bodyUserId === 'string' && bodyUserId.length > 0) {
+    return bodyUserId;
+  }
+
+  // Attempt 3: user_tokens lookup (last-resort, single-user fallback).
   // DO NOT add listUsers / oldest-user fallbacks — breaks multi-user safety.
-  // See CLAUDE.md rule 4: ONE user_id resolution pattern, everywhere.
   try {
     const { data } = await supabase
       .from('user_tokens')
@@ -310,7 +321,7 @@ Deno.serve(async (req) => {
   const elapsed = () => `${Date.now() - t0}ms`;
 
   try {
-    const { system, messages, max_tokens } = await req.json();
+    const { system, messages, max_tokens, user_id: bodyUserId } = await req.json();
 
     const systemLen   = typeof system === 'string' ? system.length : 0;
     const messageCount = Array.isArray(messages) ? messages.length : 0;
@@ -330,7 +341,7 @@ Deno.serve(async (req) => {
     console.log(`[TRACE-3 naavi-chat] userText full:`, JSON.stringify(userText), `length:`, userText.length);
 
     // ── Step 1: check for pending disambiguation ──────────────────────────────
-    const userId = await resolveUserId(supabase, token);
+    const userId = await resolveUserId(supabase, token, bodyUserId);
     console.log(`[timing] ${elapsed()} | resolveUserId done | userId=${userId ?? 'null'}`);
 
     if (userId) {
@@ -487,7 +498,14 @@ Deno.serve(async (req) => {
     }
 
     const claudeStart = Date.now();
-    console.log(`[timing] ${elapsed()} | Claude call starting | model=claude-haiku-4-5-20251001 | max_tokens=${max_tokens ?? 2048}`);
+    // V57.7 — switched from Haiku to Sonnet. Haiku 4.5 consistently failed
+    // to follow the SPEECH-ACTION CONSISTENCY rule for "Alert me when X
+    // emails me" patterns (auto-tester case chat.email-alert-rule-from-oclcc
+    // failed 5/5 times across 4 prompt iterations). Sonnet's stronger
+    // instruction-following resolves the entire class of phantom-action
+    // bugs. Per stability-over-cost rule: missed alerts are unacceptable;
+    // 5x token cost is.
+    console.log(`[timing] ${elapsed()} | Claude call starting | model=claude-sonnet-4-5-20250929 | max_tokens=${max_tokens ?? 2048}`);
     // Prompt caching — the system prompt has two markers from get-naavi-prompt:
     //   CACHE_BOUNDARY  — separates dynamic prefix (date/time, per-request) from stable rules.
     //   END_STABLE      — separates the cacheable rules from mobile-appended per-query
@@ -534,7 +552,7 @@ Deno.serve(async (req) => {
         : system;
     }
     const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-5-20250929',
       max_tokens: max_tokens ?? 2048,
       system: cachedSystem as any,
       messages: augmentedMessages,

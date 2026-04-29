@@ -81,6 +81,7 @@ export const adapters = {
       system,
       messages: args.messages,
       max_tokens: args.max_tokens ?? 1024,
+      user_id: ctx.testUserId, // critical — naavi-chat falls back to first-user-with-google-tokens otherwise (Hussein/Wael)
     }, opts);
   },
 
