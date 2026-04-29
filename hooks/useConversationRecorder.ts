@@ -44,6 +44,13 @@ export interface ConversationAction {
   suggested_by: string;
   calendar_title?: string;
   email_draft?: string;
+  // Structured scheduling fields (extract-actions populates when resolvable).
+  start_date?: string; // ISO date "YYYY-MM-DD"
+  start_time?: string; // "HH:MM" 24h
+  // Prescription-only — used by V57.3 dose-expansion to create N daily events
+  // instead of a single one. extract-actions Sonnet emits these for type="prescription".
+  duration_days?: number;
+  dose_times?: string[]; // array of "HH:MM"
 }
 
 export interface UseConversationRecorderResult {
@@ -357,29 +364,71 @@ export function useConversationRecorder(): UseConversationRecorderResult {
           if (createdTitles.has(eventTitle.toLowerCase())) continue; // skip duplicates
           createdTitles.add(eventTitle.toLowerCase());
           try {
-            // Honor extracted start_date / start_time when present (e.g.
-            // "follow-up in three weeks" resolves to a date 3 weeks out).
-            // Falls back to tomorrow 9 AM only when extract-actions did not
-            // resolve a specific date — preserves prior default behavior.
-            let start: Date;
-            if (action.start_date) {
-              const [hh, mm] = (action.start_time ?? '09:00').split(':').map(Number);
-              start = new Date(`${action.start_date}T00:00:00`);
-              start.setHours(Number.isFinite(hh) ? hh : 9, Number.isFinite(mm) ? mm : 0, 0, 0);
+            // V57.3 — prescription expansion. When the action is a prescription
+            // with dose_times + duration_days populated, generate one calendar
+            // event per (day, dose_time) instead of a single event. Mirrors the
+            // chat path's SCHEDULE_MEDICATION expansion. Prior behaviour (1
+            // event for a 10-day course) left Robert without 9 days of dose
+            // reminders.
+            const isPrescriptionExpand = action.type === 'prescription'
+              && Array.isArray(action.dose_times)
+              && action.dose_times.length > 0
+              && typeof action.duration_days === 'number'
+              && action.duration_days > 0;
+
+            // Resolve the start date once, used as day-1 anchor for prescription
+            // expansion or as the single event's start for everything else.
+            const baseStart: Date = action.start_date
+              ? new Date(`${action.start_date}T00:00:00`)
+              : (() => {
+                  const d = new Date();
+                  d.setHours(0, 0, 0, 0);
+                  d.setDate(d.getDate() + (isPrescriptionExpand ? 0 : 1));
+                  return d;
+                })();
+
+            if (isPrescriptionExpand) {
+              const doseTimes = action.dose_times!;
+              const durationDays = action.duration_days!;
+              let createdCount = 0;
+              for (let dayOffset = 0; dayOffset < durationDays; dayOffset++) {
+                const dayDate = new Date(baseStart);
+                dayDate.setDate(dayDate.getDate() + dayOffset);
+                for (const timeStr of doseTimes) {
+                  const [hh, mm] = String(timeStr).split(':').map(Number);
+                  const start = new Date(dayDate);
+                  start.setHours(Number.isFinite(hh) ? hh : 9, Number.isFinite(mm) ? mm : 0, 0, 0);
+                  const end = new Date(start.getTime() + 30 * 60 * 1000); // 30 min slot
+                  try {
+                    await registry.calendar.createEvent({
+                      title:       eventTitle,
+                      description: `${action.description}\n\nTiming: ${action.timing} (day ${dayOffset + 1} of ${durationDays})\nSuggested by: ${action.suggested_by}`,
+                      startISO:    toLocalISO(start),
+                      endISO:      toLocalISO(end),
+                      attendees:   [],
+                    });
+                    createdCount++;
+                  } catch (err) {
+                    console.error('[ConvRecorder] Prescription dose create failed:', eventTitle, dayOffset, timeStr, err);
+                  }
+                }
+              }
+              console.log(`[ConvRecorder] Auto-created ${createdCount} prescription dose event(s) for "${eventTitle}" — ${durationDays} days × ${doseTimes.length} doses/day`);
             } else {
-              start = new Date();
-              start.setDate(start.getDate() + 1);
-              start.setHours(9, 0, 0, 0);
+              // Single event for everything that isn't a multi-dose prescription.
+              const [hh, mm] = (action.start_time ?? '09:00').split(':').map(Number);
+              const start = new Date(baseStart);
+              start.setHours(Number.isFinite(hh) ? hh : 9, Number.isFinite(mm) ? mm : 0, 0, 0);
+              const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour
+              await registry.calendar.createEvent({
+                title:       eventTitle,
+                description: `${action.description}\n\nTiming: ${action.timing}\nSuggested by: ${action.suggested_by}`,
+                startISO:    toLocalISO(start),
+                endISO:      toLocalISO(end),
+                attendees:   [],
+              });
+              console.log('[ConvRecorder] Auto-created calendar event:', eventTitle, 'at', toLocalISO(start));
             }
-            const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour
-            await registry.calendar.createEvent({
-              title:       eventTitle,
-              description: `${action.description}\n\nTiming: ${action.timing}\nSuggested by: ${action.suggested_by}`,
-              startISO:    toLocalISO(start),
-              endISO:      toLocalISO(end),
-              attendees:   [],
-            });
-            console.log('[ConvRecorder] Auto-created calendar event:', eventTitle, 'at', toLocalISO(start));
           } catch (err) {
             console.error('[ConvRecorder] Failed to create event:', eventTitle, err);
           }

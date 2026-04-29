@@ -319,10 +319,20 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
   //   recipientCandidates  — all matches returned by resolveRecipient()
   //   selectedRecipientIdx — picker selection (0 by default, multi-match only)
   //   manualEmail          — fallback typed email when no contact match
+  //   overrideManualEntry  — V57.3: when the picker's matches are all wrong
+  //                          ("none of these"), Robert switches to manual
+  //                          email entry even if the picker had matches.
+  //                          Privacy fix — without this, the picker forces
+  //                          one of the wrong matches.
+  //   discarded            — V57.3: Robert can dismiss a draft card via the
+  //                          ✕ Discard button. Sets the card to a minimal
+  //                          "Draft discarded" placeholder; no Gmail action.
   // Messaging (SMS/WhatsApp) keeps the existing single-match flow for V57.
   const [recipientCandidates, setRecipientCandidates] = useState<Contact[]>([]);
   const [selectedRecipientIdx, setSelectedRecipientIdx] = useState<number>(0);
   const [manualEmail, setManualEmail] = useState<string>('');
+  const [overrideManualEntry, setOverrideManualEntry] = useState<boolean>(false);
+  const [discarded, setDiscarded] = useState<boolean>(false);
 
   const channel = String(action.channel ?? 'email').toLowerCase() as 'email' | 'sms' | 'whatsapp';
   const isMessaging = channel === 'sms' || channel === 'whatsapp';
@@ -453,8 +463,19 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
   //     is documented; full voice-channel email ask ships in V58.
   const toRaw = String(action.to ?? '');
   const toIsEmail = toRaw.includes('@');
-  const showPicker = !isMessaging && !toIsEmail && recipientCandidates.length > 1 && !sent;
-  const showManualInput = !isMessaging && !toIsEmail && recipientCandidates.length === 0 && !sent;
+  const showPicker = !isMessaging && !toIsEmail && recipientCandidates.length > 1 && !sent && !overrideManualEntry;
+  const showManualInput = !isMessaging && !toIsEmail && (recipientCandidates.length === 0 || overrideManualEntry) && !sent;
+
+  // Discarded card — minimal placeholder, no Gmail action possible.
+  if (discarded) {
+    return (
+      <View style={[styles.draftCard, { opacity: 0.55 }]}>
+        <Text style={[styles.draftLabel, { color: Colors.textMuted }]}>
+          ✕ Draft discarded
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.draftCard}>
@@ -494,6 +515,24 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
               </Text>
             </TouchableOpacity>
           ))}
+          {/* V57.3: "None of these" escape — when none of the suggested
+              contacts is the right person, Robert can switch to typing a
+              fresh email. Without this, the picker silently forced one of
+              the wrong choices (privacy gap). */}
+          <TouchableOpacity
+            onPress={() => setOverrideManualEntry(true)}
+            accessibilityLabel="None of these — type a different email"
+            style={{
+              paddingVertical: 8, paddingHorizontal: 10,
+              marginTop: 4, borderRadius: 6,
+              borderWidth: 0.5, borderColor: Colors.textMuted,
+              borderStyle: 'dashed',
+            }}
+          >
+            <Text style={{ color: Colors.accent, fontWeight: '600' }}>
+              ✕ None of these — type a different email
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
       {/* No-match manual entry — Robert types the email himself. */}
@@ -526,16 +565,30 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
         <Text style={styles.draftSendError}>{sendError}</Text>
       ) : null}
       {!sent && (
-        <TouchableOpacity
-          style={[styles.draftSendBtn, sending && styles.draftSendBtnDisabled]}
-          onPress={handleSend}
-          disabled={sending}
-          accessibilityLabel={`Send ${channelLabel}`}
-        >
-          <Text style={styles.draftSendBtnText}>
-            {sending ? 'Sending…' : `${channelIcon} Send`}
-          </Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+          <TouchableOpacity
+            style={[styles.draftSendBtn, sending && styles.draftSendBtnDisabled, { flex: 1 }]}
+            onPress={handleSend}
+            disabled={sending}
+            accessibilityLabel={`Send ${channelLabel}`}
+          >
+            <Text style={styles.draftSendBtnText}>
+              {sending ? 'Sending…' : `${channelIcon} Send`}
+            </Text>
+          </TouchableOpacity>
+          {/* V57.3: ✕ Discard button — sets discarded=true; the entire card
+              re-renders as a minimal "Draft discarded" placeholder. No Gmail
+              interaction. Pairs with the picker "None of these" option as a
+              clean exit from any draft Robert no longer wants to send. */}
+          <TouchableOpacity
+            style={styles.draftDiscardBtn}
+            onPress={() => setDiscarded(true)}
+            disabled={sending}
+            accessibilityLabel="Discard draft"
+          >
+            <Text style={styles.draftDiscardBtnText}>✕ Discard</Text>
+          </TouchableOpacity>
+        </View>
       )}
     </View>
   );
@@ -1387,11 +1440,11 @@ export default function HomeScreen() {
             disabled={locationBusy}
             activeOpacity={0.85}
           >
-            <Ionicons name="location" size={18} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.locationBannerText} numberOfLines={2}>
+            <Ionicons name="location-outline" size={16} color="#FBBF24" style={{ marginRight: 8 }} />
+            <Text style={styles.locationBannerText} numberOfLines={1}>
               {locationBusy
                 ? 'Requesting location access…'
-                : 'To receive arrival alerts (e.g. "leave for the doctor in 10 minutes", "arriving at Costco — your list"), you must enable Location. Tap to enable.'}
+                : 'Enable Location to receive arrival alerts. Tap to allow.'}
             </Text>
           </TouchableOpacity>
         )}
@@ -2454,12 +2507,32 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 10,
     paddingHorizontal: 20,
+    alignItems: 'center',
   },
   draftSendBtnDisabled: {
     opacity: 0.5,
   },
   draftSendBtnText: {
     color: '#fff',
+    fontSize: Typography.sm,
+    fontWeight: Typography.semibold,
+  },
+  // V57.3: ✕ Discard button next to Send. Outlined / less prominent than Send
+  // so the primary action stays visually obvious; discard is a deliberate
+  // secondary action.
+  draftDiscardBtn: {
+    marginTop: 10,
+    backgroundColor: 'transparent',
+    borderWidth: 0.5,
+    borderColor: Colors.textMuted,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  draftDiscardBtnText: {
+    color: Colors.textMuted,
     fontSize: Typography.sm,
     fontWeight: Typography.semibold,
   },
@@ -2857,34 +2930,25 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
-  // Persistent location-permission banner. Same horizontal placement as the
-  // sign-in banner but a different color (warning amber-ish) and a longer
-  // multiline value-framing text. Stays visible until permission is granted
-  // — no dismiss button. (V57.1 Bug 7.)
+  // Persistent location-permission banner. V57.3: thin one-line bar at the top
+  // of the chat that pushes content down (no longer position:absolute). Subtle
+  // amber-tinted background — visible enough to notice, not aggressive enough
+  // to feel like an error. Stays visible until permission is granted.
   locationBanner: {
-    position: 'absolute',
-    top: 10,
-    left: 12,
-    right: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#B45309', // amber-700 — distinct from sign-in (accent) and Stop (alert)
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    zIndex: 99,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    elevation: 6,
+    backgroundColor: 'rgba(180, 83, 9, 0.18)', // amber-700 at 18% alpha
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(251, 191, 36, 0.4)', // amber-400 hairline
+    paddingVertical: 6,
+    paddingHorizontal: 12,
   },
   locationBannerText: {
     flex: 1,
-    color: '#fff',
-    fontSize: 13,
+    color: '#FBBF24', // amber-400 — readable on dark background
+    fontSize: 12,
     fontWeight: '500',
-    lineHeight: 18,
   },
   // Empty-state block inside the brief — "Nothing on your plate today" plus
   // a rotating Try-this tip from lib/brief-logic.
