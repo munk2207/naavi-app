@@ -118,13 +118,32 @@ export async function queryWithTimeout<T = any>(
  * branch on session?.user being absent will fall through to their existing
  * fallback path (anon key, server-side body user_id resolution, etc.).
  *
+ * V57.9.1 — also caches the resolved user_id at module scope. Callers that
+ * have a server-side body-fallback (notably callNaaviEdgeFunction) can use
+ * `getCachedUserId()` to include user_id in the request body even when this
+ * call times out. Without that, the anon-key fallback gets 401 from
+ * naavi-chat (which requires JWT or body user_id per the V57.7 multi-user
+ * safety fix) and the user sees a spinner that never resolves.
+ *
  * Default 5s — a healthy refresh completes in < 1s. Anything past 5s is a
  * stall and we should not wait further.
  */
+let lastKnownUserId: string | null = null;
+
+/** Read the last successfully-resolved user_id. Returns null until at least
+ *  one call to getSessionWithTimeout has resolved with a real session. */
+export function getCachedUserId(): string | null {
+  return lastKnownUserId;
+}
+
 export async function getSessionWithTimeout(timeoutMs: number = 5_000) {
   if (!supabase) return null;
 
-  const sessionPromise = supabase.auth.getSession().then(r => r.data.session);
+  const sessionPromise = supabase.auth.getSession().then(r => {
+    const session = r.data.session;
+    if (session?.user?.id) lastKnownUserId = session.user.id;
+    return session;
+  });
   const timeoutPromise = new Promise<null>((resolve) => {
     setTimeout(() => {
       console.warn(`[getSessionWithTimeout] timed out after ${timeoutMs}ms — falling back to no session`);
