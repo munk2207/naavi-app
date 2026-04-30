@@ -119,7 +119,86 @@ Verifies note ingestion, search, query expansion.
 
 ---
 
-## Category 8 — Email send protection (3 tests, CRITICAL)
+## Category 8 — Multi-user safety (40-60 tests, HIGHEST PRIORITY)
+
+**Why this category exists:** On 2026-04-29 we discovered `naavi-chat` was missing CLAUDE.md Rule 4 step (b) — the body `user_id` fallback. Any external caller without a JWT bound to whoever was first in `user_tokens` (Hussein in this project's history). This was a multi-user safety violation present for months. The auto-tester didn't have coverage for this category, so it went undetected.
+
+**Goal:** every Edge Function callable from the mobile app OR the voice server gets a 4-test matrix. Plus suite-level cross-user isolation tests.
+
+### The 4-test matrix per Edge Function
+
+| # | Test name | Setup | Expected outcome | What it catches |
+|---|-----------|-------|------------------|-----------------|
+| a | `<fn>.jwt-resolves-to-A` | Send a JWT for user A. No body `user_id`. | Operates on A's data only. Returns A's results. | The auth chain works. |
+| b | `<fn>.body-userid-resolves-to-A` | No JWT (anon key only). Body has `user_id: A`. | Operates on A's data. (Voice server / external caller path.) | The voice-server / external path works. |
+| c | `<fn>.no-auth-no-body-rejects` | Anon key only, no body `user_id`. | Returns 401 (or empty result with `error: 'unauthenticated'`). **MUST NOT** bind to a random user. | The Hussein bug — never bind to "first user in user_tokens". |
+| d | `<fn>.jwt-overrides-body-userid` | JWT for user A. Body has `user_id: B` (mismatch / tampering attempt). | Operates on A's data (JWT wins). Body `user_id` ignored or rejected. | Defense against client-side tampering. |
+
+### Functions in scope (priority order)
+
+| # | Function | Priority |
+|---|----------|----------|
+| 8.1 | `naavi-chat` | Just fixed — verify regression doesn't recur. |
+| 8.2 | `manage-rules` | Touches RLS-protected `action_rules` table. |
+| 8.3 | `send-sms` | External-facing — fires real WhatsApp / SMS / email to real numbers. Highest blast radius. |
+| 8.4 | `lookup-contact` | Reads Google People API — leaks contacts if wrong user. |
+| 8.5 | `create-calendar-event` / `delete-calendar-event` | Writes to user's Google Calendar. |
+| 8.6 | `ingest-note` / `search-knowledge` | Personal facts; leak risk is highest. |
+| 8.7 | `evaluate-rules` | Cron-triggered — must iterate one user at a time and never cross-fire. |
+| 8.8 | `global-search` | Aggregates from many tables; must never return another user's data. |
+| 8.9 | `manage-list` | List CRUD on `lists` table. |
+| 8.10 | `resolve-place` | Reads `user_settings.home_address` etc. |
+| 8.11 | `save-to-drive` / `read-drive-file` / `update-drive-file` | Google Drive access — sandboxing per user is critical. |
+| 8.12 | `send-email` | Same blast radius as send-sms. |
+
+8.1 × 4 + 8.2 × 4 + ... = **48 tests minimum** for the matrix alone.
+
+### Suite-level cross-user isolation tests (5 extra)
+
+**8.X.1 — Cross-user `action_rules` read** — Create user B (`naavi-tester-2@…`). Seed user A with 1 rule. As user B (JWT for B), call `manage-rules` op=list. **MUST return zero rules.** B must never see A's rule.
+
+**8.X.2 — Cross-user `lists` read** — Same pattern as 8.X.1 but on `lists`.
+
+**8.X.3 — Cross-user `knowledge_fragments` read** — Same pattern. Personal data leak prevention.
+
+**8.X.4 — Cross-user `sent_messages` read** — Same pattern. Verify communication history isolation.
+
+**8.X.5 — Voice-server caller routing** — Simulate the voice server's body shape: `{ user_id: A_uuid, system: ..., messages: ... }` sent with anon key. Verify the resolved `user_id` in the response context matches A, not Hussein, not Wael, not anyone else.
+
+### Practical setup requirements
+
+- **Second test user.** Create `naavi-tester-2@gmail.com`. Sign into the mobile app once with it (so `auth.users` has a row + initial OAuth tokens). Copy the `user_id` into `tests/.env` as `TEST_USER_ID_2`.
+- **Test user JWT generation.** For the matrix's "JWT for user A" tests, the test framework needs to mint a JWT for the test user. Options:
+  - (a) Use the service-role key + `auth.admin.generateLink({ type: 'magiclink', email: testUserEmail })` to get a short-lived signed-in URL, then exchange.
+  - (b) Sign in with email + password if the test users have static passwords.
+  - (c) Skip JWT tests for now and only cover (b) and (c) of the matrix — still catches 50% of the risk surface and is simpler.
+
+Recommended: start with (c) — body-user_id and no-auth tests catch the Hussein-class bugs. Add JWT tests later when fixture infrastructure is more mature.
+
+### Generator pattern (recommended implementation)
+
+Instead of writing 48 tests by hand, scaffold a helper that takes a function descriptor and emits the 4-test matrix:
+
+```ts
+multiUserMatrix({
+  fnName: 'manage-rules',
+  body: { op: 'list' },           // request body shape
+  validate: (data) => Array.isArray(data?.rules), // success shape
+  ownerKey: 'rules[].user_id',     // for cross-user isolation
+});
+```
+
+The helper produces 4 tests per call. 12 functions × 1 call each = 48 tests with one line of catalogue code per function. Maintenance becomes near-zero.
+
+### When to run
+
+- **Every nightly run** — multi-user safety is a security property, not a behavior — needs constant verification.
+- **Before every AAB ship** — block the build if any of these fail.
+- **After any change to a `resolveUserId` function or RLS policy** — these are the most fragile surfaces.
+
+---
+
+## Category 9 — Email send protection (3 tests, CRITICAL)
 
 Verifies Naavi NEVER auto-sends emails. Drafts only.
 
