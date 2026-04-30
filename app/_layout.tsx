@@ -76,10 +76,18 @@ export default function RootLayout() {
     // the OS prompt yet. On second and later launches, we never re-ask;
     // granted stays granted, denied stays denied until the user manually
     // taps "Enable" in Settings. AAB item #8 — push default ON.
+    //
+    // V57.9.1 — also re-register when permission is already granted. FCM
+    // tokens rotate (app reinstall, OS update, Firebase rotation policy);
+    // without this, the DB row carries a stale token forever and every
+    // alert delivers 0/N. save-push-subscription upserts by endpoint, so
+    // calling it on every launch is idempotent — same token → no-op,
+    // fresh token → row updated. Wael testing 2026-04-30 surfaced this
+    // class: 6 dead FCM tokens accumulated over weeks of installs.
     const maybeAutoRegisterPush = async () => {
       try {
         const { status } = await Notifications.getPermissionsAsync();
-        if (status === 'undetermined') {
+        if (status === 'undetermined' || status === 'granted') {
           await registerPushNotifications();
         }
       } catch { /* silent */ }

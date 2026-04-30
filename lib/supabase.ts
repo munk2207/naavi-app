@@ -10,7 +10,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Platform, AppState } from 'react-native';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
+import { queryWithTimeout, getSessionWithTimeout, getCachedUserId } from './invokeWithTimeout';
 
 const SUPABASE_URL     = process.env.EXPO_PUBLIC_SUPABASE_URL     ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -106,6 +106,14 @@ export async function callNaaviEdgeFunction(
   // gets a chance to fire and the user's turn waits forever.
   const session = await getSessionWithTimeout();
   const authToken = session?.access_token ?? SUPABASE_ANON_KEY;
+  // V57.9.1 — when the session times out we still want naavi-chat to
+  // succeed via the server-side body-fallback (user_id in body). Pull from
+  // the live session if available; otherwise fall back to the cached
+  // user_id from the last successful getSession in this app session.
+  // Without this, anon-key requests get 401 from naavi-chat and the user
+  // sees a 60-90s thinking spinner that never produces a reply (Wael
+  // testing 2026-04-30).
+  const userIdForBody = session?.user?.id ?? getCachedUserId();
 
   // Hard timeout on the main Claude round-trip. V57.1 testing reproduced
   // requests that hung indefinitely with no error — without an AbortController
@@ -122,7 +130,12 @@ export async function callNaaviEdgeFunction(
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${authToken}`,
       },
-      body: JSON.stringify({ system, messages, max_tokens: 2048 }),
+      body: JSON.stringify({
+        system,
+        messages,
+        max_tokens: 2048,
+        ...(userIdForBody ? { user_id: userIdForBody } : {}),
+      }),
       signal: controller.signal,
     });
 
