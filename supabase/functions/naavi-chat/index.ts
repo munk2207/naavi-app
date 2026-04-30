@@ -313,7 +313,12 @@ Deno.serve(async (req) => {
   const elapsed = () => `${Date.now() - t0}ms`;
 
   try {
-    const { system, messages, max_tokens, user_id: bodyUserId } = await req.json();
+    const { system, messages, max_tokens: rawMaxTokens, user_id: bodyUserId } = await req.json();
+    // V57.7 cost audit — cap output at 1024 tokens (was 2048). Naavi
+    // replies are short by design ("3 sentences unless asked for more"),
+    // so 1024 is plenty. 2048 was unused headroom inflating cost.
+    // 100 beta users × 50 chat turns/day × 2x output = $$ savings.
+    const max_tokens = Math.min(rawMaxTokens ?? 1024, 1024);
 
     const systemLen   = typeof system === 'string' ? system.length : 0;
     const messageCount = Array.isArray(messages) ? messages.length : 0;
