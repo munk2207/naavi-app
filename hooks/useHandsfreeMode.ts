@@ -227,7 +227,10 @@ export function useHandsfreeMode(
   // ── Get Deepgram temporary token ──
   async function getDeepgramToken(): Promise<string> {
     if (!supabase) throw new Error('Supabase not configured');
-    const { data, error: fnError } = await invokeWithTimeout('deepgram-token', {}, 10_000);
+    // V57.8 — bumped 10s → 30s. Wael's V57.7 testing surfaced a timeout
+    // when hands-free mode failed to get a token within 10s. Token fetch
+    // hits Deepgram's API which can be slow on cold starts.
+    const { data, error: fnError } = await invokeWithTimeout('deepgram-token', {}, 30_000);
     if (fnError || !data?.token) {
       throw new Error(`Failed to get Deepgram token: ${fnError?.message ?? 'no token'}`);
     }
