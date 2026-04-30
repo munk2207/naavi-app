@@ -10,7 +10,7 @@
  */
 
 import { supabase } from './supabase';
-import { queryWithTimeout } from './invokeWithTimeout';
+import { queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
 
 // ─── Epic OAuth endpoints (sandbox) ──────────────────────────────────────────
 
@@ -49,7 +49,7 @@ export function markEpicDisconnected(): void {
 export async function isEpicConnected(): Promise<boolean> {
   if (typeof localStorage !== 'undefined' && localStorage.getItem(CONNECTED_FLAG)) return true;
   if (!supabase) return false;
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getSessionWithTimeout();
   if (!session?.user) return false;
   const { data } = await queryWithTimeout(
     supabase

@@ -7,7 +7,7 @@
  */
 
 import { supabase } from './supabase';
-import { invokeWithTimeout, queryWithTimeout } from './invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
 import type { BriefItem } from './naavi-client';
 
 const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL      ?? '';
@@ -30,7 +30,7 @@ export async function isCalendarConnected(): Promise<boolean> {
   if (typeof localStorage !== 'undefined' && localStorage.getItem(CONNECTED_FLAG)) return true;
   // Fallback — check user_tokens table (provider_token is always set while logged in, so don't use it)
   if (!supabase) return false;
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getSessionWithTimeout();
   if (!session?.user) return false;
   const { data } = await queryWithTimeout(
     supabase
@@ -79,7 +79,7 @@ export async function disconnectGoogleCalendar(): Promise<void> {
   if (!supabase) return;
   // Only remove the stored Google token — do NOT sign Robert out of Supabase.
   // Signing out clears the entire session and breaks all DB queries until reconnect.
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getSessionWithTimeout();
   console.log('[Calendar] Disconnecting — session user:', session?.user?.id ?? 'none');
   if (session?.user) {
     const { error } = await queryWithTimeout(
@@ -115,7 +115,7 @@ export async function captureAndStoreGoogleToken(): Promise<void> {
     return;
   }
 
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getSessionWithTimeout();
   const refreshToken = session?.provider_refresh_token;
 
   if (!refreshToken) {
@@ -176,7 +176,7 @@ export async function triggerCalendarSync(accessToken?: string): Promise<void> {
   try {
     let token = accessToken;
     if (!token) {
-      const { data: { session } } = await supabase!.auth.getSession();
+      const session = await getSessionWithTimeout();
       token = session?.access_token;
     }
     if (!token) return;
@@ -208,13 +208,8 @@ export async function triggerCalendarSync(accessToken?: string): Promise<void> {
 
 async function getSessionUserId(): Promise<string | null> {
   if (!supabase) return null;
-  const sessionRace = await Promise.race([
-    supabase.auth.getSession(),
-    new Promise<{ data: { session: null } }>((resolve) =>
-      setTimeout(() => resolve({ data: { session: null } }), 5000)
-    ),
-  ]);
-  const uid = sessionRace.data.session?.user?.id ?? null;
+  const session = await getSessionWithTimeout();
+  const uid = session?.user?.id ?? null;
   console.log('[Calendar] getSessionUserId:', uid ?? 'null');
   return uid;
 }

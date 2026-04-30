@@ -10,7 +10,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Platform, AppState } from 'react-native';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { queryWithTimeout } from './invokeWithTimeout';
+import { queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
 
 const SUPABASE_URL     = process.env.EXPO_PUBLIC_SUPABASE_URL     ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -100,8 +100,11 @@ export async function callNaaviEdgeFunction(
 ): Promise<string> {
   const url = `${SUPABASE_URL}/functions/v1/naavi-chat`;
 
-  // Use the user's JWT if logged in, otherwise fall back to anon key
-  const session = supabase ? (await supabase.auth.getSession()).data.session : null;
+  // Use the user's JWT if logged in, otherwise fall back to anon key.
+  // V57.9 — wrapped in a 5s timeout because getSession() can hang indefinitely
+  // on a stuck JWT refresh; without this the 60s AbortController below never
+  // gets a chance to fire and the user's turn waits forever.
+  const session = await getSessionWithTimeout();
   const authToken = session?.access_token ?? SUPABASE_ANON_KEY;
 
   // Hard timeout on the main Claude round-trip. V57.1 testing reproduced
@@ -151,7 +154,7 @@ export async function saveContact(contact: {
   relationship?: string;
 }): Promise<void> {
   if (!supabase) return;
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getSessionWithTimeout();
   const userId = session?.user?.id;
   if (!userId) {
     console.error('[Supabase] Cannot save contact — no user session');
@@ -182,7 +185,7 @@ export async function saveReminder(reminder: {
   phone_number?: string;
 }): Promise<void> {
   if (!supabase) return;
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getSessionWithTimeout();
   const userId = session?.user?.id;
   const { error } = await queryWithTimeout(
     supabase.from('reminders').insert({
@@ -200,7 +203,7 @@ export async function saveReminder(reminder: {
 
 export async function saveConversationTurn(turn: object): Promise<void> {
   if (!supabase) return;
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getSessionWithTimeout();
   const userId = session?.user?.id;
   if (!userId) return;
 
@@ -242,7 +245,7 @@ export async function saveConversationTurn(turn: object): Promise<void> {
 
 export async function loadTodayConversation(): Promise<object[]> {
   if (!supabase) return [];
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getSessionWithTimeout();
   const userId = session?.user?.id;
   if (!userId) return [];
 
@@ -266,7 +269,7 @@ export async function saveDriveNote(note: {
   webViewLink?: string;
 }): Promise<void> {
   if (!supabase) return;
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getSessionWithTimeout();
   const userId = session?.user?.id;
   if (!userId) return;
   const { error } = await queryWithTimeout(

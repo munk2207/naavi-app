@@ -7,7 +7,7 @@
  */
 
 import { supabase } from './supabase';
-import { invokeWithTimeout, queryWithTimeout } from './invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ export interface ListResult {
 
 async function getUserId(): Promise<string | null> {
   if (!supabase) return null;
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getSessionWithTimeout();
   return session?.user?.id ?? null;
 }
 

@@ -32,7 +32,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { supabase } from '@/lib/supabase';
-import { queryWithTimeout } from '@/lib/invokeWithTimeout';
+import { queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 
 const GEOFENCE_TASK = 'naavi-geofence-v1';
 
@@ -108,7 +108,7 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: any) => {
     }
 
     // Layer 2: verify current user matches rule owner (Q3)
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await getSessionWithTimeout();
     const currentUserId = session?.user?.id;
     if (currentUserId && currentUserId !== ruleRow.user_id) {
       console.log(`[geofence-task] cross-user fire blocked: rule ${ruleRow.user_id} vs current ${currentUserId}`);

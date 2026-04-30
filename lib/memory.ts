@@ -11,7 +11,7 @@
  */
 
 import { supabase } from './supabase';
-import { queryWithTimeout } from './invokeWithTimeout';
+import { queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
 import { fetchNotionNotesForPerson } from './notion';
 import { fetchEmailsFromPerson } from './gmail';
 import { searchDriveFiles, type DriveFile } from './drive';
@@ -49,13 +49,8 @@ export async function getPersonContext(name: string): Promise<PersonContext | nu
 
   // Use only calendar_events (reliable) + Notion for now
   // contacts/people/interactions/topics queries are added when RLS is verified
-  const sessionRace = await Promise.race([
-    supabase.auth.getSession(),
-    new Promise<{ data: { session: null } }>((resolve) =>
-      setTimeout(() => resolve({ data: { session: null } }), 5000)
-    ),
-  ]);
-  const userId = sessionRace.data.session?.user?.id;
+  const session = await getSessionWithTimeout();
+  const userId = session?.user?.id;
 
   const [calendarEvents, notionNotes, emails, driveFiles] = await Promise.all([
     getCalendarEventsForPerson(name),
@@ -90,14 +85,9 @@ export async function getPersonContext(name: string): Promise<PersonContext | nu
 async function getCalendarEventsForPerson(name: string): Promise<CalendarEntry[]> {
   if (!supabase) return [];
 
-  // getSession() can make a slow refresh network call — cap it at 2s
-  const sessionRace = await Promise.race([
-    supabase.auth.getSession(),
-    new Promise<{ data: { session: null } }>((resolve) =>
-      setTimeout(() => resolve({ data: { session: null } }), 5000)
-    ),
-  ]);
-  const userId = sessionRace.data.session?.user?.id;
+  // getSession() can make a slow refresh network call — getSessionWithTimeout caps at 5s
+  const session = await getSessionWithTimeout();
+  const userId = session?.user?.id;
   if (!userId) {
     console.log('[Memory] No session — skipping calendar lookup');
     return [];

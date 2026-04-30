@@ -26,7 +26,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { queryWithTimeout } from '@/lib/invokeWithTimeout';
+import { queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 import { searchDriveFiles, type DriveFile } from '@/lib/drive';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
@@ -105,7 +105,7 @@ export default function NotesScreen() {
 
   const loadNotes = useCallback(async () => {
     if (!supabase) return;
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await getSessionWithTimeout();
     if (!session?.user) return;
 
     const [memRes, driveRes] = await Promise.all([

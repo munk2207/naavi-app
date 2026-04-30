@@ -15,7 +15,7 @@ import * as Updates from 'expo-updates';
 import '../lib/i18n'; // Initialise i18n before any screen renders
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
-import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
+import { invokeWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 import { syncDeviceTimezone } from '@/lib/location';
 import { registerPushNotifications } from '@/lib/push';
 import { useGeofencing } from '@/hooks/useGeofencing';
@@ -41,8 +41,8 @@ async function handleAuthCallback(url: string) {
       // Supabase doesn't always include it in the URL so session is more reliable
       let googleToken = provider_refresh_token;
       if (!googleToken) {
-        const { data } = await supabase.auth.getSession();
-        googleToken = data?.session?.provider_refresh_token ?? null;
+        const session = await getSessionWithTimeout();
+        googleToken = session?.provider_refresh_token ?? null;
       }
 
       if (googleToken) {
@@ -89,10 +89,10 @@ export default function RootLayout() {
     // (network blip, expired token, missing native module), the app
     // must not crash. Defensive against the V57.6 blank-screen-on-
     // sign-in bug Wael hit with the test user mynaavi2207.
-    supabase.auth.getSession()
-      .then(({ data }) => {
+    getSessionWithTimeout()
+      .then((session) => {
         if (!mounted) return;
-        const uid = data?.session?.user?.id ?? null;
+        const uid = session?.user?.id ?? null;
         setUserId(uid);
         if (uid) {
           syncDeviceTimezone(uid).catch((err) => console.error('[layout] timezone sync failed:', err));
