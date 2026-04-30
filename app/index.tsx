@@ -632,6 +632,11 @@ export default function HomeScreen() {
   const [locationCheckDone, setLocationCheckDone] = useState<boolean>(false);
   const [locationBusy, setLocationBusy] = useState<boolean>(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  // V57.8 — track which past turns the user manually expanded.
+  // Default: only the latest turn is expanded; older turns auto-collapse to
+  // a 1-line summary. User taps the summary to expand. Reduces cognitive
+  // load on the chat page (Wael feedback 2026-04-29).
+  const [expandedTurns, setExpandedTurns] = useState<Set<number>>(new Set());
   const [briefDays, setBriefDays] = useState<number>(1); // default: today only
   const [recordingPrompt, setRecordingPrompt] = useState<{ title: string; endMs: number } | null>(null);
 
@@ -1582,11 +1587,49 @@ export default function HomeScreen() {
             );
           })()}
 
-          {/* Conversation turns — each turn shows bubbles then its own cards */}
-          {turns.map((turn, ti) => (
+          {/* "Clear chat" link — visible only when there's history.
+              V57.8 — explicit reset for Robert when the screen feels cluttered.
+              Wraps clearHistory() which resets turns + cards. */}
+          {turns.length > 0 && (
+            <TouchableOpacity
+              onPress={clearHistory}
+              style={styles.clearChatLink}
+              accessibilityLabel="Clear chat"
+              accessibilityRole="button"
+            >
+              <Text style={styles.clearChatLinkText}>✕ Clear chat</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Conversation turns — each turn shows bubbles then its own cards.
+              V57.8 — older turns auto-collapse to 1-line summaries to reduce
+              cognitive load (per Wael 2026-04-29). Latest turn stays expanded.
+              Tap a collapsed bubble to expand it. Cards (drafts, alerts,
+              prescriptions, etc.) ALWAYS stay visible regardless of collapse
+              state — those are the actionable items Robert needs. */}
+          {turns.map((turn, ti) => {
+            const isLatest = ti === turns.length - 1;
+            const isCollapsed = !isLatest && !expandedTurns.has(ti);
+            return (
             <View key={ti}>
-              <ConversationBubble role="user" content={turn.userMessage} timestamp={turn.timestamp} />
-              <ConversationBubble role="assistant" content={turn.assistantSpeech} timestamp={turn.timestamp} />
+              {isCollapsed ? (
+                <TouchableOpacity
+                  onPress={() => setExpandedTurns(prev => new Set([...prev, ti]))}
+                  style={styles.collapsedTurn}
+                  accessibilityLabel="Expand earlier conversation"
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.collapsedTurnText} numberOfLines={1}>
+                    Earlier: {turn.userMessage.slice(0, 50)}{turn.userMessage.length > 50 ? '…' : ''}
+                  </Text>
+                  <Text style={styles.collapsedTurnHint}>tap to expand</Text>
+                </TouchableOpacity>
+              ) : (
+                <>
+                  <ConversationBubble role="user" content={turn.userMessage} timestamp={turn.timestamp} />
+                  <ConversationBubble role="assistant" content={turn.assistantSpeech} timestamp={turn.timestamp} />
+                </>
+              )}
 
               {/* Draft emails */}
               {turn.drafts.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => (
@@ -1768,7 +1811,8 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               ))}
             </View>
-          ))}
+            );
+          })}
 
           {/* Conversation action cards */}
           {convActions.length > 0 && (
@@ -2168,6 +2212,38 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  // V57.8 — clear-chat link + collapsed-turn pill (chat page declutter)
+  clearChatLink: {
+    alignSelf: 'flex-end',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginBottom: 4,
+  },
+  clearChatLinkText: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  collapsedTurn: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginVertical: 4,
+  },
+  collapsedTurnText: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 12,
+  },
+  collapsedTurnHint: {
+    color: 'rgba(94, 217, 200, 0.85)',
+    fontSize: 11,
+    marginLeft: 8,
   },
   navBanner: {
     marginHorizontal: 0,
