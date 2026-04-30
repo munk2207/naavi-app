@@ -691,10 +691,23 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       const personName = extractPersonQuery(userMessage);
       console.log('[Orchestrator] extractPersonQuery result:', personName);
       if (personName) {
-        const [ctx, contact] = await Promise.all([
+        // V57.9 — hard 8s outer timeout. Without this cap, slow Google
+        // People API or hung memory queries can stack to 30-50s of pre-
+        // call latency BEFORE naavi-chat fires. With the cap, we proceed
+        // to naavi-chat without person context if either lookup is too
+        // slow — far better than making Robert wait 50s. Empirically
+        // diagnosed 2026-04-29.
+        const personLookupRace = Promise.all([
           getPersonContext(personName),
           lookupContact(personName),
         ]);
+        const personLookupTimeout = new Promise<[null, null]>((resolve) =>
+          setTimeout(() => {
+            console.warn('[Orchestrator] Person lookup exceeded 8s outer cap — proceeding without person context');
+            resolve([null, null]);
+          }, 8_000),
+        );
+        const [ctx, contact] = await Promise.race([personLookupRace, personLookupTimeout]);
 
         const lines: string[] = [];
         if (ctx) lines.push(formatPersonContext(ctx));
