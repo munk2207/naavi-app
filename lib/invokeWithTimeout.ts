@@ -25,7 +25,16 @@
  *   - background fire-and-forget (push, log):  10s
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
+
+// V57.9.3 — persist last-known user_id to AsyncStorage so it survives
+// force-stop and fresh launches. Without this, the very first chat send
+// after a force-stop hits the anon-key path with no body.user_id, and
+// naavi-chat returns 401 (V57.7 multi-user safety). Combined with the
+// 60 KB request body taking ~60 s to upload on a sluggish network, this
+// is the headline cold-start hang we're shipping V57.9.3 to fix.
+const USER_ID_STORAGE_KEY = 'naavi_last_known_user_id';
 
 export interface InvokeResult<T> {
   data: T | null;
@@ -130,10 +139,38 @@ export async function queryWithTimeout<T = any>(
  */
 let lastKnownUserId: string | null = null;
 
-/** Read the last successfully-resolved user_id. Returns null until at least
- *  one call to getSessionWithTimeout has resolved with a real session. */
+// On module load, kick off an async read from AsyncStorage to seed the
+// cache. The first chat send may race this — that's fine. If the read
+// finishes first, callNaaviEdgeFunction will see the persisted user_id
+// in the body and reach naavi-chat with a valid identity (200) instead
+// of the anon path (401 → 60 s wait). Subsequent sends are fast either
+// way because getSession populates the cache from memory once it
+// resolves.
+(async () => {
+  try {
+    const stored = await AsyncStorage.getItem(USER_ID_STORAGE_KEY);
+    if (stored && !lastKnownUserId) {
+      lastKnownUserId = stored;
+      console.log('[invokeWithTimeout] seeded cached user_id from AsyncStorage');
+    }
+  } catch {
+    // AsyncStorage is best-effort; failures don't break anything.
+  }
+})();
+
+/** Read the last successfully-resolved user_id. V57.9.3 — backed by
+ *  AsyncStorage so it survives force-stop. Returns null only on the
+ *  very first launch before any session has ever resolved. */
 export function getCachedUserId(): string | null {
   return lastKnownUserId;
+}
+
+async function persistUserId(userId: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(USER_ID_STORAGE_KEY, userId);
+  } catch {
+    // Best-effort; in-memory cache still works for the rest of the session.
+  }
 }
 
 export async function getSessionWithTimeout(timeoutMs: number = 5_000) {
@@ -141,7 +178,11 @@ export async function getSessionWithTimeout(timeoutMs: number = 5_000) {
 
   const sessionPromise = supabase.auth.getSession().then(r => {
     const session = r.data.session;
-    if (session?.user?.id) lastKnownUserId = session.user.id;
+    if (session?.user?.id) {
+      lastKnownUserId = session.user.id;
+      // Fire-and-forget write — never blocks the caller.
+      void persistUserId(session.user.id);
+    }
     return session;
   });
   const timeoutPromise = new Promise<null>((resolve) => {

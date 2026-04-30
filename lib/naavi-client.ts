@@ -591,17 +591,16 @@ export async function sendToNaavi(
     { role: 'user' as const, content: userMessage },
   ];
 
-  // Fetch user's name and phone from Supabase so the prompt is personalized.
-  // 5s timeout — if Supabase auth/DB query hangs we proceed with safe defaults
-  // rather than blocking the whole send pipeline.
+  // V57.9.3 — fast-path user name lookup. Previously this hit the DB via
+  // getUserProfile() which took 5 s of cold-start time on every send (got
+  // killed by the outer withTimeout). The server now does its own
+  // user_settings lookup during prompt assembly, so mobile only needs the
+  // name for the broad-query message rewrite below. SecureStore read is
+  // ~50 ms and survives JWT refresh / force-stop.
   log('getUserProfile-start');
-  const { userName, userPhone } = await withTimeout(
-    getUserProfile(),
-    5_000,
-    { userName: 'there', userPhone: '' },
-    'getUserProfile',
-  );
-  log('getUserProfile-end', { userName, hasPhone: !!userPhone });
+  const cachedName = await getUserNameAsync();
+  const userName = cachedName || 'there';
+  log('getUserProfile-end', { userName, source: cachedName ? 'cache' : 'default' });
 
   // "Broad" queries load every knowledge fragment into context — expensive.
   // The old regex matched "all", "everything", "preferences", "what is my X"
@@ -617,8 +616,13 @@ export async function sendToNaavi(
   // instead of freezing the whole send pipeline. Without these timeouts, a
   // single stuck request blocks every subsequent send (V57.1 Hi/schedule
   // hangs of 3–9 minutes were reproducible — see Session 26 testing).
+  // V57.9.3 — dropped fetchSharedPrompt from the parallel pre-fetch.
+  // Server-side naavi-chat now fetches the base prompt via get-naavi-prompt
+  // itself, so we don't pay the 9s timeout cap or ship the 57 KB result over
+  // the wire. Mobile only fetches the small per-query context (health,
+  // knowledge) and passes it inline.
   log('parallel-context-start', { isBroadQuery });
-  const [healthContext, knowledgeFragments, sharedBase] = await Promise.all([
+  const [healthContext, knowledgeFragments] = await Promise.all([
     withTimeout(getEpicHealthContext(), 6_000, '', 'getEpicHealthContext')
       .then(v => { log('getEpicHealthContext-end', { len: v?.length ?? 0 }); return v; }),
     // Cap at 20 fragments even for broad queries — prior 100-cap was the
@@ -630,34 +634,9 @@ export async function sendToNaavi(
       [],
       isBroadQuery ? 'fetchAllKnowledge' : 'searchKnowledge',
     ).then(v => { log('knowledge-end', { count: Array.isArray(v) ? v.length : 0 }); return v; }),
-    withTimeout(fetchSharedPrompt(userName, userPhone), 9_000, null, 'fetchSharedPrompt')
-      .then(v => { log('fetchSharedPrompt-end', { gotPrompt: !!v, len: v?.length ?? 0 }); return v; }),
   ]);
-  log('parallel-context-end', { systemPromptSrc: sharedBase ? 'shared' : 'local-fallback' });
+  log('parallel-context-end');
   const knowledgeContext = formatFragmentsForContext(knowledgeFragments, isBroadQuery);
-
-  // Build system prompt: prefer shared Edge Function (single source of truth),
-  // fall back to local buildSystemPrompt on error. Mobile-specific context
-  // (brief items, health, knowledge, language note) is appended either way.
-  let system: string;
-  if (sharedBase) {
-    const languageNote = language === 'fr'
-      ? `\n${userName} speaks French. Respond in Canadian French.`
-      : '';
-    const briefContext = briefItems.length > 0
-      ? `\n\n## ${userName}'s upcoming schedule (next 7 days)\n${briefItems
-          .map(item => `- [${item.category}] ${item.title}${item.detail ? ` — ${item.detail}` : ''}`)
-          .join('\n')}`
-      : `\n\n## ${userName}'s upcoming schedule (next 7 days)\n- No events found for the next 7 days.`;
-    system = sharedBase
-      + languageNote
-      + briefContext
-      + (healthContext ? `\n\n${healthContext}` : '')
-      + (knowledgeContext ? `\n\n${knowledgeContext}` : '');
-  } else {
-    console.warn('[sendToNaavi] Using local prompt fallback (get-naavi-prompt unavailable)');
-    system = buildSystemPrompt(language, briefItems, healthContext, knowledgeContext, userName, userPhone);
-  }
 
   // For broad knowledge queries inject the list directly into the user message so
   // Claude is explicitly instructed to read every item aloud — not reference "above".
@@ -671,21 +650,38 @@ export async function sendToNaavi(
   let rawText: string;
 
   if (isSupabaseConfigured()) {
-    // Phase 8 — API key lives on the server, never on the device
-    log('callNaavi-invoke-start', { system_bytes: system.length, message_count: messages.length });
-    rawText = await callNaaviEdgeFunction(system, messages, diagSessionId);
+    // V57.9.3 — server-side prompt assembly. Mobile sends only messages +
+    // small context; naavi-chat fetches the canonical 57 KB system prompt
+    // itself, eliminating the body-upload bottleneck that caused the 60s
+    // cold-start hang.
+    log('callNaavi-invoke-start', { message_count: messages.length, brief_count: briefItems.length });
+    rawText = await callNaaviEdgeFunction(
+      messages,
+      {
+        language,
+        briefItems,
+        healthContext,
+        knowledgeContext,
+      },
+      diagSessionId,
+    );
     log('callNaavi-invoke-end', { rawText_bytes: rawText.length });
   } else {
-    // Fallback — local API key (Phase 7 behaviour)
+    // Fallback — local API key (Phase 7 behaviour). Production never hits
+    // this since EAS builds always have SUPABASE_URL + SUPABASE_ANON_KEY
+    // env vars set. Kept for the dev path where someone is running with
+    // a personal Anthropic key. We still need to build a system prompt
+    // for this code path; use the local builder.
     const apiKey = await getApiKey();
     if (!apiKey) {
       throw new Error('API key not configured. Please add your Anthropic API key in Settings.');
     }
+    const localSystem = buildSystemPrompt(language, briefItems, healthContext, knowledgeContext, 'there', '');
     const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 2048,
-      system,
+      system: localSystem,
       messages,
     });
     rawText = response.content[0].type === 'text' ? response.content[0].text : '';

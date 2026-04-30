@@ -1835,7 +1835,23 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       }, 4000);
     } finally {
       remoteLog(diagSession, 'orch-send-done', { totalMs: Date.now() - t0 });
-      endDiagSession(diagSession);
+      // V57.9.3 stuck-button safety net — if status hasn't returned to
+      // 'idle' 30 s after send-done (e.g. TTS playback hang after a
+      // successful reply, audio focus race after the previous turn),
+      // force-reset so the user's mic / send buttons unlock. The
+      // existing 4s outer-catch reset only handles the error path;
+      // this covers the success path. Wael 2026-04-30: "All the
+      // Buttons are locked" after a 200-OK send.
+      setTimeout(() => {
+        const stuckStatus = statusRef.current;
+        if (stuckStatus !== 'idle' && stuckStatus !== 'cooldown' && stuckStatus !== 'answer_active') {
+          console.warn(`[Orchestrator] stuck-state safety — forcing idle (was ${stuckStatus})`);
+          remoteLog(diagSession, 'orch-stuck-safety-fired', { lastStatus: stuckStatus });
+          setError(null);
+          setStatus('idle');
+        }
+        endDiagSession(diagSession);
+      }, 30_000);
     }
   }, [status, language]);
 
