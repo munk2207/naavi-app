@@ -106,17 +106,19 @@ If in doubt, ASK before creating parallel config.
 
 ### WHERE TO START
 
-**Most recent handoff:** `docs/SESSION_25_HANDOFF.md` — read this first. It captures Session 25's work (V56.4 testing → V56.5 kill-and-replace → V56.6 UI gate fix + Draft Email + Settings cleanup → V56.7 race fix STAGED LOCALLY) and names the open V56.6 test list + the V56.7 commit-and-push step the next session must request approval for before doing.
+**Most recent handoff:** `docs/SESSION_HANDOFF_CONTINUOUS_FIX_V57.8.md` — **READ THIS FIRST**. It contains the open bug list (13 items, P0-P3 prioritized), what's already done in V57.8, recommended order of attack, and pointers to 13 memory files documenting each bug.
 
-**Next session: "Complete review of MV & MT bugs"** — a full structured sweep of Mobile Voice and Mobile Text defects across every input mode. Begins by approving + shipping V56.7, then a top-to-bottom audit.
+**Last AAB on Robert's phone:** V57.8 (build 125), installed 2026-04-30. Pro + Micro Supabase compute live.
 
-**V56.7 IS UNCOMMITTED AND UNPUSHED.** Working-tree changes in `app.json`, `app/settings.tsx`, and `hooks/useOrchestrator.ts` are the staged race-fix. Do NOT push without the user explicitly approving — they ended Session 25 mid-verification.
+**Current branch state:** `main` is clean. V57.9 (build 126) was started without approval and reverted last session — do NOT recreate it without explicit user "yes."
 
-Prior handoffs for context: `docs/SESSION_22_HANDOFF.md`, `docs/SESSION_21_HANDOFF.md`, `docs/SESSION_20_END_TO_END_VALIDATION.md`.
+**Auto-tester:** 31/32 green. Run with `npm run test:auto`. Multi-user matrix in `tests/catalogue/multiuser.ts`.
 
-**Last AAB on Robert's phone:** V56.6 build 115 (installed 2026-04-28). V56.7 build 116 not yet built.
+**Critical reminder from last session:** Two Rule violations occurred (Rule 1 — acted without approval; Rule 8 — fixed before tracing). The handoff calls these out at the bottom — re-read.
 
-**Current Claude prompt version:** `2026-04-23-v24-delete-all-keyword` (via `get-naavi-prompt` Edge Function). Session 24 experimented with v25–v38; verify deployed version with the Edge Function log if Naavi behavior diverges.
+**Current Claude prompt version:** `2026-04-29-v44-alert-me-when-explicit` (via `get-naavi-prompt` Edge Function).
+
+Prior handoffs for context: `docs/SESSION_25_HANDOFF.md`, `docs/SESSION_22_HANDOFF.md`, `docs/SESSION_21_HANDOFF.md`.
 
 **Then read memory files listed in the MEMORY.md index** — the short list that future sessions need (alert fan-out rule, verified-address rule, context fields pattern, location-trigger plan, feedback/test discipline).
 
