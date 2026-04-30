@@ -256,24 +256,16 @@ async function resolveUserId(
 
   // Attempt 2: explicit body user_id (voice server / server-side caller path).
   // CLAUDE.md Rule 4 — required step (b) in the user-resolution chain.
-  // V57.7 fix: was missing, causing tests with anon key + body user_id to
-  // silently bind to whoever happened to be first in user_tokens (Hussein).
   if (bodyUserId && typeof bodyUserId === 'string' && bodyUserId.length > 0) {
     return bodyUserId;
   }
 
-  // Attempt 3: user_tokens lookup (last-resort, single-user fallback).
-  // DO NOT add listUsers / oldest-user fallbacks — breaks multi-user safety.
-  try {
-    const { data } = await supabase
-      .from('user_tokens')
-      .select('user_id')
-      .eq('provider', 'google')
-      .limit(1)
-      .single();
-    if (data) return data.user_id;
-  } catch (_) { /* ignore */ }
-
+  // V57.7 — REMOVED the user_tokens "first-google-user" fallback.
+  // CLAUDE.md Rule 4 calls it "last resort, single-user apps only".
+  // Naavi is multi-user; the fallback was a safety hole that bound any
+  // unauthenticated caller (external webhook, attacker, broken test) to
+  // whoever happened to be first in user_tokens. The auto-tester multi-
+  // user matrix caught this 2026-04-29.
   return null;
 }
 
@@ -343,6 +335,13 @@ Deno.serve(async (req) => {
     // ── Step 1: check for pending disambiguation ──────────────────────────────
     const userId = await resolveUserId(supabase, token, bodyUserId);
     console.log(`[timing] ${elapsed()} | resolveUserId done | userId=${userId ?? 'null'}`);
+
+    // V57.7 — reject unauthenticated calls. Without this, naavi-chat acted
+    // as a free Claude proxy for any unauthenticated caller (the attacker
+    // surface auto-tester multi-user matrix surfaced 2026-04-29).
+    if (!userId) {
+      return jsonResponse({ error: 'Unauthorized — provide a JWT or user_id' }, 401);
+    }
 
     if (userId) {
       const { data: pending } = await supabase

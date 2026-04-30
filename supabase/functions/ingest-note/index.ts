@@ -139,22 +139,10 @@ serve(async (req) => {
     console.log(`[ingest-note] Using user_id from request body: ${userId}`);
   }
 
-  // Fallback: resolve from user_tokens
-  if (!userId) {
-    const adminClient = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    );
-    try {
-      const { data } = await adminClient
-        .from('user_tokens')
-        .select('user_id')
-        .eq('provider', 'google')
-        .limit(1)
-        .single();
-      if (data) userId = data.user_id;
-    } catch (_) { /* ignore */ }
-  }
+  // V57.7 — REMOVED user_tokens "first-google-user" fallback. Multi-user
+  // safety hole; the auto-tester multi-user matrix caught this 2026-04-29.
+  // Without auth + without body user_id, return 401 instead of binding to
+  // whoever was first in user_tokens (Hussein in this project's history).
 
   if (!userId) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {

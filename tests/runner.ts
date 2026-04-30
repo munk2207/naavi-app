@@ -33,6 +33,7 @@ import { calendarTests } from './catalogue/calendar';
 import { memoryTests } from './catalogue/memory';
 import { emailTests } from './catalogue/email';
 import { waelTests } from './catalogue/wael-cases';
+import { multiUserTests } from './catalogue/multiuser';
 
 // ────────────────────────────────────────────────────────────────────────────
 // .env loader (avoids adding dotenv as a dependency).
@@ -87,6 +88,7 @@ const ALL_TESTS: TestCase[] = [
   ...memoryTests,
   ...emailTests,
   ...waelTests,
+  ...multiUserTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────

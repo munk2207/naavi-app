@@ -83,18 +83,8 @@ serve(async (req) => {
     userId = bodyUserId;
   }
 
-  // Fallback: find user from user_tokens
-  if (!userId) {
-    try {
-      const { data } = await adminClient
-        .from('user_tokens')
-        .select('user_id')
-        .eq('provider', 'google')
-        .limit(1)
-        .single();
-      if (data) userId = data.user_id;
-    } catch (_) { /* ignore */ }
-  }
+  // V57.7 — REMOVED user_tokens "first-google-user" fallback. Multi-user
+  // safety hole; auto-tester multi-user matrix caught this 2026-04-29.
 
   if (!userId) {
     console.error('[search-knowledge] No user found');
