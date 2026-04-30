@@ -20,6 +20,7 @@ import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem, type 
 import { isVoiceEnabledSync } from '@/lib/voicePref';
 import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
 import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
+import { remoteLog, newDiagSession, endDiagSession } from '@/lib/remoteLog';
 import { sendPushNotification } from '@/lib/push';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
 import { lookupContact, lookupContactByPhone } from '@/lib/contacts';
@@ -678,9 +679,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     // We piggyback on currentTurnIdRef which was already bumped above.
     const turnNumber = currentTurnIdRef.current;
     const t0 = Date.now();
+    const diagSession = newDiagSession();
+    remoteLog(diagSession, 'orch-send-start', {
+      turn: turnNumber,
+      msg_len: userMessage.length,
+      msg_snippet: userMessage.slice(0, 80),
+    });
     const stepLog = (step: string) => {
       const ms = Date.now() - t0;
       console.log(`[orch:T#${turnNumber}] ${step} ${ms}ms`);
+      remoteLog(diagSession, `orch-${step}`, { turn: turnNumber });
     };
     console.log(`[orch:T#${turnNumber}] start userMessage=${JSON.stringify(userMessage).slice(0, 80)}`);
 
@@ -761,12 +769,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
       let preSearchResults: GlobalSearchResult[] = [];
       if (isRetrievalQuery && supabase) {
+        remoteLog(diagSession, 'pre-search-branch-start');
         try {
+          remoteLog(diagSession, 'pre-search-getSession-start');
           const session = await getSessionWithTimeout();
+          remoteLog(diagSession, 'pre-search-getSession-end', { hasSession: !!session, hasUser: !!session?.user });
           if (session?.user) {
             // 8-second hard cap on pre-search. V57.2 — if global-search hangs
             // we proceed without pre-search results rather than freezing the
             // whole send pipeline.
+            remoteLog(diagSession, 'pre-search-invoke-start');
             const searchPromise = supabase.functions.invoke('global-search', {
               body: { query: searchQuery, user_id: session.user.id, limit: 8 },
             });
@@ -777,12 +789,14 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               }, 8_000);
             });
             const { data, error } = await Promise.race([searchPromise, timeoutPromise]);
+            remoteLog(diagSession, 'pre-search-invoke-end', { had_error: !!error, count: Array.isArray(data?.ranked) ? data.ranked.length : 0 });
             if (!error && Array.isArray(data?.ranked)) {
               preSearchResults = (data.ranked as GlobalSearchResult[]).slice(0, 8);
               console.log('[Orchestrator] pre-search query=', JSON.stringify(searchQuery), 'returned', preSearchResults.length, 'results');
             }
           }
         } catch (err) {
+          remoteLog(diagSession, 'pre-search-catch', { error: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200) });
           console.error('[Orchestrator] pre-search failed:', err);
         }
 
@@ -797,7 +811,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
       stepLog('pre-naavi-chat done');
       const [response, knowledgeResult] = await Promise.all([
-        sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language),
+        sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language, diagSession),
         isBroadQuery ? fetchAllKnowledge(100) : Promise.resolve([]),
       ]);
       stepLog('naavi-chat returned');
@@ -1747,12 +1761,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       // simply tap and try again.
       const message = err instanceof Error ? err.message : 'Unknown error';
       console.error('[Orchestrator] send() threw:', message);
+      remoteLog(diagSession, 'orch-outer-catch', { error: message.slice(0, 300) });
       setError(message);
       setStatus('error');
       setTimeout(() => {
         setError(null);
         setStatus('idle');
       }, 4000);
+    } finally {
+      remoteLog(diagSession, 'orch-send-done', { totalMs: Date.now() - t0 });
+      endDiagSession(diagSession);
     }
   }, [status, language]);
 
