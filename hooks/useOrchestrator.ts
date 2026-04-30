@@ -163,6 +163,25 @@ export interface ConversationTurn {
   timestamp?: string;
 }
 
+/** Format a cents amount + currency code into a spoken-friendly string. */
+function formatMoney(cents: number, currency: string | null): string {
+  const dollars = (cents / 100).toFixed(2);
+  if (currency === 'USD' || currency === 'CAD') return `$${dollars}`;
+  if (currency === 'EUR') return `€${dollars}`;
+  if (currency === 'GBP') return `£${dollars}`;
+  return currency ? `${dollars} ${currency}` : `$${dollars}`;
+}
+
+/** Render a SPEND_SUMMARY period_label as a natural English phrase. */
+function formatPeriodPhrase(label: string): string {
+  const k = (label || '').trim().toLowerCase();
+  if (k === 'last month' || k === 'this month' || k === 'last year' || k === 'this year' || k === 'today' || k === 'yesterday') return k;
+  if (k === 'past week' || k === 'last week' || k === 'past 7 days') return 'in the past week';
+  if (k === 'past 30 days') return 'in the past 30 days';
+  if (k === 'all time' || k === 'ever' || k === 'all') return 'in total';
+  return k || 'recently';
+}
+
 export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefItem[] = [], avoidHighways = false, isHandsfree = false) {
   const [status, setStatus] = useState<OrchestratorStatus>('idle');
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
@@ -1005,6 +1024,52 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               }
             } catch (err) {
               console.error('[Orchestrator] GLOBAL_SEARCH error:', err);
+            }
+          }
+        }
+
+        if (action.type === 'SPEND_SUMMARY') {
+          // Aggregate vendor's invoice amounts over a time period and
+          // override Naavi's speech with one number (per RULE 19a). Naavi
+          // emitted forward-looking speech ("Let me add up..."); we now
+          // run the SUM and replace it with the actual total.
+          const vendor = String(action.vendor ?? '').trim();
+          const periodLabel = String(action.period_label ?? 'last month').trim().toLowerCase();
+          if (vendor && supabase) {
+            try {
+              const session = await getSessionWithTimeout();
+              const userIdForBody = session?.user?.id;
+              const { data, error } = await invokeWithTimeout('naavi-spend-summary', {
+                body: {
+                  vendor,
+                  period_label: periodLabel,
+                  ...(userIdForBody ? { user_id: userIdForBody } : {}),
+                },
+              }, 10_000);
+              if (error || !data) {
+                console.error('[Orchestrator] SPEND_SUMMARY failed:', error);
+                turnSpeechOverride = `I couldn't pull up your ${vendor} total right now. Try again in a moment.`;
+              } else {
+                const count = Number(data.invoice_count ?? 0);
+                const periodPhrase = formatPeriodPhrase(String(data.period_label ?? periodLabel));
+                if (count === 0) {
+                  turnSpeechOverride = `I don't see any ${vendor} invoices ${periodPhrase}. Forward the email to yourself if I'm missing one and I'll pick it up.`;
+                } else {
+                  const byCurrency = Array.isArray(data.by_currency) ? data.by_currency : [];
+                  if (byCurrency.length <= 1) {
+                    const amount = formatMoney(Number(data.total_cents ?? 0), data.currency ?? null);
+                    turnSpeechOverride = count === 1
+                      ? `${vendor} charged you ${amount} ${periodPhrase}.`
+                      : `${vendor} charged you ${amount} across ${count} invoices ${periodPhrase}.`;
+                  } else {
+                    const parts = byCurrency.map((b: any) => `${formatMoney(Number(b.total_cents ?? 0), String(b.currency ?? ''))}`);
+                    turnSpeechOverride = `${vendor} charged you ${parts.join(' plus ')} ${periodPhrase}.`;
+                  }
+                }
+              }
+            } catch (err) {
+              console.error('[Orchestrator] SPEND_SUMMARY error:', err);
+              turnSpeechOverride = `I couldn't pull up your ${vendor} total right now. Try again in a moment.`;
             }
           }
         }

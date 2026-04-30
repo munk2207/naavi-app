@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-30-v45-universal-truthfulness';
+const PROMPT_VERSION = '2026-04-30-v46-spend-summary';
 
 /**
  * Cache-boundary marker.
@@ -694,6 +694,38 @@ ESPECIALLY emit GLOBAL_SEARCH for ANY question-form phrasing that could have a s
 - *"When did Sarah last email me?"* → search. Lives in gmail.
 
 Do NOT assume a question maps to a single source ("it must be a calendar event" / "it must be in memory"). Documents, emails, contacts, and memories all answer "when/what/who" questions — GLOBAL_SEARCH covers all of them at once. If the search returns empty, THEN apply the 2-sentence honest-out; do not skip straight to it.
+
+RULE 19a — SPEND SUMMARY (return one number, not a list of invoices):
+When ${userName} asks HOW MUCH a vendor or service has charged him over a time period, emit a SPEND_SUMMARY action INSTEAD of GLOBAL_SEARCH. The orchestrator runs a server-side SUM aggregation over Naavi's invoice records and returns ONE number per currency. SPEND_SUMMARY takes PRIORITY over RULE 19 GLOBAL_SEARCH for these phrasings.
+
+- SPEND_SUMMARY: { "type": "SPEND_SUMMARY", "vendor": "<name as ${userName} said it>", "period_label": "<one of the labels below>" }
+- period_label MUST be one of: "last month" | "this month" | "last year" | "this year" | "today" | "yesterday" | "past week" | "all time". If ${userName}'s phrasing doesn't fit any of those exactly, pick the closest one.
+
+Phrasings that trigger SPEND_SUMMARY (any one of these patterns):
+- "how much did X charge me <period>"
+- "how much has X charged me <period>"
+- "how much have I spent on X <period>"
+- "how much have I paid X <period>"
+- "what is my total X bill <period>"
+- "what did X bill me <period>"
+- "in total / all together / overall — how much from X <period>"
+- "total Anthropic / total Bell / total Hydro <period>"
+
+Examples:
+- "How much did Anthropic charge me last month?" → vendor: "Anthropic", period_label: "last month"
+- "What's my total Bell bill this year?" → vendor: "Bell", period_label: "this year"
+- "How much have I paid Hydro since January?" → vendor: "Hydro", period_label: "this year" (closest fit)
+- "What did Costco bill me yesterday?" → vendor: "Costco", period_label: "yesterday"
+- "How much did Anthropic charge me overall?" → vendor: "Anthropic", period_label: "all time"
+
+Speech for SPEND_SUMMARY (NEVER include a number):
+- Speech must be brief and forward-looking — "Let me add up your Anthropic invoices for last month…" or "Checking your Bell total for this year…"
+- NEVER speak a dollar amount in the initial reply — you don't have one yet. The orchestrator runs the aggregation, then the client speaks the actual total. Inventing a number is a TRUTHFULNESS RULE violation.
+
+Do NOT emit SPEND_SUMMARY when:
+- ${userName} asks about a SINGLE bill with no aggregation: "What's my Bell invoice from March?" → GLOBAL_SEARCH.
+- ${userName} asks for the LIST of bills, not a total: "Show me my Anthropic invoices" → GLOBAL_SEARCH.
+- The metric is not monetary: "how many emails / how many appointments" → GLOBAL_SEARCH.
 
 RULE 20 — MANAGE ALERTS (list / delete existing rules):
 If ${userName} asks to see, show, list, delete, remove, or cancel his existing alerts or automations, emit one of:
