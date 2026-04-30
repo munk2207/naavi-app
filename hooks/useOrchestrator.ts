@@ -817,12 +817,38 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       // guard the user sees two "SAVED TO MEMORY" cards for one fact.
       const dedupedActions = (() => {
         const seenRemember = new Set<string>();
+        // V57.8 — also dedupe SET_ACTION_RULE on (trigger_type, place_name |
+        // from_name | etc.). Wael's office-alert speech-vs-card mismatch
+        // (2026-04-29) was caused by Claude emitting two SET_ACTION_RULE
+        // actions for the same alert with different one_shot values. The
+        // first inserted (one_shot=true), the second tried to insert AND
+        // overrode the speech ("every time"). The card showed the first,
+        // the speech showed the second. Same place + trigger = drop the
+        // duplicate.
+        const seenActionRule = new Set<string>();
+        const actionRuleKey = (a: any): string => {
+          const tt = String(a?.trigger_type ?? '');
+          const tc = a?.trigger_config ?? {};
+          // Use the most specific identifier per trigger type.
+          const ident =
+            tc.place_name ?? tc.from_name ?? tc.from_email ??
+            tc.subject_keyword ?? tc.event_match ?? tc.condition ?? '';
+          return `${tt}::${String(ident).trim().toLowerCase()}`;
+        };
         const out: NaaviAction[] = [];
         for (const a of response.actions) {
           if (a.type === 'REMEMBER') {
             const key = String(a.text ?? '').trim().toLowerCase();
             if (key && seenRemember.has(key)) continue;
             if (key) seenRemember.add(key);
+          }
+          if (a.type === 'SET_ACTION_RULE') {
+            const key = actionRuleKey(a);
+            if (key && seenActionRule.has(key)) {
+              console.warn(`[Orchestrator] dropping duplicate SET_ACTION_RULE: ${key}`);
+              continue;
+            }
+            if (key) seenActionRule.add(key);
           }
           out.push(a);
         }
@@ -1285,9 +1311,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               // See project_naavi_location_verified_address.md.
               if (triggerType === 'location') {
                 const placeName = String((action.trigger_config ?? {}).place_name ?? '').trim();
+                console.log(`[orch:loc] entering intercept | place="${placeName}" | one_shot=${action.one_shot} | label="${action.label}"`);
                 if (!placeName) {
                   locationIntercepted = true;
                   turnSpeechOverride = "I didn't catch the place for that alert. Can you say it again?";
+                  console.log('[orch:loc] empty placeName — skipping');
                   continue;
                 }
                 try {
@@ -1342,6 +1370,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                     // speech unconditionally, which lied to Robert when the
                     // insert timed out or RLS-failed silently.
                     const insertSucceeded = !insertErr && !!insertedRule?.id;
+                    console.log(`[orch:loc] memory-hit insert | succeeded=${insertSucceeded} | id=${insertedRule?.id ?? 'null'} | one_shot=${oneShot} | err=${insertErr?.message ?? insertErr ?? 'null'}`);
                     if (insertErr) {
                       console.error('[Orchestrator] memory-hit insert failed:', insertErr.message ?? insertErr);
                     }
@@ -1367,6 +1396,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                     turnSpeechOverride = insertSucceeded
                       ? `Alert set — ${modeText} you arrive at ${data.place_name}.`
                       : `I couldn't save the alert — please try again in a moment.`;
+                    console.log(`[orch:loc] turnSpeechOverride set | "${turnSpeechOverride}"`);
                     continue;
                   }
 
