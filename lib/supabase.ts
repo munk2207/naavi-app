@@ -11,6 +11,7 @@ import { Platform, AppState } from 'react-native';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { queryWithTimeout, getSessionWithTimeout, getCachedUserId } from './invokeWithTimeout';
+import { remoteLog } from './remoteLog';
 
 const SUPABASE_URL     = process.env.EXPO_PUBLIC_SUPABASE_URL     ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -97,14 +98,20 @@ export async function signOut(): Promise<void> {
 export async function callNaaviEdgeFunction(
   system: string,
   messages: { role: 'user' | 'assistant'; content: string }[],
+  diagSessionId?: string,
 ): Promise<string> {
   const url = `${SUPABASE_URL}/functions/v1/naavi-chat`;
+  const log = (step: string, payload?: Record<string, unknown>) => {
+    if (diagSessionId) remoteLog(diagSessionId, step, payload);
+  };
 
   // Use the user's JWT if logged in, otherwise fall back to anon key.
   // V57.9 — wrapped in a 5s timeout because getSession() can hang indefinitely
   // on a stuck JWT refresh; without this the 60s AbortController below never
   // gets a chance to fire and the user's turn waits forever.
+  log('callNaavi-getSession-start');
   const session = await getSessionWithTimeout();
+  log('callNaavi-getSession-end', { hasSession: !!session, hasUser: !!session?.user });
   const authToken = session?.access_token ?? SUPABASE_ANON_KEY;
   // V57.9.1 — when the session times out we still want naavi-chat to
   // succeed via the server-side body-fallback (user_id in body). Pull from
@@ -123,6 +130,18 @@ export async function callNaaviEdgeFunction(
   const controller = new AbortController();
   const abortTimer = setTimeout(() => controller.abort(), 60_000);
 
+  const reqBody = JSON.stringify({
+    system,
+    messages,
+    max_tokens: 2048,
+    ...(userIdForBody ? { user_id: userIdForBody } : {}),
+  });
+  log('callNaavi-fetch-start', {
+    body_bytes: reqBody.length,
+    auth_kind: session?.access_token ? 'jwt' : 'anon',
+    has_body_user_id: !!userIdForBody,
+  });
+
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -130,25 +149,25 @@ export async function callNaaviEdgeFunction(
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${authToken}`,
       },
-      body: JSON.stringify({
-        system,
-        messages,
-        max_tokens: 2048,
-        ...(userIdForBody ? { user_id: userIdForBody } : {}),
-      }),
+      body: reqBody,
       signal: controller.signal,
     });
+    log('callNaavi-fetch-headers', { status: res.status, ok: res.ok });
 
     if (!res.ok) {
       const body = await res.text();
+      log('callNaavi-fetch-error-body', { status: res.status, body_snippet: body.slice(0, 200) });
       throw new Error(`Edge Function error ${res.status}: ${body}`);
     }
 
-    const { rawText, error } = await res.json();
+    const json = await res.json();
+    log('callNaavi-fetch-json-parsed', { has_rawText: !!json?.rawText, has_error: !!json?.error });
+    const { rawText, error } = json;
     if (error) throw new Error(`Edge Function returned error: ${error}`);
     return rawText as string;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    log('callNaavi-fetch-catch', { error: msg.slice(0, 200) });
     if (msg.includes('aborted') || msg.includes('AbortError')) {
       throw new Error('Naavi took too long to respond. Please try again.');
     }

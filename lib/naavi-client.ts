@@ -17,6 +17,7 @@ import { isSupabaseConfigured, callNaaviEdgeFunction, supabase } from './supabas
 import { queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
 import { getEpicHealthContext } from './epic';
 import { searchKnowledge, fetchAllKnowledge, formatFragmentsForContext } from './knowledge';
+import { remoteLog } from './remoteLog';
 
 // ─── Platform-aware storage ───────────────────────────────────────────────────
 // expo-secure-store only works on iOS/Android.
@@ -572,8 +573,14 @@ export async function sendToNaavi(
   userMessage: string,
   conversationHistory: NaaviMessage[],
   briefItems: BriefItem[] = [],
-  language: 'en' | 'fr' = 'en'
+  language: 'en' | 'fr' = 'en',
+  diagSessionId?: string,
 ): Promise<NaaviResponse> {
+  const log = (step: string, payload?: Record<string, unknown>) => {
+    if (diagSessionId) remoteLog(diagSessionId, step, payload);
+  };
+  log('sendToNaavi-start');
+
   // Keep only the last 10 turns (20 messages) to prevent stale history from
   // anchoring Claude's behaviour and overriding fresh knowledge context.
   const recentHistory = conversationHistory
@@ -587,12 +594,14 @@ export async function sendToNaavi(
   // Fetch user's name and phone from Supabase so the prompt is personalized.
   // 5s timeout — if Supabase auth/DB query hangs we proceed with safe defaults
   // rather than blocking the whole send pipeline.
+  log('getUserProfile-start');
   const { userName, userPhone } = await withTimeout(
     getUserProfile(),
     5_000,
     { userName: 'there', userPhone: '' },
     'getUserProfile',
   );
+  log('getUserProfile-end', { userName, hasPhone: !!userPhone });
 
   // "Broad" queries load every knowledge fragment into context — expensive.
   // The old regex matched "all", "everything", "preferences", "what is my X"
@@ -608,8 +617,10 @@ export async function sendToNaavi(
   // instead of freezing the whole send pipeline. Without these timeouts, a
   // single stuck request blocks every subsequent send (V57.1 Hi/schedule
   // hangs of 3–9 minutes were reproducible — see Session 26 testing).
+  log('parallel-context-start', { isBroadQuery });
   const [healthContext, knowledgeFragments, sharedBase] = await Promise.all([
-    withTimeout(getEpicHealthContext(), 6_000, '', 'getEpicHealthContext'),
+    withTimeout(getEpicHealthContext(), 6_000, '', 'getEpicHealthContext')
+      .then(v => { log('getEpicHealthContext-end', { len: v?.length ?? 0 }); return v; }),
     // Cap at 20 fragments even for broad queries — prior 100-cap was the
     // other half of the cost lever; 20 is enough for "what do you know about
     // me" without bloating the prompt. AAB cost-lever #4.
@@ -618,9 +629,11 @@ export async function sendToNaavi(
       6_000,
       [],
       isBroadQuery ? 'fetchAllKnowledge' : 'searchKnowledge',
-    ),
-    withTimeout(fetchSharedPrompt(userName, userPhone), 9_000, null, 'fetchSharedPrompt'),
+    ).then(v => { log('knowledge-end', { count: Array.isArray(v) ? v.length : 0 }); return v; }),
+    withTimeout(fetchSharedPrompt(userName, userPhone), 9_000, null, 'fetchSharedPrompt')
+      .then(v => { log('fetchSharedPrompt-end', { gotPrompt: !!v, len: v?.length ?? 0 }); return v; }),
   ]);
+  log('parallel-context-end', { systemPromptSrc: sharedBase ? 'shared' : 'local-fallback' });
   const knowledgeContext = formatFragmentsForContext(knowledgeFragments, isBroadQuery);
 
   // Build system prompt: prefer shared Edge Function (single source of truth),
@@ -659,7 +672,9 @@ export async function sendToNaavi(
 
   if (isSupabaseConfigured()) {
     // Phase 8 — API key lives on the server, never on the device
-    rawText = await callNaaviEdgeFunction(system, messages);
+    log('callNaavi-invoke-start', { system_bytes: system.length, message_count: messages.length });
+    rawText = await callNaaviEdgeFunction(system, messages, diagSessionId);
+    log('callNaavi-invoke-end', { rawText_bytes: rawText.length });
   } else {
     // Fallback — local API key (Phase 7 behaviour)
     const apiKey = await getApiKey();
