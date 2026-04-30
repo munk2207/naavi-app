@@ -102,6 +102,44 @@ function normalizeOrdinalsForTTS(text: string): string {
   return text;
 }
 
+// V57.8 — expand street-suffix abbreviations to full words so Aura reads
+// addresses correctly. Wael flagged Naavi pronouncing "962 Terranova Dr"
+// as "962 Terranova Doctor" — "Dr" was being read as "Doctor" because
+// that's the more common dictionary expansion. Address abbreviations
+// only get expanded when in unambiguous address context (preceded by a
+// street name token + followed by ",", " in", or end-of-line).
+//
+// "Dr." with a period followed by a capitalized name (Dr. Smith) is
+// LEFT ALONE — that's correctly read as "Doctor".
+function expandAddressAbbreviations(text: string): string {
+  if (!text) return text;
+  // Each entry: bare abbrev (no period), expansion. Only one-word
+  // street suffixes — multi-word like "Apt 4" stay unchanged.
+  const SUFFIX_MAP: Record<string, string> = {
+    'Dr':   'Drive',
+    'St':   'Street',
+    'Ave':  'Avenue',
+    'Blvd': 'Boulevard',
+    'Rd':   'Road',
+    'Ln':   'Lane',
+    'Ct':   'Court',
+    'Pl':   'Place',
+    'Hwy':  'Highway',
+    'Pkwy': 'Parkway',
+    'Sq':   'Square',
+    'Ter':  'Terrace',
+    'Cir':  'Circle',
+    'Trl':  'Trail',
+  };
+  // Pattern: street name word + abbrev + (comma | space + city-ish word | EOL)
+  // We require a preceding capitalized word so "I'll Dr you home" doesn't match.
+  const pattern = new RegExp(
+    `(\\b[A-Z][a-zA-Z]+)\\s+(${Object.keys(SUFFIX_MAP).join('|')})\\b(\\.?)(?=\\s*(?:,|$|\\n))`,
+    'g',
+  );
+  return text.replace(pattern, (_m, name, abbrev, _dot) => `${name} ${SUFFIX_MAP[abbrev]}`);
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -126,7 +164,7 @@ serve(async (req) => {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    const normalised = normalizeOrdinalsForTTS(normalizePhoneForTTS(text));
+    const normalised = expandAddressAbbreviations(normalizeOrdinalsForTTS(normalizePhoneForTTS(text)));
     console.log('[text-to-speech] voice: aura-hera-en, text length:', text.length, 'normalised length:', normalised.length);
 
     const res = await fetch('https://api.deepgram.com/v1/speak?model=aura-hera-en&encoding=mp3', {
