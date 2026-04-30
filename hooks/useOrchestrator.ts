@@ -19,7 +19,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem, type GlobalSearchResult } from '@/lib/naavi-client';
 import { isVoiceEnabledSync } from '@/lib/voicePref';
 import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
-import { invokeWithTimeout, queryWithTimeout } from '@/lib/invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 import { sendPushNotification } from '@/lib/push';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
 import { lookupContact, lookupContactByPhone } from '@/lib/contacts';
@@ -508,7 +508,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
       // ── CASE: yes + we have a resolved place → commit
       if (isYes && pending.resolved) {
-        const { data: { session } } = await supabase.auth.getSession();
+        const session = await getSessionWithTimeout();
         if (!session?.user) {
           pendingLocationRef.current = null;
           emitPendingTurn("I'm not signed in. Please sign in and try again.");
@@ -555,7 +555,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           return;
         }
 
-        const { data: { session } } = await supabase.auth.getSession();
+        const session = await getSessionWithTimeout();
         if (!session?.user) {
           pendingLocationRef.current = null;
           emitPendingTurn("I'm not signed in. Please sign in and try again.");
@@ -762,7 +762,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       let preSearchResults: GlobalSearchResult[] = [];
       if (isRetrievalQuery && supabase) {
         try {
-          const { data: { session } } = await supabase.auth.getSession();
+          const session = await getSessionWithTimeout();
           if (session?.user) {
             // 8-second hard cap on pre-search. V57.2 — if global-search hangs
             // we proceed without pre-search results rather than freezing the
@@ -808,6 +808,37 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       if (isCancelled()) return;
       console.log('[Orchestrator] actions:', JSON.stringify(response.actions));
       console.log('[Orchestrator] knowledgeItems from direct fetch:', knowledgeResult.length);
+
+      // ── V57.9 phantom-action backstop ─────────────────────────────────────
+      // Claude (Haiku) sometimes speaks a commit verb ("I've scheduled...",
+      // "I've set up the alert...") with empty actions[]. The prompt-side
+      // rule (UNIVERSAL TRUTHFULNESS RULE) is supposed to prevent this, but
+      // Haiku has been observed to ignore it. This backstop catches the
+      // mismatch on the client and rewrites the speech to be honest. Maps
+      // each commit verb to its required action type — if the speech says
+      // it but the action wasn't emitted, override the speech.
+      //
+      // Only fires when actions[] is non-empty for OTHER reasons OR
+      // completely empty — the goal is to never let a "done" speech ride
+      // alongside a missing structured action.
+      const phantomCommitChecks: Array<{ verbRe: RegExp; needsType: string; honestSpeech: string }> = [
+        { verbRe: /\b(?:i['']?ve\s+(?:scheduled|added|booked|put)|scheduled\b|booked\b|added it to (?:your|the) calendar|put (?:it|that) on (?:your|the) calendar)\b/i, needsType: 'CREATE_EVENT', honestSpeech: "I tried to add that to your calendar but my system didn't run it. Can you say it again?" },
+        { verbRe: /\b(?:i['']?ve\s+(?:drafted|sent)|drafted (?:a|the) (?:message|email|text)|sent (?:a|the) (?:message|email|text))\b/i, needsType: 'DRAFT_MESSAGE', honestSpeech: "I tried to draft that message but my system didn't run it. Can you say it again?" },
+        { verbRe: /\b(?:i['']?ve\s+saved|saved to memory|i['']?ll\s+remember|noted that|got it[,.]?\s+(?:i['']?ve\s+)?saved|i['']?ve\s+remembered)\b/i, needsType: 'REMEMBER', honestSpeech: "I tried to save that to memory but my system didn't run it. Can you say it again?" },
+        { verbRe: /\b(?:i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+when|i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+(?:as soon|the moment|if)|alert is set|i['']?ve\s+set\s+(?:the|that|up)\s+(?:up\s+)?(?:the\s+)?alert)\b/i, needsType: 'SET_ACTION_RULE', honestSpeech: "I tried to set that alert but my system didn't run it. Can you say it again?" },
+      ];
+      const claudeActions = Array.isArray(response.actions) ? response.actions : [];
+      const claudeSpeech  = String(response.speech ?? '');
+      for (const check of phantomCommitChecks) {
+        if (check.verbRe.test(claudeSpeech)) {
+          const hasMatchingAction = claudeActions.some((a: any) => a?.type === check.needsType);
+          if (!hasMatchingAction) {
+            turnSpeechOverride = check.honestSpeech;
+            console.warn(`[Orchestrator] phantom-action detected — speech promised ${check.needsType} but no action emitted. Overriding speech.`);
+            break;
+          }
+        }
+      }
 
       // ── Execute actions ────────────────────────────────────────────────────────
 
@@ -946,7 +977,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           const query = String(action.query ?? '').trim();
           if (query && supabase) {
             try {
-              const { data: { session } } = await supabase.auth.getSession();
+              const session = await getSessionWithTimeout();
               if (session?.user) {
                 const { data, error } = await invokeWithTimeout('global-search', {
                   body: { query, user_id: session.user.id, limit: 8 },
@@ -1253,7 +1284,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           // Writes go to action_rules (unified trigger/action framework).
           // email_watch_rules has been retired; evaluate-rules reads action_rules.
           if (supabase) {
-            const { data: { session } } = await supabase.auth.getSession();
+            const session = await getSessionWithTimeout();
             if (session?.user) {
               const triggerConfig: Record<string, string> = {};
               if (action.fromName)       triggerConfig.from_name = String(action.fromName);
@@ -1296,7 +1327,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           }
         } else if (action.type === 'SET_ACTION_RULE') {
           if (supabase) {
-            const { data: { session } } = await supabase.auth.getSession();
+            const session = await getSessionWithTimeout();
             if (session?.user) {
               // Resolve contact for the action target
               const actionConfig = (action.action_config ?? {}) as Record<string, any>;
@@ -1404,10 +1435,21 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                     // Robert always knows which mode the rule is in.
                     // V57.6 — fall back to a candid error if the insert
                     // didn't land. Speech-truthfulness rule.
+                    // V57.9 — distinguish unique-constraint duplicates (HTTP 409
+                    // / Postgres 23505) from real failures. Wael testing 2026-04-30
+                    // surfaced this: the office alert had been added twice the
+                    // previous evening, blocking new inserts. Old speech ("I
+                    // couldn't save the alert") was misleading — the alert was
+                    // already set, not failing.
                     const modeText = oneShot ? 'one time' : 'every time';
+                    const isDuplicate =
+                      (insertErr as any)?.code === '23505' ||
+                      /duplicate|already exists|conflict/i.test(insertErr?.message ?? '');
                     turnSpeechOverride = insertSucceeded
                       ? `Alert set — ${modeText} you arrive at ${data.place_name}.`
-                      : `I couldn't save the alert — please try again in a moment.`;
+                      : isDuplicate
+                        ? `You already have an alert set for ${data.place_name}.`
+                        : `I couldn't save the alert — please try again in a moment.`;
                     console.log(`[orch:loc] turnSpeechOverride set | "${turnSpeechOverride}"`);
                     continue;
                   }
@@ -1698,9 +1740,19 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       });
 
     } catch (err) {
+      // V57.9 — when sendToNaavi (or any step inside the try) throws, status
+      // was being left at 'error' forever, leaving every voice channel locked
+      // until the user force-stopped the app (P0 #2 from V57.8 handoff).
+      // Show the error briefly, then auto-reset to 'idle' so the user can
+      // simply tap and try again.
       const message = err instanceof Error ? err.message : 'Unknown error';
+      console.error('[Orchestrator] send() threw:', message);
       setError(message);
       setStatus('error');
+      setTimeout(() => {
+        setError(null);
+        setStatus('idle');
+      }, 4000);
     }
   }, [status, language]);
 

@@ -101,3 +101,36 @@ export async function queryWithTimeout<T = any>(
 
   return Promise.race([queryPromise, timeoutPromise]);
 }
+
+/**
+ * getSessionWithTimeout — wraps supabase.auth.getSession() with a hard timeout.
+ *
+ * Why this exists (V57.9):
+ *   The Supabase JS SDK's getSession() can hang indefinitely when the JWT is
+ *   expired and the refresh attempt stalls (network blip, slow DNS, captive
+ *   portal). The V57.4 timeout audit covered functions.invoke() and the V57.5
+ *   audit covered .from() queries, but auth.getSession() was missed and quietly
+ *   blocks every code path that needs the user's session — including
+ *   callNaaviEdgeFunction, where it runs BEFORE the 60s AbortController on the
+ *   actual fetch. A stuck refresh hangs the whole turn with no recovery.
+ *
+ * On timeout returns null (same shape as "no session"). Callers that already
+ * branch on session?.user being absent will fall through to their existing
+ * fallback path (anon key, server-side body user_id resolution, etc.).
+ *
+ * Default 5s — a healthy refresh completes in < 1s. Anything past 5s is a
+ * stall and we should not wait further.
+ */
+export async function getSessionWithTimeout(timeoutMs: number = 5_000) {
+  if (!supabase) return null;
+
+  const sessionPromise = supabase.auth.getSession().then(r => r.data.session);
+  const timeoutPromise = new Promise<null>((resolve) => {
+    setTimeout(() => {
+      console.warn(`[getSessionWithTimeout] timed out after ${timeoutMs}ms — falling back to no session`);
+      resolve(null);
+    }, timeoutMs);
+  });
+
+  return Promise.race([sessionPromise, timeoutPromise]);
+}

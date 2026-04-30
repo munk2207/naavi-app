@@ -14,7 +14,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { isSupabaseConfigured, callNaaviEdgeFunction, supabase } from './supabase';
-import { queryWithTimeout } from './invokeWithTimeout';
+import { queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
 import { getEpicHealthContext } from './epic';
 import { searchKnowledge, fetchAllKnowledge, formatFragmentsForContext } from './knowledge';
 
@@ -62,7 +62,7 @@ export function saveUserName(name: string): void {
  */
 export async function syncUserNameToSupabase(name: string): Promise<void> {
   if (!supabase) throw new Error('Supabase not configured');
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getSessionWithTimeout();
   if (!session?.user) throw new Error('Not signed in');
   const { error } = await queryWithTimeout(
     supabase
@@ -174,7 +174,7 @@ async function getUserProfile(): Promise<{ userName: string; userPhone: string }
   if (!supabase) return { userName, userPhone };
 
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await getSessionWithTimeout();
     if (!session?.user) return { userName, userPhone };
 
     const { data } = await queryWithTimeout(

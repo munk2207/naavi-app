@@ -28,7 +28,7 @@ import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
-import { queryWithTimeout } from '@/lib/invokeWithTimeout';
+import { queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 import { suggestFaq, faqUrl, type FaqEntry } from '@/lib/faq';
 
 const FORMSPREE_URL = 'https://formspree.io/f/mpqkkdep';
@@ -73,7 +73,7 @@ export default function ReportScreen() {
   useEffect(() => {
     (async () => {
       if (!supabase) return;
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = await getSessionWithTimeout();
       const authEmail = session?.user?.email ?? '';
       if (authEmail) setEmail(authEmail);
       if (session?.user?.id) {

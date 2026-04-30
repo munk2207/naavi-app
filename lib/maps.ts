@@ -7,7 +7,7 @@
  */
 
 import { supabase } from './supabase';
-import { invokeWithTimeout, queryWithTimeout } from './invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
 import * as Location from 'expo-location';
 
 export interface TravelTime {
@@ -24,7 +24,7 @@ export interface TravelTime {
 async function getStoredHomeAddress(): Promise<string | null> {
   if (!supabase) return null;
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await getSessionWithTimeout();
     if (!session?.user?.id) return null;
     const { data } = await queryWithTimeout(
       supabase

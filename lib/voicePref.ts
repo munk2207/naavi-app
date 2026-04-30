@@ -11,7 +11,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
-import { queryWithTimeout } from './invokeWithTimeout';
+import { queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
 
 const CACHE_KEY = 'naavi.voice_playback';
 let cached: boolean | null = null;
@@ -26,7 +26,7 @@ export function isVoiceEnabledSync(): boolean {
 export async function refreshVoicePref(): Promise<boolean> {
   if (!supabase) return true;
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await getSessionWithTimeout();
     if (!session?.user?.id) {
       const local = await AsyncStorage.getItem(CACHE_KEY);
       cached = local === 'false' ? false : true;
@@ -61,7 +61,7 @@ export async function setVoicePref(enabled: boolean): Promise<void> {
   await AsyncStorage.setItem(CACHE_KEY, enabled ? 'true' : 'false');
   if (!supabase) return;
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await getSessionWithTimeout();
     if (!session?.user?.id) return;
     await queryWithTimeout(
       supabase

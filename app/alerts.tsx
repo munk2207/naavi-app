@@ -28,7 +28,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
-import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
+import { invokeWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -241,7 +241,7 @@ export default function AlertsScreen() {
     try {
       setError(null);
       if (!supabase) { setLoading(false); return; }
-      const { data: { session } } = await supabase.auth.getSession();
+      const session = await getSessionWithTimeout();
       if (!session?.user) { setLoading(false); return; }
       const { data, error: err } = await invokeWithTimeout('manage-rules', {
         body: { op: 'list' },

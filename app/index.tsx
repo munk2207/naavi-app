@@ -76,7 +76,7 @@ import { getBackgroundPermission, requestLocationPermissions } from '@/lib/locat
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
-import { invokeWithTimeout, queryWithTimeout } from '@/lib/invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 
 // ─── Integrations data ────────────────────────────────────────────────────────
 
@@ -670,7 +670,7 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!supabase) return;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    getSessionWithTimeout().then((session) => {
       console.log('[Home] getSession:', session?.user?.id ?? 'none');
       if (session?.user) { setCurrentUserId(session.user.id); setIsSignedIn(true); }
     });

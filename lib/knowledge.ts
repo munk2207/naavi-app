@@ -6,7 +6,7 @@
  */
 
 import { supabase } from './supabase';
-import { invokeWithTimeout, queryWithTimeout } from './invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
 
 export interface KnowledgeFragment {
   id: string;
@@ -71,7 +71,7 @@ export async function searchKnowledge(
 export async function fetchAllKnowledge(limit = 100): Promise<KnowledgeFragment[]> {
   if (!supabase) return [];
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await getSessionWithTimeout();
     if (!session?.user?.id) return [];
     const { data, error } = await queryWithTimeout(
       supabase
@@ -96,7 +96,7 @@ export async function fetchAllKnowledge(limit = 100): Promise<KnowledgeFragment[
 export async function deleteKnowledge(keyword: string): Promise<number> {
   if (!supabase || !keyword.trim()) return 0;
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await getSessionWithTimeout();
     if (!session?.user?.id) return 0;
     const { data, error } = await queryWithTimeout(
       supabase
