@@ -124,9 +124,41 @@ serve(async (req) => {
     });
   }
 
+  // V57.7 cost audit — DORMANCY FILTER. Skip users who haven't signed in
+  // for 30+ days. They likely aren't using Naavi, and Claude/OCR/Gmail
+  // costs to keep dormant inboxes synced are pure waste.
+  // Industry stat: ~30-50% of beta signups go dormant within 30 days.
+  // At 100 beta users this saves ~$500-1500/month.
+  //
+  // When a dormant user signs back in, Supabase Auth updates last_sign_in_at
+  // automatically — the next cron tick will pick them up.
+  const DORMANCY_DAYS = 30;
+  const dormancyThreshold = new Date(Date.now() - DORMANCY_DAYS * 24 * 60 * 60 * 1000);
+  const activeUserIds = new Set<string>();
+  try {
+    const { data: usersPage } = await adminClient.auth.admin.listUsers({ perPage: 1000 });
+    for (const u of usersPage?.users ?? []) {
+      const lastSignIn = u.last_sign_in_at ? new Date(u.last_sign_in_at) : null;
+      if (lastSignIn && lastSignIn >= dormancyThreshold) {
+        activeUserIds.add(u.id);
+      }
+    }
+    console.log(`[sync-gmail] Dormancy filter: ${activeUserIds.size}/${usersPage?.users?.length ?? 0} users active in last ${DORMANCY_DAYS} days`);
+  } catch (err) {
+    console.error('[sync-gmail] Failed to load active users — fail open (sync all):', err);
+    // Fail-open so we never accidentally drop real users from the sync if
+    // the auth admin API has a transient issue.
+    for (const t of tokens) activeUserIds.add(t.user_id);
+  }
+
+  const skippedDormant: string[] = [];
   const results: { user_id: string; messages: number; error?: string }[] = [];
 
   for (const { user_id, refresh_token } of tokens) {
+    if (!activeUserIds.has(user_id)) {
+      skippedDormant.push(user_id);
+      continue;
+    }
     try {
       const accessToken = await getNewAccessToken(refresh_token);
 
@@ -289,7 +321,7 @@ serve(async (req) => {
     }
   }
 
-  return new Response(JSON.stringify({ results }), {
+  return new Response(JSON.stringify({ results, skipped_dormant: skippedDormant.length }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 });
