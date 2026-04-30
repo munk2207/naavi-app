@@ -95,9 +95,21 @@ export async function signOut(): Promise<void> {
 
 // ─── Edge Function call ────────────────────────────────────────────────────────
 
+/**
+ * Lean per-call context that mobile sends to naavi-chat. Server uses this
+ * to assemble the full system prompt itself, so we don't ship 57 KB of
+ * shared rules over the wire on every turn (V57.9.3).
+ */
+export interface NaaviCallContext {
+  language: 'en' | 'fr';
+  briefItems: any[];
+  healthContext: string;
+  knowledgeContext: string;
+}
+
 export async function callNaaviEdgeFunction(
-  system: string,
   messages: { role: 'user' | 'assistant'; content: string }[],
+  ctx: NaaviCallContext,
   diagSessionId?: string,
 ): Promise<string> {
   const url = `${SUPABASE_URL}/functions/v1/naavi-chat`;
@@ -116,24 +128,32 @@ export async function callNaaviEdgeFunction(
   // V57.9.1 — when the session times out we still want naavi-chat to
   // succeed via the server-side body-fallback (user_id in body). Pull from
   // the live session if available; otherwise fall back to the cached
-  // user_id from the last successful getSession in this app session.
+  // user_id (V57.9.3 — backed by AsyncStorage so it survives force-stop).
   // Without this, anon-key requests get 401 from naavi-chat and the user
-  // sees a 60-90s thinking spinner that never produces a reply (Wael
-  // testing 2026-04-30).
+  // sees a 60-90s thinking spinner that never produces a reply.
   const userIdForBody = session?.user?.id ?? getCachedUserId();
 
-  // Hard timeout on the main Claude round-trip. V57.1 testing reproduced
-  // requests that hung indefinitely with no error — without an AbortController
-  // the JS process never recovers. 60s covers Claude's worst-case latency
-  // with comfortable margin; a real Claude reply is 5-15s. After 60s we
-  // throw so the orchestrator can show an error instead of "Thinking..." forever.
+  // V57.9.3 — hard timeout on the main Claude round-trip reduced from 60s
+  // to 25s. Now that the body is ~3 KB instead of ~60 KB the upload time
+  // on a sluggish connection is sub-second; Claude itself returns in
+  // 1-15s. 25s covers worst-case Claude with comfortable margin; if a
+  // request is still pending past 25s the network is too sluggish to be
+  // worth waiting for and the user sees a clean error sooner.
   const controller = new AbortController();
-  const abortTimer = setTimeout(() => controller.abort(), 60_000);
+  const abortTimer = setTimeout(() => controller.abort(), 25_000);
 
+  // V57.9.3 lean body — ship messages + small context. naavi-chat fetches
+  // the canonical system prompt itself via get-naavi-prompt, so the 57 KB
+  // shared rules never travel over the user's network. Drops body from
+  // ~60 KB to ~3 KB, kills the 60-second cold-start hang.
   const reqBody = JSON.stringify({
-    system,
     messages,
-    max_tokens: 2048,
+    max_tokens: 1024,
+    channel: 'app',
+    language: ctx.language,
+    brief_items: ctx.briefItems,
+    health_context: ctx.healthContext,
+    knowledge_context: ctx.knowledgeContext,
     ...(userIdForBody ? { user_id: userIdForBody } : {}),
   });
   log('callNaavi-fetch-start', {

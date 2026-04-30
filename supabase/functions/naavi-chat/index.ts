@@ -241,6 +241,106 @@ async function lookupContactsByName(
   }
 }
 
+// ── V57.9.3 server-side prompt assembly ──────────────────────────────────────
+//
+// Mobile V57.9.3+ sends a lean body without the system prompt to avoid
+// shipping 57 KB of text over the wire on every turn (caused 60 s body-
+// upload stalls on sluggish networks). When `system` is missing we
+// assemble the prompt here using:
+//   1. user_settings (server-side DB lookup) for user_name + user_phone
+//   2. get-naavi-prompt Edge Function (in-region, fast, prompt cached)
+//   3. The mobile-supplied context (brief items, health, knowledge)
+//
+// Output mirrors what mobile sendToNaavi previously assembled — same
+// CACHE_BOUNDARY / END_STABLE_RULES markers preserved so the prompt-cache
+// 3-block split below still works.
+
+interface MobileBriefItem {
+  id?: string;
+  category?: string;
+  title?: string;
+  detail?: string;
+  urgent?: boolean;
+}
+
+async function assembleSystemPromptServerSide(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  opts: {
+    channel: string;
+    language: 'en' | 'fr';
+    briefItems: MobileBriefItem[];
+    healthContext: string;
+    knowledgeContext: string;
+  },
+): Promise<string | null> {
+  // 1. user_settings → user name + phone (drives prompt personalization)
+  let userName = 'there';
+  let userPhone = '';
+  try {
+    const { data } = await supabase
+      .from('user_settings')
+      .select('name, phone')
+      .eq('user_id', userId)
+      .single();
+    if (data?.name)  userName  = String(data.name);
+    if (data?.phone) userPhone = String(data.phone);
+  } catch (err) {
+    console.warn('[assembleSystemPrompt] user_settings lookup failed:', (err as Error)?.message);
+  }
+
+  // 2. get-naavi-prompt → base canonical prompt (channel-tailored)
+  let base: string | null = null;
+  try {
+    const supaUrl = Deno.env.get('SUPABASE_URL')!;
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const promptRes = await fetch(`${supaUrl}/functions/v1/get-naavi-prompt`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({
+        channel: opts.channel === 'voice' ? 'voice' : 'app',
+        userName,
+        userPhone,
+      }),
+    });
+    if (promptRes.ok) {
+      const promptData = await promptRes.json();
+      if (typeof promptData?.prompt === 'string' && promptData.prompt.length > 100) {
+        base = promptData.prompt;
+      }
+    } else {
+      console.warn('[assembleSystemPrompt] get-naavi-prompt non-200:', promptRes.status);
+    }
+  } catch (err) {
+    console.error('[assembleSystemPrompt] get-naavi-prompt fetch failed:', (err as Error)?.message);
+  }
+
+  if (!base) return null;
+
+  // 3. Append mobile-supplied per-query context (brief / health / knowledge).
+  //    Layout mirrors the previous mobile-side assembly so the prompt-cache
+  //    3-block split downstream still finds the END_STABLE marker (it's
+  //    embedded in the base) and partitions correctly.
+  const languageNote = opts.language === 'fr'
+    ? `\n${userName} speaks French. Respond in Canadian French.`
+    : '';
+
+  const briefContext = (opts.briefItems && opts.briefItems.length > 0)
+    ? `\n\n## ${userName}'s upcoming schedule (next 7 days)\n` +
+      opts.briefItems
+        .map(item => `- [${item.category ?? 'task'}] ${item.title ?? ''}${item.detail ? ` — ${item.detail}` : ''}`)
+        .join('\n')
+    : `\n\n## ${userName}'s upcoming schedule (next 7 days)\n- No events found for the next 7 days.`;
+
+  const healthSuffix    = opts.healthContext    ? `\n\n${opts.healthContext}`    : '';
+  const knowledgeSuffix = opts.knowledgeContext ? `\n\n${opts.knowledgeContext}` : '';
+
+  return base + languageNote + briefContext + healthSuffix + knowledgeSuffix;
+}
+
 // ── Resolve user ID ───────────────────────────────────────────────────────────
 
 async function resolveUserId(
@@ -313,16 +413,35 @@ Deno.serve(async (req) => {
   const elapsed = () => `${Date.now() - t0}ms`;
 
   try {
-    const { system, messages, max_tokens: rawMaxTokens, user_id: bodyUserId } = await req.json();
+    const body = await req.json();
+    const {
+      system: rawSystem,
+      messages,
+      max_tokens: rawMaxTokens,
+      user_id: bodyUserId,
+      // V57.9.3 — new lean-body fields. Mobile no longer ships the 57 KB
+      // system prompt over the wire (caused 60 s upload stall on slow
+      // networks). Instead it sends user_id + channel + small mobile
+      // context, and naavi-chat assembles the prompt server-side via
+      // an in-region call to get-naavi-prompt.
+      channel: bodyChannel,
+      language: bodyLanguage,
+      brief_items: bodyBriefItems,
+      health_context: bodyHealthContext,
+      knowledge_context: bodyKnowledgeContext,
+    } = body;
     // V57.7 cost audit — cap output at 1024 tokens (was 2048). Naavi
     // replies are short by design ("3 sentences unless asked for more"),
     // so 1024 is plenty. 2048 was unused headroom inflating cost.
     // 100 beta users × 50 chat turns/day × 2x output = $$ savings.
     const max_tokens = Math.min(rawMaxTokens ?? 1024, 1024);
 
-    const systemLen   = typeof system === 'string' ? system.length : 0;
     const messageCount = Array.isArray(messages) ? messages.length : 0;
-    console.log(`[timing] ${elapsed()} | request parsed | system=${systemLen} chars | messages=${messageCount}`);
+    const hasInlineSystem = typeof rawSystem === 'string' && rawSystem.length > 0;
+    console.log(
+      `[timing] ${elapsed()} | request parsed | inline_system=${hasInlineSystem ? rawSystem.length : 0} chars | ` +
+      `lean_body=${!hasInlineSystem} | messages=${messageCount}`
+    );
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -476,6 +595,27 @@ Deno.serve(async (req) => {
     if (!apiKey) return jsonResponse({ error: 'ANTHROPIC_API_KEY not configured' }, 500);
 
     const client   = new Anthropic({ apiKey });
+
+    // V57.9.3 lean-body path — when mobile didn't ship `system` over the wire,
+    // build it here from user_settings + get-naavi-prompt + the small mobile
+    // context. Falls through with `system = rawSystem` (legacy V57.9.2 mobile
+    // and any voice-server-style caller that already builds the prompt).
+    let system: any = rawSystem;
+    if (!hasInlineSystem) {
+      const assembled = await assembleSystemPromptServerSide(supabase, userId, {
+        channel: typeof bodyChannel === 'string' ? bodyChannel : 'app',
+        language: bodyLanguage === 'fr' ? 'fr' : 'en',
+        briefItems: Array.isArray(bodyBriefItems) ? bodyBriefItems : [],
+        healthContext: typeof bodyHealthContext === 'string' ? bodyHealthContext : '',
+        knowledgeContext: typeof bodyKnowledgeContext === 'string' ? bodyKnowledgeContext : '',
+      });
+      if (!assembled) {
+        console.error('[naavi-chat] server-side prompt assembly failed; cannot proceed');
+        return jsonResponse({ error: 'Prompt assembly failed; try again' }, 503);
+      }
+      system = assembled;
+      console.log(`[timing] ${elapsed()} | server-assembled system | len=${assembled.length}`);
+    }
 
     // Calendar ask-time PDF injection — when the user asks a date question
     // and has a calendar-typed PDF harvested, pass that PDF to Claude as a
