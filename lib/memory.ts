@@ -332,11 +332,28 @@ export function extractPersonQuery(rawMessage: string): string | null {
     'first', 'last',
   ]);
 
+  // V57.7 — explicit deny-list for possessive-determiner phrases that
+  // false-positive on the case-insensitive patterns above. Without this,
+  // "What is on my calendar today?" extracts "my calendar" as a person
+  // and triggers a 15s+ Google People API lookup. Wael hit this; server
+  // logs showed "Searched for 'my calenda' in contacts, calendar, emails…"
+  // appended to the orchestrator's prompt.
+  const possessiveDenyPrefixes = [
+    'my ', 'your ', 'his ', 'her ', 'their ', 'our ', 'the ', "today's ",
+    "tomorrow's ", "yesterday's ", "this week's ", "last week's ",
+  ];
+
   for (const pattern of patterns) {
     const match = message.match(pattern);
     if (match) {
       const name = match[1].trim();
-      if (!stopwords.has(name.toLowerCase())) return name;
+      const lower = name.toLowerCase();
+      if (stopwords.has(lower)) continue;
+      // V57.7 — reject if the captured name STARTS with a possessive
+      // determiner (e.g. "my calendar", "your wife", "his appointment").
+      // These are never personal names.
+      if (possessiveDenyPrefixes.some(p => lower.startsWith(p))) continue;
+      return name;
     }
   }
 

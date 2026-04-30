@@ -21,31 +21,38 @@ import { registerPushNotifications } from '@/lib/push';
 import { useGeofencing } from '@/hooks/useGeofencing';
 
 // Handle Google OAuth deep link callback (naavi://auth/callback#access_token=...)
+// V57.7 — wrapped in try/catch. A throw here was a candidate for the
+// blank-screen bug when signing in as mynaavi2207. Auth callback errors
+// must not crash the app — fail silently and let the user retry.
 async function handleAuthCallback(url: string) {
-  if (!url.includes('auth/callback')) return;
-  const fragment = url.includes('#') ? url.split('#')[1] : url.split('?')[1] ?? '';
-  const params = new URLSearchParams(fragment);
-  const access_token           = params.get('access_token');
-  const refresh_token          = params.get('refresh_token');
-  const provider_refresh_token = params.get('provider_refresh_token');
+  try {
+    if (!url.includes('auth/callback')) return;
+    const fragment = url.includes('#') ? url.split('#')[1] : url.split('?')[1] ?? '';
+    const params = new URLSearchParams(fragment);
+    const access_token           = params.get('access_token');
+    const refresh_token          = params.get('refresh_token');
+    const provider_refresh_token = params.get('provider_refresh_token');
 
-  if (access_token && refresh_token && supabase) {
-    // Set the Supabase session so the user is logged in
-    await supabase.auth.setSession({ access_token, refresh_token });
+    if (access_token && refresh_token && supabase) {
+      // Set the Supabase session so the user is logged in
+      await supabase.auth.setSession({ access_token, refresh_token });
 
-    // Get the Google refresh token — first try the URL, then the session object
-    // Supabase doesn't always include it in the URL so session is more reliable
-    let googleToken = provider_refresh_token;
-    if (!googleToken) {
-      const { data } = await supabase.auth.getSession();
-      googleToken = data?.session?.provider_refresh_token ?? null;
+      // Get the Google refresh token — first try the URL, then the session object
+      // Supabase doesn't always include it in the URL so session is more reliable
+      let googleToken = provider_refresh_token;
+      if (!googleToken) {
+        const { data } = await supabase.auth.getSession();
+        googleToken = data?.session?.provider_refresh_token ?? null;
+      }
+
+      if (googleToken) {
+        invokeWithTimeout('store-google-token', {
+          body: { refresh_token: googleToken },
+        }, 15_000).catch((err) => console.error('[layout] store-google-token failed:', err));
+      }
     }
-
-    if (googleToken) {
-      invokeWithTimeout('store-google-token', {
-        body: { refresh_token: googleToken },
-      }, 15_000).catch(() => {});
-    }
+  } catch (err) {
+    console.error('[layout] handleAuthCallback threw:', err);
   }
 }
 
@@ -78,24 +85,32 @@ export default function RootLayout() {
       } catch { /* silent */ }
     };
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      const uid = data?.session?.user?.id ?? null;
-      setUserId(uid);
-      // Sync device timezone to user_settings on every signin — supports
-      // the global-first rule (no hardcoded timezone defaults).
-      if (uid) {
-        syncDeviceTimezone(uid).catch(() => {});
-        maybeAutoRegisterPush();
-      }
-    });
+    // V57.7 — wrap startup work in try/catch. If any of these throws
+    // (network blip, expired token, missing native module), the app
+    // must not crash. Defensive against the V57.6 blank-screen-on-
+    // sign-in bug Wael hit with the test user mynaavi2207.
+    supabase.auth.getSession()
+      .then(({ data }) => {
+        if (!mounted) return;
+        const uid = data?.session?.user?.id ?? null;
+        setUserId(uid);
+        if (uid) {
+          syncDeviceTimezone(uid).catch((err) => console.error('[layout] timezone sync failed:', err));
+          maybeAutoRegisterPush().catch((err) => console.error('[layout] push register failed:', err));
+        }
+      })
+      .catch((err) => console.error('[layout] getSession failed:', err));
 
     const { data: authSub } = supabase.auth.onAuthStateChange((_event, session) => {
-      const uid = session?.user?.id ?? null;
-      setUserId(uid);
-      if (uid) {
-        syncDeviceTimezone(uid).catch(() => {});
-        maybeAutoRegisterPush();
+      try {
+        const uid = session?.user?.id ?? null;
+        setUserId(uid);
+        if (uid) {
+          syncDeviceTimezone(uid).catch((err) => console.error('[layout] timezone sync failed:', err));
+          maybeAutoRegisterPush().catch((err) => console.error('[layout] push register failed:', err));
+        }
+      } catch (err) {
+        console.error('[layout] onAuthStateChange handler threw:', err);
       }
     });
 
