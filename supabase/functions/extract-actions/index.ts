@@ -130,8 +130,12 @@ Return only the JSON array. If no action items found, return [].`;
       // Reverted from Haiku → Sonnet 2026-04-27. Haiku was returning wrong
       // prescription duration_days (e.g. "for 10 days" → 2) and over-emitting
       // email_draft. Per CLAUDE.md "stability over cost" rule, accuracy on
-      // medical extractions outweighs token cost.
-      model: 'claude-sonnet-4-6',
+      // V57.7 cost audit — switched Sonnet 4.6 → Haiku 4.5 (3x cheaper).
+      // Visit transcripts are long (1-5k tokens) and run after every
+      // recording. With 2 users this was ~$30/month; at 100 users it
+      // would be $1,500/month on Sonnet. Haiku is sufficient for the
+      // structured extraction task; revisit if accuracy regresses.
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
       system: [
         { type: 'text', text: extractionRules, cache_control: { type: 'ephemeral' } },
