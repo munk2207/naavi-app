@@ -106,19 +106,32 @@ If in doubt, ASK before creating parallel config.
 
 ### WHERE TO START
 
-**Most recent handoff:** `docs/SESSION_HANDOFF_CONTINUOUS_FIX_V57.8.md` — **READ THIS FIRST**. It contains the open bug list (13 items, P0-P3 prioritized), what's already done in V57.8, recommended order of attack, and pointers to 13 memory files documenting each bug.
+**Most recent handoff:** `docs/SESSION_HANDOFF_2026-04-30_90S_HANG_UNSOLVED.md` — **READ THIS FIRST**. The 60–90 second "Thinking…" hang on chat messages was NOT solved despite three builds today. The handoff is honest about that. **Do not patch more code on hypothesis — the next session must gather device-level evidence first** (`adb logcat` is the simplest, ~3 min, no dev build setup needed; OR a remote-log Edge Function if logcat is off-limits).
 
-**Last AAB on Robert's phone:** V57.8 (build 125), installed 2026-04-30. Pro + Micro Supabase compute live.
+**Last AAB on Wael's phone:** V57.9.1 (build 127), installed 2026-04-30 ~3 PM EDT.
+**Last AAB on Robert's phone:** V56.6 (build 115), installed 2026-04-28. **Do NOT promote V57.x to Robert until the 90s hang is diagnosed and fixed.**
 
-**Current branch state:** `main` is clean. V57.9 (build 126) was started without approval and reverted last session — do NOT recreate it without explicit user "yes."
+**Server-side fixes shipped 2026-04-30 (all live):**
+- `get-naavi-prompt` v45 — universal truthfulness rule + CREATE_EVENT phantom-action block
+- `text-to-speech` — address-suffix expander (Dr→Drive)
+- `send-push-notification` — auto-prunes stale FCM tokens on 404 / NOT_FOUND / UNREGISTERED
+- `sync-gmail` — accepts `days_back` / `before_days_back` / `tier1_only` body params for one-shot backfills (cron path unchanged at 7 days)
+
+**Email caches expanded:** Wael 442 days of tier-1 (1,735 emails), Hussein 360 days (210 emails). Both populated via the new sync-gmail backfill mode.
+
+**Mobile fixes shipped (V57.9 → V57.9.1, but did NOT fully solve the hang):**
+- `getSessionWithTimeout()` 5s race wraps 33 call sites of `supabase.auth.getSession()`
+- `callNaaviEdgeFunction` adds `user_id` to body via in-memory cache (cache empties on force-stop — known gap)
+- Speech-on-409 (duplicate location alert) says "You already have an alert set"
+- Orchestrator outer-catch auto-resets `status='error'` to `'idle'` after 4s
+- Phantom-action client backstop overrides commit-verb speech if matching action is missing
+- `app/_layout.tsx` re-registers FCM token on every launch when permission granted (fixes long-term token rot)
 
 **Auto-tester:** 31/32 green. Run with `npm run test:auto`. Multi-user matrix in `tests/catalogue/multiuser.ts`.
 
-**Critical reminder from last session:** Two Rule violations occurred (Rule 1 — acted without approval; Rule 8 — fixed before tracing). The handoff calls these out at the bottom — re-read.
+**Current Claude prompt version:** `2026-04-30-v45-universal-truthfulness` (via `get-naavi-prompt` Edge Function).
 
-**Current Claude prompt version:** `2026-04-29-v44-alert-me-when-explicit` (via `get-naavi-prompt` Edge Function).
-
-Prior handoffs for context: `docs/SESSION_25_HANDOFF.md`, `docs/SESSION_22_HANDOFF.md`, `docs/SESSION_21_HANDOFF.md`.
+Prior handoffs for context: `docs/SESSION_HANDOFF_CONTINUOUS_FIX_V57.8.md`, `docs/SESSION_25_HANDOFF.md`, `docs/SESSION_22_HANDOFF.md`.
 
 **Then read memory files listed in the MEMORY.md index** — the short list that future sessions need (alert fan-out rule, verified-address rule, context fields pattern, location-trigger plan, feedback/test discipline).
 
