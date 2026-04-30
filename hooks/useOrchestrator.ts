@@ -854,9 +854,15 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       // Only fires when actions[] is non-empty for OTHER reasons OR
       // completely empty — the goal is to never let a "done" speech ride
       // alongside a missing structured action.
+      // V57.9.4 — tightened. Earlier version had bare /scheduled\b/ and
+      // /booked\b/ alternatives that misfired on retrieval responses
+      // ("You have a doctor's appointment scheduled for Monday" → falsely
+      // flagged as a phantom CREATE_EVENT). Each check now requires a
+      // first-person commit shape ("I've X", "I will X", "I added it...")
+      // so retrieval phrasings pass through untouched.
       const phantomCommitChecks: Array<{ verbRe: RegExp; needsType: string; honestSpeech: string }> = [
-        { verbRe: /\b(?:i['']?ve\s+(?:scheduled|added|booked|put)|scheduled\b|booked\b|added it to (?:your|the) calendar|put (?:it|that) on (?:your|the) calendar)\b/i, needsType: 'CREATE_EVENT', honestSpeech: "I tried to add that to your calendar but my system didn't run it. Can you say it again?" },
-        { verbRe: /\b(?:i['']?ve\s+(?:drafted|sent)|drafted (?:a|the) (?:message|email|text)|sent (?:a|the) (?:message|email|text))\b/i, needsType: 'DRAFT_MESSAGE', honestSpeech: "I tried to draft that message but my system didn't run it. Can you say it again?" },
+        { verbRe: /\b(?:i['']?ve\s+(?:scheduled|added|booked|put)|i['']?ll\s+(?:schedule|add|book|put)|added it to (?:your|the) calendar|put (?:it|that) on (?:your|the) calendar|booked it for you|scheduled it for you)\b/i, needsType: 'CREATE_EVENT', honestSpeech: "I tried to add that to your calendar but my system didn't run it. Can you say it again?" },
+        { verbRe: /\b(?:i['']?ve\s+(?:drafted|sent)|i['']?ll\s+(?:draft|send)|drafted (?:a|the) (?:message|email|text)|sent (?:a|the) (?:message|email|text))\b/i, needsType: 'DRAFT_MESSAGE', honestSpeech: "I tried to draft that message but my system didn't run it. Can you say it again?" },
         { verbRe: /\b(?:i['']?ve\s+saved|saved to memory|i['']?ll\s+remember|noted that|got it[,.]?\s+(?:i['']?ve\s+)?saved|i['']?ve\s+remembered)\b/i, needsType: 'REMEMBER', honestSpeech: "I tried to save that to memory but my system didn't run it. Can you say it again?" },
         { verbRe: /\b(?:i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+when|i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+(?:as soon|the moment|if)|alert is set|i['']?ve\s+set\s+(?:the|that|up)\s+(?:up\s+)?(?:the\s+)?alert)\b/i, needsType: 'SET_ACTION_RULE', honestSpeech: "I tried to set that alert but my system didn't run it. Can you say it again?" },
       ];
