@@ -691,6 +691,10 @@ export default function HomeScreen() {
       'select-highway-prefs',
     ).then(({ data }) => {
       avoidHighwaysRef.current = !!(data && data.length > 0);
+    }).catch((err) => {
+      // V57.7 — defensive catch. An unhandled rejection during startup
+      // can crash the home render on Android. Fail open.
+      console.error('[Home] highway-prefs lookup failed:', err);
     });
   }, [currentUserId]);
 
@@ -703,10 +707,16 @@ export default function HomeScreen() {
     if (!currentUserId) return;
     let cancelled = false;
     (async () => {
-      const status = await getBackgroundPermission();
-      if (cancelled) return;
-      setLocationGranted(status === 'granted');
-      setLocationCheckDone(true);
+      try {
+        const status = await getBackgroundPermission();
+        if (cancelled) return;
+        setLocationGranted(status === 'granted');
+        setLocationCheckDone(true);
+      } catch (err) {
+        // V57.7 defensive — getBackgroundPermission throwing must not crash startup.
+        console.error('[Home] location permission check failed:', err);
+        if (!cancelled) setLocationCheckDone(true); // proceed with default optimistic
+      }
     })();
     return () => { cancelled = true; };
   }, [currentUserId]);

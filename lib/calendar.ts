@@ -126,15 +126,26 @@ export async function captureAndStoreGoogleToken(): Promise<void> {
   console.log('[Calendar] Storing Google refresh token server-side...');
 
   try {
-    // Store refresh token in Supabase via Edge Function
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/store-google-token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
+    // V57.7 — added 15s AbortController. Without it, a stalled
+    // store-google-token call hangs the auth callback indefinitely
+    // and the user sees a blank screen / app crash on first sign-in.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+
+    let res: Response;
+    try {
+      res = await fetch(`${SUPABASE_URL}/functions/v1/store-google-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (!res.ok) {
       console.error('[Calendar] Failed to store token:', await res.text());
@@ -145,11 +156,17 @@ export async function captureAndStoreGoogleToken(): Promise<void> {
     if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem('naavi_google_oauth_pending');
     console.log('[Calendar] Token stored. Triggering first sync...');
 
-    // Trigger an immediate sync so calendar data is available right away
-    await triggerCalendarSync(session.access_token);
+    // Trigger an immediate sync so calendar data is available right away.
+    // Wrapped in its own try/catch so a sync failure can't propagate to the
+    // auth callback and break the home render.
+    try {
+      await triggerCalendarSync(session.access_token);
+    } catch (syncErr) {
+      console.error('[Calendar] First sync failed (non-fatal):', syncErr);
+    }
 
   } catch (err) {
-    console.error('[Calendar] Error storing token:', err);
+    console.error('[Calendar] Error storing token (non-fatal):', err);
   }
 }
 
@@ -164,18 +181,26 @@ export async function triggerCalendarSync(accessToken?: string): Promise<void> {
     }
     if (!token) return;
 
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/sync-google-calendar`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-      },
-    });
-
-    const data = await res.json();
-    console.log('[Calendar] Sync result:', JSON.stringify(data));
+    // V57.7 — 30s AbortController. sync-google-calendar can be slow on
+    // large calendars; fail open if it stalls so we don't block the UI.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/sync-google-calendar`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        signal: controller.signal,
+      });
+      const data = await res.json();
+      console.log('[Calendar] Sync result:', JSON.stringify(data));
+    } finally {
+      clearTimeout(timer);
+    }
   } catch (err) {
-    console.error('[Calendar] Sync trigger failed:', err);
+    console.error('[Calendar] Sync trigger failed (non-fatal):', err);
   }
 }
 
