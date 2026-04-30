@@ -31,6 +31,8 @@ import { useRouter, Stack } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
+import * as Speech from 'expo-speech';
+import { SPEECH } from '@/lib/voice-confirm';
 
 import { getUserName } from '@/lib/naavi-client';
 import { useOrchestrator, isInputLocked, isOrangeButtonVisible, orangeButtonLabel } from '@/hooks/useOrchestrator';
@@ -411,6 +413,11 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
           setSendError(detail || (error?.message ?? data?.error ?? `${channelLabel} send failed`));
         } else {
           setSent(true);
+          // V57.8 — speak confirmation (CLAUDE.md "ONE TTS confirmation"
+          // rule). Both tap-to-send and voice-confirm-to-send must emit
+          // the same audio feedback. Without this Robert can't tell from
+          // a quick glance whether the message was sent.
+          try { Speech.speak(SPEECH.SENT, { rate: 1.0, pitch: 1.0 }); } catch {}
         }
       } catch (err) {
         setSending(false);
@@ -445,6 +452,8 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
       setSending(false);
       if (result.success) {
         setSent(true);
+        // V57.8 — speak confirmation (see matching note in SMS path).
+        try { Speech.speak(SPEECH.SENT, { rate: 1.0, pitch: 1.0 }); } catch {}
       } else {
         setSendError(result.error ?? 'Send failed');
       }
