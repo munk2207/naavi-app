@@ -886,6 +886,13 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
 
         if (action.type === 'CREATE_EVENT') {
+          // V57.8 — track CREATE_EVENT outcome so we can override Naavi's
+          // speech if the create call failed (silent calendar add bug
+          // surfaced 2026-04-29 by Wael testing). Without this Naavi
+          // says "I've added it" even when the event never landed in
+          // Google Calendar — lying to the user.
+          const summary = String(action.summary ?? 'event');
+          console.log(`[orch:event] CREATE_EVENT attempt | summary="${summary}" | start=${action.start}`);
           try {
             const event = await registry.calendar.createEvent({
               title:       String(action.summary     ?? ''),
@@ -900,8 +907,13 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                 : undefined,
             });
             turnEvents.push({ summary: event.title, htmlLink: event.htmlLink });
+            console.log(`[orch:event] CREATE_EVENT succeeded | id=${event.htmlLink ?? 'no-link'}`);
           } catch (err) {
             console.error('[Orchestrator] CREATE_EVENT failed:', err);
+            // V57.8 — override Naavi's speech to be truthful about the
+            // failure. Otherwise the speech still says "I've added it"
+            // and the user thinks the event was created.
+            turnSpeechOverride = `I tried to add ${summary} to your calendar but it didn't work. Please try again, or check that your Google Calendar is connected in Settings.`;
           }
         }
 
