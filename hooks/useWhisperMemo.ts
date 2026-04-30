@@ -15,6 +15,7 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '@/lib/supabase';
 import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
+import { remoteLog, newDiagSession, endDiagSession } from '@/lib/remoteLog';
 
 export type MemoState = 'idle' | 'recording' | 'transcribing' | 'error';
 
@@ -140,31 +141,109 @@ export function useWhisperMemo(): UseWhisperMemoResult {
       if (!recording) return;
 
       (async () => {
+        // V57.9.4 — Storage upload path replaces base64-in-body. The
+        // legacy path stuffed 50-200 KB of base64 audio into a JSON
+        // request body, then waited 30+ seconds for the Supabase API
+        // gateway to forward it to transcribe-memo. New path uploads
+        // the binary audio directly to a dedicated Storage endpoint
+        // (much faster), then calls transcribe-memo with just the
+        // storage path (~80 byte body). Same architectural win we
+        // shipped for chat-send in V57.9.3.
+        const diagSession = newDiagSession();
+        remoteLog(diagSession, 'voice-stop-start');
         try {
           await recording.stopAndUnloadAsync();
+          remoteLog(diagSession, 'voice-recording-unloaded');
           const uri = recording.getURI();
           nativeRecordingRef.current = null;
 
           if (!uri) throw new Error('No recording URI');
 
           setMemoState('transcribing');
-
-          const raw = await FileSystem.readAsStringAsync(uri, {
-            encoding: 'base64' as any,
-          });
-          const base64 = raw.replace(/\s/g, '');
+          remoteLog(diagSession, 'voice-state-transcribing');
 
           if (!supabase) throw new Error('Supabase not configured');
+
+          // Need the user_id to namespace the upload path under their folder
+          // (storage RLS policy requires path[0] = auth.uid()). If session is
+          // missing for some reason we fall back to the legacy base64 path so
+          // voice still works.
+          const { data: { user } } = await supabase.auth.getUser();
+          remoteLog(diagSession, 'voice-user-resolved', { has_user: !!user });
+
+          // File size for diagnostics — small ones don't even need Storage,
+          // but we send everything via Storage for consistency now.
+          let fileBytes = 0;
+          try {
+            const info = await FileSystem.getInfoAsync(uri);
+            if ((info as any)?.size) fileBytes = Number((info as any).size);
+          } catch { /* size lookup is best-effort */ }
+          remoteLog(diagSession, 'voice-file-info', { file_bytes: fileBytes });
 
           const ext = uri.split('.').pop()?.toLowerCase() ?? 'm4a';
           const mimeMap: Record<string, string> = { m4a: 'audio/m4a', mp4: 'audio/mp4', '3gp': 'audio/3gp', wav: 'audio/wav' };
           const mimeType = mimeMap[ext] ?? 'audio/m4a';
 
+          let storagePath: string | null = null;
+          let base64ForFallback: string | null = null;
+
+          if (user?.id) {
+            // V57.9.4 fast path — read file as base64 then convert to bytes
+            // for the storage upload. supabase-js storage.upload() on RN
+            // accepts ArrayBuffer / Uint8Array.
+            remoteLog(diagSession, 'voice-read-file-start');
+            const raw = await FileSystem.readAsStringAsync(uri, {
+              encoding: 'base64' as any,
+            });
+            const base64 = raw.replace(/\s/g, '');
+            remoteLog(diagSession, 'voice-read-file-end', { base64_bytes: base64.length });
+            base64ForFallback = base64;
+
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+            const candidatePath = `${user.id}/${Date.now()}.${ext}`;
+            remoteLog(diagSession, 'voice-storage-upload-start', { path: candidatePath, bytes: bytes.length });
+            const { error: upErr } = await supabase.storage
+              .from('voice-memos')
+              .upload(candidatePath, bytes, { contentType: mimeType, upsert: false });
+            if (upErr) {
+              console.warn('[useWhisperMemo] storage upload failed, falling back to base64:', upErr.message);
+              remoteLog(diagSession, 'voice-storage-upload-error', { error: upErr.message.slice(0, 200) });
+              storagePath = null;
+            } else {
+              storagePath = candidatePath;
+              remoteLog(diagSession, 'voice-storage-upload-end');
+            }
+          }
+
+          // Build the request body — prefer storage_path, fall back to
+          // base64 if upload failed or there's no logged-in user.
+          const reqBody: Record<string, unknown> = { mimeType, language };
+          if (storagePath) {
+            reqBody.storage_path = storagePath;
+          } else if (base64ForFallback) {
+            reqBody.audio = base64ForFallback;
+          } else {
+            // No user AND we never read the file — read it now for legacy path.
+            const raw = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' as any });
+            reqBody.audio = raw.replace(/\s/g, '');
+          }
+          remoteLog(diagSession, 'voice-invoke-start', {
+            mode: storagePath ? 'storage_path' : 'base64',
+            body_audio_bytes: typeof reqBody.audio === 'string' ? reqBody.audio.length : 0,
+          });
+
           // V57.6 — was 30_000 ms, but Whisper API can take 30-60s on
           // longer audio. 60s is comfortable headroom.
           const { data, error } = await invokeWithTimeout('transcribe-memo', {
-            body: { audio: base64, mimeType, language },
+            body: reqBody,
           }, 60_000);
+          remoteLog(diagSession, 'voice-invoke-end', {
+            had_error: !!error,
+            transcript_bytes: typeof data?.transcript === 'string' ? data.transcript.length : 0,
+          });
 
           if (error || !data?.transcript) {
             const ctxJson  = (error as any)?.context?.json?.error;
@@ -178,10 +257,14 @@ export function useWhisperMemo(): UseWhisperMemoResult {
 
           setMemoState('idle');
           onTranscript(data.transcript);
+          remoteLog(diagSession, 'voice-done');
+          endDiagSession(diagSession);
 
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Transcription failed';
           console.error('[useWhisperMemo] Native stop error:', msg);
+          remoteLog(diagSession, 'voice-error', { error: msg.slice(0, 200) });
+          endDiagSession(diagSession);
           setMemoError(msg);
           setMemoState('error');
           setTimeout(() => { setMemoState('idle'); setMemoError(null); }, 4000);
