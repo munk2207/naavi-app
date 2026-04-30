@@ -54,13 +54,6 @@ const corsHeaders = {
 const DEFAULT_TZ = 'America/Toronto';
 const DEFAULT_ACTION_TYPES = ['pay', 'renewal'];
 
-interface EmailActionRow {
-  vendor: string | null;
-  amount_cents: number | null;
-  currency: string | null;
-  created_at: string;
-}
-
 interface CurrencyBucket {
   currency: string;
   total_cents: number;
@@ -172,9 +165,13 @@ serve(async (req) => {
   }
 
   const tz: string = typeof body?.timezone === 'string' && body.timezone.length > 0 ? body.timezone : DEFAULT_TZ;
-  const actionTypes: string[] = Array.isArray(body?.action_types) && body.action_types.length > 0
+  // action_types is parsed but currently unused — the V2 source is
+  // `documents` filtered by document_type. Kept in the contract for a
+  // future variant that aggregates over `email_actions` (no PDF) too.
+  const _actionTypes: string[] = Array.isArray(body?.action_types) && body.action_types.length > 0
     ? body.action_types.filter((t: unknown) => typeof t === 'string')
     : DEFAULT_ACTION_TYPES;
+  void _actionTypes;
 
   let periodStart: string;
   let periodEnd: string;
@@ -208,52 +205,190 @@ serve(async (req) => {
   }
 
   // ── Aggregation ─────────────────────────────────────────────────────────────
+  // Source: `documents` table (harvested PDF attachments). Vendor matching
+  // mirrors the global-search drive adapter:
+  //   (a) documents whose own fields contain the vendor string
+  //       (file_name, extracted_summary, extracted_reference)
+  //   (b) documents linked via email_action_id to an email_actions row
+  //       whose vendor matches
+  // We dedupe on document.id and aggregate `extracted_amount_cents` per
+  // currency. Period uses COALESCE(extracted_date, created_at) — invoice
+  // received in May for an April bill should count as April.
   const admin = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     { auth: { persistSession: false } },
   );
 
-  const { data, error } = await admin
+  const vendorPattern = `%${vendor}%`;
+  // High limit because spend-summary aggregates over the whole period; the
+  // function dedupes by content key after fetching, so over-pulling is fine.
+  const FETCH_LIMIT = 5000;
+
+  // (a) Direct field match on documents. Order by created_at desc so when
+  // the cap is hit we keep the most recent docs (which cover the user's
+  // typical "last month / this year" question windows).
+  const directQ = admin
+    .from('documents')
+    .select(`
+      id,
+      file_name,
+      document_type,
+      extracted_amount_cents,
+      extracted_currency,
+      extracted_summary,
+      extracted_reference,
+      extracted_date,
+      created_at,
+      email_action:email_actions(vendor, action_type)
+    `)
+    .eq('user_id', userId)
+    .or([
+      `file_name.ilike.${vendorPattern}`,
+      `extracted_summary.ilike.${vendorPattern}`,
+      `extracted_reference.ilike.${vendorPattern}`,
+    ].join(','))
+    .order('created_at', { ascending: false })
+    .limit(FETCH_LIMIT);
+
+  // (b) Documents linked via email_action_id where the email_action.vendor matches.
+  const linkedActionsQ = admin
     .from('email_actions')
-    .select('vendor, amount_cents, currency, created_at')
+    .select('id, vendor, action_type')
     .eq('user_id', userId)
     .eq('dismissed', false)
-    .in('action_type', actionTypes)
-    .ilike('vendor', `%${vendor}%`)
-    .gte('created_at', periodStart)
-    .lt('created_at', periodEnd);
+    .ilike('vendor', vendorPattern)
+    .limit(FETCH_LIMIT);
 
-  if (error) {
-    console.error('[naavi-spend-summary] query error:', error.message);
-    return new Response(JSON.stringify({ error: error.message }), {
+  const [directRes, linkedActionsRes] = await Promise.all([directQ, linkedActionsQ]);
+
+  if (directRes.error) {
+    console.error('[naavi-spend-summary] direct query error:', directRes.error.message);
+    return new Response(JSON.stringify({ error: directRes.error.message }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  const rows: EmailActionRow[] = data ?? [];
+  const docMap = new Map<string, any>();
+  for (const d of (directRes.data ?? [])) {
+    if (d?.id) docMap.set(d.id, d);
+  }
+
+  const actionIds = (linkedActionsRes.data ?? []).map((a: any) => a.id).filter(Boolean);
+  if (actionIds.length > 0) {
+    const { data: linkedDocs, error: linkedErr } = await admin
+      .from('documents')
+      .select(`
+        id,
+        file_name,
+        document_type,
+        extracted_amount_cents,
+        extracted_currency,
+        extracted_summary,
+        extracted_reference,
+        extracted_date,
+        created_at,
+        email_action:email_actions(vendor, action_type)
+      `)
+      .eq('user_id', userId)
+      .in('email_action_id', actionIds)
+      .order('created_at', { ascending: false })
+      .limit(FETCH_LIMIT);
+    if (linkedErr) {
+      console.error('[naavi-spend-summary] linked query error:', linkedErr.message);
+    } else {
+      for (const d of (linkedDocs ?? [])) {
+        if (d?.id && !docMap.has(d.id)) docMap.set(d.id, d);
+      }
+    }
+  }
+
+  // Defensive dedupe — `documents` is known to contain repeat harvests of
+  // the same PDF (same email re-processed during a backfill, multiple
+  // gmail_message_id rows pointing at the same logical invoice, or
+  // cleanup-duplicate-documents not having run). The unique constraint
+  // (user_id, drive_file_id) only blocks identical Drive-file-id rows; it
+  // does not catch "same invoice, harvested into a fresh Drive upload".
+  // Group by content key (file_name + amount + currency + extracted date)
+  // and count each distinct invoice once.
+  const dedupeKey = (d: any) => {
+    const dateKey = (d.extracted_date || d.created_at || '').slice(0, 10); // YYYY-MM-DD
+    const amount = typeof d.extracted_amount_cents === 'number' ? d.extracted_amount_cents : '';
+    const cur = (d.extracted_currency || '').toUpperCase();
+    const name = (d.file_name || '').toLowerCase();
+    return `${name}|${amount}|${cur}|${dateKey}`;
+  };
+
+  const seenKeys = new Set<string>();
   const buckets = new Map<string, CurrencyBucket>();
   const vendorsSet = new Set<string>();
   let totalAcrossAllCurrenciesCents = 0;
   let countAll = 0;
+  let candidatesScanned = 0;
+  let candidatesAfterDedupe = 0;
+  let droppedNoAmount = 0;
+  let droppedOutOfPeriod = 0;
+  let droppedWrongType = 0;
 
-  for (const r of rows) {
-    if (typeof r.amount_cents !== 'number' || r.amount_cents <= 0) continue;
-    const cur = (r.currency || '').toUpperCase().trim() || 'UNKNOWN';
+  // Sort by effective_date desc so when two duplicates differ only in
+  // created_at we keep the latest harvest (most up-to-date metadata).
+  const orderedDocs = [...docMap.values()].sort((a: any, b: any) => {
+    const ad = (a.extracted_date || a.created_at || '');
+    const bd = (b.extracted_date || b.created_at || '');
+    return ad < bd ? 1 : ad > bd ? -1 : 0;
+  });
+
+  for (const d of orderedDocs) {
+    candidatesScanned += 1;
+    const key = dedupeKey(d);
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    candidatesAfterDedupe += 1;
+
+    // Money filter — must have an extracted amount.
+    const cents = typeof d.extracted_amount_cents === 'number' ? d.extracted_amount_cents : null;
+    if (!cents || cents <= 0) { droppedNoAmount += 1; continue; }
+
+    // Document-type filter — RECEIPTS ONLY ("what the user actually paid").
+    //
+    // Why receipts and not invoices: vendors like Anthropic via Stripe send
+    // BOTH an invoice PDF (in vendor currency, USD) AND a receipt PDF (in
+    // the user's card currency, CAD) for the SAME charge. Counting both
+    // double-counts every transaction. Receipts are the canonical proof-
+    // of-payment record and reflect what actually came out of the card.
+    //
+    // Haiku-misclassification fallback: extract-document-text occasionally
+    // labels a receipt as `other` (or null). When the file name starts
+    // with "Receipt" (Stripe convention), trust the file name over the
+    // type tag and count it.
+    const dt = (d.document_type || '').toLowerCase();
+    const fnLower = (d.file_name || '').toLowerCase();
+    const isReceipt = dt === 'receipt' || fnLower.startsWith('receipt');
+    if (!isReceipt) { droppedWrongType += 1; continue; }
+
+    // Period filter — invoice date if extracted, else when we received it.
+    const effectiveDateStr = d.extracted_date || d.created_at;
+    if (!effectiveDateStr) { droppedOutOfPeriod += 1; continue; }
+    if (effectiveDateStr < periodStart || effectiveDateStr >= periodEnd) { droppedOutOfPeriod += 1; continue; }
+
+    const cur = (d.extracted_currency || '').toUpperCase().trim() || 'UNKNOWN';
     const b = buckets.get(cur) ?? { currency: cur, total_cents: 0, invoice_count: 0 };
-    b.total_cents += r.amount_cents;
+    b.total_cents += cents;
     b.invoice_count += 1;
     buckets.set(cur, b);
-    totalAcrossAllCurrenciesCents += r.amount_cents;
+    totalAcrossAllCurrenciesCents += cents;
     countAll += 1;
-    if (r.vendor) vendorsSet.add(r.vendor);
+
+    // Track which vendor strings we matched on (via the linked email_action).
+    const linkedVendor = d.email_action?.vendor;
+    if (linkedVendor && typeof linkedVendor === 'string') vendorsSet.add(linkedVendor);
   }
 
   const byCurrency = [...buckets.values()].sort((a, b) => b.total_cents - a.total_cents);
   const dominantCurrency = byCurrency[0]?.currency ?? null;
   const isMixed = byCurrency.length > 1;
 
-  const responsePayload = {
+  const responsePayload: any = {
     vendor,
     period_label: resolvedLabel,
     period_start: periodStart,
@@ -266,9 +401,38 @@ serve(async (req) => {
     vendors_seen: [...vendorsSet],
   };
 
+  // Debug mode — caller passes `debug: true` to see candidate metadata.
+  // Strictly opt-in; the orchestrator/voice server never set this.
+  if (body?.debug === true) {
+    const sample = [...docMap.values()].slice(0, 20).map((d: any) => ({
+      id: d.id,
+      file_name: d.file_name,
+      document_type: d.document_type,
+      extracted_amount_cents: d.extracted_amount_cents,
+      extracted_currency: d.extracted_currency,
+      extracted_date: d.extracted_date,
+      created_at: d.created_at,
+      effective_date: d.extracted_date || d.created_at,
+      linked_vendor: d.email_action?.vendor ?? null,
+      linked_action_type: d.email_action?.action_type ?? null,
+    }));
+    responsePayload.debug = {
+      total_doc_candidates: docMap.size,
+      after_dedupe: candidatesAfterDedupe,
+      counted: countAll,
+      dropped_no_amount: droppedNoAmount,
+      dropped_wrong_type: droppedWrongType,
+      dropped_out_of_period: droppedOutOfPeriod,
+      direct_match_count: (directRes.data ?? []).length,
+      linked_action_match_count: actionIds.length,
+      sample,
+    };
+  }
+
   console.log(
     `[naavi-spend-summary] user=${userId.slice(0, 8)} vendor="${vendor}" ` +
-    `period=${resolvedLabel} count=${countAll} total=${responsePayload.total_cents} ${responsePayload.currency ?? '(mixed)'}`
+    `period=${resolvedLabel} candidates=${candidatesScanned} counted=${countAll} ` +
+    `total=${responsePayload.total_cents} ${responsePayload.currency ?? '(mixed)'}`
   );
 
   return new Response(JSON.stringify(responsePayload), {
