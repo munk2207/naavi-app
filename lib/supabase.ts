@@ -10,21 +10,77 @@ import { createClient } from '@supabase/supabase-js';
 import { Platform, AppState } from 'react-native';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { queryWithTimeout, getSessionWithTimeout, getCachedUserId } from './invokeWithTimeout';
 import { remoteLog } from './remoteLog';
 
 const SUPABASE_URL     = process.env.EXPO_PUBLIC_SUPABASE_URL     ?? '';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
+// V57.9.7 — dual-write storage adapter.
+//
+// Why: the internal-test install path appears to wipe app data in
+// /data/data/<app>/ even when the user doesn't formally uninstall.
+// AsyncStorage lives there, so each install effectively logged the user
+// out — Wael had to sign in again every time. SecureStore lives in the
+// Android Keystore (a separate, more durable store designed for keys
+// that should survive app updates).
+//
+// Strategy:
+//   - WRITE goes to AsyncStorage (fast) AND SecureStore (durable).
+//   - READ tries AsyncStorage first; if empty, falls back to SecureStore
+//     and back-fills AsyncStorage so subsequent reads are fast.
+//   - REMOVE clears both.
+//
+// SecureStore failures are swallowed so the app keeps working even on
+// edge cases (oversized value, Keystore unavailable). Worst case = same
+// as today (re-sign-in needed).
+//
+// SecureStore key naming: only [A-Za-z0-9._-] allowed on iOS Keychain,
+// so we sanitize Supabase's raw key (which uses ":" and similar).
+const sanitizeKey = (k: string) => k.replace(/[^A-Za-z0-9._-]/g, '_');
+
+const dualAuthStorage = {
+  getItem: async (key: string): Promise<string | null> => {
+    try {
+      const fromAsync = await AsyncStorage.getItem(key);
+      if (fromAsync != null) return fromAsync;
+    } catch { /* ignore */ }
+    // AsyncStorage missing — try SecureStore backup.
+    try {
+      const fromSecure = await SecureStore.getItemAsync(sanitizeKey(key));
+      if (fromSecure != null) {
+        // Back-fill AsyncStorage for next read (fast path).
+        AsyncStorage.setItem(key, fromSecure).catch(() => {});
+        return fromSecure;
+      }
+    } catch { /* ignore */ }
+    return null;
+  },
+  setItem: async (key: string, value: string): Promise<void> => {
+    try { await AsyncStorage.setItem(key, value); } catch { /* ignore */ }
+    // Also persist to SecureStore. Don't await — fire-and-forget so it
+    // doesn't block the auth flow. Errors are swallowed (e.g. iOS 2 KB
+    // Keychain limit on rare oversized session blobs).
+    SecureStore.setItemAsync(sanitizeKey(key), value).catch(() => {});
+  },
+  removeItem: async (key: string): Promise<void> => {
+    try { await AsyncStorage.removeItem(key); } catch { /* ignore */ }
+    SecureStore.deleteItemAsync(sanitizeKey(key)).catch(() => {});
+  },
+};
+
 // Supabase client with the canonical Expo-compatible auth options.
 //
-// The session is persisted in AsyncStorage so it survives app restarts, and
-// autoRefreshToken keeps the access token valid for the lifetime of the
-// session. Without this config on React Native, the client held the session
-// in memory only, auto-refresh didn't run reliably when the app backgrounded,
-// and after ~1 hour the JWT expired silently — breaking every `functions.invoke`
-// including text-to-speech. Symptom: "voice stops working mid-session, only
-// logout/login restores it." (Session 20, V54.1 build 102.)
+// The session is persisted in dualAuthStorage (V57.9.7) — AsyncStorage
+// for speed + SecureStore for durability across install paths that wipe
+// AsyncStorage. autoRefreshToken keeps the access token valid for the
+// lifetime of the session. Without persistence on React Native, the
+// client held the session in memory only, auto-refresh didn't run
+// reliably when the app backgrounded, and after ~1 hour the JWT expired
+// silently — breaking every `functions.invoke` including text-to-speech.
+// Symptom: "voice stops working mid-session, only logout/login restores
+// it." (Session 20, V54.1 build 102.)
 export const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: Platform.OS === 'web'
@@ -34,7 +90,7 @@ export const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
             detectSessionInUrl: true,
           }
         : {
-            storage: AsyncStorage,
+            storage: dualAuthStorage,
             autoRefreshToken: true,
             persistSession: true,
             detectSessionInUrl: false,

@@ -21,6 +21,7 @@ import { isVoiceEnabledSync } from '@/lib/voicePref';
 import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
 import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 import { remoteLog, newDiagSession, endDiagSession } from '@/lib/remoteLog';
+import { maybePromptBatteryExemption } from '@/lib/batteryExemptionPrompt';
 import { sendPushNotification } from '@/lib/push';
 import { extractPersonQuery, getPersonContext, formatPersonContext, savePerson, saveTopic } from '@/lib/memory';
 import { lookupContact, lookupContactByPhone } from '@/lib/contacts';
@@ -523,6 +524,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         } catch (err) {
           console.error('[Orchestrator] geofence sync after confirmed location rule:', err);
         }
+        // V57.9.7 — first-time battery-exemption nudge so Robert's
+        // arrival alerts actually fire on time (Wael 2026-05-01: 28-min
+        // delay due to Android Doze).
+        maybePromptBatteryExemption().catch(() => {});
         return { ok: true, ruleId: insertedRule?.id ? String(insertedRule.id) : null };
       };
 
@@ -1514,6 +1519,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                       } catch (err) {
                         console.error('[Orchestrator] geofence sync after memory-hit insert:', err);
                       }
+                      // V57.9.7 — first-time battery-exemption nudge.
+                      maybePromptBatteryExemption().catch(() => {});
                     }
                     locationIntercepted = true;
                     // V57.4 — speech now states one-time vs every-time so
