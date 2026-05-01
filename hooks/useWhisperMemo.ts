@@ -14,7 +14,7 @@ import { Platform } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from '@/lib/supabase';
-import { invokeWithTimeout } from '@/lib/invokeWithTimeout';
+import { invokeWithTimeout, getCachedUserId } from '@/lib/invokeWithTimeout';
 import { remoteLog, newDiagSession, endDiagSession } from '@/lib/remoteLog';
 
 export type MemoState = 'idle' | 'recording' | 'transcribing' | 'error';
@@ -164,12 +164,17 @@ export function useWhisperMemo(): UseWhisperMemoResult {
 
           if (!supabase) throw new Error('Supabase not configured');
 
-          // Need the user_id to namespace the upload path under their folder
-          // (storage RLS policy requires path[0] = auth.uid()). If session is
-          // missing for some reason we fall back to the legacy base64 path so
-          // voice still works.
-          const { data: { user } } = await supabase.auth.getUser();
-          remoteLog(diagSession, 'voice-user-resolved', { has_user: !!user });
+          // V57.9.5 — use the AsyncStorage-backed cached user_id instead of
+          // supabase.auth.getUser(). getUser() triggers a JWT refresh on
+          // cold-start that hangs 10-20 seconds — observed Wael 2026-04-30
+          // session b3w6y46q where it took 16 SECONDS, dwarfing the actual
+          // Deepgram transcribe (2.3s). The cache is populated by the
+          // V57.9.3 getSessionWithTimeout flow and survives force-stop.
+          // If cache is empty (truly cold install pre-sign-in), fall through
+          // to the base64 path — Storage upload would have failed anyway
+          // because the RLS policy requires path[0] = auth.uid().
+          const userId = getCachedUserId();
+          remoteLog(diagSession, 'voice-user-resolved', { has_user: !!userId, source: 'cache' });
 
           // File size for diagnostics — small ones don't even need Storage,
           // but we send everything via Storage for consistency now.
@@ -187,7 +192,7 @@ export function useWhisperMemo(): UseWhisperMemoResult {
           let storagePath: string | null = null;
           let base64ForFallback: string | null = null;
 
-          if (user?.id) {
+          if (userId) {
             // V57.9.4 fast path — read file as base64 then convert to bytes
             // for the storage upload. supabase-js storage.upload() on RN
             // accepts ArrayBuffer / Uint8Array.
@@ -203,7 +208,7 @@ export function useWhisperMemo(): UseWhisperMemoResult {
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
-            const candidatePath = `${user.id}/${Date.now()}.${ext}`;
+            const candidatePath = `${userId}/${Date.now()}.${ext}`;
             remoteLog(diagSession, 'voice-storage-upload-start', { path: candidatePath, bytes: bytes.length });
             const { error: upErr } = await supabase.storage
               .from('voice-memos')
