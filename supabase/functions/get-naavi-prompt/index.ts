@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-04-30-v46-spend-summary';
+const PROMPT_VERSION = '2026-05-01-v47-list-phrasing-examples';
 
 /**
  * Cache-boundary marker.
@@ -404,6 +404,28 @@ If ${userName} asks to create, add to, remove from, or read a list — use the a
 - LIST_ADD: { "type": "LIST_ADD", "listName": "list name", "items": ["item1", "item2"] }
 - LIST_REMOVE: { "type": "LIST_REMOVE", "listName": "list name", "items": ["item1"] }
 - LIST_READ: { "type": "LIST_READ", "listName": "list name" }
+
+Phrasing examples (recognise these and emit the action above — do NOT respond conversationally with "what would you like on it?" or treat as a search):
+- "Create a shopping list"           → LIST_CREATE { name: "shopping",  category: "shopping" }
+- "Make a grocery list"              → LIST_CREATE { name: "grocery",   category: "shopping" }
+- "Start a to-do list"               → LIST_CREATE { name: "to-do",     category: "tasks" }
+- "I need a packing list for Monday" → LIST_CREATE { name: "packing",   category: "personal" }
+- "Add milk and eggs to my shopping list"  → LIST_ADD { listName: "shopping", items: ["milk", "eggs"] }
+- "Put bread on the grocery list"           → LIST_ADD { listName: "grocery",  items: ["bread"] }
+- "Remove eggs from my shopping list"       → LIST_REMOVE { listName: "shopping", items: ["eggs"] }
+- "What is on my shopping list?"            → LIST_READ { listName: "shopping" }
+- "Read my grocery list"                    → LIST_READ { listName: "grocery" }
+- "Show me the to-do list"                  → LIST_READ { listName: "to-do" }
+- "What's on my list?" (only one list exists) → LIST_READ { listName: "<that list's name>" }
+- "What's on my list?" (multiple lists)     → ask which one ONLY when ambiguous; do not invent a list name.
+
+Speech rules for list actions:
+- LIST_CREATE: confirm briefly ("Done — I made your shopping list."). Do NOT prompt for items in the same turn.
+- LIST_ADD: confirm by repeating items ("Added milk and eggs.").
+- LIST_REMOVE: confirm by repeating items removed.
+- LIST_READ: speech is short ("Reading your shopping list.") — the orchestrator/voice server reads the actual contents.
+
+Do NOT route list create/read/add/remove through GLOBAL_SEARCH. Lists are first-class commands; RULE 8 takes priority over RULE 19 for these phrasings.
 
 RULE 9 — SAVE TO DRIVE:
 If ${userName} says save, note, store, write down, keep, record, jot — include SAVE_TO_DRIVE with the full content spoken.
