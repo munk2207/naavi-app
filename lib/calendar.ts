@@ -8,6 +8,8 @@
 
 import { supabase } from './supabase';
 import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
+import { remoteLog } from './remoteLog';
+import { getLifecycleSession } from './appLifecycle';
 import type { BriefItem } from './naavi-client';
 
 const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL      ?? '';
@@ -26,12 +28,24 @@ export function markCalendarDisconnected(): void {
 }
 
 export async function isCalendarConnected(): Promise<boolean> {
+  // V57.9.9 diagnostic — track every connection check so we can see which
+  // call returned false at the moment the user notices a disconnect.
+  remoteLog(getLifecycleSession(), 'isCalendarConnected-start');
   // Fast check — flag set when token was stored server-side
-  if (typeof localStorage !== 'undefined' && localStorage.getItem(CONNECTED_FLAG)) return true;
+  if (typeof localStorage !== 'undefined' && localStorage.getItem(CONNECTED_FLAG)) {
+    remoteLog(getLifecycleSession(), 'isCalendarConnected-end', { result: true, reason: 'localStorage-flag' });
+    return true;
+  }
   // Fallback — check user_tokens table (provider_token is always set while logged in, so don't use it)
-  if (!supabase) return false;
+  if (!supabase) {
+    remoteLog(getLifecycleSession(), 'isCalendarConnected-end', { result: false, reason: 'no-supabase-client' });
+    return false;
+  }
   const session = await getSessionWithTimeout();
-  if (!session?.user) return false;
+  if (!session?.user) {
+    remoteLog(getLifecycleSession(), 'isCalendarConnected-end', { result: false, reason: 'no-session' });
+    return false;
+  }
   const { data } = await queryWithTimeout(
     supabase
       .from('user_tokens')
@@ -44,6 +58,11 @@ export async function isCalendarConnected(): Promise<boolean> {
   );
   const connected = Boolean(data && data.length > 0);
   if (connected) markCalendarConnected(); // sync localStorage flag
+  remoteLog(getLifecycleSession(), 'isCalendarConnected-end', {
+    result: connected,
+    reason: connected ? 'user-tokens-row-found' : 'no-user-tokens-row',
+    user_id_short: session.user.id.slice(0, 8),
+  });
   return connected;
 }
 

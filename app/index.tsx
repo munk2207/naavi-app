@@ -73,7 +73,7 @@ import { lookupContact, type Contact } from '@/lib/contacts';
 import { resolveRecipient } from '@/lib/recipientLookup';
 import { saveContact, loadTodayConversation, signInWithGoogle, signOut } from '@/lib/supabase';
 import { getBackgroundPermission, requestLocationPermissions } from '@/lib/location';
-import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
+import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync, isCalendarConnected } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
 import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout, getCachedUserId } from '@/lib/invokeWithTimeout';
@@ -806,9 +806,40 @@ export default function HomeScreen() {
         const status = await getBackgroundPermission();
         setLocationGranted(status === 'granted');
         setLocationCheckDone(true);
+        // V57.9.9 diagnostic — re-check Google connection on every foreground
+        // and log the result. Captures the moment Wael returns from the
+        // Android Settings round-trip so we can correlate the connection
+        // state with the location-permission status he just changed.
+        remoteLog(getLifecycleSession(), 'home-foreground-recheck', {
+          location_status: status,
+          current_user_id_present: !!currentUserId,
+        });
+        try {
+          const connected = await isCalendarConnected();
+          remoteLog(getLifecycleSession(), 'home-foreground-recheck-connection', {
+            google_connected: connected,
+          });
+        } catch (err) {
+          remoteLog(getLifecycleSession(), 'home-foreground-recheck-connection', {
+            google_connected: false,
+            error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+          });
+        }
       }
     });
     return () => sub.remove();
+  }, [currentUserId]);
+
+  // V57.9.9 diagnostic — log every currentUserId flip (null ↔ user-id) so we
+  // can see the exact sequence when auth state changes around a location
+  // permission toggle. Pairs with home-auth-event + lifecycle-appstate to
+  // form a complete timeline.
+  useEffect(() => {
+    remoteLog(getLifecycleSession(), 'home-currentUserId-flip', {
+      has_user_id: !!currentUserId,
+      user_id_short: currentUserId ? currentUserId.slice(0, 8) : null,
+      ms_since_fg: msSinceForeground(),
+    });
   }, [currentUserId]);
 
   // Load calendar data whenever user ID becomes available

@@ -33,6 +33,8 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { supabase } from '@/lib/supabase';
 import { queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
+import { remoteLog } from '@/lib/remoteLog';
+import { getLifecycleSession } from '@/lib/appLifecycle';
 
 const GEOFENCE_TASK = 'naavi-geofence-v1';
 
@@ -148,10 +150,30 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
   if (!userId || !supabase) return 0;
 
   try {
+    // V57.9.9 diagnostic — log entry + permission status seen. If the user
+    // just toggled "Allow all the time" via system Settings and Android
+    // restarted the activity, this fires on the foreground re-sync and
+    // tells us what permission state the new instance sees.
+    remoteLog(getLifecycleSession(), 'syncGeofences-start', {
+      user_id_short: userId.slice(0, 8),
+    });
     // Permission check — if not granted, stop all geofences and return
     const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
+    let bgStatus: string | undefined;
+    try {
+      const bg = await Location.getBackgroundPermissionsAsync();
+      bgStatus = bg.status;
+    } catch { /* not supported on this platform */ }
+    remoteLog(getLifecycleSession(), 'syncGeofences-permissions', {
+      foreground: fgStatus,
+      background: bgStatus ?? 'unavailable',
+    });
     if (fgStatus !== 'granted') {
       await stopAllGeofences();
+      remoteLog(getLifecycleSession(), 'syncGeofences-end', {
+        registered: 0,
+        reason: 'foreground-not-granted',
+      });
       return 0;
     }
 
@@ -236,9 +258,18 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
     }
 
     console.log(`[geofence-sync] user ${userId}: registered ${regions.length} geofences`);
+    remoteLog(getLifecycleSession(), 'syncGeofences-end', {
+      registered: regions.length,
+      reason: 'ok',
+    });
     return regions.length;
   } catch (err) {
     console.error('[geofence-sync] failed:', err);
+    remoteLog(getLifecycleSession(), 'syncGeofences-end', {
+      registered: 0,
+      reason: 'threw',
+      error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+    });
     return 0;
   }
 }
