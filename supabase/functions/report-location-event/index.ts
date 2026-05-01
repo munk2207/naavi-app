@@ -43,6 +43,32 @@ interface LocationEvent {
   lng:       number;
   event:     'enter' | 'exit' | 'dwell';
   timestamp: string;
+  event_id?: string; // V57.10.1 — diagnostic correlation id from client
+}
+
+// V57.10.1 — direct insert into client_diagnostics so the Doze-delay
+// investigation can join client (T1/T2) and server (T3/T4) timestamps
+// under the same event_id. Fire-and-forget; never block the main path.
+async function diag(
+  admin: any,
+  eventId: string | undefined,
+  userId: string,
+  step: string,
+  payload: Record<string, unknown> = {},
+): Promise<void> {
+  if (!eventId) return;
+  try {
+    await admin.from('client_diagnostics').insert({
+      session_id: eventId,
+      step,
+      user_id: userId,
+      ms_since_start: 0,
+      payload,
+      build_version: 'server',
+    });
+  } catch {
+    // intentional: never let diagnostic logging affect the alert path
+  }
 }
 
 serve(async (req) => {
@@ -55,11 +81,19 @@ serve(async (req) => {
 
   try {
     const body = (await req.json()) as LocationEvent;
-    const { user_id, rule_id, event } = body;
+    const { user_id, rule_id, event, event_id } = body;
 
     if (!user_id || !rule_id || !event) {
       return json({ error: 'Missing user_id, rule_id, or event' }, 400);
     }
+
+    // V57.10.1 — T3 server received. Pairs with client T1/T2 to expose
+    // the Doze-delay segment.
+    await diag(admin, event_id, user_id, 'geofence-T3-server-received', {
+      rule_id,
+      event,
+      client_timestamp: body.timestamp,
+    });
 
     // 1. Fetch the rule — verify ownership + confirm it's a location rule
     const { data: rule, error: ruleErr } = await admin
@@ -97,6 +131,12 @@ serve(async (req) => {
 
     // 4. Fire the action (replicates evaluate-rules/fireAction fan-out)
     const success = await fireLocationAction(rule, admin, supabaseUrl, interFnKey);
+
+    // V57.10.1 — T4 fan-out finished. Difference vs T3 = server fan-out cost.
+    await diag(admin, event_id, user_id, 'geofence-T4-fanout-done', {
+      rule_id,
+      success,
+    });
 
     if (success) {
       // 5. Log the fire to prevent re-firing

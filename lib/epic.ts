@@ -38,19 +38,45 @@ const EPIC_SCOPES = [
 
 const CONNECTED_FLAG = 'naavi_epic_connected';
 
+// V57.10.1 — module-level cache for the connection check. Without this,
+// every chat send pays a Supabase round-trip just to discover the user
+// hasn't connected Epic. We cache for 5 minutes so connect/disconnect
+// state stays reasonably fresh, while non-connected users (the common
+// case) skip the network on every send. Wael 2026-05-01: chat felt
+// "frozen" for 1.5 s because getEpicHealthContext fired three parallel
+// epic_* table queries even though no Epic token existed.
+let epicConnectionCache: { value: boolean; ts: number } | null = null;
+const EPIC_CACHE_TTL_MS = 5 * 60 * 1000;
+
 export function markEpicConnected(): void {
   if (typeof localStorage !== 'undefined') localStorage.setItem(CONNECTED_FLAG, '1');
+  epicConnectionCache = { value: true, ts: Date.now() };
 }
 
 export function markEpicDisconnected(): void {
   if (typeof localStorage !== 'undefined') localStorage.removeItem(CONNECTED_FLAG);
+  epicConnectionCache = { value: false, ts: Date.now() };
 }
 
 export async function isEpicConnected(): Promise<boolean> {
-  if (typeof localStorage !== 'undefined' && localStorage.getItem(CONNECTED_FLAG)) return true;
-  if (!supabase) return false;
+  // Fast path 1 — module-level memo is fresh.
+  if (epicConnectionCache && Date.now() - epicConnectionCache.ts < EPIC_CACHE_TTL_MS) {
+    return epicConnectionCache.value;
+  }
+  // Fast path 2 — web-only flag set when token was stored.
+  if (typeof localStorage !== 'undefined' && localStorage.getItem(CONNECTED_FLAG)) {
+    epicConnectionCache = { value: true, ts: Date.now() };
+    return true;
+  }
+  if (!supabase) {
+    epicConnectionCache = { value: false, ts: Date.now() };
+    return false;
+  }
   const session = await getSessionWithTimeout();
-  if (!session?.user) return false;
+  if (!session?.user) {
+    epicConnectionCache = { value: false, ts: Date.now() };
+    return false;
+  }
   const { data } = await queryWithTimeout(
     supabase
       .from('epic_tokens')
@@ -62,6 +88,7 @@ export async function isEpicConnected(): Promise<boolean> {
   );
   const connected = Boolean(data && data.length > 0);
   if (connected) markEpicConnected();
+  else epicConnectionCache = { value: false, ts: Date.now() };
   return connected;
 }
 
@@ -156,6 +183,13 @@ export async function handleEpicCallback(code: string, returnedState: string): P
 
 export async function getEpicHealthContext(): Promise<string> {
   if (!supabase) return '';
+  // V57.10.1 — short-circuit when Epic isn't connected. Without this we paid
+  // 3 parallel epic_* table round-trips on every chat send even for users
+  // who never linked Epic, adding ~1-1.5 s of perceived "frozen" wait.
+  // isEpicConnected() is module-cached for 5 min so this check is free
+  // after the first call.
+  const connected = await isEpicConnected();
+  if (!connected) return '';
   try {
     const [medsRes, apptsRes, condsRes] = await Promise.all([
       queryWithTimeout(
