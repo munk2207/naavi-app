@@ -9,7 +9,7 @@
 import { supabase } from './supabase';
 import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
 import { remoteLog } from './remoteLog';
-import { getLifecycleSession } from './appLifecycle';
+import { getLifecycleSession, justForegrounded } from './appLifecycle';
 import type { BriefItem } from './naavi-client';
 
 const SUPABASE_URL      = process.env.EXPO_PUBLIC_SUPABASE_URL      ?? '';
@@ -25,6 +25,21 @@ export function markCalendarConnected(): void {
 
 export function markCalendarDisconnected(): void {
   if (typeof localStorage !== 'undefined') localStorage.removeItem(CONNECTED_FLAG);
+}
+
+async function queryUserTokensRow(userId: string): Promise<boolean> {
+  if (!supabase) return false;
+  const { data } = await queryWithTimeout(
+    supabase
+      .from('user_tokens')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('provider', 'google')
+      .limit(1),
+    15_000,
+    'select-user-tokens-google',
+  );
+  return Boolean(data && data.length > 0);
 }
 
 export async function isCalendarConnected(): Promise<boolean> {
@@ -46,17 +61,24 @@ export async function isCalendarConnected(): Promise<boolean> {
     remoteLog(getLifecycleSession(), 'isCalendarConnected-end', { result: false, reason: 'no-session' });
     return false;
   }
-  const { data } = await queryWithTimeout(
-    supabase
-      .from('user_tokens')
-      .select('id')
-      .eq('user_id', session.user.id)
-      .eq('provider', 'google')
-      .limit(1),
-    15_000,
-    'select-user-tokens-google',
-  );
-  const connected = Boolean(data && data.length > 0);
+  let connected = await queryUserTokensRow(session.user.id);
+
+  // V57.10.0 — retry-once on the JWT-refresh race. After Android brings the
+  // app back from a permission round-trip, the Supabase JWT is briefly stale
+  // and the next user_tokens query returns 0 rows under RLS even though the
+  // row exists. Diagnostic V57.9.9 captured this on 2026-05-01: row missing
+  // for ~1 s after foreground from "Allow all the time", then visible again.
+  // We retry only when we just foregrounded (≤10 s window) so the regular
+  // "actually disconnected" path is not slowed down.
+  if (!connected && justForegrounded(10_000)) {
+    remoteLog(getLifecycleSession(), 'isCalendarConnected-retry-after-fg-race');
+    await new Promise((r) => setTimeout(r, 1500));
+    connected = await queryUserTokensRow(session.user.id);
+    if (connected) {
+      remoteLog(getLifecycleSession(), 'isCalendarConnected-retry-recovered');
+    }
+  }
+
   if (connected) markCalendarConnected(); // sync localStorage flag
   remoteLog(getLifecycleSession(), 'isCalendarConnected-end', {
     result: connected,
