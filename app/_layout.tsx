@@ -16,6 +16,8 @@ import '../lib/i18n'; // Initialise i18n before any screen renders
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { invokeWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
+import { justForegrounded, msSinceForeground, getLifecycleSession } from '@/lib/appLifecycle';
+import { remoteLog } from '@/lib/remoteLog';
 import { syncDeviceTimezone } from '@/lib/location';
 import { registerPushNotifications } from '@/lib/push';
 import { useGeofencing } from '@/hooks/useGeofencing';
@@ -109,9 +111,38 @@ export default function RootLayout() {
       })
       .catch((err) => console.error('[layout] getSession failed:', err));
 
-    const { data: authSub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: authSub } = supabase.auth.onAuthStateChange((event, session) => {
       try {
         const uid = session?.user?.id ?? null;
+        console.log('[layout] onAuthStateChange:', event, 'uid:', uid ?? 'none', 'msSinceFg:', msSinceForeground());
+        remoteLog(getLifecycleSession(), 'layout-auth-event', {
+          event,
+          has_session: !!session,
+          has_user: !!uid,
+          has_provider_refresh_token: !!session?.provider_refresh_token,
+          ms_since_fg: msSinceForeground(),
+        });
+        // V57.9.8 defensive — same rationale as app/index.tsx. If the
+        // SDK fires SIGNED_OUT (uid becomes null) within 5 s of returning
+        // from background, don't trust it. Re-poll after 1.5 s and only
+        // clear local state if the re-poll also reports no session.
+        if (!uid && event === 'SIGNED_OUT' && justForegrounded(5_000)) {
+          console.warn('[layout] SIGNED_OUT during foreground window — ignoring + re-polling');
+          setTimeout(async () => {
+            try {
+              const recheck = await getSessionWithTimeout();
+              const recheckUid = recheck?.user?.id ?? null;
+              if (!recheckUid) {
+                console.warn('[layout] re-poll confirms no session — clearing userId');
+                setUserId(null);
+              } else {
+                console.log('[layout] re-poll restored session:', recheckUid);
+                setUserId(recheckUid);
+              }
+            } catch { /* leave userId as-is */ }
+          }, 1500);
+          return;
+        }
         setUserId(uid);
         if (uid) {
           syncDeviceTimezone(uid).catch((err) => console.error('[layout] timezone sync failed:', err));

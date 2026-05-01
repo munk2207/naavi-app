@@ -49,6 +49,61 @@ async function getUserPhone(
   return ''; // empty — callers handle gracefully
 }
 
+// ── V57.9.8 phantom-action server-side backstop ────────────────────────────
+//
+// Mirrors hooks/useOrchestrator.ts::phantomCommitChecks. Mobile already has
+// this check on the client (since V57.9), but the server-side check ensures
+// the same guarantee for every caller — voice server, future surfaces, and
+// the auto-tester (which goes straight to naavi-chat without the mobile
+// orchestrator).
+//
+// Each entry: a regex over Claude's `speech` for a commit verb, the action
+// type that MUST exist for that verb to be honest, and the honest-fallback
+// speech to substitute when the action is missing.
+//
+// Keep IN SYNC with the mobile-side regex set when changing.
+const PHANTOM_CHECKS: Array<{ verbRe: RegExp; needsType: string; honestSpeech: string }> = [
+  { verbRe: /\b(?:i['']?ve\s+(?:scheduled|added|booked|put)|i['']?ll\s+(?:schedule|add|book|put)|added it to (?:your|the) calendar|put (?:it|that) on (?:your|the) calendar|booked it for you|scheduled it for you)\b/i,
+    needsType: 'CREATE_EVENT',
+    honestSpeech: "I tried to add that to your calendar but my system didn't run it. Can you say it again?" },
+  { verbRe: /\b(?:i['']?ve\s+(?:drafted|sent)|i['']?ll\s+(?:draft|send)|drafted (?:a|the) (?:message|email|text)|sent (?:a|the) (?:message|email|text))\b/i,
+    needsType: 'DRAFT_MESSAGE',
+    honestSpeech: "I tried to draft that message but my system didn't run it. Can you say it again?" },
+  { verbRe: /\b(?:i['']?ve\s+saved|saved to memory|i['']?ll\s+remember|noted that|got it[,.]?\s+(?:i['']?ve\s+)?saved|i['']?ve\s+remembered)\b/i,
+    needsType: 'REMEMBER',
+    honestSpeech: "I tried to save that to memory but my system didn't run it. Can you say it again?" },
+  { verbRe: /\b(?:i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+when|i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+(?:as soon|the moment|if)|alert is set|i['']?ve\s+set\s+(?:the|that|up)\s+(?:up\s+)?(?:the\s+)?alert)\b/i,
+    needsType: 'SET_ACTION_RULE',
+    honestSpeech: "I tried to set that alert but my system didn't run it. Can you say it again?" },
+];
+
+function rewritePhantomActionSpeech(rawText: string): string {
+  if (typeof rawText !== 'string' || rawText.length === 0) return rawText;
+  // Strip ```json fences Haiku sometimes adds.
+  const fenced = /^```(?:json)?\s*/i.test(rawText) || /\s*```\s*$/.test(rawText);
+  const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+
+  let parsed: any;
+  try { parsed = JSON.parse(cleaned); } catch {
+    return rawText; // not JSON — nothing to rewrite
+  }
+  const speech = typeof parsed?.speech === 'string' ? parsed.speech : '';
+  if (!speech) return rawText;
+
+  const actions = Array.isArray(parsed.actions) ? parsed.actions : [];
+  for (const check of PHANTOM_CHECKS) {
+    if (!check.verbRe.test(speech)) continue;
+    const has = actions.some((a: any) => a?.type === check.needsType);
+    if (!has) {
+      console.warn(`[naavi-chat] phantom-action detected: speech promised ${check.needsType} but no matching action. Rewriting speech.`);
+      const rewritten = { ...parsed, speech: check.honestSpeech };
+      const out = JSON.stringify(rewritten);
+      return fenced ? '```json\n' + out + '\n```' : out;
+    }
+  }
+  return rawText;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function jsonResponse(data: unknown, status = 200) {
@@ -702,10 +757,21 @@ Deno.serve(async (req) => {
     });
     const claudeMs = Date.now() - claudeStart;
 
-    const rawText = response.content[0].type === 'text' ? response.content[0].text : '';
+    let rawText = response.content[0].type === 'text' ? response.content[0].text : '';
     const usage = (response as any).usage ?? {};
     console.log(`[timing] ${elapsed()} | Claude call done | Claude=${claudeMs}ms | rawTextLen=${rawText.length}`);
     console.log(`[cache-debug] usage=${JSON.stringify(usage)}`);
+
+    // V57.9.8 — server-side phantom-action backstop. Mirrors the V57.9
+    // client-side check in hooks/useOrchestrator.ts. Catches the case
+    // where Haiku speaks a commit verb ("I've drafted...", "I've
+    // scheduled...") with empty actions[]. Without this, the server
+    // returns a misleading reply that makes the user think an action
+    // happened when it didn't. Speech is rewritten to an honest version;
+    // actions[] is left untouched (the "fix" is to admit the failure,
+    // not to fabricate the missing action).
+    rawText = rewritePhantomActionSpeech(rawText);
+
     return jsonResponse({ rawText });
 
   } catch (err) {
