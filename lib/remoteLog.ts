@@ -65,12 +65,22 @@ export function remoteLog(
   // Fire without await. If anything throws synchronously we swallow it.
   // The .catch() on the promise covers async rejections (network errors,
   // AbortError, etc.) so an unhandled-rejection warning never bubbles up.
+  //
+  // V57.9.6 — CRITICAL: must consume the response body so the underlying
+  // HTTP connection is released back to OkHttp's idle pool. RN's fetch
+  // does NOT auto-release; the Response keeps the socket open until GC
+  // eventually finalizes it. Each remoteLog call without body-consumption
+  // leaked a connection — after ~30 calls the OkHttp pool (5 idle slots
+  // by default) was full of stuck connections and the next chat-send
+  // fetch could not get a slot. That's the "third call hangs" bug Wael
+  // reported. We use res.body?.cancel() — a discard primitive that
+  // releases the connection without paying for body-bytes-download.
   void (async () => {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 3_000);
       try {
-        await fetch(`${SUPABASE_URL}/functions/v1/remote-log`, {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/remote-log`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -87,6 +97,21 @@ export function remoteLog(
           }),
           signal: controller.signal,
         });
+        // Release the underlying socket back to the pool. Try cancel()
+        // first (cheapest — discards the body without downloading it);
+        // if not supported on this RN runtime, fall back to draining
+        // the body via text(). Either way the connection is freed.
+        try {
+          if (res.body && typeof (res.body as any).cancel === 'function') {
+            await (res.body as any).cancel();
+          } else {
+            await res.text();
+          }
+        } catch {
+          // Body consumption itself failed — that's still OK; the
+          // important guarantee is we attempted release. The Response
+          // will GC eventually.
+        }
       } finally {
         clearTimeout(timer);
       }
