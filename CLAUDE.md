@@ -104,6 +104,8 @@ If in doubt, ASK before creating parallel config.
 
 13. **"# N" MEANS THE USER PICKED OPTION N.** When you offer numbered choices and the user replies with `# 2`, `# 5`, etc., the digit after the `#` is the option they chose. The user prefixes the hash because the chat interface auto-renumbers a bare number reply (typing just `2` can render as `1`). Always honor this convention literally — `# 2` = option 2, never something else, never ask what it means.
 
+14. **MANDATORY — `npm run test:auto` MUST BE FULLY GREEN BEFORE EVERY AAB BUILD.** Established by Wael 2026-05-01 after V57.9.8 reached the first 44/44 green state. No exceptions. The rule applies to every `npx eas build` invocation, regardless of how small the change. Run the full suite, read the summary line, confirm `✗ 0 failed   ⨯ 0 errored`. If anything fails or errors: STOP, diagnose, fix, re-run, re-confirm green — only THEN proceed to build. The green suite is our stable baseline / safety net; pushing a build on top of a red suite breaks the baseline. Skipping the suite "because the change is small" or "because we just ran it" is a hard violation — re-run every time. Partial-grep runs (`npm run test:auto -- --grep <x>`) are OK during iteration but the FULL run must happen before the build command.
+
 ### WHERE TO START
 
 **Most recent handoff:** `docs/SESSION_HANDOFF_2026-04-30_90S_HANG_UNSOLVED.md` — **READ THIS FIRST**. The 60–90 second "Thinking…" hang on chat messages was NOT solved despite three builds today. The handoff is honest about that. **Do not patch more code on hypothesis — the next session must gather device-level evidence first** (`adb logcat` is the simplest, ~3 min, no dev build setup needed; OR a remote-log Edge Function if logcat is off-limits).

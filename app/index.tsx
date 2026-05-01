@@ -77,6 +77,8 @@ import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken
 import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
 import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout, getCachedUserId } from '@/lib/invokeWithTimeout';
+import { justForegrounded, msSinceForeground, getLifecycleSession } from '@/lib/appLifecycle';
+import { remoteLog } from '@/lib/remoteLog';
 
 // ─── Integrations data ────────────────────────────────────────────────────────
 
@@ -695,7 +697,14 @@ export default function HomeScreen() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('[Home] onAuthStateChange:', event, 'user:', session?.user?.id ?? 'none');
+        console.log('[Home] onAuthStateChange:', event, 'user:', session?.user?.id ?? 'none', 'msSinceFg:', msSinceForeground());
+        remoteLog(getLifecycleSession(), 'home-auth-event', {
+          event,
+          has_session: !!session,
+          has_user: !!session?.user,
+          has_provider_refresh_token: !!session?.provider_refresh_token,
+          ms_since_fg: msSinceForeground(),
+        });
         if (event === 'SIGNED_IN' && session?.provider_refresh_token) {
           await captureAndStoreGoogleToken();
         }
@@ -705,6 +714,33 @@ export default function HomeScreen() {
           setStaleAuth(false);
         }
         if (event === 'SIGNED_OUT') {
+          // V57.9.8 defensive — ignore SIGNED_OUT that fires within 5 s
+          // of an AppState→active transition. The Supabase SDK can emit
+          // a transient SIGNED_OUT during process resume while the
+          // AsyncStorage / SecureStore session is still loading. Wael
+          // 2026-05-01 hit this after granting "Allow all the time"
+          // location permission — chat sends started returning 401 even
+          // though the underlying user_tokens row was intact.
+          if (justForegrounded(5_000)) {
+            console.warn('[Home] SIGNED_OUT during foreground window — ignoring + re-polling');
+            // Re-poll after 1.5 s. If the session genuinely is gone
+            // (real sign-out), the re-poll returns null and we clear
+            // state then. If it was a transient blip, we restore.
+            setTimeout(async () => {
+              try {
+                const recheck = await getSessionWithTimeout();
+                if (!recheck?.user) {
+                  console.warn('[Home] re-poll confirms no session — clearing state');
+                  setCurrentUserId(null);
+                  setIsSignedIn(false);
+                  setStaleAuth(false);
+                } else {
+                  console.log('[Home] re-poll restored session:', recheck.user.id);
+                }
+              } catch { /* leave state as-is */ }
+            }, 1500);
+            return;
+          }
           setCurrentUserId(null);
           setIsSignedIn(false);
           setStaleAuth(false);
@@ -1669,7 +1705,7 @@ export default function HomeScreen() {
                   <Text style={styles.collapsedTurnText} numberOfLines={1}>
                     Earlier: {turn.userMessage.slice(0, 50)}{turn.userMessage.length > 50 ? '…' : ''}
                   </Text>
-                  <Text style={styles.collapsedTurnHint}>tap to expand</Text>
+                  <Text style={styles.collapsedTurnHint}>▾ show</Text>
                 </TouchableOpacity>
               ) : (
                 <>
@@ -1690,7 +1726,7 @@ export default function HomeScreen() {
                       accessibilityLabel="Collapse earlier conversation"
                       accessibilityRole="button"
                     >
-                      <Text style={styles.collapsedTurnHint}>tap to collapse</Text>
+                      <Text style={styles.collapsedTurnHintHide}>▴ hide</Text>
                     </TouchableOpacity>
                   )}
                 </>
@@ -2305,14 +2341,24 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.55)',
     fontSize: 12,
   },
+  // V57.9.7-fix — separate styles for expand vs collapse so the user
+  // sees colour at a glance instead of relying on text. Green ▾ show =
+  // open, soft red ▴ hide = close. Same shape, opposite colour and
+  // chevron direction.
   collapsedTurnHint: {
-    color: 'rgba(94, 217, 200, 0.85)',
-    fontSize: 11,
+    color: 'rgba(94, 217, 200, 0.95)', // teal/green — ▾ show (opens)
+    fontSize: 12,
+    fontWeight: '600',
     marginLeft: 8,
   },
-  // V57.9.7 — small right-aligned tap target shown under expanded older
-  // turns to collapse them back to the 1-line summary. Quiet UI; doesn't
-  // compete with the actual conversation content above it.
+  collapsedTurnHintHide: {
+    color: 'rgba(242, 139, 130, 0.95)', // soft coral/red — ▴ hide (closes)
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  // Right-aligned tap target shown under expanded older turns to
+  // collapse them back to the 1-line summary.
   collapseBackRow: {
     alignItems: 'flex-end',
     paddingHorizontal: 12,
