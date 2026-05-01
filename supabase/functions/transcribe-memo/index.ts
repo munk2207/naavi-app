@@ -1,25 +1,28 @@
 /**
  * transcribe-memo Edge Function
  *
- * V57.9.4: now accepts EITHER:
- *   - { audio: <base64>, mimeType, language }       (legacy path, V57.9.3 and older mobile builds)
+ * V57.9.5: switched STT from OpenAI Whisper to Deepgram nova-3.
+ *   Whisper short-clip latency was 5-15 seconds (Wael 2026-04-30:
+ *   ~14 s of post-upload time on a 1-2 second utterance). Deepgram
+ *   nova-3 typically transcribes the same audio in 1-3 seconds and
+ *   the voice-server has been using it successfully via the
+ *   streaming WebSocket API for months. We reuse DEEPGRAM_API_KEY
+ *   (already a Supabase secret) — no new credentials.
+ *
+ * V57.9.4: accepts EITHER:
+ *   - { audio: <base64>, mimeType, language }       (legacy path, V57.9.3 and older mobile)
  *   - { storage_path: <bucket key>, mimeType, language }  (V57.9.4+ mobile)
  *
- * The new storage_path mode reads the file from Supabase Storage's
- * `voice-memos` bucket, which keeps the request body tiny (<500 bytes)
- * and lets the actual audio bytes travel over the dedicated Storage
- * upload endpoint. Drops the cold-start "Processing…" hang from 30s
- * to a few seconds (same architecture win as V57.9.3 chat send).
+ *   Storage path keeps the request body tiny (<500 bytes) and
+ *   bypasses the API gateway upload bottleneck.
  *
- * Whisper itself is called identically in both modes — the only
- * difference is HOW we load the audio bytes into memory before
- * forwarding to Whisper.
+ * Response: { transcript: string } — same as before.
  */
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const WHISPER_URL = 'https://api.openai.com/v1/audio/transcriptions';
+const DEEPGRAM_URL = 'https://api.deepgram.com/v1/listen';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -27,16 +30,6 @@ const corsHeaders = {
 };
 
 const VOICE_BUCKET = 'voice-memos';
-
-const EXT_MAP: Record<string, string> = {
-  'audio/webm': 'webm',
-  'audio/m4a':  'm4a',
-  'audio/mp4':  'mp4',
-  'audio/mpeg': 'mp3',
-  'audio/ogg':  'ogg',
-  'audio/wav':  'wav',
-  'audio/3gp':  '3gp',
-};
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -61,7 +54,7 @@ serve(async (req) => {
 
   try {
     let audioBytes: Uint8Array;
-    let resolvedMime = mimeType ?? 'audio/webm';
+    const resolvedMime = mimeType ?? 'audio/m4a';
     let sourceLabel: string;
 
     if (storage_path) {
@@ -82,7 +75,6 @@ serve(async (req) => {
       }
       audioBytes = new Uint8Array(await blob.arrayBuffer());
       // Best-effort delete after download — voice memos are transient.
-      // Failure is non-fatal; a cleanup job can sweep stragglers.
       admin.storage.from(VOICE_BUCKET).remove([String(storage_path)]).catch(() => {});
     } else {
       // Legacy V57.9.3-and-older path — base64 in JSON body.
@@ -91,41 +83,58 @@ serve(async (req) => {
       audioBytes = Uint8Array.from(atob(cleanAudio), c => c.charCodeAt(0));
     }
 
-    const audioBlob = new Blob([audioBytes], { type: resolvedMime });
-    const ext = EXT_MAP[resolvedMime] ?? 'webm';
-
     console.log(`[transcribe-memo] +${Date.now() - t0}ms audio loaded | source=${sourceLabel} | bytes=${audioBytes.length}`);
 
-    // Build multipart form for Whisper
-    const formData = new FormData();
-    formData.append('file', audioBlob, `memo.${ext}`);
-    formData.append('model', 'whisper-1');
-    if (language) formData.append('language', language);
-    formData.append('prompt', 'Voice command from Robert speaking English.');
-
-    const whisperStart = Date.now();
-    const res = await fetch(WHISPER_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
-      },
-      body: formData,
+    // Deepgram pre-recorded transcription. Same nova-3 model the voice
+    // server uses on its streaming WebSocket — proven to handle Wael's
+    // and Robert's accents reliably with the keyterm boosts below.
+    const dgParams = new URLSearchParams({
+      model: 'nova-3',
+      language: typeof language === 'string' && language.length > 0 ? language : 'en',
+      smart_format: 'true',
+      punctuate: 'true',
     });
-    const whisperMs = Date.now() - whisperStart;
+    // Keyterms — match the voice-server's WebSocket setup so the
+    // app-side voice memos recognize Naavi's name and the canonical
+    // command verbs the same way.
+    dgParams.append('keyterm', 'naavi');
+    dgParams.append('keyterm', 'nahvee');
+    for (const verb of ['alert', 'remind', 'notify', 'text', 'message', 'email', 'find', 'search', 'schedule', 'cancel', 'record', 'forget', 'remember', 'save', 'set', 'when', 'arrive', 'leave']) {
+      dgParams.append('keyterm', verb);
+    }
 
-    if (!res.ok) {
-      const err = await res.text();
-      console.error('[transcribe-memo] Whisper error:', err);
-      return new Response(JSON.stringify({ error: `Whisper failed: ${err}` }), {
+    const dgKey = Deno.env.get('DEEPGRAM_API_KEY');
+    if (!dgKey) {
+      return new Response(JSON.stringify({ error: 'DEEPGRAM_API_KEY not configured' }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    const data = await res.json();
-    const transcript = data.text ?? '';
+    const dgStart = Date.now();
+    const dgRes = await fetch(`${DEEPGRAM_URL}?${dgParams.toString()}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Token ${dgKey}`,
+        'Content-Type': resolvedMime,
+      },
+      body: audioBytes,
+    });
+    const dgMs = Date.now() - dgStart;
+
+    if (!dgRes.ok) {
+      const errText = await dgRes.text();
+      console.error('[transcribe-memo] Deepgram error:', dgRes.status, errText);
+      return new Response(JSON.stringify({ error: `Deepgram failed: ${errText}` }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const dgData = await dgRes.json();
+    const transcript: string =
+      dgData?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? '';
 
     console.log(
-      `[transcribe-memo] +${Date.now() - t0}ms total | whisper=${whisperMs}ms | ` +
+      `[transcribe-memo] +${Date.now() - t0}ms total | deepgram=${dgMs}ms | ` +
       `bytes=${audioBytes.length} | transcript="${transcript.slice(0, 80)}"`
     );
 
