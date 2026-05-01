@@ -76,7 +76,7 @@ import { getBackgroundPermission, requestLocationPermissions } from '@/lib/locat
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
-import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout, getCachedUserId } from '@/lib/invokeWithTimeout';
 
 // ─── Integrations data ────────────────────────────────────────────────────────
 
@@ -666,13 +666,31 @@ export default function HomeScreen() {
     hydrateVoicePref().then(() => { refreshVoicePref(); });
   }, []);
 
+  // V57.9.7 — "stale auth" detection. The Layer 1 SecureStore fallback
+  // catches most install-wipes-AsyncStorage cases silently. This is the
+  // failsafe banner for the rare case where SecureStore ALSO didn't
+  // restore (corrupted Keystore, oversized blob, fresh-fresh install).
+  // Conditions: getCachedUserId returned non-null (proving prior sign-in
+  // happened on this device) AND current session is null (auth not
+  // restored). Banner offers one-tap re-sign-in.
+  const [staleAuth, setStaleAuth] = useState(false);
+
   // Resolve user ID — from getSession on mount OR onAuthStateChange
   useEffect(() => {
     if (!supabase) return;
 
     getSessionWithTimeout().then((session) => {
       console.log('[Home] getSession:', session?.user?.id ?? 'none');
-      if (session?.user) { setCurrentUserId(session.user.id); setIsSignedIn(true); }
+      if (session?.user) {
+        setCurrentUserId(session.user.id);
+        setIsSignedIn(true);
+        setStaleAuth(false);
+      } else if (getCachedUserId()) {
+        // Cache says we WERE signed in here before — but the SDK has no
+        // session right now. Show the recovery banner.
+        console.warn('[Home] stale-auth: cached user_id present but session is null');
+        setStaleAuth(true);
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -681,8 +699,16 @@ export default function HomeScreen() {
         if (event === 'SIGNED_IN' && session?.provider_refresh_token) {
           await captureAndStoreGoogleToken();
         }
-        if (session?.user) { setCurrentUserId(session.user.id); setIsSignedIn(true); }
-        if (event === 'SIGNED_OUT') { setCurrentUserId(null); setIsSignedIn(false); }
+        if (session?.user) {
+          setCurrentUserId(session.user.id);
+          setIsSignedIn(true);
+          setStaleAuth(false);
+        }
+        if (event === 'SIGNED_OUT') {
+          setCurrentUserId(null);
+          setIsSignedIn(false);
+          setStaleAuth(false);
+        }
       }
     );
     return () => subscription.unsubscribe();
@@ -1232,6 +1258,27 @@ export default function HomeScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={90}
       >
+        {/* V57.9.7 — stale-auth recovery banner. Shown when we have a
+            cached user_id (prior sign-in on this device) but no current
+            session — which means the auth tokens didn't survive the last
+            install. One tap re-runs the Google sign-in flow. */}
+        {staleAuth && (
+          <TouchableOpacity
+            style={styles.staleAuthBanner}
+            onPress={() => {
+              setSigningIn(true);
+              signInWithGoogle()
+                .catch(err => console.error('[Home] stale-auth re-sign-in failed:', err))
+                .finally(() => setSigningIn(false));
+            }}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.staleAuthBannerText}>
+              {signingIn ? 'Opening sign-in…' : 'Sign-in expired — tap to fix'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {/* Navigation alert banner */}
         {navAlert && (
           <TouchableOpacity
@@ -1628,6 +1675,24 @@ export default function HomeScreen() {
                 <>
                   <ConversationBubble role="user" content={turn.userMessage} timestamp={turn.timestamp} />
                   <ConversationBubble role="assistant" content={turn.assistantSpeech} timestamp={turn.timestamp} />
+                  {/* V57.9.7 — collapse-back affordance for older turns
+                      that were expanded. Without this, expand was a one-way
+                      action (Wael 2026-05-01). Latest turn never gets this
+                      because it's always expanded. */}
+                  {!isLatest && (
+                    <TouchableOpacity
+                      onPress={() => setExpandedTurns(prev => {
+                        const next = new Set(prev);
+                        next.delete(ti);
+                        return next;
+                      })}
+                      style={styles.collapseBackRow}
+                      accessibilityLabel="Collapse earlier conversation"
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.collapsedTurnHint}>tap to collapse</Text>
+                    </TouchableOpacity>
+                  )}
                 </>
               )}
 
@@ -2245,6 +2310,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginLeft: 8,
   },
+  // V57.9.7 — small right-aligned tap target shown under expanded older
+  // turns to collapse them back to the 1-line summary. Quiet UI; doesn't
+  // compete with the actual conversation content above it.
+  collapseBackRow: {
+    alignItems: 'flex-end',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
   navBanner: {
     marginHorizontal: 0,
     paddingVertical: 14,
@@ -2258,6 +2331,22 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.alert,
   },
   navBannerText: {
+    color: '#fff',
+    fontSize: Typography.body,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  // V57.9.7 — stale-auth recovery banner. Same visual language as the
+  // navAlert banner but with a distinct amber/orange colour so the user
+  // sees it as "needs attention" rather than "running late".
+  staleAuthBanner: {
+    marginHorizontal: 0,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    backgroundColor: '#b87a1c', // muted amber
+    zIndex: 21,
+  },
+  staleAuthBannerText: {
     color: '#fff',
     fontSize: Typography.body,
     fontWeight: '600',
