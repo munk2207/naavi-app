@@ -16,6 +16,7 @@ import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Location from 'expo-location';
 import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem, type GlobalSearchResult } from '@/lib/naavi-client';
 import { isVoiceEnabledSync } from '@/lib/voicePref';
 import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
@@ -1450,6 +1451,34 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                   turnSpeechOverride = "I didn't catch the place for that alert. Can you say it again?";
                   console.log('[orch:loc] empty placeName — skipping');
                   continue;
+                }
+                // V57.10.1 — lazy permission request, "Allow all the time"
+                // required. Removed the persistent home banner; we now ask
+                // the moment Robert creates a location-trigger rule.
+                // Arrival alerts need background permission to fire when
+                // the phone is locked, so we request foreground first
+                // (Android-required order) then background. Final state
+                // is re-checked because Android 11+ opens Settings for
+                // background and the request promise can resolve before
+                // the user finishes choosing.
+                try {
+                  const bgInitial = await Location.getBackgroundPermissionsAsync();
+                  if (bgInitial.status !== 'granted') {
+                    const fgReq = await Location.requestForegroundPermissionsAsync();
+                    if (fgReq.status === 'granted') {
+                      await Location.requestBackgroundPermissionsAsync();
+                    }
+                    const bgFinal = await Location.getBackgroundPermissionsAsync();
+                    if (bgFinal.status !== 'granted') {
+                      locationIntercepted = true;
+                      turnSpeechOverride = `Please pick 'Allow all the time' so I can alert you at ${placeName}.`;
+                      console.log('[orch:loc] background permission not granted — aborting rule creation');
+                      continue;
+                    }
+                  }
+                } catch (err) {
+                  console.error('[orch:loc] permission check threw:', err);
+                  // Fall through — let downstream sync decide what to do.
                 }
                 try {
                   const res = await fetchWithTimeout(`${SUPABASE_URL}/functions/v1/resolve-place`, {

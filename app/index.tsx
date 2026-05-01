@@ -72,7 +72,7 @@ import { sendDriveFileAsEmail } from '@/lib/drive';
 import { lookupContact, type Contact } from '@/lib/contacts';
 import { resolveRecipient } from '@/lib/recipientLookup';
 import { saveContact, loadTodayConversation, signInWithGoogle, signOut } from '@/lib/supabase';
-import { getBackgroundPermission, requestLocationPermissions } from '@/lib/location';
+import { getBackgroundPermission, getForegroundPermission, requestLocationPermissions } from '@/lib/location';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync, isCalendarConnected } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
@@ -784,12 +784,21 @@ export default function HomeScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const status = await getBackgroundPermission();
+        // V57.10.1 — banner hides when EITHER foreground or background
+        // permission is granted. Old behaviour kept the banner visible
+        // until "Allow all the time" was granted, which felt naggy after
+        // the user had already chosen "While using the app". Wael
+        // 2026-05-01: "we did not remove the Enable location from the
+        // top of the home" — banner should disappear once any permission
+        // is granted; the user has made their choice.
+        const [fg, bg] = await Promise.all([
+          getForegroundPermission(),
+          getBackgroundPermission(),
+        ]);
         if (cancelled) return;
-        setLocationGranted(status === 'granted');
+        setLocationGranted(fg === 'granted' || bg === 'granted');
         setLocationCheckDone(true);
       } catch (err) {
-        // V57.7 defensive — getBackgroundPermission throwing must not crash startup.
         console.error('[Home] location permission check failed:', err);
         if (!cancelled) setLocationCheckDone(true); // proceed with default optimistic
       }
@@ -803,15 +812,23 @@ export default function HomeScreen() {
   useEffect(() => {
     const sub = AppState.addEventListener('change', async (state) => {
       if (state === 'active' && currentUserId) {
-        const status = await getBackgroundPermission();
-        setLocationGranted(status === 'granted');
+        // V57.10.1 — banner hides when EITHER foreground or background
+        // permission is granted (see initial-check useEffect above).
+        const [fg, bg] = await Promise.all([
+          getForegroundPermission(),
+          getBackgroundPermission(),
+        ]);
+        const anyGranted = fg === 'granted' || bg === 'granted';
+        setLocationGranted(anyGranted);
         setLocationCheckDone(true);
         // V57.9.9 diagnostic — re-check Google connection on every foreground
         // and log the result. Captures the moment Wael returns from the
         // Android Settings round-trip so we can correlate the connection
         // state with the location-permission status he just changed.
         remoteLog(getLifecycleSession(), 'home-foreground-recheck', {
-          location_status: status,
+          location_status: bg, // keeps the legacy field name pointing at background
+          location_foreground: fg,
+          location_any_granted: anyGranted,
           current_user_id_present: !!currentUserId,
         });
         try {
@@ -1558,50 +1575,12 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Persistent location-permission banner. Shows ONLY when the user is
-            signed in AND we've checked permission AND it's not granted.
-            Explicit value framing per the design principle: state what value
-            the permission unlocks, not just the system name. The banner stays
-            visible until the user enables (no dismiss) — a missed alert is
-            worse than a visible reminder. (V57.1, Bug 7.) */}
-        {currentUserId && locationCheckDone && !locationGranted && (
-          <TouchableOpacity
-            style={styles.locationBanner}
-            onPress={async () => {
-              if (locationBusy) return;
-              setLocationBusy(true);
-              try {
-                const { background } = await requestLocationPermissions();
-                setLocationGranted(background === 'granted');
-                if (background !== 'granted' && Platform.OS !== 'web') {
-                  // Foreground granted but not "Always allow" — Android requires
-                  // the user to flip it via system settings.
-                  Alert.alert(
-                    'One more step',
-                    'To send arrival alerts even when MyNaavi is closed, the system needs "Allow all the time". Tap Settings, find MyNaavi, and switch Location to "Allow all the time".',
-                    [
-                      { text: 'Maybe later', style: 'cancel' },
-                      { text: 'Open Settings', onPress: () => RNLinking.openSettings().catch(() => {}) },
-                    ]
-                  );
-                }
-              } catch (e) {
-                console.error('[Location] permission request failed:', e);
-              } finally {
-                setLocationBusy(false);
-              }
-            }}
-            disabled={locationBusy}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="location-outline" size={16} color="#FBBF24" style={{ marginRight: 8 }} />
-            <Text style={styles.locationBannerText} numberOfLines={1}>
-              {locationBusy
-                ? 'Requesting location access…'
-                : 'Enable Location to receive arrival alerts. Tap to allow.'}
-            </Text>
-          </TouchableOpacity>
-        )}
+        {/* V57.10.1 — persistent location-permission banner removed.
+            Permission is now requested lazily, only the moment Robert
+            creates a location-trigger rule (handled in
+            useOrchestrator.ts SET_ACTION_RULE intercept). Wael 2026-05-01:
+            persistent home banner felt naggy; on-demand prompt has the
+            right context for the user. */}
 
         <ScrollView
           ref={scrollRef}
@@ -1945,6 +1924,19 @@ export default function HomeScreen() {
             </View>
             );
           })}
+
+          {/* V57.10.1 — typing indicator. While the orchestrator is thinking,
+              show a placeholder assistant-style bubble at the end of the chat
+              thread so Robert sees that a reply is coming. Without this the
+              chat looks frozen for 2-8 s on slow paths and Robert gives up
+              before the answer lands. The small status row at the bottom of
+              the screen exists too but is far from the action. */}
+          {status === 'thinking' && (
+            <View style={styles.typingBubble}>
+              <ActivityIndicator size="small" color={Colors.primary} />
+              <Text style={styles.typingBubbleText}>Naavi is thinking…</Text>
+            </View>
+          )}
 
           {/* Conversation action cards */}
           {convActions.length > 0 && (
@@ -2623,6 +2615,23 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: Typography.sm,
     color: Colors.textMuted,
+    fontStyle: 'italic',
+  },
+  typingBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.bgCard,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginVertical: 6,
+    gap: 8,
+    maxWidth: '80%',
+  },
+  typingBubbleText: {
+    fontSize: Typography.sm,
+    color: Colors.textPrimary,
     fontStyle: 'italic',
   },
   errorText: {

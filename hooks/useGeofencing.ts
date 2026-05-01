@@ -33,7 +33,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { supabase } from '@/lib/supabase';
 import { queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
-import { remoteLog } from '@/lib/remoteLog';
+import { remoteLog, newDiagSession } from '@/lib/remoteLog';
 import { getLifecycleSession } from '@/lib/appLifecycle';
 
 const GEOFENCE_TASK = 'naavi-geofence-v1';
@@ -81,6 +81,22 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: any) => {
     eventType === Location.GeofencingEventType.Exit  ? 'exit'  :
     'dwell';
 
+  // V57.10.1 — Doze-delay investigation. Each geofence fire gets a fresh
+  // event_id so client + server logs can be joined back into one timeline:
+  //   T1 — task fire (this point)
+  //   T2 — about to POST report-location-event
+  //   T3 — server received the event
+  //   T4 — server finished fan-out
+  // Comparing T1 → T4 against Wael's wall-clock arrival time tells us
+  // which segment is consuming the 28 min: Doze-delayed callback (T1
+  // late vs arrival), Doze-throttled network (T2 - T1 large), server
+  // (T3 - T2 large), or fan-out (T4 - T3 large).
+  const eventId = newDiagSession();
+  remoteLog(eventId, 'geofence-T1-task-fired', {
+    rule_id: ruleId,
+    event: eventName,
+  });
+
   if (!supabase) return;
 
   try {
@@ -118,6 +134,10 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: any) => {
     }
 
     // POST the crossing to report-location-event
+    remoteLog(eventId, 'geofence-T2-about-to-post', {
+      rule_id: ruleId,
+      event: eventName,
+    });
     const res = await fetch(`${SUPABASE_URL}/functions/v1/report-location-event`, {
       method: 'POST',
       headers: {
@@ -131,6 +151,7 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: any) => {
         lng: region.longitude,
         event: eventName,
         timestamp: new Date().toISOString(),
+        event_id: eventId, // V57.10.1 — server logs T3/T4 under same id
       }),
     });
 
