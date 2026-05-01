@@ -99,17 +99,33 @@ export default function RootLayout() {
     // (network blip, expired token, missing native module), the app
     // must not crash. Defensive against the V57.6 blank-screen-on-
     // sign-in bug Wael hit with the test user mynaavi2207.
+    // V57.9.9 diagnostic — log the cold-start session restoration result.
+    // This is the moment we discover whether SecureStore handed back a valid
+    // session. If session is null here on a cold start AFTER a "Allow all the
+    // time" toggle, it means Android killed the activity AND the storage
+    // restore did not return the prior session.
+    remoteLog(getLifecycleSession(), 'layout-coldstart-session-start');
     getSessionWithTimeout()
       .then((session) => {
         if (!mounted) return;
         const uid = session?.user?.id ?? null;
+        remoteLog(getLifecycleSession(), 'layout-coldstart-session-end', {
+          has_session: !!session,
+          has_user: !!uid,
+          has_provider_refresh_token: !!session?.provider_refresh_token,
+        });
         setUserId(uid);
         if (uid) {
           syncDeviceTimezone(uid).catch((err) => console.error('[layout] timezone sync failed:', err));
           maybeAutoRegisterPush().catch((err) => console.error('[layout] push register failed:', err));
         }
       })
-      .catch((err) => console.error('[layout] getSession failed:', err));
+      .catch((err) => {
+        remoteLog(getLifecycleSession(), 'layout-coldstart-session-error', {
+          error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+        });
+        console.error('[layout] getSession failed:', err);
+      });
 
     const { data: authSub } = supabase.auth.onAuthStateChange((event, session) => {
       try {
