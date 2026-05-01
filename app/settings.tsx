@@ -17,6 +17,7 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -126,6 +127,24 @@ export default function SettingsScreen() {
     useState<UserProfile['defaultMapsProvider']>('google_maps');
 
   // ── Load saved state ────────────────────────────────────────────────────────
+
+  // V57.10.0 — re-check Google connection state every time the Settings
+  // screen comes back to the foreground. Without this, the calendarConnected
+  // boolean is set ONCE on mount; a transient JWT-refresh race during a
+  // foreground transition (e.g. after the user grants "Allow all the time"
+  // location and returns to the app) can leave calendarConnected = false
+  // forever, displaying "Not connected" even though the row is intact.
+  // Diagnostic V57.9.9 captured this on 2026-05-01 — user_tokens row was
+  // briefly invisible for ~1 s, never re-checked, UI stayed stale.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        isCalendarConnected().then(setCalendarConnected).catch(() => {});
+        isEpicConnected().then(setEpicConnected).catch(() => {});
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     hasApiKey().then(setApiKeySet);
@@ -663,7 +682,7 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V57.9.9 (build 135)</Text>
+        <Text style={styles.version}>MyNaavi — V57.10.0 (build 136)</Text>
 
       </ScrollView>
     </SafeAreaView>
