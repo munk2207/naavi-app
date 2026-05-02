@@ -267,11 +267,26 @@ async function fireLocationAction(
       // internal record (parity with SMS/WhatsApp/email rows). Without
       // this we couldn't distinguish "voice call placed" from "voice
       // call never tried" at audit time. Fire-and-forget; never block.
+      // V57.10.3 — capture Twilio's error response body in `metadata`
+      // so failures can be diagnosed from sent_messages alone (parity
+      // with SMS error rows that previously stored only "failed" with
+      // no reason).
       let providerSid: string | null = null;
+      let errorMetadata: Record<string, unknown> | null = null;
       try {
         const json = await res.clone().json();
         providerSid = typeof json?.sid === 'string' ? json.sid : null;
-      } catch { /* ignore body-parse error */ }
+        if (!res.ok) {
+          errorMetadata = {
+            twilio_status: res.status,
+            twilio_code: json?.code ?? null,
+            twilio_message: typeof json?.message === 'string' ? json.message.slice(0, 500) : null,
+            twilio_more_info: json?.more_info ?? null,
+          };
+        }
+      } catch {
+        if (!res.ok) errorMetadata = { twilio_status: res.status, parse_error: 'response body not JSON' };
+      }
       admin.from('sent_messages').insert({
         user_id:         rule.user_id,
         channel:         'voice',
@@ -280,6 +295,7 @@ async function fireLocationAction(
         delivery_status: res.ok ? 'sent' : 'failed',
         provider_sid:    providerSid,
         source:          'location_alert',
+        metadata:        errorMetadata,
       }).then(() => {}).catch(() => {});
       return { channel: 'voice-call', ok: res.ok };
     } catch (err) {

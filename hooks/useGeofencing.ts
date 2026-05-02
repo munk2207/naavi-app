@@ -41,6 +41,19 @@ const GEOFENCE_TASK = 'naavi-geofence-v1';
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
+// V57.10.3 — module-level registry of per-rule last-registration time.
+// Defense-in-depth against phantom initial-state events. Android emits an
+// ENTER (or DWELL) event for every region the user is currently inside
+// when startGeofencingAsync is called, even if the user did not actually
+// just transition. V57.10.2 broke the self-amplifying loop by removing
+// the post-fire re-sync; this map adds a second line of defence so even
+// the legitimate single-pass phantom events (from a normal foreground
+// re-sync) are suppressed. ENTER/DWELL events arriving within
+// PHANTOM_SUPPRESS_MS of the last registration are dropped at the task
+// boundary before they reach the server.
+const PHANTOM_SUPPRESS_MS = 5_000;
+const lastRegisteredAtByRule = new Map<string, number>();
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 interface ActionRule {
@@ -96,6 +109,24 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: any) => {
     rule_id: ruleId,
     event: eventName,
   });
+
+  // V57.10.3 — phantom-event suppression. Drop ENTER/DWELL events that
+  // arrive within PHANTOM_SUPPRESS_MS of the last registration for this
+  // rule, since Android emits initial-state ENTER for any region the
+  // user is currently inside. EXIT events are not suppressed — a
+  // legitimate exit close to a re-registration is rare but possible
+  // and benign (server dedup blocks repeated fires).
+  if (eventName === 'enter' || eventName === 'dwell') {
+    const lastReg = lastRegisteredAtByRule.get(ruleId);
+    if (lastReg !== undefined && Date.now() - lastReg < PHANTOM_SUPPRESS_MS) {
+      remoteLog(eventId, 'geofence-T1-suppressed-phantom', {
+        rule_id: ruleId,
+        event: eventName,
+        ms_since_registration: Date.now() - lastReg,
+      });
+      return;
+    }
+  }
 
   if (!supabase) return;
 
@@ -283,6 +314,14 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
     await stopAllGeofences();
     if (regions.length > 0) {
       await Location.startGeofencingAsync(GEOFENCE_TASK, regions);
+      // V57.10.3 — record per-rule registration time so the geofence task
+      // can suppress phantom initial-state events.
+      const now = Date.now();
+      for (const r of regions) {
+        lastRegisteredAtByRule.set(r.identifier, now);
+      }
+    } else {
+      lastRegisteredAtByRule.clear();
     }
 
     console.log(`[geofence-sync] user ${userId}: registered ${regions.length} geofences`);

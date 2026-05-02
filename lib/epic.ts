@@ -11,6 +11,7 @@
 
 import { supabase } from './supabase';
 import { queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
+import { justForegrounded } from './appLifecycle';
 
 // ─── Epic OAuth endpoints (sandbox) ──────────────────────────────────────────
 
@@ -77,16 +78,29 @@ export async function isEpicConnected(): Promise<boolean> {
     epicConnectionCache = { value: false, ts: Date.now() };
     return false;
   }
-  const { data } = await queryWithTimeout(
-    supabase
-      .from('epic_tokens')
-      .select('id')
-      .eq('user_id', session.user.id)
-      .limit(1),
-    15_000,
-    'select-epic-tokens',
-  );
-  const connected = Boolean(data && data.length > 0);
+  const queryEpicTokens = async () => {
+    const { data } = await queryWithTimeout(
+      supabase!
+        .from('epic_tokens')
+        .select('id')
+        .eq('user_id', session.user.id)
+        .limit(1),
+      15_000,
+      'select-epic-tokens',
+    );
+    return Boolean(data && data.length > 0);
+  };
+  let connected = await queryEpicTokens();
+  // V57.10.3 — apply the same JWT-refresh-race retry pattern as
+  // isCalendarConnected (V57.10.0). After Android brings the app back
+  // from a permission round-trip, the Supabase JWT can be briefly
+  // stale and RLS-gated reads return 0 rows even when the row exists.
+  // We retry only when we just foregrounded (≤10 s window) so the
+  // regular "actually disconnected" path is not slowed down.
+  if (!connected && justForegrounded(10_000)) {
+    await new Promise((r) => setTimeout(r, 1500));
+    connected = await queryEpicTokens();
+  }
   if (connected) markEpicConnected();
   else epicConnectionCache = { value: false, ts: Date.now() };
   return connected;

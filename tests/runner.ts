@@ -220,7 +220,26 @@ async function main(): Promise<void> {
   const results: TestResult[] = [];
   for (const t of candidates) {
     process.stdout.write(`  ${t.id} … `);
-    const result = await runOne(baseCtx, t);
+    let result = await runOne(baseCtx, t);
+    // V57.10.3 — retry-on-flake for chat / smoke tests. Both categories
+    // hit Claude Haiku, which is non-deterministic for prompt-driven
+    // shape assertions (one_shot defaults, action types, etc.). One
+    // re-run catches transient flakes without normalising real
+    // regressions. Wael 2026-05-02:
+    // chat.location-default-one-time passed 27 runs in a row then
+    // errored once on `one_shot=false` immediately before a build;
+    // immediate re-run passed. Retry once for failed/errored chat-shape
+    // tests; passed/skipped/timed-out are not retried.
+    const isChatShape = t.category === 'chat' || t.category === 'smoke';
+    const isRetriable = result.status === 'failed' || result.status === 'errored';
+    if (isChatShape && isRetriable) {
+      process.stdout.write('[retry] ');
+      const retryResult = await runOne(baseCtx, t);
+      if (retryResult.status === 'passed') {
+        retryResult.log = [...(result.log ?? []), '--- RETRIED (initial run flaked) ---', ...(retryResult.log ?? [])];
+        result = retryResult;
+      }
+    }
     results.push(result);
     const glyph =
       result.status === 'passed'    ? '[32m✓[0m PASS' :

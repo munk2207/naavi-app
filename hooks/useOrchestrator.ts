@@ -637,6 +637,28 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
             if (data.source === 'memory' || data.source === 'settings_home' || data.source === 'settings_work') {
               // Already in memory/settings — treat as verified without re-asking.
+              // V57.10.3 — mirror the V57.10.2 permission check that lives in
+              // the yes-confirm branch (line ~543). Without this, rules
+              // committed via the clarification-memory-hit path could be
+              // saved silently without "Allow all the time" granted, leaving
+              // the user with a rule that never fires.
+              try {
+                const bgInitial = await Location.getBackgroundPermissionsAsync();
+                if (bgInitial.status !== 'granted') {
+                  const fgReq = await Location.requestForegroundPermissionsAsync();
+                  if (fgReq.status === 'granted') {
+                    await Location.requestBackgroundPermissionsAsync();
+                  }
+                  const bgFinal = await Location.getBackgroundPermissionsAsync();
+                  if (bgFinal.status !== 'granted') {
+                    pendingLocationRef.current = null;
+                    emitPendingTurn(`Please pick 'Allow all the time' so I can alert you at ${data.place_name}.`);
+                    return;
+                  }
+                }
+              } catch (err) {
+                console.error('[orch:loc:clarif-memory] permission check threw:', err);
+              }
               const { ok, ruleId } = await commitPending(session.user.id, 'memory');
               const oneShot = pending.originalAction?.one_shot ?? true;
               pendingLocationRef.current = null;
@@ -1070,6 +1092,17 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           // run the SUM and replace it with the actual total.
           const vendor = String(action.vendor ?? '').trim();
           const periodLabel = String(action.period_label ?? 'last month').trim().toLowerCase();
+          // V57.10.3 — diagnostic + safety net. Wael 2026-05-01 saw
+          // chat stall on "Let me add up..." with no follow-up. We now
+          // log both the entry and exit of this handler so the next
+          // recurrence can be diagnosed from client_diagnostics, and
+          // we install a default fallback override so even if every
+          // path below falls through silently, the user gets a clear
+          // message instead of the LLM's forward-looking placeholder.
+          remoteLog(diagSessionId, 'orch-spend-summary-start', { vendor, periodLabel });
+          if (!turnSpeechOverride) {
+            turnSpeechOverride = `I couldn't pull up your ${vendor || 'spend'} total right now. Try again in a moment.`;
+          }
           if (vendor && supabase) {
             try {
               const session = await getSessionWithTimeout();
@@ -1107,6 +1140,12 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               turnSpeechOverride = `I couldn't pull up your ${vendor} total right now. Try again in a moment.`;
             }
           }
+          remoteLog(diagSessionId, 'orch-spend-summary-end', {
+            vendor,
+            periodLabel,
+            override_set: !!turnSpeechOverride,
+            override_preview: (turnSpeechOverride ?? '').slice(0, 120),
+          });
         }
 
         if (action.type === 'DELETE_EVENT') {
@@ -2110,9 +2149,26 @@ function sanitiseForSpeech(text: string): string {
 let _speechGen = 0;
 let _currentAudio: HTMLAudioElement | null = null;
 let _currentSound: any = null;
+// V57.10.3 — registry of pending playBase64AudioNative cleanup callbacks.
+// Without this, an external stopSpeaking() call stops the audio but the
+// playBase64AudioNative Promise stays pending up to 4-15 s waiting for a
+// safety timer, because the status-update callback no longer fires once
+// playback is stopped. Wael 2026-05-01: Cancel-to-mic-release was 3 s
+// (the chunk-duration safety timer firing) instead of near-instant.
+// stopSpeaking now invokes the cleanup callback synchronously so the
+// Promise resolves immediately and the next tick can release the mic.
+let _pendingPlaybackCleanup: ((reason: string) => void) | null = null;
 
 export function stopSpeaking(): void {
   _speechGen++;  // invalidate any in-flight speakResponse
+  // V57.10.3 — release any pending playBase64AudioNative cleanup so the
+  // speakResponse Promise resolves immediately instead of waiting for the
+  // safety timer.
+  if (_pendingPlaybackCleanup) {
+    const cb = _pendingPlaybackCleanup;
+    _pendingPlaybackCleanup = null;
+    try { cb('stopSpeaking-external'); } catch { /* swallow */ }
+  }
   // Web
   if (_currentAudio) {
     _currentAudio.pause();
@@ -2254,17 +2310,23 @@ async function playBase64AudioNative(base64: string): Promise<void> {
         resolved = true;
         if (safetyTimer) clearTimeout(safetyTimer);
         if (_currentSound === sound) _currentSound = null;
+        if (_pendingPlaybackCleanup === cleanupAndResolve) _pendingPlaybackCleanup = null;
         sound.unloadAsync().catch(() => {});
         FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
         console.log(`[TTS Native] chunk done — ${reason}`);
         resolve();
       };
 
+      // V57.10.3 — register so stopSpeaking() can resolve us immediately
+      // instead of waiting for the per-chunk safety timer.
+      _pendingPlaybackCleanup = cleanupAndResolve;
+
       const cleanupAndReject = (err: any) => {
         if (resolved) return;
         resolved = true;
         if (safetyTimer) clearTimeout(safetyTimer);
         if (_currentSound === sound) _currentSound = null;
+        if (_pendingPlaybackCleanup === cleanupAndResolve) _pendingPlaybackCleanup = null;
         sound.unloadAsync().catch(() => {});
         FileSystem.deleteAsync(tempUri, { idempotent: true }).catch(() => {});
         reject(err);
