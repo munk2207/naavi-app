@@ -113,10 +113,17 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: any) => {
   // V57.10.3 — phantom-event suppression. Drop ENTER/DWELL events that
   // arrive within PHANTOM_SUPPRESS_MS of the last registration for this
   // rule, since Android emits initial-state ENTER for any region the
-  // user is currently inside. EXIT events are not suppressed — a
-  // legitimate exit close to a re-registration is rare but possible
-  // and benign (server dedup blocks repeated fires).
-  if (eventName === 'enter' || eventName === 'dwell') {
+  // user is currently inside.
+  // V57.10.4 — extended to also suppress EXIT events. Android also
+  // emits an initial-state EXIT for every region the user is currently
+  // outside on every registration, generating ~8 wasted server round-
+  // trips per re-sync (Wael 2026-05-02 traffic analysis). With Wael's
+  // current rules all set to direction='arrive', exits are pure noise
+  // anyway — the server's direction check skips them. If a leave-
+  // direction rule is ever re-enabled, this suppression must be made
+  // direction-aware (suppress EXIT only for arrive rules) to avoid
+  // dropping legitimate within-5s exits.
+  if (eventName === 'enter' || eventName === 'dwell' || eventName === 'exit') {
     const lastReg = lastRegisteredAtByRule.get(ruleId);
     if (lastReg !== undefined && Date.now() - lastReg < PHANTOM_SUPPRESS_MS) {
       remoteLog(eventId, 'geofence-T1-suppressed-phantom', {

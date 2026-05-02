@@ -1099,7 +1099,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           // we install a default fallback override so even if every
           // path below falls through silently, the user gets a clear
           // message instead of the LLM's forward-looking placeholder.
-          remoteLog(diagSessionId, 'orch-spend-summary-start', { vendor, periodLabel });
+          remoteLog(diagSession, 'orch-spend-summary-start', { vendor, periodLabel });
           if (!turnSpeechOverride) {
             turnSpeechOverride = `I couldn't pull up your ${vendor || 'spend'} total right now. Try again in a moment.`;
           }
@@ -1140,7 +1140,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               turnSpeechOverride = `I couldn't pull up your ${vendor} total right now. Try again in a moment.`;
             }
           }
-          remoteLog(diagSessionId, 'orch-spend-summary-end', {
+          remoteLog(diagSession, 'orch-spend-summary-end', {
             vendor,
             periodLabel,
             override_set: !!turnSpeechOverride,
