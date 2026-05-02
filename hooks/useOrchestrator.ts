@@ -540,6 +540,29 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           emitPendingTurn("I'm not signed in. Please sign in and try again.");
           return;
         }
+        // V57.10.2 — gap-fix: V57.10.1's permission check lived only in the
+        // SET_ACTION_RULE intercept (memory-hit path). Rules that take the
+        // pending-confirmation path (resolve-place hit / user said "yes")
+        // bypassed it and could be saved without "Allow all the time"
+        // permission, leaving the user with a silent rule that never fires.
+        // Mirror the same check here.
+        try {
+          const bgInitial = await Location.getBackgroundPermissionsAsync();
+          if (bgInitial.status !== 'granted') {
+            const fgReq = await Location.requestForegroundPermissionsAsync();
+            if (fgReq.status === 'granted') {
+              await Location.requestBackgroundPermissionsAsync();
+            }
+            const bgFinal = await Location.getBackgroundPermissionsAsync();
+            if (bgFinal.status !== 'granted') {
+              pendingLocationRef.current = null;
+              emitPendingTurn(`Please pick 'Allow all the time' so I can alert you at ${pending.resolved.place_name}.`);
+              return;
+            }
+          }
+        } catch (err) {
+          console.error('[orch:loc:pending] permission check threw:', err);
+        }
         const { ok, ruleId } = await commitPending(session.user.id, 'confirmed');
         // V57.4 — speech now states one-time vs every-time so Robert always
         // knows which mode the rule is in.
@@ -2005,8 +2028,21 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       setAudioPlaying(false);
       setStatus('answer_active');
     } else if (s === 'answer_active') {
-      // Tap = ✕ Cancel. Start the 10-second cooldown buffer.
-      startCooldown();
+      // V57.10.2 — explicit Cancel goes straight to 'idle' so the mic is
+      // released immediately. Previously this called startCooldown() which
+      // held the mic locked for 10 seconds. Wael 2026-05-01 with stopwatch:
+      // "Cancel doesn't release the mic — it waits until the message
+      // completes." The 10-s cooldown still applies to the natural
+      // end-of-speech path (startCooldown is still called from the
+      // speakResponse .then()/.catch() handlers when speech ends on its
+      // own), but explicit Cancel is the user saying "I'm done now."
+      currentTurnIdRef.current++;
+      stopSpeaking();
+      setAudioPlaying(false);
+      clearCooldownTimer();
+      pendingActionRef.current = null;
+      setPendingAction(null);
+      setStatus('idle');
     }
     // cooldown / idle / pending_confirm / error: no-op.
   }, [clearCooldownTimer, setAudioPlaying, startCooldown]);

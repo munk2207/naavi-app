@@ -263,6 +263,24 @@ async function fireLocationAction(
         },
         body: form,
       });
+      // V57.10.2 — track voice calls in sent_messages so the DB has an
+      // internal record (parity with SMS/WhatsApp/email rows). Without
+      // this we couldn't distinguish "voice call placed" from "voice
+      // call never tried" at audit time. Fire-and-forget; never block.
+      let providerSid: string | null = null;
+      try {
+        const json = await res.clone().json();
+        providerSid = typeof json?.sid === 'string' ? json.sid : null;
+      } catch { /* ignore body-parse error */ }
+      admin.from('sent_messages').insert({
+        user_id:         rule.user_id,
+        channel:         'voice',
+        to_phone:        toNumber,
+        body,
+        delivery_status: res.ok ? 'sent' : 'failed',
+        provider_sid:    providerSid,
+        source:          'location_alert',
+      }).then(() => {}).catch(() => {});
       return { channel: 'voice-call', ok: res.ok };
     } catch (err) {
       console.error('[report-location-event] callVoice error:', err);

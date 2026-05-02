@@ -36,17 +36,34 @@ export function LocationRuleCard({ ruleId, placeName, initialOneShot }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const { error: err } = await queryWithTimeout(
+      // V57.10.2 — explicit .select() so the response carries the updated row.
+      // Previous code relied on default 204 No Content which made it harder
+      // to distinguish "update succeeded, response empty" from a real error.
+      // We also verify the returned row matches the expected new value
+      // before flipping the UI, eliminating the false-error class Wael saw
+      // 2026-05-01 (database had one_shot=false but UI showed "Couldn't
+      // update — try again" because the response check tripped on a non-null
+      // error field that did not actually represent failure).
+      const { data, error: err } = await queryWithTimeout(
         supabase
           .from('action_rules')
           .update({ one_shot: next })
-          .eq('id', ruleId),
+          .eq('id', ruleId)
+          .select('id, one_shot')
+          .single(),
         15_000,
         'update-rule-one-shot',
       );
-      if (err) throw err;
-      setOneShot(next);
-    } catch (e: any) {
+      const row = data as { id?: string; one_shot?: boolean } | null;
+      const succeeded = !!row && row.one_shot === next;
+      if (succeeded) {
+        setOneShot(next);
+      } else if (err) {
+        throw err;
+      } else {
+        throw new Error('Update did not return the expected row');
+      }
+    } catch (e: unknown) {
       console.error('[LocationRuleCard] toggle failed:', e);
       setError("Couldn't update — try again.");
     } finally {

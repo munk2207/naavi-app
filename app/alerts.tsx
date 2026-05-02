@@ -30,6 +30,27 @@ import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { invokeWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 
+// V57.10.2 — Wael 2026-05-01 saw "[object Object]" in the orange error
+// banner. Root cause: Supabase / Edge Function error responses are plain
+// objects with a `message` property — they are NOT instances of Error.
+// String(e) on a plain object yields "[object Object]". Pull the message
+// out explicitly when present so the banner shows the real reason.
+function formatErrorForUser(e: unknown): string {
+  if (!e) return 'Unknown error';
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'string') return e;
+  if (typeof e === 'object') {
+    const msg = (e as Record<string, unknown>).message;
+    if (typeof msg === 'string' && msg.length > 0) return msg;
+    try {
+      return JSON.stringify(e);
+    } catch {
+      return 'Unknown error';
+    }
+  }
+  return String(e);
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 type TriggerType = 'location' | 'weather' | 'email' | 'contact_silence' | 'time' | 'calendar';
@@ -249,7 +270,7 @@ export default function AlertsScreen() {
       if (err) throw err;
       setRules(Array.isArray((data as any)?.rules) ? (data as any).rules : []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatErrorForUser(e));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -294,7 +315,7 @@ export default function AlertsScreen() {
       setRules(prev => prev.filter(r => r.id !== pendingDelete.id));
       setPendingDelete(null);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatErrorForUser(e));
     } finally {
       setDeleting(false);
     }

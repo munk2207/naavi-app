@@ -157,9 +157,16 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: any) => {
 
     console.log(`[geofence-task] posted ${eventName} for rule ${ruleId} → ${res.status}`);
 
-    // Self-healing: re-sync after fire (Q6). Drops one_shot rules that just
-    // disabled themselves.
-    await syncGeofencesForUser(ruleRow.user_id);
+    // V57.10.2 — REMOVED self-healing re-sync after fire. The previous
+    // call to syncGeofencesForUser caused a phantom-events loop:
+    // Android emits initial-state ENTER/EXIT events for every region on
+    // re-registration; the task processed them, called sync again, which
+    // re-registered, which emitted more phantoms. Confirmed in the data
+    // 2026-05-02: 1000+ phantom events in 6 minutes from a stationary phone.
+    // Trade-off: one_shot rules that disable themselves now linger as OS
+    // geofences until the next AppState→active foreground sync. Safe
+    // because (a) report-location-event line 74 skips disabled rules,
+    // (b) action_rule_log per-day dedup blocks repeated fires.
   } catch (err) {
     console.error('[geofence-task] handler failed:', err);
   }
