@@ -75,18 +75,86 @@ const PHANTOM_CHECKS: Array<{ verbRe: RegExp; needsType: string; honestSpeech: s
   { verbRe: /\b(?:i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+when|i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+(?:as soon|the moment|if)|alert is set|i['']?ve\s+set\s+(?:the|that|up)\s+(?:up\s+)?(?:the\s+)?alert)\b/i,
     needsType: 'SET_ACTION_RULE',
     honestSpeech: "I tried to set that alert but my system didn't run it. Can you say it again?" },
+  // V57.10.4 — phantom forward-looking SPEND_SUMMARY speech without
+  // the action emitted. Wael 2026-05-02: asked "How much did I spend
+  // on Anthropic last month?", Naavi said "Let me add up your
+  // Anthropic invoices for last month." and never produced a number.
+  // The LLM emitted forward-looking intent but did NOT emit the
+  // SPEND_SUMMARY action. Without this rewrite the user stares at
+  // "Let me add up..." indefinitely. Narrow to unambiguous summation
+  // verbs (add up / tally / sum up / total) so we don't false-trigger
+  // on generic "let me check" / "let me look up" phrases that might
+  // be legitimately preface for non-action responses.
+  { verbRe: /\b(?:let me (?:add up|tally|sum up|total)|i['']?ll\s+(?:add up|tally|sum up|total)|adding up|tallying up|summing up|totalling up)\b/i,
+    needsType: 'SPEND_SUMMARY',
+    honestSpeech: "I couldn't pull that total up right now. Try asking again in a moment." },
 ];
 
-function rewritePhantomActionSpeech(rawText: string): string {
-  if (typeof rawText !== 'string' || rawText.length === 0) return rawText;
-  // Strip ```json fences Haiku sometimes adds.
-  const fenced = /^```(?:json)?\s*/i.test(rawText) || /\s*```\s*$/.test(rawText);
-  const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-
-  let parsed: any;
-  try { parsed = JSON.parse(cleaned); } catch {
-    return rawText; // not JSON — nothing to rewrite
+/**
+ * Extract the embedded JSON object from Claude's rawText. Haiku is
+ * non-deterministic about response shape — sometimes returns pure JSON,
+ * sometimes wraps it in ```json fences, sometimes prepends preamble
+ * text before the JSON. This helper finds and parses the first
+ * top-level JSON object regardless of what surrounds it. Returns the
+ * parsed object + a "reconstructor" that can produce the equivalent
+ * rawText for any modified parsed object.
+ */
+function extractAndParseJson(rawText: string): {
+  parsed: any | null;
+  reconstruct: (modified: any) => string;
+} {
+  if (typeof rawText !== 'string' || rawText.length === 0) {
+    return { parsed: null, reconstruct: () => rawText };
   }
+
+  // Find a ```json fenced block first; if absent, find the first '{' and
+  // walk the string to its matching '}' (brace-depth counter — handles
+  // nested objects in actions[]).
+  let jsonStart = -1;
+  let jsonEnd = -1;
+  let fenced = false;
+
+  const fenceMatch = rawText.match(/```(?:json)?\s*/i);
+  if (fenceMatch && fenceMatch.index !== undefined) {
+    jsonStart = fenceMatch.index + fenceMatch[0].length;
+    fenced = true;
+  } else {
+    jsonStart = rawText.indexOf('{');
+  }
+
+  if (jsonStart < 0) return { parsed: null, reconstruct: () => rawText };
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = jsonStart; i < rawText.length; i++) {
+    const ch = rawText[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) { jsonEnd = i + 1; break; }
+    }
+  }
+  if (jsonEnd < 0) return { parsed: null, reconstruct: () => rawText };
+
+  const jsonSlice = rawText.slice(jsonStart, jsonEnd);
+  let parsed: any;
+  try { parsed = JSON.parse(jsonSlice); }
+  catch { return { parsed: null, reconstruct: () => rawText }; }
+
+  const preamble = rawText.slice(0, jsonStart);
+  const trailer = rawText.slice(jsonEnd);
+  const reconstruct = (modified: any) => preamble + JSON.stringify(modified) + trailer;
+  return { parsed, reconstruct };
+}
+
+function rewritePhantomActionSpeech(rawText: string): string {
+  const { parsed, reconstruct } = extractAndParseJson(rawText);
+  if (!parsed) return rawText;
   const speech = typeof parsed?.speech === 'string' ? parsed.speech : '';
   if (!speech) return rawText;
 
@@ -96,12 +164,23 @@ function rewritePhantomActionSpeech(rawText: string): string {
     const has = actions.some((a: any) => a?.type === check.needsType);
     if (!has) {
       console.warn(`[naavi-chat] phantom-action detected: speech promised ${check.needsType} but no matching action. Rewriting speech.`);
-      const rewritten = { ...parsed, speech: check.honestSpeech };
-      const out = JSON.stringify(rewritten);
-      return fenced ? '```json\n' + out + '\n```' : out;
+      return reconstruct({ ...parsed, speech: check.honestSpeech });
     }
   }
   return rawText;
+}
+
+/**
+ * Normalize Claude's rawText output so downstream callers (mobile
+ * client, voice server, auto-tester) always see a clean JSON string
+ * with no preamble or trailing prose. If the raw output has a parseable
+ * JSON object embedded, this returns just that object stringified.
+ * Falls through unchanged if nothing parseable is found.
+ */
+function normalizeRawText(rawText: string): string {
+  const { parsed } = extractAndParseJson(rawText);
+  if (!parsed) return rawText;
+  return JSON.stringify(parsed);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -771,6 +850,16 @@ Deno.serve(async (req) => {
     // actions[] is left untouched (the "fix" is to admit the failure,
     // not to fabricate the missing action).
     rawText = rewritePhantomActionSpeech(rawText);
+
+    // V57.9.8 — normalize rawText so callers always see clean JSON.
+    // Haiku occasionally prepends preamble prose before the actual JSON
+    // block ("Here's the response:\n```json{...}```"). The mobile client's
+    // parseResponse handles this, but the server-side phantom backstop
+    // and the auto-tester's findActionInRawText do not — and that
+    // mismatch was the source of the priority-flag-critical flake. By
+    // normalizing here, EVERY downstream consumer sees a parseable
+    // JSON string. Falls through unchanged if no JSON is found.
+    rawText = normalizeRawText(rawText);
 
     return jsonResponse({ rawText });
 
