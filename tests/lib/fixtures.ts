@@ -19,7 +19,13 @@ import type { TestContext } from './types';
 /** Tables to clear at suite teardown for the test user. */
 const OWNED_TABLES = [
   'action_rules',
-  'action_rule_log',
+  // V57.10.3 — action_rule_log removed. The table is keyed by rule_id,
+  // not user_id, so the user_id=eq.X delete pattern always returned a
+  // 42703 "column action_rule_log.user_id does not exist" error in
+  // every suite run (Wael 2026-05-01). Test-created action_rules are
+  // virtual (no real geofence fires for the test user), so no
+  // action_rule_log entries should accumulate. If a future test
+  // pushes synthetic fires, add a per-rule cascade here.
   'reminders',
   'knowledge_fragments',
   'lists',

@@ -41,6 +41,14 @@ export async function maybePromptBatteryExemption(): Promise<void> {
     // user sees it twice.
   }
 
+  // V57.10.3 — wait until Naavi has finished speaking the rule-confirmation
+  // sentence before popping the modal. Without this delay, the Alert
+  // interrupted the "Alert set — every time you arrive at Costco" TTS
+  // mid-sentence (Wael 2026-05-01). 6 s comfortably covers a typical
+  // arrival-confirmation line (~3-4 s of speech) without making the user
+  // wait noticeably long for the prompt.
+  await new Promise(r => setTimeout(r, 6_000));
+
   Alert.alert(
     'One-time setting for arrival alerts',
     "Android delays alerts when the phone is idle to save battery — sometimes by 30 minutes or more. To make sure your arrival alerts fire on time, please tap 'Open Settings' below, find MyNaavi in the Battery list, and choose 'Don't optimize'.\n\nOnly takes 30 seconds. You only need to do this once.",
