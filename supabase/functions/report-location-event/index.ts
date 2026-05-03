@@ -242,8 +242,16 @@ async function fireLocationAction(
     const authToken  = Deno.env.get('TWILIO_AUTH_TOKEN')  ?? '';
     const voiceBase  = Deno.env.get('VOICE_SERVER_URL')   ?? '';
     const twilioFrom = '+12495235394';
+    // V57.10.5 — diagnostic. Wael 2026-05-03 reported no voice call for a
+    // Movati arrival even though SMS + WhatsApp fired. Voice-call rows
+    // were ALSO missing from sent_messages because the channel CHECK
+    // constraint rejected them (separate fix in same release). This log
+    // tells us at audit time whether callVoice even reached the Twilio
+    // API call vs bailed early due to missing env, AND surfaces the
+    // exact failure reason if Twilio rejects.
+    console.log(`[callVoice] entry rule=${rule.id.slice(0,8)} to=${toNumber} accountSid=${accountSid ? 'set' : 'MISSING'} authToken=${authToken ? 'set' : 'MISSING'} voiceBase=${voiceBase ? voiceBase : 'MISSING'}`);
     if (!accountSid || !authToken || !voiceBase) {
-      console.error('[report-location-event] callVoice: missing Twilio/voice-server secrets');
+      console.error('[report-location-event] callVoice: missing Twilio/voice-server secrets — skipping');
       return { channel: 'voice-call', ok: false };
     }
     try {
@@ -263,6 +271,7 @@ async function fireLocationAction(
         },
         body: form,
       });
+      console.log(`[callVoice] Twilio API responded status=${res.status} ok=${res.ok} for rule=${rule.id.slice(0,8)} to=${toNumber}`);
       // V57.10.2 — track voice calls in sent_messages so the DB has an
       // internal record (parity with SMS/WhatsApp/email rows). Without
       // this we couldn't distinguish "voice call placed" from "voice

@@ -48,10 +48,20 @@ const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 // just transition. V57.10.2 broke the self-amplifying loop by removing
 // the post-fire re-sync; this map adds a second line of defence so even
 // the legitimate single-pass phantom events (from a normal foreground
-// re-sync) are suppressed. ENTER/DWELL events arriving within
-// PHANTOM_SUPPRESS_MS of the last registration are dropped at the task
-// boundary before they reach the server.
-const PHANTOM_SUPPRESS_MS = 5_000;
+// re-sync) are suppressed.
+//
+// V57.10.5 — asymmetric suppression windows. Wael 2026-05-02 traffic
+// analysis showed Android sometimes emits initial-state EXIT events 4+
+// minutes after registration (well past the 5-second window). Since
+// none of Wael's rules use direction='leave', EXIT events are pure
+// noise — the server's direction check skips them. We can therefore
+// safely widen the EXIT suppression window to 5 minutes with zero
+// downside. ENTER/DWELL stays at 5 seconds because a user who actually
+// arrives somewhere within seconds of opening the app would otherwise
+// have their real arrival suppressed. If a leave-direction rule is
+// ever re-enabled, narrow EXIT to 5s as well.
+const PHANTOM_SUPPRESS_ENTER_MS = 5_000;     // 5s — preserves real arrivals
+const PHANTOM_SUPPRESS_EXIT_MS  = 300_000;   // 5min — covers Android's slow phantom emission
 const lastRegisteredAtByRule = new Map<string, number>();
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -110,26 +120,20 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: any) => {
     event: eventName,
   });
 
-  // V57.10.3 — phantom-event suppression. Drop ENTER/DWELL events that
-  // arrive within PHANTOM_SUPPRESS_MS of the last registration for this
-  // rule, since Android emits initial-state ENTER for any region the
-  // user is currently inside.
-  // V57.10.4 — extended to also suppress EXIT events. Android also
-  // emits an initial-state EXIT for every region the user is currently
-  // outside on every registration, generating ~8 wasted server round-
-  // trips per re-sync (Wael 2026-05-02 traffic analysis). With Wael's
-  // current rules all set to direction='arrive', exits are pure noise
-  // anyway — the server's direction check skips them. If a leave-
-  // direction rule is ever re-enabled, this suppression must be made
-  // direction-aware (suppress EXIT only for arrive rules) to avoid
-  // dropping legitimate within-5s exits.
+  // V57.10.3 — phantom-event suppression. Android emits initial-state
+  // events on registration for every region in the user's current
+  // membership state. We drop these at the task boundary.
+  // V57.10.5 — asymmetric windows: 5s for ENTER/DWELL, 5min for EXIT
+  // (see PHANTOM_SUPPRESS_*_MS constants for rationale).
   if (eventName === 'enter' || eventName === 'dwell' || eventName === 'exit') {
     const lastReg = lastRegisteredAtByRule.get(ruleId);
-    if (lastReg !== undefined && Date.now() - lastReg < PHANTOM_SUPPRESS_MS) {
+    const suppressMs = eventName === 'exit' ? PHANTOM_SUPPRESS_EXIT_MS : PHANTOM_SUPPRESS_ENTER_MS;
+    if (lastReg !== undefined && Date.now() - lastReg < suppressMs) {
       remoteLog(eventId, 'geofence-T1-suppressed-phantom', {
         rule_id: ruleId,
         event: eventName,
         ms_since_registration: Date.now() - lastReg,
+        window_ms: suppressMs,
       });
       return;
     }

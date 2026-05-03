@@ -29,6 +29,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { invokeWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
+import { remoteLog } from '@/lib/remoteLog';
+import { getLifecycleSession } from '@/lib/appLifecycle';
 
 // V57.10.2 — Wael 2026-05-01 saw "[object Object]" in the orange error
 // banner. Root cause: Supabase / Edge Function error responses are plain
@@ -259,25 +261,54 @@ export default function AlertsScreen() {
   const [error, setError]           = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    // V57.10.5 — UI freeze instrumentation. Wael 2026-05-03 saw the app
+    // freeze after Alerts → Notes → Alerts → Home navigation. We log every
+    // step of the alerts load + the timing so we can pinpoint which call
+    // hung if the freeze happens again.
+    const t0 = Date.now();
+    remoteLog(getLifecycleSession(), 'alerts-load-start');
     try {
       setError(null);
-      if (!supabase) { setLoading(false); return; }
+      if (!supabase) {
+        remoteLog(getLifecycleSession(), 'alerts-load-end', { reason: 'no-supabase', ms: Date.now() - t0 });
+        setLoading(false);
+        return;
+      }
+      remoteLog(getLifecycleSession(), 'alerts-load-getSession-start');
       const session = await getSessionWithTimeout();
-      if (!session?.user) { setLoading(false); return; }
+      remoteLog(getLifecycleSession(), 'alerts-load-getSession-end', { has_user: !!session?.user, ms: Date.now() - t0 });
+      if (!session?.user) {
+        remoteLog(getLifecycleSession(), 'alerts-load-end', { reason: 'no-session', ms: Date.now() - t0 });
+        setLoading(false);
+        return;
+      }
+      remoteLog(getLifecycleSession(), 'alerts-load-invoke-start');
       const { data, error: err } = await invokeWithTimeout('manage-rules', {
         body: { op: 'list' },
       }, 15_000);
+      remoteLog(getLifecycleSession(), 'alerts-load-invoke-end', {
+        had_error: !!err,
+        rules_count: Array.isArray((data as any)?.rules) ? (data as any).rules.length : 0,
+        ms: Date.now() - t0,
+      });
       if (err) throw err;
       setRules(Array.isArray((data as any)?.rules) ? (data as any).rules : []);
+      remoteLog(getLifecycleSession(), 'alerts-load-end', { reason: 'ok', ms: Date.now() - t0 });
     } catch (e: unknown) {
-      setError(formatErrorForUser(e));
+      const errMsg = formatErrorForUser(e);
+      remoteLog(getLifecycleSession(), 'alerts-load-end', { reason: 'error', error: errMsg.slice(0, 200), ms: Date.now() - t0 });
+      setError(errMsg);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    remoteLog(getLifecycleSession(), 'alerts-screen-mount');
+    load();
+    return () => remoteLog(getLifecycleSession(), 'alerts-screen-unmount');
+  }, [load]);
 
   // When navigating in with a highlight param (e.g. from the orchestrator
   // after "show me my Costco alert"), auto-expand the first rule whose

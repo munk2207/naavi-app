@@ -27,6 +27,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
+import { remoteLog } from '@/lib/remoteLog';
+import { getLifecycleSession } from '@/lib/appLifecycle';
 import { searchDriveFiles, type DriveFile } from '@/lib/drive';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
@@ -104,10 +106,22 @@ export default function NotesScreen() {
   // ── Data loading ────────────────────────────────────────────────────────────
 
   const loadNotes = useCallback(async () => {
-    if (!supabase) return;
+    // V57.10.5 — UI freeze instrumentation. Same pattern as Alerts page;
+    // captures timing of each step so we can pinpoint hangs.
+    const t0 = Date.now();
+    remoteLog(getLifecycleSession(), 'notes-load-start');
+    if (!supabase) {
+      remoteLog(getLifecycleSession(), 'notes-load-end', { reason: 'no-supabase', ms: Date.now() - t0 });
+      return;
+    }
     const session = await getSessionWithTimeout();
-    if (!session?.user) return;
+    remoteLog(getLifecycleSession(), 'notes-load-getSession-end', { has_user: !!session?.user, ms: Date.now() - t0 });
+    if (!session?.user) {
+      remoteLog(getLifecycleSession(), 'notes-load-end', { reason: 'no-session', ms: Date.now() - t0 });
+      return;
+    }
 
+    remoteLog(getLifecycleSession(), 'notes-load-queries-start');
     const [memRes, driveRes] = await Promise.all([
       queryWithTimeout(
         supabase
@@ -130,6 +144,13 @@ export default function NotesScreen() {
         'select-drive-notes',
       ),
     ]);
+    remoteLog(getLifecycleSession(), 'notes-load-queries-end', {
+      mem_count: Array.isArray(memRes.data) ? memRes.data.length : -1,
+      drive_count: Array.isArray(driveRes.data) ? driveRes.data.length : -1,
+      mem_err: !!memRes.error,
+      drive_err: !!driveRes.error,
+      ms: Date.now() - t0,
+    });
 
     if (memRes.data)   setMemoryNotes(memRes.data);
     if (driveRes.data) setDriveNotes(driveRes.data);
@@ -137,11 +158,14 @@ export default function NotesScreen() {
     // Clear selections on refresh
     setSelectedMemory(new Set());
     setSelectedDrive(new Set());
+    remoteLog(getLifecycleSession(), 'notes-load-end', { reason: 'ok', ms: Date.now() - t0 });
   }, []);
 
   useEffect(() => {
+    remoteLog(getLifecycleSession(), 'notes-screen-mount');
     setLoading(true);
     loadNotes().finally(() => setLoading(false));
+    return () => remoteLog(getLifecycleSession(), 'notes-screen-unmount');
   }, [loadNotes]);
 
   async function handleRefresh() {
