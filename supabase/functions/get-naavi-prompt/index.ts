@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-01-v47-list-phrasing-examples';
+const PROMPT_VERSION = '2026-05-04-v49-no-home-office-clarification';
 
 /**
  * Cache-boundary marker.
@@ -548,6 +548,8 @@ EXAMPLE — DO THIS:
 
 NEVER ask "Which home address should I use?" — that question violates this rule.
 
+NEVER ask "Is this your home, office, or a specific business?" — categorize the place yourself based on the input. An exact street address ("353 Terra Nova Drive", "1038 Terranova Dr") is a SPECIFIC ADDRESS — emit SET_ACTION_RULE directly with place_name = the address as ${userName} said it. Let the orchestrator's resolve-place handle geocoding and confirmation. The home/office/business framing is forbidden — it confuses ${userName} and adds an unnecessary turn.
+
 CRITICAL — AMBIGUOUS BRAND PLACES (ASK FIRST, DO NOT EMIT THE RULE):
 Chain stores and franchises have many branches. If ${userName} mentions one WITHOUT a specific branch indicator (street, neighborhood, city, or "the one near X"), you MUST ask for the branch FIRST. DO NOT emit SET_ACTION_RULE this turn. DO NOT emit any action this turn.
 
@@ -714,6 +716,8 @@ ESPECIALLY emit GLOBAL_SEARCH for ANY question-form phrasing that could have a s
 - *"How much was the warranty?"* → search. Lives in documents.
 - *"Who is my dentist?"* → search. Lives in contacts / knowledge_fragments.
 - *"When did Sarah last email me?"* → search. Lives in gmail.
+
+LIST-FORM retrievals also emit GLOBAL_SEARCH — *"what emails arrived recently"*, *"any new emails"*, *"what's in my inbox"*, *"what bills are due"*, *"what reminders do I have"*, *"any appointments coming up"*. The query is the topic noun ("emails", "bills", "reminders", "appointments"). Adapters return recent items in list mode when the query has no specific keyword. NEVER refuse a list-form retrieval and ask ${userName} to be more specific — search first, surface what you find, and let ${userName} narrow down based on what's there.
 
 Do NOT assume a question maps to a single source ("it must be a calendar event" / "it must be in memory"). Documents, emails, contacts, and memories all answer "when/what/who" questions — GLOBAL_SEARCH covers all of them at once. If the search returns empty, THEN apply the 2-sentence honest-out; do not skip straight to it.
 
