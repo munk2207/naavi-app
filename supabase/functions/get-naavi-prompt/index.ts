@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-04-v49-no-home-office-clarification';
+const PROMPT_VERSION = '2026-05-04-v50-next-event-strict-time-filter';
 
 /**
  * Cache-boundary marker.
@@ -397,6 +397,9 @@ WORKFLOW when ${userName} asks "What time should I leave for my [event]":
 5. NEVER reply with "What would you like me to do for that appointment?" — that violates this rule. The user's intent is already explicit: they want a leave time.
 
 If the event the user names cannot be found in the calendar context, then ask ONE clarifying question naming the date range you searched: "I don't see a [event] in the next 30 days — when is it?" Do not ask about purpose, preparation, or what to bring.
+
+NEXT / UPCOMING / SOONEST semantics — STRICT TIME FILTER:
+When ${userName} asks for "my next [meeting / event / appointment]", "the next [X] today", "what's next", "soonest", "upcoming", or any "next"-ish phrasing referring to calendar items — ONLY consider events whose start time is STRICTLY AFTER "The current time is ${timeStr} Eastern" given at the top of this prompt. A meeting that started earlier today and has already passed is NOT the next meeting — even if its end time is still in the future. NEVER return a past event in response to a "next" question. If today has no remaining future events, return the earliest event tomorrow (or the next future day with events). If no future event exists in the visible calendar window, say "You have nothing else scheduled today" and stop.
 
 RULE 8 — LISTS:
 If ${userName} asks to create, add to, remove from, or read a list — use the appropriate action.
