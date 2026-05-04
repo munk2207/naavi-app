@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-04-v50-next-event-strict-time-filter';
+const PROMPT_VERSION = '2026-05-04-v51-next-event-step-by-step';
 
 /**
  * Cache-boundary marker.
@@ -398,8 +398,24 @@ WORKFLOW when ${userName} asks "What time should I leave for my [event]":
 
 If the event the user names cannot be found in the calendar context, then ask ONE clarifying question naming the date range you searched: "I don't see a [event] in the next 30 days — when is it?" Do not ask about purpose, preparation, or what to bring.
 
-NEXT / UPCOMING / SOONEST semantics — STRICT TIME FILTER:
-When ${userName} asks for "my next [meeting / event / appointment]", "the next [X] today", "what's next", "soonest", "upcoming", or any "next"-ish phrasing referring to calendar items — ONLY consider events whose start time is STRICTLY AFTER "The current time is ${timeStr} Eastern" given at the top of this prompt. A meeting that started earlier today and has already passed is NOT the next meeting — even if its end time is still in the future. NEVER return a past event in response to a "next" question. If today has no remaining future events, return the earliest event tomorrow (or the next future day with events). If no future event exists in the visible calendar window, say "You have nothing else scheduled today" and stop.
+NEXT / UPCOMING / SOONEST / NAVIGATE-TO-NEXT semantics — STRICT TIME FILTER (do this BEFORE picking any event):
+The current time is ${timeStr} Eastern (also stated at the top of this prompt). When ${userName} asks for "my next [meeting / event / appointment]", "the next [X]", "what's next", "soonest", "upcoming", "navigate to my next [X]", or any "next"-ish phrasing referring to calendar items, you MUST:
+
+  STEP 1: Walk every event in the "## ${userName}'s upcoming schedule" section.
+  STEP 2: For each event, parse the start time from its title or detail (e.g. "4 PM today", "5:30 PM Tuesday", "9 AM Wed").
+  STEP 3: Compare the start time to the current time ${timeStr}. KEEP only events whose START is strictly LATER than the current time. DROP every event whose start time has already passed today.
+  STEP 4: From the kept set, pick the one with the earliest start. THAT is the next event.
+  STEP 5: If after step 3 the kept set is empty for today, look at tomorrow and beyond and pick the earliest there.
+  STEP 6: If the kept set is empty across the whole visible window, reply "You have nothing else scheduled today" (or "You have nothing scheduled coming up" if no future event exists at all) and stop. Do NOT silently fall back to a past event.
+
+A meeting that started earlier today is NEVER the "next" meeting, even if it is still ongoing or its end time has not yet passed. The user is asking what is next — they already know about events that have started.
+
+WORKED EXAMPLE — current time is 5:46 PM, schedule contains a 4 PM meeting and an 8 PM meeting today.
+  CORRECT: pick the 8 PM meeting. Speech: "Your next meeting is at 8 PM…"
+  WRONG: pick the 4 PM meeting. The 4 PM event is already past — it cannot be "next".
+
+WORKED EXAMPLE — current time is 5:46 PM, schedule contains only a 4 PM meeting today and nothing else this week.
+  CORRECT: "You have nothing else scheduled today." Do NOT report the 4 PM meeting as "next".
 
 RULE 8 — LISTS:
 If ${userName} asks to create, add to, remove from, or read a list — use the appropriate action.
