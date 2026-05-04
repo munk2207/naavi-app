@@ -118,6 +118,18 @@ export function isInputLocked(s: OrchestratorStatus): boolean {
       || s === 'pending_confirm';
 }
 
+// V57.11 — text-Send is locked LESS strictly than the mic. Sending typed
+// text while Naavi is speaking has no audio-pickup risk (the user isn't
+// holding a mic open), and forcing them to wait for a clarification
+// question's TTS to finish before they can reply is bad UX. send()
+// silences the current TTS at the start of the new turn so audio doesn't
+// collide. Mic / hands-free / Visits stay gated by isInputLocked.
+export function isSendLocked(s: OrchestratorStatus): boolean {
+  return s === 'thinking'
+      || s === 'cooldown'
+      || s === 'pending_confirm';
+}
+
 // TextInput is NEVER locked — typing has no audio-pickup risk and pre-composing
 // while reading is a feature. Helper kept for symmetry / future-proofing.
 export function isTextInputLocked(_s: OrchestratorStatus): boolean {
@@ -298,6 +310,15 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     // start a new turn from here; the lock UI shouldn't allow it anyway.
     if (status === 'pending_confirm') return;
 
+    // V57.11 — send() may be called while Naavi is still speaking the
+    // previous reply (e.g. user types a clarification answer while
+    // Naavi's "Is that in Ottawa?" TTS is still playing). Silence the
+    // ongoing audio so it doesn't collide with the new turn's response.
+    if (status === 'speaking' || status === 'answer_active') {
+      stopSpeaking();
+      setAudioPlaying(false);
+    }
+
     // Capture this turn's id. If Robert taps orange Stop during thinking,
     // currentTurnIdRef will be bumped, and isCancelled() will return true at
     // each await checkpoint so we discard the stale response.
@@ -315,8 +336,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     }
 
     // Lock model: enter Thinking. UI shows orange ⏹ Stop, voice/Send buttons
-    // grey out. send() does NOT call stopSpeaking() — under the lock the UI
-    // prevents this code path from running while a previous reply is active.
+    // grey out (mic/Voice still does — Send remains usable for the next
+    // typed reply during the speaking phase, see isSendLocked).
     setStatus('thinking');
     setError(null);
 
@@ -470,11 +491,20 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         sourceLabel: 'confirmed' | 'memory',
       ): Promise<{ ok: boolean; ruleId: string | null }> => {
         if (!pending.resolved) return { ok: false, ruleId: null };
+        // V57.11 — explicitly carry radius_meters into trigger_config.
+        // Without this every confirmed-flow rule landed with NULL radius
+        // (resolve-place returns one but the orchestrator wasn't reading
+        // it), which breaks OS geofencing because the OS can't register a
+        // fence with no radius. Default 150m if neither resolve-place nor
+        // Claude provided a value.
         const triggerConfig = {
           ...(pending.originalAction?.trigger_config ?? {}),
           place_name: pending.resolved.place_name,
           resolved_lat: pending.resolved.lat,
           resolved_lng: pending.resolved.lng,
+          radius_meters: pending.resolved.radius_meters
+            ?? (pending.originalAction?.trigger_config as any)?.radius_meters
+            ?? 150,
         };
         // V57.4 — location alerts default to ONE-TIME (one_shot=true). See
         // matching note in the SET_ACTION_RULE intercept below.
@@ -1556,11 +1586,20 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 
                   // 1. Memory / Settings hit → insert immediately with resolved coords.
                   if (data?.status === 'ok' && (data.source === 'memory' || data.source === 'settings_home' || data.source === 'settings_work')) {
+                    // V57.11 — explicitly carry radius_meters into trigger_config.
+                    // Without this every rule landed with NULL radius (resolve-place
+                    // returns one but the orchestrator wasn't reading it), which
+                    // breaks OS geofencing because the OS can't register a fence
+                    // with no radius. Default 150m if neither resolve-place nor
+                    // Claude provided a value.
                     const triggerConfig = {
                       ...(action.trigger_config ?? {}),
                       place_name: data.place_name,
                       resolved_lat: data.lat,
                       resolved_lng: data.lng,
+                      radius_meters: data.radius_meters
+                        ?? (action.trigger_config as any)?.radius_meters
+                        ?? 150,
                     };
                     // V57.4 — location alerts default to ONE-TIME (one_shot=true).
                     // Naavi only flips this to recurring if Robert says
@@ -2059,13 +2098,23 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       setPendingAction(null);
       setStatus('idle');
     } else if (s === 'speaking') {
-      // Silence voice. Status → answer_active with NO timer. The timer starts
-      // only when Cancel is tapped OR when the silent answer finishes (the
-      // speakResponse .then() / .catch() handlers detect the end-of-answer
-      // and call startCooldown()).
+      // Silence voice.
       stopSpeaking();
       setAudioPlaying(false);
-      setStatus('answer_active');
+      // V57.11 — Single-tap unlock for tap-to-talk users. In hands-free
+      // mode the answer_active state is meaningful (Naavi keeps thinking
+      // in the background while voice is silenced). For tap-to-talk
+      // users it just adds a second mandatory tap before they can reply.
+      // Skip straight to idle in that case so one Stop tap fully unlocks.
+      if (handsfreeRef.current) {
+        setStatus('answer_active');
+      } else {
+        currentTurnIdRef.current++;
+        clearCooldownTimer();
+        pendingActionRef.current = null;
+        setPendingAction(null);
+        setStatus('idle');
+      }
     } else if (s === 'answer_active') {
       // V57.10.2 — explicit Cancel goes straight to 'idle' so the mic is
       // released immediately. Previously this called startCooldown() which

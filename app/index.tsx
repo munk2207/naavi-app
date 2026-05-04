@@ -35,7 +35,7 @@ import * as Speech from 'expo-speech';
 import { SPEECH } from '@/lib/voice-confirm';
 
 import { getUserName } from '@/lib/naavi-client';
-import { useOrchestrator, isInputLocked, isOrangeButtonVisible, orangeButtonLabel } from '@/hooks/useOrchestrator';
+import { useOrchestrator, isInputLocked, isSendLocked, isOrangeButtonVisible, orangeButtonLabel } from '@/hooks/useOrchestrator';
 import { useVoice } from '@/hooks/useVoice';
 import { useWhisperMemo } from '@/hooks/useWhisperMemo';
 import { useHandsfreeMode } from '@/hooks/useHandsfreeMode';
@@ -1265,13 +1265,13 @@ export default function HomeScreen() {
     // bug is in the TextInput state (onChangeText not committing the
     // last character before Send fires).
     console.log('[handleSend] inputText raw=', JSON.stringify(inputText), 'trimmed=', JSON.stringify(text));
-    // Lock model: Send is gated whenever the input lock is engaged
-    // (thinking/speaking/answer_active/pending_confirm). The IconButton
-    // disabled prop already prevents the on-screen Send tap, but the
-    // TextInput onSubmitEditing (Enter key) also calls handleSend, so we
-    // re-enforce the gate here. Robert must release the lock first
-    // (orange Cancel tap or 10s timeout). (Session 26 design lock.)
-    if (!text || isInputLocked(status)) return;
+    // V57.11 — Send is gated by isSendLocked (looser than isInputLocked).
+    // Mic / hands-free / Visits are still under the full input lock; only
+    // typed-text Send is allowed during 'speaking' and 'answer_active' so
+    // the user can reply to a clarification without waiting for the TTS
+    // to finish. send() in the orchestrator silences ongoing audio at
+    // turn start so the new turn doesn't collide.
+    if (!text || isSendLocked(status)) return;
     setInputText('');
     // "Cancel" during an active chat returns to the brief without asking Claude.
     // Only triggers when a conversation is actually in progress — otherwise
@@ -2259,13 +2259,15 @@ export default function HomeScreen() {
                 if (isTranscribing)       { icon = <Ionicons name="ellipsis-horizontal" size={30} color="#fff" />; label = 'Transcribing'; description = 'Converting your voice to text…'; }
                 else if (isRecording)     { icon = <Ionicons name="stop" size={30} color="#fff" />; label = 'Stop recording'; description = 'Stop recording and send what you said to MyNaavi.'; bg = Colors.alert; }
                 else if (hasText)         { icon = <Ionicons name="send" size={26} color="#fff" />; label = 'Send'; description = 'Send your typed message to MyNaavi.'; }
-                // Locked while Naavi reply is in flight (thinking/speaking/
-                // answer_active/pending_confirm). Stays tappable mid-recording
-                // so Robert can always stop. The lock prevents this code path
-                // from running during an active reply, so the previous
-                // stopSpeaking() safety call is no longer needed.
-                // (Session 26 design lock.)
-                const disabled = isTranscribing || (inputLocked && !isRecording);
+                // V57.11 — Differentiated lock. When the button is in Send
+                // mode (hasText), use the looser isSendLocked so the user
+                // can reply to a clarification while Naavi's TTS is still
+                // playing. When in Voice mode (no text), keep the full
+                // input lock so the mic doesn't open over Naavi's audio.
+                const sendModeLocked = isSendLocked(status);
+                const voiceModeLocked = inputLocked;
+                const lockForCurrentMode = hasText ? sendModeLocked : voiceModeLocked;
+                const disabled = isTranscribing || (lockForCurrentMode && !isRecording);
                 const onPress = () => {
                   if (hasText && !isRecording && !isTranscribing) { handleSend(); return; }
                   if (isRecording) {

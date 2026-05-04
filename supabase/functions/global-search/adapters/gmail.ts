@@ -23,6 +23,30 @@ type GmailRow = {
   signal_strength: 'personal' | 'institutional' | 'ambient' | null;
 };
 
+// Generic-query detection. When the user asks "what emails arrived
+// recently" / "any new emails" / "show my inbox" — the query has no
+// keyword to search, just an email/inbox trigger plus filler words.
+// In that case we skip the keyword filter and return the most recent
+// tier-1 messages, ordered by received_at desc.
+const EMAIL_TRIGGERS = new Set([
+  'email', 'emails', 'inbox', 'mail', 'mails', 'message', 'messages',
+]);
+const GENERIC_FILLERS = new Set([
+  'recent', 'recently', 'latest', 'new', 'any', 'arrive', 'arrived', 'received',
+  'what', 'whats', 'tell', 'show', 'list', 'have', 'has', 'see',
+  'this', 'week', 'today', 'yesterday', 'lately', 'last', 'past',
+  'is', 'are', 'do', 'did', 'i', 'me', 'my', 'mine', 'the', 'a', 'an',
+  'in', 'on', 'from', 'to', 'of', 'for', 'about',
+]);
+
+function isGenericEmailQuery(q: string): boolean {
+  const words = q.toLowerCase().split(/[\s.,!?]+/).filter(Boolean);
+  if (words.length === 0) return false;
+  const hasTrigger = words.some(w => EMAIL_TRIGGERS.has(w));
+  if (!hasTrigger) return false;
+  return words.every(w => EMAIL_TRIGGERS.has(w) || GENERIC_FILLERS.has(w));
+}
+
 export const gmailAdapter: SearchAdapter = {
   name: 'gmail',
   label: 'Email',
@@ -36,33 +60,39 @@ export const gmailAdapter: SearchAdapter = {
     if (!q) return [];
 
     const variants = ctx.queryVariants;
-    const orClauses: string[] = [];
-    for (const v of variants) {
-      const pat = `%${v}%`;
-      orClauses.push(
-        `subject.ilike.${pat}`,
-        `sender_name.ilike.${pat}`,
-        `sender_email.ilike.${pat}`,
-        `snippet.ilike.${pat}`,
-        `body_text.ilike.${pat}`,
-      );
-    }
+    const generic = isGenericEmailQuery(q);
 
-    // Exclude ambient — Gmail flagged them but we don't know the sender.
-    // Global Search is a retrieval tool, not a research tool; CNN articles
-    // mentioning a company are not the user's relationship with that
-    // company. Only personal (in contacts) and institutional (trusted
-    // domain or Claude-promoted) appear. Ambient stays in the inbox and
-    // morning brief — just not here.
-    const { data, error } = await ctx.supabase
+    let queryBuilder = ctx.supabase
       .from('gmail_messages')
       .select(
         'id, gmail_message_id, subject, sender_name, sender_email, snippet, body_text, received_at, signal_strength',
       )
       .eq('user_id', ctx.userId)
       .eq('is_tier1', true)
-      .in('signal_strength', ['personal', 'institutional'])
-      .or(orClauses.join(','))
+      // Exclude ambient — Gmail flagged them but we don't know the sender.
+      // Global Search is a retrieval tool, not a research tool; CNN articles
+      // mentioning a company are not the user's relationship with that
+      // company. Only personal (in contacts) and institutional (trusted
+      // domain or Claude-promoted) appear. Ambient stays in the inbox and
+      // morning brief — just not here.
+      .in('signal_strength', ['personal', 'institutional']);
+
+    if (!generic) {
+      const orClauses: string[] = [];
+      for (const v of variants) {
+        const pat = `%${v}%`;
+        orClauses.push(
+          `subject.ilike.${pat}`,
+          `sender_name.ilike.${pat}`,
+          `sender_email.ilike.${pat}`,
+          `snippet.ilike.${pat}`,
+          `body_text.ilike.${pat}`,
+        );
+      }
+      queryBuilder = queryBuilder.or(orClauses.join(','));
+    }
+
+    const { data, error } = await queryBuilder
       .order('received_at', { ascending: false })
       .limit(ctx.limit);
 
@@ -85,8 +115,12 @@ export const gmailAdapter: SearchAdapter = {
       // snippet-only = 0.6. Trusted senders (signal_strength = 'personal' or
       // 'institutional') get a +0.1 nudge so a known-sender match outranks a
       // subject-match on an ambient sender.
+      // In generic-list mode (no keyword to score against) every row gets
+      // a flat baseline; ordering is by received_at desc from the DB.
       let score = 0.5;
-      if (variants.some(v => subject.includes(v))) score = 1.0;
+      if (generic) {
+        score = 0.7;
+      } else if (variants.some(v => subject.includes(v))) score = 1.0;
       else if (variants.some(v => sender.includes(v) || senderEmail.includes(v))) score = 0.85;
       else if (variants.some(v => body.includes(v))) score = 0.7;
       else if (variants.some(v => snippet.includes(v))) score = 0.6;

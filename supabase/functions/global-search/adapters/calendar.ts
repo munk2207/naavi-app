@@ -33,6 +33,73 @@ const CALENDAR_EVENTS_API = 'https://www.googleapis.com/calendar/v3/calendars';
 const SEARCH_WINDOW_DAYS_PAST   = 180;
 const SEARCH_WINDOW_DAYS_FUTURE = 365;
 
+// Generic-query detection. "What's on my calendar this week" / "any
+// appointments today" — the query has no specific keyword to match
+// against event titles. In that case we drop Google's `q=` parameter
+// and narrow the time range based on phrases like "today" or "this
+// week" so we return a useful list instead of nothing.
+const CALENDAR_TRIGGERS = new Set([
+  'calendar', 'calendars', 'schedule', 'event', 'events',
+  'appointment', 'appointments', 'meeting', 'meetings', 'agenda',
+]);
+const CALENDAR_FILLERS = new Set([
+  'what', 'whats', 'tell', 'show', 'list', 'have', 'has', 'any',
+  'is', 'are', 'do', 'did', 'i', 'me', 'my', 'mine', 'the', 'a', 'an',
+  'in', 'on', 'from', 'to', 'of', 'for', 'about', 'going',
+  'today', 'tomorrow', 'this', 'next', 'week', 'weekend',
+  'morning', 'afternoon', 'evening', 'tonight', 'now',
+  'recent', 'upcoming', 'soon', 'lately',
+  'planned', 'scheduled',
+]);
+
+function isGenericCalendarQuery(q: string): boolean {
+  const words = q.toLowerCase().split(/[\s.,!?]+/).filter(Boolean);
+  if (words.length === 0) return false;
+  const hasTrigger = words.some(w => CALENDAR_TRIGGERS.has(w));
+  if (!hasTrigger) return false;
+  return words.every(w => CALENDAR_TRIGGERS.has(w) || CALENDAR_FILLERS.has(w));
+}
+
+// Narrows the search time range based on natural-language phrases.
+// Returns { timeMin, timeMax } as Date objects. Defaults to the full
+// past/future window if no phrase is detected.
+function timeRangeFromQuery(q: string): { timeMin: Date; timeMax: Date } {
+  const lower = q.toLowerCase();
+  const now = new Date();
+  const startOfDay = new Date(now); startOfDay.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(startOfDay); tomorrow.setDate(tomorrow.getDate() + 1);
+
+  if (/\btomorrow\b/.test(lower)) {
+    const dayAfter = new Date(tomorrow); dayAfter.setDate(dayAfter.getDate() + 1);
+    return { timeMin: tomorrow, timeMax: dayAfter };
+  }
+  if (/\btonight\b|\bthis\s+evening\b/.test(lower)) {
+    const evening = new Date(startOfDay); evening.setHours(17, 0, 0, 0);
+    return { timeMin: evening, timeMax: tomorrow };
+  }
+  if (/\btoday\b/.test(lower)) {
+    return { timeMin: startOfDay, timeMax: tomorrow };
+  }
+  if (/\bthis\s+week\b|\bweek\b/.test(lower)) {
+    const weekEnd = new Date(startOfDay); weekEnd.setDate(weekEnd.getDate() + 7);
+    return { timeMin: startOfDay, timeMax: weekEnd };
+  }
+  if (/\bnext\s+week\b/.test(lower)) {
+    const nextWeekStart = new Date(startOfDay); nextWeekStart.setDate(nextWeekStart.getDate() + 7);
+    const nextWeekEnd = new Date(nextWeekStart); nextWeekEnd.setDate(nextWeekEnd.getDate() + 7);
+    return { timeMin: nextWeekStart, timeMax: nextWeekEnd };
+  }
+  if (/\bweekend\b/.test(lower)) {
+    // Loose: today through 7 days. Caller is asking for the upcoming weekend.
+    const weekEnd = new Date(startOfDay); weekEnd.setDate(weekEnd.getDate() + 7);
+    return { timeMin: startOfDay, timeMax: weekEnd };
+  }
+
+  const fullPast = new Date(); fullPast.setDate(fullPast.getDate() - SEARCH_WINDOW_DAYS_PAST);
+  const fullFuture = new Date(); fullFuture.setDate(fullFuture.getDate() + SEARCH_WINDOW_DAYS_FUTURE);
+  return { timeMin: fullPast, timeMax: fullFuture };
+}
+
 type GoogleEvent = {
   id: string;
   summary?: string;
@@ -132,11 +199,17 @@ export const calendarAdapter: SearchAdapter = {
       calendarIds = ['primary'];
     }
 
-    // ── 3. Parallel events.list with Google's built-in `q` search ──────────
-    const timeMin = new Date();
-    timeMin.setDate(timeMin.getDate() - SEARCH_WINDOW_DAYS_PAST);
-    const timeMax = new Date();
-    timeMax.setDate(timeMax.getDate() + SEARCH_WINDOW_DAYS_FUTURE);
+    // ── 3. Parallel events.list (with Google's `q` for keyword queries,
+    //       or a narrowed time range for generic "what's on my calendar"
+    //       queries that have no keyword to match).
+    const generic = isGenericCalendarQuery(q);
+    const { timeMin, timeMax } = generic
+      ? timeRangeFromQuery(q)
+      : (() => {
+          const min = new Date(); min.setDate(min.getDate() - SEARCH_WINDOW_DAYS_PAST);
+          const max = new Date(); max.setDate(max.getDate() + SEARCH_WINDOW_DAYS_FUTURE);
+          return { timeMin: min, timeMax: max };
+        })();
 
     const perCalendarResults = await Promise.all(
       calendarIds.map(async (calId): Promise<GoogleEvent[]> => {
@@ -144,7 +217,7 @@ export const calendarAdapter: SearchAdapter = {
           const url =
             `${CALENDAR_EVENTS_API}/${encodeURIComponent(calId)}/events` +
             `?maxResults=25&singleEvents=true&orderBy=startTime` +
-            `&q=${encodeURIComponent(q)}` +
+            (generic ? '' : `&q=${encodeURIComponent(q)}`) +
             `&timeMin=${encodeURIComponent(timeMin.toISOString())}` +
             `&timeMax=${encodeURIComponent(timeMax.toISOString())}`;
           const res = await fetch(url, {
@@ -187,7 +260,11 @@ export const calendarAdapter: SearchAdapter = {
       const attendeeText = attendeesToText(e.attendees).toLowerCase();
 
       let score = 0;
-      if      (title.includes(qLower))        score = 1.0;
+      if (generic) {
+        // Generic-list mode (no keyword to score against) — flat baseline.
+        // Ordering is by startTime asc from the Google API; we keep it.
+        score = 0.7;
+      } else if (title.includes(qLower))        score = 1.0;
       else if (attendeeText.includes(qLower)) score = 0.8;
       else if (location.includes(qLower))     score = 0.7;
       else if (description.includes(qLower))  score = 0.6;
