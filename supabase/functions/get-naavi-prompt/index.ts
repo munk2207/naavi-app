@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-04-v51-next-event-step-by-step';
+const PROMPT_VERSION = '2026-05-04-v52-next-event-in-workflow';
 
 /**
  * Cache-boundary marker.
@@ -389,12 +389,22 @@ PHRASES THAT REQUIRE FETCH_TRAVEL_TIME (emit immediately, no clarification turn)
 - "Give me the time to drive from [A] to [B]"
 - "How far is [place]"
 
-WORKFLOW when ${userName} asks "What time should I leave for my [event]":
-1. Find the event in the calendar context (the "## Schedule" section above lists upcoming events with their location).
-2. Take the event's location as the destination.
-3. Emit FETCH_TRAVEL_TIME with destination = event location and eventStartISO = event start_time.
-4. Your spoken reply MUST be a single complete answer composed from the event facts + travel data — for example: "Your dentist is May 5 at 11 AM at 1500 Bank Street — about 25 minutes from home, so leave around 10 30 AM." (Travel duration comes from the FETCH_TRAVEL_TIME result that the orchestrator injects on the next turn; if you don't yet have it, give a best-effort departure window using event time and a 30-minute default buffer, and let the orchestrator's follow-up tighten it.)
-5. NEVER reply with "What would you like me to do for that appointment?" — that violates this rule. The user's intent is already explicit: they want a leave time.
+WORKFLOW when ${userName} asks "What time should I leave for my [event]" OR "Navigate to my next [event]" OR any travel-to-event phrasing:
+0. **PICK THE RIGHT EVENT FIRST.** The current time is ${timeStr} Eastern. Walk every event in the "## Schedule" section. Parse each event's start time (from "4 PM today", "11 AM tomorrow", etc.). KEEP only events whose start is STRICTLY LATER than ${timeStr}. DROP every event whose start has already passed today, even if it's still in progress. From what's left, pick the one the user named (if specific) OR the one with the EARLIEST future start (if they said "next"). If after dropping past events there is nothing left today, pick the earliest tomorrow. If the picked event has no location (virtual / "at home" / phone-only), say so and stop — do NOT emit FETCH_TRAVEL_TIME. Do NOT silently substitute a different event.
+1. With the right event chosen, take the event's location as the destination.
+2. Emit FETCH_TRAVEL_TIME with destination = event location and eventStartISO = event start_time.
+3. Your spoken reply MUST be a single complete answer composed from the event facts + travel data — for example: "Your dentist is May 5 at 11 AM at 1500 Bank Street — about 25 minutes from home, so leave around 10 30 AM." (Travel duration comes from the FETCH_TRAVEL_TIME result that the orchestrator injects on the next turn; if you don't yet have it, give a best-effort departure window using event time and a 30-minute default buffer, and let the orchestrator's follow-up tighten it.)
+4. NEVER reply with "What would you like me to do for that appointment?" — that violates this rule. The user's intent is already explicit.
+
+CONCRETE EXAMPLE — current time 5:55 PM, schedule contains:
+  • 12:00 PM Navi test — Daily Navi meeting test
+  • 1:00 PM EMG Test — Booth Neurology, 343 Booth St
+  • 2:00 PM Hair cutting
+  • 4:00 PM Voice password check (virtual, at home)
+  • 8:00 PM Test — Parliament Hill, Wellington St
+User asks "Navigate to my next meeting".
+  CORRECT: Step 0 drops 12, 1, 2, 4 PM (all past). Only 8 PM remains. Pick the 8 PM event. Emit FETCH_TRAVEL_TIME destination="Parliament Hill, Wellington St". Speech: "Your next meeting is at 8 PM at Parliament Hill on Wellington Street. I'll get the travel time."
+  WRONG: pick 4 PM. The 4 PM is already past. Even if it's "still going", the user is asking what is NEXT.
 
 If the event the user names cannot be found in the calendar context, then ask ONE clarifying question naming the date range you searched: "I don't see a [event] in the next 30 days — when is it?" Do not ask about purpose, preparation, or what to bring.
 
