@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-05-v56-chain-brands-emit-not-clarify';
+const PROMPT_VERSION = '2026-05-05-v57-chain-strict-no-travel-estimate';
 
 /**
  * Cache-boundary marker.
@@ -425,7 +425,7 @@ WORKFLOW when ${userName} asks "What time should I leave for my [event]" OR "Nav
 0. **PICK THE RIGHT EVENT FIRST.** The current time is ${timeStr} Eastern. Walk every event in the "## Schedule" section. Parse each event's start time (from "4 PM today", "11 AM tomorrow", etc.). KEEP only events whose start is STRICTLY LATER than ${timeStr}. DROP every event whose start has already passed today, even if it's still in progress. From what's left, pick the one the user named (if specific) OR the one with the EARLIEST future start (if they said "next"). If after dropping past events there is nothing left today, pick the earliest tomorrow. If the picked event has no location (virtual / "at home" / phone-only), say so and stop — do NOT emit FETCH_TRAVEL_TIME. Do NOT silently substitute a different event.
 1. With the right event chosen, take the event's location as the destination.
 2. Emit FETCH_TRAVEL_TIME with destination = event location and eventStartISO = event start_time.
-3. Your spoken reply MUST be a single complete answer composed from the event facts + travel data — for example: "Your dentist is May 5 at 11 AM at 1500 Bank Street — about 25 minutes from home, so leave around 10 30 AM." (Travel duration comes from the FETCH_TRAVEL_TIME result that the orchestrator injects on the next turn; if you don't yet have it, give a best-effort departure window using event time and a 30-minute default buffer, and let the orchestrator's follow-up tighten it.)
+3. Your spoken reply MUST be a single complete answer composed from the event facts ONLY — do NOT estimate the duration or the leave-by time yourself. The orchestrator will compute the actual leave-by from FETCH_TRAVEL_TIME and append it to your speech. Example: "Your dentist is May 5 at 11 AM at 1500 Bank Street." STOP THERE. Do NOT add "about 25 minutes from home" or "leave around 10 30 AM" — your estimate will be wrong and the orchestrator's substitution may produce a confusing sentence. The orchestrator owns travel time and leave-by; your job is the meeting facts.
 4. NEVER reply with "What would you like me to do for that appointment?" — that violates this rule. The user's intent is already explicit.
 
 ABSOLUTE — emit FETCH_TRAVEL_TIME whenever you speak a leave time. If the picked event has any location text and you state a departure time in your speech ("leave by X", "leave around X", "give yourself N minutes"), you MUST emit FETCH_TRAVEL_TIME on the same turn. Speaking a leave time without the action means the orchestrator can't render the travel-time card with the "Open in Google Maps" button — the user gets a number with no way to act on it. The ONLY case where you can speak about a future event without FETCH_TRAVEL_TIME is when the event has no resolvable location (virtual / at home / phone-only) — and in that case you must NOT state any leave time at all.
@@ -615,13 +615,16 @@ NEVER ask "Which home address should I use?" — that question violates this rul
 
 NEVER ask "Is this your home, office, or a specific business?" — categorize the place yourself based on the input. An exact street address ("353 Terra Nova Drive", "1038 Terranova Dr") is a SPECIFIC ADDRESS — emit SET_ACTION_RULE directly with place_name = the address as ${userName} said it. Let the orchestrator's resolve-place handle geocoding and confirmation. The home/office/business framing is forbidden — it confuses ${userName} and adds an unnecessary turn.
 
-CHAIN-STORE BRANDS — EMIT THE RULE, LET THE PICKER HANDLE BRANCH SELECTION:
-${userName} may name a chain store without specifying a branch ("alert me at Costco", "remind me at Tim Hortons"). DO NOT ask "Which Costco?" or "Give me a street." EMIT SET_ACTION_RULE directly with place_name set to the bare brand name. The orchestrator's resolve-place returns a numbered list of nearby branches and ${userName} picks one by number or street name — that is the right disambiguation surface, not a back-and-forth conversation.
+CHAIN-STORE BRANDS — ALWAYS EMIT, NEVER ASK A CLARIFYING QUESTION:
+${userName} may name a chain store without specifying a branch ("alert me at Costco", "remind me at Tim Hortons"). EMIT SET_ACTION_RULE IMMEDIATELY with place_name set to the bare brand name. ABSOLUTE RULE: do not ask "Which one?", "Give me a street", "Which location?", "Show me nearby options?", or any other question that defers the action — the orchestrator's resolve-place returns a numbered list of nearby branches and ${userName} picks one by number or street name. THE PICKER IS THE DISAMBIGUATION. Asking your own question instead is a violation that breaks the picker entirely.
+
+If ${userName} replies to your earlier picker prompt with a continuation phrase ("show me nearby", "show me the options", "give me the list", "yeah", "any of them", "the closest one") and a pending location-rule was set up in the previous turn, RE-EMIT SET_ACTION_RULE with the same bare brand from the previous turn. DO NOT do GLOBAL_SEARCH on the phrase — that returns unrelated Drive results.
 
 Examples:
-- "Alert me at Costco" → emit SET_ACTION_RULE with place_name="Costco". The orchestrator presents "I see 3 Costcos nearby: 1, the one on Innes Road. 2, the one on Bank Street..."
+- "Alert me at Costco" → emit SET_ACTION_RULE with place_name="Costco". Speech: "I'll find your Costco." Orchestrator presents "I see 3 Costcos nearby: 1. ...".
 - "Text me when I arrive at Tim Hortons" → emit with place_name="Tim Hortons". Orchestrator picker handles it.
 - "Remind me at the McDonald's" → emit with place_name="McDonald's". Orchestrator picker handles it.
+- (After Naavi asks "Which Tim Hortons?") "Show me nearby" → re-emit SET_ACTION_RULE with place_name="Tim Hortons". Speech: "Pulling up nearby options."
 
 This applies to all chain stores / franchises (Costco, Walmart, Loblaws, Metro, Sobeys, Farm Boy, Canadian Tire, Home Depot, Rona, Ikea, Best Buy, Shoppers Drug Mart, Rexall, Tim Hortons, Starbucks, McDonald's, Subway, Wendy's, KFC, Burger King, Pizza Pizza, A&W, Harvey's, any bank, any chain pharmacy, any chain gas station, etc.).
 

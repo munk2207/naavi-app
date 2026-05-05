@@ -1162,6 +1162,14 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         // the action will be present when it does. Claude generating this
         // shape with no action is a phantom.
         { verbRe: /\bfound\s+.{1,80}\s+(?:at|near)\s+.{1,80}\.\s*(?:please\s+)?say\s+yes/i, needsType: 'SET_ACTION_RULE', honestSpeech: "Let me check that address — I need to verify it before setting the alert." },
+        // V57.11.5 — Wael 2026-05-05: "alert me at Tim Hortons" → "Show me
+        // nearby" → Claude said "I need to resolve nearby Tim Hortons
+        // locations for you. Let me check the map. Once I have the list,
+        // you can tell me which one by street name or number" but emitted
+        // GLOBAL_SEARCH instead of SET_ACTION_RULE. Result: unrelated Drive
+        // PDFs surfaced. This backstop catches "let me check the map" /
+        // "I need to resolve nearby" speech without a SET_ACTION_RULE.
+        { verbRe: /\b(?:let me check the map|i need to resolve nearby|i'?ll resolve nearby|once i have the list)\b/i, needsType: 'SET_ACTION_RULE', honestSpeech: "I'm having trouble finding nearby options. Tell me a street or neighborhood and I'll narrow it down." },
         // V57.11.2 — Wael 2026-05-04: "Navigate to my next meeting" returned
         // speech with a leave time ("Leave by 7:36 PM") but no FETCH_TRAVEL_TIME
         // action, so the TravelTime card with the Open-in-Google-Maps button
@@ -2020,15 +2028,23 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       if (turnSpeechOverride !== null) {
         displaySpeech = turnSpeechOverride;
       }
-      // V57.11.3 — also align the bubble's "Leave by" with the card data,
-      // matching what we already do for finalSpeech below. Wael 2026-05-04
-      // build 144 test: TTS spoke "10:34" (matched card) but bubble still
-      // showed Claude's original "10:35" — same bug, two surfaces.
+      // V57.11.3 — align the bubble's "Leave by" with the card data,
+      // matching finalSpeech below. V57.11.5 — also strip Claude's
+      // best-effort duration estimate ("About 15 minutes from here")
+      // since Claude is hallucinating times that don't match reality;
+      // the card has the truth. Match "Leave by" with OR without a
+      // time so a truncated Claude speech ("Leave by") still gets the
+      // proper time appended. Wael 2026-05-05 caught both bugs at once.
       if (turnSpeechOverride === null && turnNav.length > 0 && turnNav[0].leaveByLabel) {
-        displaySpeech = displaySpeech.replace(
-          /\bleave\s+(?:by|around|at)\s+\d{1,2}(?::\d{2})?\s*(?:a|p)\.?\s*m\.?\b/gi,
-          turnNav[0].leaveByLabel
-        );
+        displaySpeech = displaySpeech
+          .replace(/\babout\s+\d+\s+minutes?\s+(?:from\s+here|away|drive)\b[\.,—–-]?\s*/gi, '')
+          .replace(
+            /\bleave\s+(?:by|around|at)(?:\s+\d{1,2}(?::\d{2})?\s*(?:a|p)\.?\s*m\.?)?\b\.?/gi,
+            turnNav[0].leaveByLabel + '.',
+          )
+          .replace(/\s+—\s*$/, '.')
+          .replace(/\.+$/, '.')
+          .trim();
       }
       console.log('[Orchestrator] response.speech:', response.speech);
       console.log('[Orchestrator] displaySpeech (for bubble):', displaySpeech);
@@ -2103,16 +2119,21 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         finalSpeech = finalSpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
       }
       // V57.11.2 — align spoken "Leave by" with the card's computed leave time.
-      // Claude composes a best-effort leave time (30-min default buffer per
-      // get-naavi-prompt:428); the card uses real Google Maps duration. Wael
-      // 2026-05-04 heard "Leave by 11:15 PM" while the card showed "Leave by
-      // 11:21 PM" — same trip, two answers. Replace Claude's leave-by with
-      // the card's authoritative leaveByLabel.
+      // V57.11.5 — strip Claude's hallucinated duration ("About 15 minutes
+      // from here" when the actual is 21 min) and match "Leave by" with or
+      // without a time so even a truncated Claude speech gets the correct
+      // leave-by appended. Same regex flow as displaySpeech above so TTS
+      // and bubble stay in lockstep.
       if (turnNav.length > 0 && turnNav[0].leaveByLabel) {
-        finalSpeech = finalSpeech.replace(
-          /\bleave\s+(?:by|around|at)\s+\d{1,2}(?::\d{2})?\s*(?:a|p)\.?\s*m\.?\b/gi,
-          turnNav[0].leaveByLabel
-        );
+        finalSpeech = finalSpeech
+          .replace(/\babout\s+\d+\s+minutes?\s+(?:from\s+here|away|drive)\b[\.,—–-]?\s*/gi, '')
+          .replace(
+            /\bleave\s+(?:by|around|at)(?:\s+\d{1,2}(?::\d{2})?\s*(?:a|p)\.?\s*m\.?)?\b\.?/gi,
+            turnNav[0].leaveByLabel + '.',
+          )
+          .replace(/\s+—\s*$/, '.')
+          .replace(/\.+$/, '.')
+          .trim();
       }
       console.log('[Orchestrator] finalSpeech (for TTS):', finalSpeech);
 
@@ -2736,9 +2757,19 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
   // staleness check is the culprit.
   const voiceEnabled = isVoiceEnabledSync();
   console.log(`[TTS Native] speakCloudNative entry — voiceEnabled=${voiceEnabled}, textLen=${text?.length ?? 0}, textPreview="${(text ?? '').slice(0, 60)}"`);
+  // V57.11.5 — remote-log every TTS step so we can diagnose Aura-Hera-vs-
+  // expo-speech fallbacks on Wael's phone without console access.
+  const ttsSession = newDiagSession();
+  remoteLog(ttsSession, 'tts-entry', {
+    voiceEnabled,
+    textLen: text?.length ?? 0,
+    textHead: (text ?? '').slice(0, 80),
+  });
   // Honor global voice-playback toggle.
   if (!voiceEnabled) {
     console.log('[TTS Native] Skipped — voice playback disabled in Settings');
+    remoteLog(ttsSession, 'tts-skip-voice-off');
+    endDiagSession(ttsSession);
     return;
   }
   if (!text || text.trim().length === 0) {
@@ -2779,6 +2810,7 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
       const base64 = await promise;
       if (!base64) {
         console.warn(`[TTS Native] chunk ${chunkIdx}/${chunks.length} fetch returned null — text-to-speech Edge Function may be failing`);
+        remoteLog(ttsSession, 'tts-chunk-null', { chunkIdx, total: chunks.length });
         continue;
       }
       if (isStale()) {
@@ -2786,19 +2818,29 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
         continue;
       }
       console.log(`[TTS Native] playing chunk ${chunkIdx}/${chunks.length} (${base64.length} bytes base64)`);
+      remoteLog(ttsSession, 'tts-chunk-play', { chunkIdx, total: chunks.length, bytes: base64.length });
       await playBase64AudioNative(base64);
       playedAny = true;
     }
     // If no cloud TTS chunks played (all returned null), fall back to expo-speech
     if (!playedAny && !isStale()) {
       console.warn(`[TTS Native] All ${chunks.length} chunks returned null — falling back to expo-speech`);
+      remoteLog(ttsSession, 'tts-all-null-fallback', { total: chunks.length });
       throw new Error('No TTS audio available');
     }
-    if (playedAny) console.log(`[TTS Native] Done — played ${chunks.length} chunks successfully`);
+    if (playedAny) {
+      console.log(`[TTS Native] Done — played ${chunks.length} chunks successfully`);
+      remoteLog(ttsSession, 'tts-done', { total: chunks.length });
+      endDiagSession(ttsSession);
+    }
   } catch (err) {
-    if (isStale()) return;
+    if (isStale()) { endDiagSession(ttsSession); return; }
     // Fall back to expo-speech if cloud TTS fails
     console.error('[TTS Native] cloud TTS failed, using expo-speech:', err);
+    remoteLog(ttsSession, 'tts-fallback-expo', {
+      error: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+    });
+    endDiagSession(ttsSession);
     await Speech.stop();
     return new Promise((resolve) => {
       Speech.speak(text, {
