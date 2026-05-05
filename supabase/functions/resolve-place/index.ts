@@ -212,7 +212,38 @@ serve(async (req) => {
       return jsonResponse({ status: 'not_found' });
     }
 
-    const resolvedName  = first.name ?? placeName;
+    // V57.11 — quality check. Google Places Text Search happily returns
+    // fuzzy matches even for typo'd or non-existent addresses ("150 Innards
+    // Road" was being confirmed as a real place because Google returned the
+    // surrounding postal-code area). Reject if:
+    //   (a) the match is partial AND the result has no concrete-location
+    //       type — Google guessed our way to a generic area
+    //   (b) the result types are entirely generic (locality / political /
+    //       postal_code) with no street, premise, or establishment
+    const resultTypes: string[] = Array.isArray(first.types) ? first.types : [];
+    const SPECIFIC_TYPES = new Set([
+      'street_address', 'premise', 'subpremise', 'route',
+      'point_of_interest', 'establishment',
+      'park', 'airport', 'transit_station',
+      'school', 'university', 'hospital', 'restaurant', 'store',
+      'shopping_mall', 'gas_station', 'pharmacy',
+    ]);
+    const hasSpecificType = resultTypes.some(t => SPECIFIC_TYPES.has(t));
+    const isPartial = first.partial_match === true;
+    if (!hasSpecificType || (isPartial && !hasSpecificType)) {
+      console.log(`[resolve-place] rejecting "${placeName}" — no concrete-location type. partial=${isPartial} types=${JSON.stringify(resultTypes)} formatted=${JSON.stringify(first.formatted_address ?? null)}`);
+      return jsonResponse({ status: 'not_found' });
+    }
+
+    // Prefer Google's canonical form (formatted_address or name) over
+    // the user's typed input — otherwise a typo gets echoed back to
+    // the user as the "found" address. Only fall back to placeName if
+    // both Google fields are missing.
+    const resolvedName = (typeof first.name === 'string' && first.name.trim())
+      ? first.name.trim()
+      : (typeof first.formatted_address === 'string' && first.formatted_address.trim())
+        ? first.formatted_address.trim()
+        : placeName;
     const resolvedAddr  = first.formatted_address ?? null;
     const canonicalSlug = slugify(resolvedName);
 

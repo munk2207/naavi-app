@@ -945,7 +945,32 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         { verbRe: /\b(?:i['']?ve\s+(?:scheduled|added|booked|put)|i['']?ll\s+(?:schedule|add|book|put)|added it to (?:your|the) calendar|put (?:it|that) on (?:your|the) calendar|booked it for you|scheduled it for you)\b/i, needsType: 'CREATE_EVENT', honestSpeech: "I tried to add that to your calendar but my system didn't run it. Can you say it again?" },
         { verbRe: /\b(?:i['']?ve\s+(?:drafted|sent)|i['']?ll\s+(?:draft|send)|drafted (?:a|the) (?:message|email|text)|sent (?:a|the) (?:message|email|text))\b/i, needsType: 'DRAFT_MESSAGE', honestSpeech: "I tried to draft that message but my system didn't run it. Can you say it again?" },
         { verbRe: /\b(?:i['']?ve\s+saved|saved to memory|i['']?ll\s+remember|noted that|got it[,.]?\s+(?:i['']?ve\s+)?saved|i['']?ve\s+remembered)\b/i, needsType: 'REMEMBER', honestSpeech: "I tried to save that to memory but my system didn't run it. Can you say it again?" },
-        { verbRe: /\b(?:i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+when|i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+(?:as soon|the moment|if)|alert is set|i['']?ve\s+set\s+(?:the|that|up)\s+(?:up\s+)?(?:the\s+)?alert)\b/i, needsType: 'SET_ACTION_RULE', honestSpeech: "I tried to set that alert but my system didn't run it. Can you say it again?" },
+        // V57.11.1 — added bare "alert set" / "alert has been set" phrasings.
+        // Wael 2026-05-04: Naavi said "Alert set — one time you arrive at 150
+        // Innards Road" but no row landed in DB. The orchestrator's template
+        // for confirmed inserts uses "Alert set —" so Claude can perfectly
+        // mimic it. Without this addition, the backstop missed and the user
+        // believed an alert was created when it wasn't.
+        { verbRe: /\b(?:i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+when|i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+(?:as soon|the moment|if)|alert is set|alert\s+(?:has\s+been|is)\s+set|i['']?ve\s+set\s+(?:the|that|up)\s+(?:up\s+)?(?:the\s+)?alert|^\s*alert set\b)/i, needsType: 'SET_ACTION_RULE', honestSpeech: "I tried to set that alert but my system didn't run it. Can you say it again?" },
+        // V57.11.2 — catch the "Found X at Y. Say yes" hallucinated readback
+        // pattern. Wael 2026-05-04: Claude generated a complete confirmation
+        // flow ("Found 150 Innards Road at 150 Innards Rd... Say yes to
+        // confirm") for a non-existent address WITHOUT emitting
+        // SET_ACTION_RULE — the orchestrator never intercepted, never
+        // resolved, never asked Google. The user was about to confirm a
+        // fake place. The orchestrator's own readback uses the same
+        // pattern, but it only fires after a real resolve-place call so
+        // the action will be present when it does. Claude generating this
+        // shape with no action is a phantom.
+        { verbRe: /\bfound\s+.{1,80}\s+(?:at|near)\s+.{1,80}\.\s*(?:please\s+)?say\s+yes/i, needsType: 'SET_ACTION_RULE', honestSpeech: "Let me check that address — I need to verify it before setting the alert." },
+        // V57.11.2 — Wael 2026-05-04: "Navigate to my next meeting" returned
+        // speech with a leave time ("Leave by 7:36 PM") but no FETCH_TRAVEL_TIME
+        // action, so the TravelTime card with the Open-in-Google-Maps button
+        // never rendered. Claude was hallucinating a leave time from the
+        // best-effort 30-min buffer rule without actually requesting the
+        // travel calculation. This backstop catches "leave by/around X"
+        // speech that wasn't backed by an action.
+        { verbRe: /\bleave\s+(?:by|around|at)\s+\d{1,2}(?::\d{2})?\s*(?:a|p)?\.?m?\.?\b/i, needsType: 'FETCH_TRAVEL_TIME', honestSpeech: "Let me check the travel time — one moment." },
       ];
       const claudeActions = Array.isArray(response.actions) ? response.actions : [];
       const claudeSpeech  = String(response.speech ?? '');
@@ -1979,12 +2004,15 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     } finally {
       remoteLog(diagSession, 'orch-send-done', { totalMs: Date.now() - t0 });
       // V57.9.3 stuck-button safety net — if status hasn't returned to
-      // 'idle' 30 s after send-done (e.g. TTS playback hang after a
+      // 'idle' after send-done (e.g. TTS playback hang after a
       // successful reply, audio focus race after the previous turn),
-      // force-reset so the user's mic / send buttons unlock. The
-      // existing 4s outer-catch reset only handles the error path;
-      // this covers the success path. Wael 2026-04-30: "All the
-      // Buttons are locked" after a 200-OK send.
+      // force-reset so the user's mic / send buttons unlock.
+      // V57.11.1 — shrunk 30s → 8s. Wael 2026-05-04: TTS hangs were
+      // leaving the UI locked for the full 30s while the user waited
+      // to reply. 8s is enough headroom for a normal long TTS reply
+      // (~6s) but short enough that a hang doesn't feel like "the app
+      // froze". Per-chunk TTS playback already has its own internal
+      // timeouts so this only fires on edge cases.
       setTimeout(() => {
         const stuckStatus = statusRef.current;
         if (stuckStatus !== 'idle' && stuckStatus !== 'cooldown' && stuckStatus !== 'answer_active') {
@@ -1994,7 +2022,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           setStatus('idle');
         }
         endDiagSession(diagSession);
-      }, 30_000);
+      }, 8_000);
     }
   }, [status, language]);
 

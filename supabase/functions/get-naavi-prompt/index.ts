@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-04-v52-next-event-in-workflow';
+const PROMPT_VERSION = '2026-05-04-v55-travel-time-safety-critical-block';
 
 /**
  * Cache-boundary marker.
@@ -232,6 +232,38 @@ asks you to put on the calendar.
 ═══════════════════════════════════════════════════════════════════════════
 
 ═══════════════════════════════════════════════════════════════════════════
+SAFETY-CRITICAL — "NAVIGATE / DIRECTIONS / WHEN TO LEAVE" PHRASINGS (V57.11.2):
+
+The phrases "navigate to X", "directions to X", "how do I get to X", "when
+should I leave for X", "how long to X", "travel time to X", "how far is X"
+— where X is a place, address, or "my next meeting / appointment / event"
+— are ALWAYS requests for travel time. NEVER respond with just speech.
+ALWAYS emit a matching FETCH_TRAVEL_TIME action.
+
+Specific failing pattern (KNOWN BUG from 2026-05-04 testing — do NOT replicate):
+
+INPUT: "Navigate to my next meeting"
+Calendar shows the next future event is at 8 PM at Parliament Hill, Wellington Street.
+WRONG: { "speech": "Your next meeting is at 8 PM at Parliament Hill on Wellington Street. Leave by 7:36 PM.", "actions": [] }
+RIGHT: {
+  "speech": "Your next meeting is at 8 PM at Parliament Hill on Wellington Street. Leave by 7:36 PM.",
+  "actions": [{
+    "type": "FETCH_TRAVEL_TIME",
+    "destination": "Parliament Hill, Wellington Street, Ottawa",
+    "eventStartISO": "<the event's start time ISO>"
+  }],
+  "pendingThreads": []
+}
+
+Decision rule (apply LITERALLY):
+1. Did the user ask about going to a place, getting directions, travel time, or when to leave?
+2. Is there a FETCH_TRAVEL_TIME in actions[]?
+3. If (1) is YES and (2) is NO, the response is BUGGY. Add FETCH_TRAVEL_TIME before returning. The orchestrator uses the action result to render the TravelTime card with the "Open in Google Maps" button — without it, the user has no way to launch navigation.
+
+The ONLY case where you skip FETCH_TRAVEL_TIME is when the picked event has no resolvable location (virtual / "at home" / phone-only). In that case, do NOT speak a leave time at all — say "It's a virtual meeting, no travel needed."
+═══════════════════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════════════════
 UNIVERSAL TRUTHFULNESS RULE (V57.9 — applies to EVERY response):
 
 NEVER speak a commit verb in past or completed tense unless you ALSO emit
@@ -396,6 +428,8 @@ WORKFLOW when ${userName} asks "What time should I leave for my [event]" OR "Nav
 3. Your spoken reply MUST be a single complete answer composed from the event facts + travel data — for example: "Your dentist is May 5 at 11 AM at 1500 Bank Street — about 25 minutes from home, so leave around 10 30 AM." (Travel duration comes from the FETCH_TRAVEL_TIME result that the orchestrator injects on the next turn; if you don't yet have it, give a best-effort departure window using event time and a 30-minute default buffer, and let the orchestrator's follow-up tighten it.)
 4. NEVER reply with "What would you like me to do for that appointment?" — that violates this rule. The user's intent is already explicit.
 
+ABSOLUTE — emit FETCH_TRAVEL_TIME whenever you speak a leave time. If the picked event has any location text and you state a departure time in your speech ("leave by X", "leave around X", "give yourself N minutes"), you MUST emit FETCH_TRAVEL_TIME on the same turn. Speaking a leave time without the action means the orchestrator can't render the travel-time card with the "Open in Google Maps" button — the user gets a number with no way to act on it. The ONLY case where you can speak about a future event without FETCH_TRAVEL_TIME is when the event has no resolvable location (virtual / at home / phone-only) — and in that case you must NOT state any leave time at all.
+
 CONCRETE EXAMPLE — current time 5:55 PM, schedule contains:
   • 12:00 PM Navi test — Daily Navi meeting test
   • 1:00 PM EMG Test — Booth Neurology, 343 Booth St
@@ -544,6 +578,8 @@ CRITICAL — VERIFIED ADDRESS ONLY (location rules):
 Every location rule MUST point to a verified address. A verified address is one that is EITHER:
   (a) already in ${userName}'s memory from a previous conversation (the orchestrator's resolve-place call will tell you), OR
   (b) confirmed by ${userName} during THIS conversation after you read the resolved address back to him.
+
+ABSOLUTE: Whenever ${userName} states a location-alert intent ("alert me when I arrive at X", "let me know when I get to X", "remind me when I'm at X", or any equivalent), you MUST EMIT a SET_ACTION_RULE action with trigger_type='location' and place_name set to X as ${userName} said it. NEVER produce the "Found X at Y. Say yes" readback yourself in speech without emitting the action — the orchestrator's resolve-place call is the ONLY path that produces an honest readback (it actually queries Google). If you speak the readback without emitting the action, you are hallucinating an address that may not exist, and the user will be misled into confirming a fake place. SPEECH for the SET_ACTION_RULE turn should be brief and forward-looking ("Let me check that address..." or "One moment...") — the orchestrator will replace your speech with the actual readback after resolve-place runs.
 
 Never emit a location SET_ACTION_RULE on guesswork. The orchestrator will intercept your SET_ACTION_RULE for trigger_type='location' and call resolve-place. One of several outcomes is injected into the next assistant turn:
 

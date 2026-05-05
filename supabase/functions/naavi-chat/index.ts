@@ -389,6 +389,95 @@ async function lookupContactsByName(
 // CACHE_BOUNDARY / END_STABLE_RULES markers preserved so the prompt-cache
 // 3-block split below still works.
 
+// V57.11.2 — fetch the user's calendar events live from Google so Claude
+// always sees the current schedule. Wael 2026-05-04: changed an event in
+// Google Calendar and Naavi kept reporting the old time because the brief
+// passed by mobile was loaded at app launch and only refreshed every 60s.
+// Pulling per-request adds ~500ms latency but eliminates the staleness.
+async function fetchLiveCalendarEvents(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<MobileBriefItem[]> {
+  try {
+    const { data: tokenRow } = await supabase
+      .from('user_tokens')
+      .select('refresh_token')
+      .eq('user_id', userId)
+      .eq('provider', 'google')
+      .maybeSingle();
+    const refreshToken = (tokenRow as { refresh_token?: string } | null)?.refresh_token;
+    if (!refreshToken) return [];
+
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: Deno.env.get('GOOGLE_CLIENT_ID') ?? '',
+        client_secret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '',
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }),
+    });
+    const tokenData = await tokenRes.json();
+    const accessToken = typeof tokenData?.access_token === 'string' ? tokenData.access_token : null;
+    if (!accessToken) return [];
+
+    const timeMin = new Date();
+    const timeMax = new Date();
+    timeMax.setDate(timeMax.getDate() + 7);
+    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events`
+      + `?singleEvents=true&orderBy=startTime&maxResults=50`
+      + `&timeMin=${encodeURIComponent(timeMin.toISOString())}`
+      + `&timeMax=${encodeURIComponent(timeMax.toISOString())}`;
+    const eventsRes = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!eventsRes.ok) return [];
+    const eventsData = await eventsRes.json();
+    const items = (eventsData?.items ?? []) as Array<{
+      id?: string;
+      summary?: string;
+      location?: string;
+      start?: { dateTime?: string; date?: string };
+    }>;
+
+    // V57.11.2 — drop events whose start time has already passed. Without
+    // this, Claude treats a meeting that started 27 minutes ago as "next"
+    // because the prompt rule about past-event filtering isn't reliably
+    // followed by Haiku. Doing it server-side makes "next meeting" answers
+    // deterministic. The trade-off: an in-progress meeting won't appear in
+    // the brief; if the user asks about it explicitly the global-search
+    // calendar adapter still surfaces it (that adapter searches by keyword).
+    const now = Date.now();
+    return items
+      .map(e => {
+        const start = e.start?.dateTime ?? e.start?.date ?? '';
+        const startDate = start ? new Date(start) : new Date();
+        const isValid = !Number.isNaN(startDate.getTime());
+        return { e, startDate, isValid };
+      })
+      .filter(({ startDate, isValid }) => {
+        if (!isValid) return false;
+        return startDate.getTime() > now;
+      })
+      .map(({ e, startDate }) => {
+        const timeStr = e.start?.dateTime
+          ? startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/Toronto' })
+          : 'all day';
+        const dateStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Toronto' });
+        const detailParts = [`${dateStr}${e.start?.dateTime ? ' at ' + timeStr : ''}`];
+        if (e.location) detailParts.push(`at ${e.location}`);
+        return {
+          id: e.id ?? '',
+          category: 'calendar',
+          title: e.summary ?? 'Event',
+          detail: detailParts.join(' '),
+        } as MobileBriefItem;
+      });
+  } catch (err) {
+    console.error('[fetchLiveCalendarEvents] failed:', (err as Error)?.message);
+    return [];
+  }
+}
+
 interface MobileBriefItem {
   id?: string;
   category?: string;
@@ -408,17 +497,25 @@ async function assembleSystemPromptServerSide(
     knowledgeContext: string;
   },
 ): Promise<string | null> {
-  // 1. user_settings → user name + phone (drives prompt personalization)
+  // 1. user_settings → user name + phone + home/work addresses (drives
+  //    prompt personalization). V57.11.2 — include home/work addresses
+  //    so Claude can answer "what's my home address" directly. Wael
+  //    2026-05-04: Naavi was saying "I don't have your home address"
+  //    despite the value being in user_settings — Claude never saw it.
   let userName = 'there';
   let userPhone = '';
+  let userHomeAddress = '';
+  let userWorkAddress = '';
   try {
     const { data } = await supabase
       .from('user_settings')
-      .select('name, phone')
+      .select('name, phone, home_address, work_address')
       .eq('user_id', userId)
       .single();
-    if (data?.name)  userName  = String(data.name);
-    if (data?.phone) userPhone = String(data.phone);
+    if (data?.name)         userName         = String(data.name);
+    if (data?.phone)        userPhone        = String(data.phone);
+    if (data?.home_address) userHomeAddress  = String(data.home_address);
+    if (data?.work_address) userWorkAddress  = String(data.work_address);
   } catch (err) {
     console.warn('[assembleSystemPrompt] user_settings lookup failed:', (err as Error)?.message);
   }
@@ -462,17 +559,34 @@ async function assembleSystemPromptServerSide(
     ? `\n${userName} speaks French. Respond in Canadian French.`
     : '';
 
-  const briefContext = (opts.briefItems && opts.briefItems.length > 0)
+  // V57.11.2 — replace mobile's calendar items with live Google Calendar
+  // fetch so Claude never sees a stale schedule. Non-calendar items (emails,
+  // birthdays, weather) still come from mobile (they don't have the same
+  // staleness problem).
+  const liveCalendar = await fetchLiveCalendarEvents(supabase, userId);
+  const nonCalendarMobile = (opts.briefItems ?? []).filter(item => item.category !== 'calendar');
+  const mergedBrief: MobileBriefItem[] = [...liveCalendar, ...nonCalendarMobile];
+
+  const briefContext = mergedBrief.length > 0
     ? `\n\n## ${userName}'s upcoming schedule (next 7 days)\n` +
-      opts.briefItems
+      mergedBrief
         .map(item => `- [${item.category ?? 'task'}] ${item.title ?? ''}${item.detail ? ` — ${item.detail}` : ''}`)
         .join('\n')
     : `\n\n## ${userName}'s upcoming schedule (next 7 days)\n- No events found for the next 7 days.`;
 
+  // V57.11.2 — User reference section. Authoritative facts that Claude
+  // should answer directly when asked, no search needed.
+  const userRefParts: string[] = [];
+  if (userHomeAddress) userRefParts.push(`- Home address: ${userHomeAddress}`);
+  if (userWorkAddress) userRefParts.push(`- Work / office address: ${userWorkAddress}`);
+  const userRefSection = userRefParts.length > 0
+    ? `\n\n## ${userName}'s reference info (answer these directly when asked, no search needed)\n${userRefParts.join('\n')}`
+    : '';
+
   const healthSuffix    = opts.healthContext    ? `\n\n${opts.healthContext}`    : '';
   const knowledgeSuffix = opts.knowledgeContext ? `\n\n${opts.knowledgeContext}` : '';
 
-  return base + languageNote + briefContext + healthSuffix + knowledgeSuffix;
+  return base + languageNote + userRefSection + briefContext + healthSuffix + knowledgeSuffix;
 }
 
 // ── Resolve user ID ───────────────────────────────────────────────────────────

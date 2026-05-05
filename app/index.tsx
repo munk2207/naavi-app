@@ -24,6 +24,7 @@ import {
   Modal,
   AppState,
   Alert,
+  Keyboard,
   Linking as RNLinking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -615,7 +616,18 @@ export default function HomeScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const runSyncRef = useRef<(() => void) | null>(null);
   const avoidHighwaysRef = useRef(false);
-  const [inputText, setInputText] = useState('');
+  // V57.11.1 — mirror the input text in a ref so handleSend reads the
+  // latest value without depending on the React state having flushed.
+  // Wael 2026-05-04: typed "Navigate to my next meeting" but the bubble
+  // showed "Navigate to my next" — last word lost because state hadn't
+  // committed before Send fired. The ref always has the most recent
+  // onChangeText value, no closure / batching gap.
+  const [inputText, _setInputText] = useState('');
+  const inputTextRef = useRef('');
+  const setInputText = useCallback((t: string) => {
+    inputTextRef.current = t;
+    _setInputText(t);
+  }, []);
   const [memoTranscript, setMemoTranscript] = useState<string | null>(null);
   const [brief, setBrief] = useState<BriefItem[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -1055,26 +1067,10 @@ export default function HomeScreen() {
     };
   }, [clearHistory]);
 
-  // Auto-open Google Maps when a navigation result arrives
-  const lastAutoOpenedTurnRef = useRef(-1);
-  useEffect(() => {
-    const lastIdx = turns.length - 1;
-    if (lastIdx < 0 || lastIdx === lastAutoOpenedTurnRef.current) return;
-    const lastTurn = turns[lastIdx];
-    if (lastTurn.navigationResults.length > 0) {
-      lastAutoOpenedTurnRef.current = lastIdx;
-      const nav = lastTurn.navigationResults[0];
-      const avoid = avoidHighwaysRef.current ? '&avoid=highways' : '';
-      const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(nav.destination)}&travelmode=driving${avoid}`;
-      if (Platform.OS === 'web') {
-        const a = document.createElement('a');
-        a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      } else {
-        Linking.openURL(url).catch(() => {});
-      }
-    }
-  }, [turns]);
+  // V57.11.1 — auto-open Google Maps removed. Wael 2026-05-04: yanking the
+  // user out of the app to Google Maps before they read the travel time was
+  // disorienting. The "Open in Google Maps" button on the TravelTimeCard
+  // is the chosen path — user taps when they're ready to navigate.
 
   // ── Hands-free mode ──────────────────────────────────────────────────────
   // speakCue: short spoken cue using cloud TTS (Deepgram aura-hera-en) so the
@@ -1256,15 +1252,13 @@ export default function HomeScreen() {
   }
 
   async function handleSend() {
-    const text = inputText.trim();
-    // V57.6 diagnostic — log the actual text passed in so we can find the
-    // truncation bug Wael flagged on V57.5. If the bubble shows
-    // "Alert me when I arrive" but this log shows
-    // "Alert me when I arrive home", bug is in the bubble (Android Yoga
-    // wrap regression). If the log itself shows the truncated string,
-    // bug is in the TextInput state (onChangeText not committing the
-    // last character before Send fires).
-    console.log('[handleSend] inputText raw=', JSON.stringify(inputText), 'trimmed=', JSON.stringify(text));
+    // V57.11.1 — read from the ref (always up-to-date) rather than the
+    // state, which could lag on Android by one onChangeText cycle. Also
+    // dismiss the keyboard so any pending IME composition flushes
+    // before we read.
+    Keyboard.dismiss();
+    const text = (inputTextRef.current || inputText).trim();
+    console.log('[handleSend] inputText ref=', JSON.stringify(inputTextRef.current), 'state=', JSON.stringify(inputText), 'trimmed=', JSON.stringify(text));
     // V57.11 — Send is gated by isSendLocked (looser than isInputLocked).
     // Mic / hands-free / Visits are still under the full input lock; only
     // typed-text Send is allowed during 'speaking' and 'answer_active' so
