@@ -35,6 +35,7 @@
  *   }
  *
  * Response:
+ *   Single-result:
  *   {
  *     status:        'ok' | 'personal_unset' | 'not_found',
  *     source:        'memory' | 'fresh' | 'settings_home' | 'settings_work' | null,
@@ -46,6 +47,21 @@
  *     lng:           number,
  *     radius_meters: number
  *   }
+ *
+ *   Multi-result (V57.11.3 — bare-brand picker):
+ *   {
+ *     status:     'multiple',
+ *     source:     'memory' | 'fresh',
+ *     candidates: [
+ *       { place_name, address, lat, lng, radius_meters, alias?, canonical_alias? },
+ *       ...
+ *     ]
+ *   }
+ *   Returned when the user said a bare brand name (≤2 words, no street /
+ *   neighborhood / digit) and either:
+ *     - user_places has 2+ rows matching the brand → source='memory'
+ *     - Google Places returns 2+ specific-type results → source='fresh'
+ *   Caller presents the list and asks the user to pick by number or street.
  */
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
@@ -70,6 +86,39 @@ const PERSONAL_WORK = new Set([
 
 function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
+}
+
+// V57.11.3 — bare-brand detection. A "bare brand" is a short query with no
+// street / neighborhood / digit disambiguators. When user says a bare brand
+// AND there are 2+ candidates (saved or fresh), return them as 'multiple' so
+// the caller can present a numbered list. Mirrors the voice server's S9d
+// guard but applied to memory-multi and fresh-multi consistently.
+function isBareBrand(spoken: string): boolean {
+  const lower = spoken.toLowerCase().trim();
+  const wordCount = lower.split(/\s+/).filter(Boolean).length;
+  if (wordCount > 2) return false;
+  if (/\d/.test(lower)) return false;
+  const disambiguator = /\b(street|st|road|rd|ave|avenue|blvd|boulevard|drive|dr|lane|ln|way|near|at the|the one|north|south|east|west|downtown|merivale|kanata|orleans|bayshore|bel\s*air|carling|innes|bank|merivale)\b/i;
+  if (disambiguator.test(lower)) return false;
+  return true;
+}
+
+const SPECIFIC_TYPES = new Set([
+  'street_address', 'premise', 'subpremise', 'route',
+  'point_of_interest', 'establishment',
+  'park', 'airport', 'transit_station',
+  'school', 'university', 'hospital', 'restaurant', 'store',
+  'shopping_mall', 'gas_station', 'pharmacy',
+]);
+
+function isSpecificResult(r: any): boolean {
+  const types: string[] = Array.isArray(r?.types) ? r.types : [];
+  const hasSpecific = types.some(t => SPECIFIC_TYPES.has(t));
+  if (!hasSpecific) return false;
+  if (r?.partial_match === true && !hasSpecific) return false;
+  if (typeof r?.geometry?.location?.lat !== 'number') return false;
+  if (typeof r?.geometry?.location?.lng !== 'number') return false;
+  return true;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -148,29 +197,77 @@ serve(async (req) => {
     }
 
     // ── (2) Memory lookup — any alias this user has previously confirmed
-    const { data: cached } = await admin
-      .from('user_places')
-      .select('alias, place_name, lat, lng, radius_meters')
-      .eq('user_id', user_id)
-      .eq('alias', alias)
-      .maybeSingle();
-
-    if (cached) {
-      await admin.from('user_places')
-        .update({ last_used_at: new Date().toISOString() })
+    // V57.11.3 — for bare-brand queries, also search by partial alias / name
+    // so the picker can offer multiple saved branches ("Costco Bel Air",
+    // "Costco Innes") when the user just says "Costco".
+    const bareBrand = isBareBrand(placeName);
+    if (bareBrand) {
+      const aliasPattern = `${alias}-%`;
+      const namePattern  = `%${placeName}%`;
+      const { data: multi } = await admin
+        .from('user_places')
+        .select('alias, place_name, lat, lng, radius_meters')
         .eq('user_id', user_id)
-        .eq('alias', alias);
+        .or(`alias.eq.${alias},alias.ilike.${aliasPattern},place_name.ilike.${namePattern}`)
+        .order('last_used_at', { ascending: false })
+        .limit(5);
 
-      console.log(`[resolve-place] memory hit: ${alias}`);
-      return jsonResponse({
-        status: 'ok',
-        source: 'memory',
-        alias: cached.alias,
-        place_name: cached.place_name,
-        lat: cached.lat,
-        lng: cached.lng,
-        radius_meters: cached.radius_meters,
-      });
+      if (multi && multi.length >= 2) {
+        console.log(`[resolve-place] bare-brand memory multi: ${multi.length} matches for "${placeName}"`);
+        return jsonResponse({
+          status: 'multiple',
+          source: 'memory',
+          candidates: multi.map(r => ({
+            alias: r.alias,
+            place_name: r.place_name,
+            lat: r.lat,
+            lng: r.lng,
+            radius_meters: r.radius_meters,
+          })),
+        });
+      }
+      if (multi && multi.length === 1) {
+        const c = multi[0];
+        await admin.from('user_places')
+          .update({ last_used_at: new Date().toISOString() })
+          .eq('user_id', user_id).eq('alias', c.alias);
+        console.log(`[resolve-place] bare-brand memory single: ${c.alias}`);
+        return jsonResponse({
+          status: 'ok',
+          source: 'memory',
+          alias: c.alias,
+          place_name: c.place_name,
+          lat: c.lat,
+          lng: c.lng,
+          radius_meters: c.radius_meters,
+        });
+      }
+      // 0 saved matches → fall through to fresh Google Places multi-search below
+    } else {
+      const { data: cached } = await admin
+        .from('user_places')
+        .select('alias, place_name, lat, lng, radius_meters')
+        .eq('user_id', user_id)
+        .eq('alias', alias)
+        .maybeSingle();
+
+      if (cached) {
+        await admin.from('user_places')
+          .update({ last_used_at: new Date().toISOString() })
+          .eq('user_id', user_id)
+          .eq('alias', alias);
+
+        console.log(`[resolve-place] memory hit: ${alias}`);
+        return jsonResponse({
+          status: 'ok',
+          source: 'memory',
+          alias: cached.alias,
+          place_name: cached.place_name,
+          lat: cached.lat,
+          lng: cached.lng,
+          radius_meters: cached.radius_meters,
+        });
+      }
     }
 
     // ── (3) Fresh resolve via Places API
@@ -201,39 +298,40 @@ serve(async (req) => {
     }
 
     const data = await res.json();
-    const first = data.results?.[0];
+    const allResults: any[] = Array.isArray(data.results) ? data.results : [];
+    const specificResults = allResults.filter(isSpecificResult);
+
+    // V57.11.3 — bare-brand fresh-multi: when user said "Costco" (bare brand)
+    // and Google returned 2+ specific-type results, present them as a list
+    // so the user can pick by number or street name. Only kicks in when no
+    // saved-place multi-match landed above (we'd have returned earlier).
+    if (bareBrand && specificResults.length >= 2) {
+      console.log(`[resolve-place] bare-brand fresh multi: ${specificResults.length} matches for "${placeName}"`);
+      const candidates = specificResults.slice(0, 5).map(r => {
+        const name = (typeof r.name === 'string' && r.name.trim())
+          ? r.name.trim()
+          : (typeof r.formatted_address === 'string' ? r.formatted_address.trim() : placeName);
+        return {
+          place_name:    name,
+          address:       r.formatted_address ?? null,
+          lat:           r.geometry.location.lat,
+          lng:           r.geometry.location.lng,
+          radius_meters: radiusOverride,
+          canonical_alias: slugify(name),
+        };
+      });
+      return jsonResponse({ status: 'multiple', source: 'fresh', candidates });
+    }
+
+    // Single-result path: take the first specific result, or 404.
+    const first = specificResults[0];
     if (!first) {
+      console.log(`[resolve-place] no specific-type results for "${placeName}"`);
       return jsonResponse({ status: 'not_found' });
     }
 
-    const lat = first.geometry?.location?.lat;
-    const lng = first.geometry?.location?.lng;
-    if (typeof lat !== 'number' || typeof lng !== 'number') {
-      return jsonResponse({ status: 'not_found' });
-    }
-
-    // V57.11 — quality check. Google Places Text Search happily returns
-    // fuzzy matches even for typo'd or non-existent addresses ("150 Innards
-    // Road" was being confirmed as a real place because Google returned the
-    // surrounding postal-code area). Reject if:
-    //   (a) the match is partial AND the result has no concrete-location
-    //       type — Google guessed our way to a generic area
-    //   (b) the result types are entirely generic (locality / political /
-    //       postal_code) with no street, premise, or establishment
-    const resultTypes: string[] = Array.isArray(first.types) ? first.types : [];
-    const SPECIFIC_TYPES = new Set([
-      'street_address', 'premise', 'subpremise', 'route',
-      'point_of_interest', 'establishment',
-      'park', 'airport', 'transit_station',
-      'school', 'university', 'hospital', 'restaurant', 'store',
-      'shopping_mall', 'gas_station', 'pharmacy',
-    ]);
-    const hasSpecificType = resultTypes.some(t => SPECIFIC_TYPES.has(t));
-    const isPartial = first.partial_match === true;
-    if (!hasSpecificType || (isPartial && !hasSpecificType)) {
-      console.log(`[resolve-place] rejecting "${placeName}" — no concrete-location type. partial=${isPartial} types=${JSON.stringify(resultTypes)} formatted=${JSON.stringify(first.formatted_address ?? null)}`);
-      return jsonResponse({ status: 'not_found' });
-    }
+    const lat = first.geometry.location.lat;
+    const lng = first.geometry.location.lng;
 
     // Prefer Google's canonical form (formatted_address or name) over
     // the user's typed input — otherwise a typo gets echoed back to

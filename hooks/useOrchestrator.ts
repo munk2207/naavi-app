@@ -48,6 +48,86 @@ const NEGATIVE_RE    = /^(no|nope|cancel|never ?mind|stop|forget it|don[']?t)[.!
 // the "home + Alert me when I arrive to my office" concatenation bug.
 const FRESH_COMMAND_RE = /^\s*(alert|text|notify|remind|tell)\s+(me|my|the|him|her|us|them)\b/i;
 
+// V57.11.3 — escape pattern for the multi-candidate picker. If the user
+// asks a question instead of picking ("List me all Movati", "Where is
+// Costco", "How far is Bank Street"), drop the pending picker so Claude
+// can answer the new query — don't trap them in pick-mode.
+const QUESTION_ESCAPE_RE = /^\s*(list|show|find|tell|where|what|how|which|search|look up)\b/i;
+
+// V57.11.3 — number words 1-5 → digit. The picker tops out at 5 candidates
+// so spelled-out numbers beyond five aren't recognised.
+const NUMBER_WORDS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5,
+  '1': 1, '2': 2, '3': 3, '4': 4, '5': 5,
+  '#1': 1, '#2': 2, '#3': 3, '#4': 4, '#5': 5,
+  first: 1, second: 2, third: 3, fourth: 4, fifth: 5,
+};
+
+/**
+ * Pull the distinguishing street name from a full formatted address. Used
+ * when reading candidates aloud ("the one on Bank Street") and when fuzzy-
+ * matching the user's spoken pick.
+ *
+ * Examples:
+ *   "1280 Merivale Rd, Ottawa, ON K2C 0L4, Canada" → "Merivale"
+ *   "1900 Innes Rd, Gloucester, ON K1B 3K6, Canada" → "Innes"
+ *   "200 Bank St, Ottawa, ON K1P 5N6, Canada" → "Bank"
+ */
+export function pickShortAddress(address?: string | null): string | null {
+  if (!address) return null;
+  const firstSegment = address.split(',')[0]?.trim() ?? '';
+  // Drop the leading civic number if present.
+  const noCivic = firstSegment.replace(/^\s*\d+\s*[a-z]?\s*/i, '');
+  // Drop the trailing street-type abbreviation so we keep only the name token.
+  const streetTypeRe = /\s+(rd|road|st|street|ave|avenue|blvd|boulevard|dr|drive|ln|lane|way|ct|court|cres|crescent|hwy|highway|pkwy|parkway|pl|place|terr|terrace|sq|square)\.?$/i;
+  const trimmed = noCivic.replace(streetTypeRe, '').trim();
+  return trimmed.length > 0 ? trimmed : (noCivic.length > 0 ? noCivic : null);
+}
+
+/**
+ * Parse a user reply against an array of location candidates and return
+ * the matching index, or -1 if no clear match. Supports:
+ *   - digit / spelled number ("1", "two", "third", "#3")
+ *   - street-name fuzzy match ("Bank", "Bank Street", "the one on Innes")
+ * Ambiguous matches return -1 so the caller can re-prompt.
+ */
+export function parseLocationPick(
+  reply: string,
+  candidates: Array<{ address?: string | null; place_name: string }>,
+): number {
+  const lower = reply.toLowerCase().trim();
+  if (!lower) return -1;
+
+  // Number-first parse.
+  for (const token of lower.split(/[^a-z0-9#]+/i)) {
+    if (NUMBER_WORDS[token] !== undefined) {
+      const n = NUMBER_WORDS[token];
+      if (n >= 1 && n <= candidates.length) return n - 1;
+    }
+  }
+
+  // Street-name fuzzy parse — match candidate's distinguishing street token.
+  const matches: number[] = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const street = (pickShortAddress(candidates[i].address ?? null) ?? '').toLowerCase();
+    if (street && lower.includes(street)) matches.push(i);
+  }
+  if (matches.length === 1) return matches[0];
+
+  // Last fallback — match candidate's full place_name word.
+  const nameMatches: number[] = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const name = candidates[i].place_name.toLowerCase();
+    // Skip the brand prefix (everything before the first space) — it's
+    // common to all candidates so it can't disambiguate.
+    const distinctive = name.split(/\s+/).slice(1).join(' ');
+    if (distinctive && lower.includes(distinctive)) nameMatches.push(i);
+  }
+  if (nameMatches.length === 1) return nameMatches[0];
+
+  return -1;
+}
+
 /**
  * fetchWithTimeout — wraps fetch with an AbortController so a hung Edge Function
  * (Google Places API stall, network blip, etc.) can't lock the UI for minutes.
@@ -196,7 +276,13 @@ function formatPeriodPhrase(label: string): string {
   return k || 'recently';
 }
 
-export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefItem[] = [], avoidHighways = false, isHandsfree = false) {
+// V57.11.3 — `isHandsfree` parameter retained for call-site compatibility
+// but always false. Hands-free mode was removed; the phone is the always-
+// listening surface. Tap-to-talk + press-and-hold-anywhere are the only
+// mobile voice paths. The parameter and any handsfree branching below are
+// kept temporarily to avoid a noisy file-wide refactor and will be removed
+// in a follow-up cleanup. Today the value is hard-wired false.
+export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefItem[] = [], avoidHighways = false, _isHandsfree = false) {
   const [status, setStatus] = useState<OrchestratorStatus>('idle');
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -267,6 +353,21 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       radius_meters: number;
     } | null;
     attempts: number;
+    // V57.11.3 — multi-result picker. When resolve-place returns
+    // status='multiple', store the candidates here and let the user pick by
+    // number ("two", "2") or by fuzzy match against the address ("Bank
+    // Street", "the one on Innes"). Mutually exclusive with `resolved` —
+    // only one is ever populated at a time.
+    candidates?: Array<{
+      place_name: string;
+      address?: string;
+      lat: number;
+      lng: number;
+      radius_meters: number;
+      alias?: string;
+      canonical_alias?: string;
+    }>;
+    candidatesSource?: 'memory' | 'fresh';
   } | null>(null);
 
   // Cross-turn state for DELETE_RULE disambiguation. When a delete matched
@@ -283,9 +384,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const briefRef = useRef(briefItems);
   useEffect(() => { briefRef.current = briefItems; }, [briefItems]);
 
-  // Always-current ref for hands-free state
-  const handsfreeRef = useRef(isHandsfree);
-  useEffect(() => { handsfreeRef.current = isHandsfree; }, [isHandsfree]);
+  // V57.11.3 — handsfreeRef removed. Hands-free mode is gone; this is
+  // kept as a const-false sentinel so the few remaining branch checks
+  // below (to be cleaned up later) compile and short-circuit correctly.
+  const handsfreeRef = { current: false } as const;
 
   // Derive history for Claude context from turns
   const historyRef = useRef<NaaviMessage[]>([]);
@@ -561,6 +663,99 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         maybePromptBatteryExemption().catch(() => {});
         return { ok: true, ruleId: insertedRule?.id ? String(insertedRule.id) : null };
       };
+
+      // ── CASE: V57.11.3 — multi-candidate picker turn ─────────────────────
+      // Pending has 2+ candidates from a bare-brand resolve. User picks by
+      // number ("two") or street name ("Bank"). Memory picks commit
+      // immediately (already saved); fresh picks defer for "yes" confirm.
+      // Mutually exclusive with the resolved/yes path below.
+      if (pending.candidates && pending.candidates.length >= 2) {
+        if (isNo) {
+          pendingLocationRef.current = null;
+          emitPendingTurn('Cancelled.');
+          return;
+        }
+        if (QUESTION_ESCAPE_RE.test(msg) || FRESH_COMMAND_RE.test(msg)) {
+          console.log('[Orchestrator] candidate picker dropped — user asked a question / fresh command');
+          pendingLocationRef.current = null;
+          // Fall through to normal Claude flow.
+        } else {
+          const idx = parseLocationPick(msg, pending.candidates);
+          if (idx >= 0) {
+            const sel = pending.candidates[idx];
+            const isMemoryPick = pending.candidatesSource === 'memory';
+            pending.resolved = {
+              place_name: sel.place_name,
+              address: sel.address,
+              lat: sel.lat,
+              lng: sel.lng,
+              canonical_alias: sel.canonical_alias,
+              radius_meters: sel.radius_meters,
+            };
+            pending.candidates = undefined;
+            pending.candidatesSource = undefined;
+
+            if (isMemoryPick) {
+              // Saved place — commit immediately. User already confirmed
+              // this place when they saved it; the pick IS the confirmation.
+              const session = await getSessionWithTimeout();
+              if (!session?.user) {
+                pendingLocationRef.current = null;
+                emitPendingTurn("I'm not signed in. Please sign in and try again.");
+                return;
+              }
+              try {
+                const bgInitial = await Location.getBackgroundPermissionsAsync();
+                if (bgInitial.status !== 'granted') {
+                  const fgReq = await Location.requestForegroundPermissionsAsync();
+                  if (fgReq.status === 'granted') {
+                    await Location.requestBackgroundPermissionsAsync();
+                  }
+                  const bgFinal = await Location.getBackgroundPermissionsAsync();
+                  if (bgFinal.status !== 'granted') {
+                    pendingLocationRef.current = null;
+                    emitPendingTurn(`Please pick 'Allow all the time' so I can alert you at ${sel.place_name}.`);
+                    return;
+                  }
+                }
+              } catch (err) {
+                console.error('[orch:loc:multi-pick] permission check threw:', err);
+              }
+              const { ok, ruleId } = await commitPending(session.user.id, 'memory');
+              const oneShot = pending.originalAction?.one_shot ?? true;
+              const modeText = oneShot ? 'one time' : 'every time';
+              const speech = ok
+                ? `${sel.place_name} from your saved locations — alert set ${modeText} you arrive.`
+                : `Couldn't save the rule — something went wrong.`;
+              const cards = ok && ruleId ? [{ ruleId, placeName: sel.place_name, oneShot }] : [];
+              pendingLocationRef.current = null;
+              emitPendingTurn(speech, cards);
+              return;
+            }
+
+            // Fresh pick — defer for explicit yes confirmation, mirroring
+            // the single-fresh-resolve path.
+            pendingLocationRef.current = pending;
+            emitPendingTurn(`Found ${sel.place_name}${sel.address ? ' at ' + sel.address : ''}. Say yes to set the alert, cancel to skip, or give me a different area.`);
+            return;
+          }
+
+          // No clear pick match — re-prompt with the same list.
+          pending.attempts += 1;
+          if (pending.attempts > 3) {
+            pendingLocationRef.current = null;
+            emitPendingTurn("I couldn't tell which one you meant. Please call me back with the street name.");
+            return;
+          }
+          const lines = pending.candidates.map((c, i) => {
+            const street = pickShortAddress(c.address);
+            return street ? `${i + 1}, the one on ${street}` : `${i + 1}, ${c.place_name}`;
+          });
+          pendingLocationRef.current = pending;
+          emitPendingTurn(`I'm not sure which one. ${lines.join('. ')}. Say a number or the street name. Or say cancel to stop.`);
+          return;
+        }
+      }
 
       // ── CASE: yes + we have a resolved place → commit
       if (isYes && pending.resolved) {
@@ -1721,6 +1916,31 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                     continue;
                   }
 
+                  // 2b. Multiple candidates → present numbered picker.
+                  // V57.11.3 — fires when bare-brand query has 2+ saved or
+                  // fresh matches. User picks by number ("two") or by street
+                  // name ("Bank"). The pick is handled in send()'s pre-Claude
+                  // section via parseLocationPick() against pendingLocation.
+                  if (data?.status === 'multiple' && Array.isArray(data.candidates) && data.candidates.length >= 2) {
+                    const cands = data.candidates.slice(0, 5);
+                    pendingLocationRef.current = {
+                      originalAction: action,
+                      placeName,
+                      resolved: null,
+                      candidates: cands,
+                      candidatesSource: data.source === 'memory' ? 'memory' : 'fresh',
+                      attempts: 1,
+                    };
+                    locationIntercepted = true;
+                    const sourcePhrase = data.source === 'memory' ? 'from your saved places' : 'nearby';
+                    const lines = cands.map((c: any, i: number) => {
+                      const street = pickShortAddress(c.address);
+                      return street ? `${i + 1}, the one on ${street}` : `${i + 1}, ${c.place_name}`;
+                    });
+                    turnSpeechOverride = `I see ${cands.length} ${data.place_name ?? placeName.trim()}s ${sourcePhrase}: ${lines.join('. ')}. Say a number or the street name. Or say cancel to stop.`;
+                    continue;
+                  }
+
                   // 3. Personal address unset (home/office without address saved).
                   if (data?.status === 'personal_unset') {
                     const which = data.personal === 'work' ? 'work' : 'home';
@@ -1785,6 +2005,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       // Location rule intercept — always wins over Claude's speech.
       if (turnSpeechOverride !== null) {
         displaySpeech = turnSpeechOverride;
+      }
+      // V57.11.3 — also align the bubble's "Leave by" with the card data,
+      // matching what we already do for finalSpeech below. Wael 2026-05-04
+      // build 144 test: TTS spoke "10:34" (matched card) but bubble still
+      // showed Claude's original "10:35" — same bug, two surfaces.
+      if (turnSpeechOverride === null && turnNav.length > 0 && turnNav[0].leaveByLabel) {
+        displaySpeech = displaySpeech.replace(
+          /\bleave\s+(?:by|around|at)\s+\d{1,2}(?::\d{2})?\s*(?:a|p)\.?\s*m\.?\b/gi,
+          turnNav[0].leaveByLabel
+        );
       }
       console.log('[Orchestrator] response.speech:', response.speech);
       console.log('[Orchestrator] displaySpeech (for bubble):', displaySpeech);
