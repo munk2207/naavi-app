@@ -1123,34 +1123,20 @@ export default function HomeScreen() {
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
   const memoStartedAtRef = useRef<number>(0);
 
-  // V57.11.3 — press-and-hold-anywhere on chat → push-to-talk. Replaces
-  // hands-free mode for the active-senior who wants voice without aiming
-  // for the small mic button. Single taps still trigger normal UI
-  // (buttons, cards, scroll); a 300 ms hold starts recording and release
-  // sends the transcript. Routes through useWhisperMemo just like the
-  // mic button so the pipeline is the same.
-  const [isHoldRecording, setIsHoldRecording] = useState(false);
-  const isHoldRecordingRef = useRef(false);
-  useEffect(() => { isHoldRecordingRef.current = isHoldRecording; }, [isHoldRecording]);
+  // V57.11.3 — press-and-hold-anywhere on chat → trigger to OPEN the mic.
+  // The hold is just an entry gesture (300 ms intentional press); once
+  // the mic is open the user can release their finger and the recording
+  // stays running, exactly like a tap-to-talk session. To stop and send,
+  // tap the mic button (same as today). This pattern feels right for the
+  // senior user — they don't have to keep their finger down while
+  // composing what to say. Wael 2026-05-05.
   const onChatLongPress = useCallback(() => {
     if (isInputLocked(status)) return;
     if (memoState !== 'idle') return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     memoStartedAtRef.current = Date.now();
     startRecording();
-    setIsHoldRecording(true);
   }, [status, memoState, startRecording]);
-  const onChatPressOut = useCallback(() => {
-    if (!isHoldRecordingRef.current) return;
-    setIsHoldRecording(false);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    stopRecording(async (transcript) => {
-      if (!transcript.trim()) return;
-      setMemoTranscript(transcript);
-      await send(transcript);
-      setTimeout(() => setMemoTranscript(null), 5000);
-    }, 'en');
-  }, [stopRecording, send]);
 
   const { startLive, stopLive, clearSegments: clearLive } = useLiveTranscript();
 
@@ -1576,32 +1562,21 @@ export default function HomeScreen() {
             persistent home banner felt naggy; on-demand prompt has the
             right context for the user. */}
 
-        {/* V57.11.3 — Press-and-hold-anywhere on the chat → push-to-talk.
-            Replaces hands-free. Single taps still trigger normal UI (buttons,
-            cards, scroll); a 300 ms hold fires onLongPress to start recording,
-            release fires onPressOut to stop + send. The whole chat area is the
-            target — Robert doesn't have to aim for the mic icon. */}
-        <Pressable
-          delayLongPress={300}
-          onLongPress={onChatLongPress}
-          onPressOut={onChatPressOut}
-          style={styles.flex}
-        >
+        {/* V57.11.3 — Press-and-hold-anywhere on the chat opens the mic.
+            Pressable is INSIDE the ScrollView (not around it) so the
+            ScrollView always gets first crack at touches. Vertical drag
+            = scroll (ScrollView wins). Stationary press 300 ms = mic
+            opens. After mic opens, user can release; recording stays on
+            until they tap the mic button to stop + send. */}
         <ScrollView
           ref={scrollRef}
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          onScrollBeginDrag={() => {
-            // V57.11.3 — if the user starts to scroll, treat it as a scroll
-            // gesture and discard any in-flight recording. Without this, a
-            // hold-then-drag would keep recording while the user was just
-            // trying to read the conversation.
-            if (isHoldRecordingRef.current) {
-              setIsHoldRecording(false);
-              stopRecording(() => { /* discard transcript */ }, 'en');
-            }
-          }}
+        >
+        <Pressable
+          delayLongPress={300}
+          onLongPress={onChatLongPress}
         >
           {/* "← Brief" chip — only appears during an active conversation so
               Robert can bail back to the brief without scrolling. */}
@@ -2041,8 +2016,8 @@ export default function HomeScreen() {
               </Text>
             </View>
           ) : null}
-        </ScrollView>
         </Pressable>
+        </ScrollView>
 
         {/* Recording / transcribing status.
             V57.11.3 — when in press-and-hold mode the hint is "release to
@@ -2051,7 +2026,7 @@ export default function HomeScreen() {
         {memoState === 'recording' ? (
           <View style={styles.statusRow}>
             <Text style={styles.recordingHintText}>
-              {isHoldRecording ? '🎙 Recording… release anywhere to send' : '🔴 Recording… tap ⏹ when done'}
+              🔴 Recording… tap ⏹ when done
             </Text>
           </View>
         ) : memoState === 'transcribing' ? (
