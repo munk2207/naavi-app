@@ -35,12 +35,12 @@ export function ConversationBubble({ role, content, timestamp }: Props) {
         <Text style={styles.label}>MyNaavi</Text>
       )}
       {isNaavi ? (
-        <View style={[styles.naaviPlain, styles.textRow]}>
-          <Text style={[styles.naaviText, styles.textFlex]}>{content}</Text>
+        <View style={styles.naaviPlain}>
+          <Text style={styles.naaviText}>{content}</Text>
         </View>
       ) : (
-        <View style={[styles.bubble, styles.robertBubble, styles.textRow]}>
-          <Text style={[styles.robertText, styles.textFlex]}>{content}</Text>
+        <View style={[styles.bubble, styles.robertBubble]}>
+          <Text style={styles.robertText}>{content}</Text>
         </View>
       )}
       {timestamp && (
@@ -55,31 +55,16 @@ const styles = StyleSheet.create({
     marginVertical: 6,
     maxWidth: BUBBLE_MAX_WIDTH,
   },
-  // Row-flex wrapper around the Text — gifted-chat-style. Forces a stable
-  // width context on Android so Yoga measures correctly and Text wraps
-  // instead of silently truncating ("What is my calendar next" instead of
-  // "What is my calendar next\nweek"). Combined with `textFlex` below,
-  // this is the battle-tested pattern from react-native-gifted-chat.
-  textRow: {
-    flexDirection: 'row',
-  },
-  // `flex: 0` (don't grow) + `flexShrink: 1` (allow shrink to fit row) on
-  // the Text itself is what lets Android wrap correctly inside the row.
-  //
-  // V57.10.3 — paddingRight + includeFontPadding: false (Android-only)
-  // fix the last-character clip ("Yes" → "Ye", "Costco, Gloucester" →
-  // "Costco") Wael saw 2026-05-01. Android's intrinsic-width measurement
-  // is sometimes short of the actual glyph extent when used inside a row
-  // with flex: 0; the extra buffer absorbs the measurement quirk.
-  // V57.11.2 — bumped from 4 to 12. Wael 2026-05-04: "What is my next
-  // meeting?" still rendered as "What is my next" — whole word dropped,
-  // not just the last character. 4px wasn't enough buffer.
-  textFlex: {
-    flex: 0,
-    flexShrink: 1,
-    paddingRight: 12,
-    includeFontPadding: false,
-  },
+  // V57.11.3 — removed the textRow + textFlex flex pattern entirely.
+  // It was added in V57.10.3 to fix Yoga measurement on Samsung Android
+  // (gifted-chat-style row wrapper + flex:0 + flexShrink:1 on the Text).
+  // The pattern fixed single-character clips but Wael 2026-05-04 caught
+  // it still dropping whole words on medium-length strings ("Navigate
+  // to my next meeting" → "Navigate to my next"). Bumping paddingRight
+  // 4 → 12 helped some lengths but not others. Dropping the row +
+  // flex props lets RN's default text layout wrap normally inside the
+  // maxWidth-constrained container, which is the simpler and correct
+  // pattern for a chat bubble.
   naaviContainer: {
     alignSelf: 'flex-start',
   },

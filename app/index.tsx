@@ -20,6 +20,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   TouchableOpacity,
+  Pressable,
   ActivityIndicator,
   Modal,
   AppState,
@@ -27,6 +28,7 @@ import {
   Keyboard,
   Linking as RNLinking,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
 import { useTranslation } from 'react-i18next';
@@ -39,7 +41,6 @@ import { getUserName } from '@/lib/naavi-client';
 import { useOrchestrator, isInputLocked, isSendLocked, isOrangeButtonVisible, orangeButtonLabel } from '@/hooks/useOrchestrator';
 import { useVoice } from '@/hooks/useVoice';
 import { useWhisperMemo } from '@/hooks/useWhisperMemo';
-import { useHandsfreeMode } from '@/hooks/useHandsfreeMode';
 import { useConversationRecorder } from '@/hooks/useConversationRecorder';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { VoiceButton } from '@/components/VoiceButton';
@@ -56,7 +57,6 @@ import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { BriefItem, GlobalSearchResult } from '@/lib/naavi-client';
 import type { Email } from '@/lib/types';
-import { speakCue } from '@/lib/tts';
 
 function emailToBriefItem(email: Email): BriefItem {
   return {
@@ -985,8 +985,11 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [brief]);
 
-  const [handsfreeActive, setHandsfreeActive] = useState(false);
-  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, onOrangeButtonPressed, isAudioPlaying, pendingAction, confirmPending, cancelPending, editPending } = useOrchestrator('en', brief, avoidHighwaysRef.current, handsfreeActive);
+  // V57.11.3 — hands-free mode removed. The mobile surface is now strictly
+  // tap-to-talk + press-and-hold-anywhere on the chat. The phone (Twilio)
+  // surface remains the always-listening voice channel — that is the
+  // strategic moat. See docs/SESSION_HANDOFF_V57.11.3.md for the rationale.
+  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, onOrangeButtonPressed, isAudioPlaying, pendingAction, confirmPending, cancelPending, editPending } = useOrchestrator('en', brief, avoidHighwaysRef.current, false);
 
   // Lock-model derived flags — wired into every voice-channel button below.
   const inputLocked = isInputLocked(status);
@@ -1072,40 +1075,14 @@ export default function HomeScreen() {
   // disorienting. The "Open in Google Maps" button on the TravelTimeCard
   // is the chosen path — user taps when they're ready to navigate.
 
-  // ── Hands-free mode ──────────────────────────────────────────────────────
-  // speakCue: short spoken cue using cloud TTS (Deepgram aura-hera-en) so the
-  // cue voice matches Naavi's main replies and the phone call voice. Returns a
-  // Promise that resolves when playback finishes — hands-free waits before
-  // starting speech recognition (Android can't do both simultaneously). Falls
-  // back to expo-speech if the network is unavailable.
-  const speakCueRef = useRef((text: string): Promise<void> => speakCue(text, 'en'));
+  // V57.11.3 — Hands-free mode REMOVED. The mobile surface is tap-to-talk +
+  // press-and-hold-anywhere only. The phone (Twilio) is the always-listening
+  // voice channel. Voice-confirm flow died with hands-free; drafts confirm
+  // via the DraftCard Send button.
 
-  // Voice-confirm callback: hands-free reports what Robert said during confirmation
-  const handleConfirmResponse = useCallback((response: 'confirm' | 'cancel' | 'timeout' | 'edit', editText?: string) => {
-    if (response === 'confirm') {
-      confirmPending();
-    } else if (response === 'cancel') {
-      cancelPending();
-    } else if (response === 'timeout') {
-      cancelPending("I didn't hear a confirmation. The draft is still here when you're ready.");
-    } else if (response === 'edit' && editText) {
-      editPending(editText);
-    }
-  }, [confirmPending, cancelPending, editPending]);
-
-  const handsfree = useHandsfreeMode(status, send, speakCueRef.current, handleConfirmResponse, stopSpeaking);
-
-  // Track hands-free active state for orchestrator (Voice-Confirm only in hands-free)
-  useEffect(() => {
-    setHandsfreeActive(handsfree.state !== 'inactive');
-  }, [handsfree.state]);
-
-  // Auto-trigger features when app is opened via "Hey Google" (naavi:// deep link)
-  // - naavi://?auto=handsfree → hands-free mode (default for any naavi:// URL
-  //   without a specific auto param — preserves prior behaviour)
-  // - naavi://?auto=record    → start conversation recording immediately
-  // Deep links to /brief, /calendar, /contacts route via expo-router to their
-  // own screens and don't hit this handler at the home-screen level.
+  // Auto-intent deep link: naavi://?auto=record → start conversation
+  // recording. Other naavi:// links (e.g. ?auto=handsfree from the
+  // long-deprecated Hey Google route) are now no-ops.
   const autoIntentRef = useRef(false);
   useEffect(() => {
     if (autoIntentRef.current) return;
@@ -1115,7 +1092,6 @@ export default function HomeScreen() {
         const url = await Linking.getInitialURL();
         if (!url || !url.startsWith('naavi://')) return;
 
-        // Parse ?auto= param from the deep link.
         const autoParam = (() => {
           try {
             const m = url.match(/[?&]auto=([^&]+)/i);
@@ -1124,10 +1100,9 @@ export default function HomeScreen() {
         })();
 
         autoIntentRef.current = true;
-        console.log('[Home] Opened via intent:', url, '— auto:', autoParam ?? 'handsfree');
+        console.log('[Home] Opened via intent:', url, '— auto:', autoParam ?? '(none)');
 
         if (autoParam === 'record') {
-          // Give the screen a moment to render so the recorder UI is mounted.
           setTimeout(() => {
             try {
               startConvRecording();
@@ -1135,10 +1110,6 @@ export default function HomeScreen() {
               console.error('[Home] Auto-record failed:', err);
             }
           }, 500);
-        } else {
-          // Default: hands-free (covers old naavi://, naavi://?auto=handsfree,
-          // and unrecognised auto params).
-          setTimeout(() => handsfree.activate(), 500);
         }
       } catch {}
     }
@@ -1151,6 +1122,35 @@ export default function HomeScreen() {
   const { voiceState, voiceError, startListening, stopListening, isSupported } = useVoice('en');
   const { memoState, memoError, isSupported: memoSupported, startRecording, stopRecording } = useWhisperMemo();
   const memoStartedAtRef = useRef<number>(0);
+
+  // V57.11.3 — press-and-hold-anywhere on chat → push-to-talk. Replaces
+  // hands-free mode for the active-senior who wants voice without aiming
+  // for the small mic button. Single taps still trigger normal UI
+  // (buttons, cards, scroll); a 300 ms hold starts recording and release
+  // sends the transcript. Routes through useWhisperMemo just like the
+  // mic button so the pipeline is the same.
+  const [isHoldRecording, setIsHoldRecording] = useState(false);
+  const isHoldRecordingRef = useRef(false);
+  useEffect(() => { isHoldRecordingRef.current = isHoldRecording; }, [isHoldRecording]);
+  const onChatLongPress = useCallback(() => {
+    if (isInputLocked(status)) return;
+    if (memoState !== 'idle') return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    memoStartedAtRef.current = Date.now();
+    startRecording();
+    setIsHoldRecording(true);
+  }, [status, memoState, startRecording]);
+  const onChatPressOut = useCallback(() => {
+    if (!isHoldRecordingRef.current) return;
+    setIsHoldRecording(false);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    stopRecording(async (transcript) => {
+      if (!transcript.trim()) return;
+      setMemoTranscript(transcript);
+      await send(transcript);
+      setTimeout(() => setMemoTranscript(null), 5000);
+    }, 'en');
+  }, [stopRecording, send]);
 
   const { startLive, stopLive, clearSegments: clearLive } = useLiveTranscript();
 
@@ -1576,11 +1576,32 @@ export default function HomeScreen() {
             persistent home banner felt naggy; on-demand prompt has the
             right context for the user. */}
 
+        {/* V57.11.3 — Press-and-hold-anywhere on the chat → push-to-talk.
+            Replaces hands-free. Single taps still trigger normal UI (buttons,
+            cards, scroll); a 300 ms hold fires onLongPress to start recording,
+            release fires onPressOut to stop + send. The whole chat area is the
+            target — Robert doesn't have to aim for the mic icon. */}
+        <Pressable
+          delayLongPress={300}
+          onLongPress={onChatLongPress}
+          onPressOut={onChatPressOut}
+          style={styles.flex}
+        >
         <ScrollView
           ref={scrollRef}
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          onScrollBeginDrag={() => {
+            // V57.11.3 — if the user starts to scroll, treat it as a scroll
+            // gesture and discard any in-flight recording. Without this, a
+            // hold-then-drag would keep recording while the user was just
+            // trying to read the conversation.
+            if (isHoldRecordingRef.current) {
+              setIsHoldRecording(false);
+              stopRecording(() => { /* discard transcript */ }, 'en');
+            }
+          }}
         >
           {/* "← Brief" chip — only appears during an active conversation so
               Robert can bail back to the brief without scrolling. */}
@@ -2021,11 +2042,17 @@ export default function HomeScreen() {
             </View>
           ) : null}
         </ScrollView>
+        </Pressable>
 
-        {/* Recording / transcribing status */}
+        {/* Recording / transcribing status.
+            V57.11.3 — when in press-and-hold mode the hint is "release to
+            send" (finger still down); the regular tap-to-talk hint is
+            "tap ⏹ when done". */}
         {memoState === 'recording' ? (
           <View style={styles.statusRow}>
-            <Text style={styles.recordingHintText}>🔴 Recording… tap ⏹ when done</Text>
+            <Text style={styles.recordingHintText}>
+              {isHoldRecording ? '🎙 Recording… release anywhere to send' : '🔴 Recording… tap ⏹ when done'}
+            </Text>
           </View>
         ) : memoState === 'transcribing' ? (
           <View style={styles.statusRow}>
@@ -2088,61 +2115,12 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Hands-free mode status banner */}
-        {handsfree.state === 'listening' && (
-          <View style={styles.handsfreeBanner}>
-            <View style={styles.handsfreePulse} />
-            <Text style={styles.handsfreeBannerText}>Listening…</Text>
-            <TouchableOpacity onPress={handsfree.deactivate} style={styles.handsfreeStopBtn}>
-              <Text style={styles.handsfreeStopText}>End</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        {handsfree.state === 'processing' && (
-          <View style={styles.handsfreeBanner}>
-            <ActivityIndicator size="small" color="#fff" />
-            <Text style={styles.handsfreeBannerText}>Processing…</Text>
-          </View>
-        )}
-        {handsfree.state === 'waiting' && (
-          <View style={styles.handsfreeBanner}>
-            <ActivityIndicator size="small" color="#fff" />
-            <Text style={styles.handsfreeBannerText}>
-              {status === 'thinking' ? 'Thinking…' : status === 'speaking' ? 'Speaking…' : 'Working…'}
-            </Text>
-          </View>
-        )}
-        {/* Confirming state shows the normal listening banner — Naavi already said the prompt */}
-        {handsfree.state === 'confirming' && (
-          <View style={styles.handsfreeBanner}>
-            <View style={styles.handsfreePulse} />
-            <Text style={styles.handsfreeBannerText}>Listening...</Text>
-            <TouchableOpacity onPress={handsfree.deactivate} style={styles.handsfreeStopBtn}>
-              <Text style={styles.handsfreeStopText}>End</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        {(handsfree.state === 'wake_listen' || handsfree.state === 'paused') && (
-          <View style={[styles.handsfreeBanner, styles.handsfreeBannerPaused]}>
-            <Text style={styles.handsfreeBannerText}>Say "Hi Naavi" to continue</Text>
-            <TouchableOpacity onPress={handsfree.activate} style={styles.handsfreeResumeBtn}>
-              <Text style={styles.handsfreeStopText}>Resume</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handsfree.deactivate} style={styles.handsfreeStopBtn}>
-              <Text style={styles.handsfreeStopText}>End</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        {handsfree.error && (
-          <View style={styles.statusRow}>
-            <Text style={styles.errorText}>{handsfree.error}</Text>
-          </View>
-        )}
-
         {/* Input area — full-width text input + icon row (no labels).
             Mic ↔ Send toggles on the far right based on whether text is typed.
-            Long-press any icon to see its label. */}
-        {handsfree.state === 'inactive' ? (
+            Long-press any icon to see its label.
+            V57.11.3 — hands-free state guards removed; the input area is
+            always visible. */}
+        {true ? (
           <View style={styles.inputArea}>
             {/* Row 1 — full-width text input, no embedded send */}
             <View style={styles.inputRow}>
@@ -2213,19 +2191,9 @@ export default function HomeScreen() {
                 />
               )}
 
-              {/* Free — hands-free mode.
-                  Locked while a Naavi reply is in flight — opening hands-free
-                  during speech would capture Naavi's audio as a phantom
-                  command. (Session 26 design lock.) */}
-              <IconButton
-                label="Hands-free"
-                description="Hands-free conversation — say 'Hi Naavi' to start, no tapping needed. Say 'Thanks' to end."
-                onPeek={setPeekText}
-                icon={<Ionicons name="radio" size={30} color="#fff" />}
-                style={{ backgroundColor: '#2563EB' }}
-                disabled={inputLocked}
-                onPress={() => handsfree.activate()}
-              />
+              {/* V57.11.3 — Hands-free button removed. The phone (Twilio
+                  voice line) is the always-listening surface. Mobile is
+                  tap-to-talk + press-and-hold-anywhere on the chat. */}
 
               {/* Recording timer badge — info only */}
               {convState === 'recording' && (
@@ -2288,13 +2256,19 @@ export default function HomeScreen() {
                     icon={icon}
                     onPress={onPress}
                     disabled={disabled}
-                    style={{ backgroundColor: bg }}
+                    // V57.11.3 — width 78 (was 52). Per Wael 2026-05-05:
+                    // since the hands-free button is gone, give the mic
+                    // 50% more horizontal target without changing height
+                    // or pushing the input row up. Easier to hit, no UI
+                    // re-layout.
+                    style={{ backgroundColor: bg, width: 78, borderRadius: 26 }}
                   />
                 );
               })()}
             </View>
           </View>
         ) : null}
+        {/* Mic-large pill button kept here in code position; rendered above. */}
       </KeyboardAvoidingView>
       {/* Screen-wide peek bar — shows the IconButton's description during
           hover / long-press. Positioned above the input row so the bottom
@@ -3594,53 +3568,5 @@ const styles = StyleSheet.create({
     fontSize: Typography.body,
     fontWeight: '600',
     color: '#FFFFFF',
-  },
-  // ── Hands-free mode styles ──────────────────────────────────────────────
-  handsfreeBtn: {
-    backgroundColor: Colors.accent,
-  },
-  handsfreeBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.accent,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    marginHorizontal: 16,
-    marginBottom: 8,
-    borderRadius: 12,
-    gap: 10,
-  },
-  handsfreeBannerPaused: {
-    backgroundColor: Colors.bgElevated,
-  },
-  handsfreeBannerText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
-    flex: 1,
-  },
-  handsfreePulse: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#4ADE80',
-  },
-  handsfreeStopBtn: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  handsfreeResumeBtn: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  handsfreeStopText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
   },
 });
