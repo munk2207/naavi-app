@@ -2,7 +2,25 @@
 
 ## READ THIS FIRST — EVERY SESSION
 
-You are working on MyNaavi, an AI life orchestration companion for active seniors. The founder (Wael) is non-technical. He builds the product vision; you build the code.
+You are working on MyNaavi, an AI life orchestration companion for everyone — designed to feel especially friendly to older healthy independent adults, but never positioned as a senior product. The founder (Wael) is non-technical. He builds the product vision; you build the code.
+
+### POSITIONING — NO "SENIOR" / "CAREGIVER" LANGUAGE
+
+Wael 2026-05-05: stop framing MyNaavi as "for seniors" or describing users as "seniors". The app is for EVERYONE; we just take extra care that older healthy independent adults find it friendly (large tap targets, voice-first phone surface, simple language).
+
+**Banned words in any user-facing surface, prompt, doc, code comment, or memory file:**
+- "senior" / "seniors" / "senior citizen"
+- "caregiver" — say "helper" or "person setting up MyNaavi for someone else"
+- "elderly" / "older person" / "active aging"
+
+**Allowed when context demands:**
+- "user" — preferred default
+- "older healthy independent adult" — only when discussing target demographic in internal docs, never in user-facing copy
+- "person", "they", "the user themselves"
+
+**Why:** the senior framing is condescending to active healthy users. It positions the product as care-receiving rather than empowering. The audience is anyone who wants help managing their daily life — they happen to skew older but the framing should never reduce them to that.
+
+Apply this rule retroactively when editing existing code, prompts, docs, or memories. Apply it to new work without exception.
 
 ### ACTIVE WORKTREE / BRANCH — CHECK BEFORE ANY EDIT
 
@@ -102,16 +120,28 @@ If in doubt, ASK before creating parallel config.
 
 12. **NEVER ACT ON THE OUTSIDE WORLD WITHOUT EXPLICIT POSITIVE APPROVAL.** Any action that sends to or creates a record for a third party — SMS, WhatsApp, email, calendar events with attendees, voice messages, deletions — MUST receive a clear affirmative from the user before executing. Acceptable approvals: *"yes"*, *"approved"*, *"send it"*, *"confirm"*, *"go ahead"*. NOT acceptable: *"ok"*, *"sure"*, *"sounds good"*, silence, or any ambiguous reply — Naavi re-asks. Additionally, if any input referenced in the action is **unresolved** (*"my wife"* without a known contact, a date without a year, a place not verified) the action is BLOCKED until the input is clarified by the user — never fall back silently, never guess, never default to the user's own phone/email. Internal actions (rule/alert creation, memory writes, lookups, drafts, solo calendar events on the user's own schedule) do NOT require approval and should flow naturally.
 
-13. **"# N" MEANS THE USER PICKED OPTION N.** When you offer numbered choices and the user replies with `# 2`, `# 5`, etc., the digit after the `#` is the option they chose. The user prefixes the hash because the chat interface auto-renumbers a bare number reply (typing just `2` can render as `1`). Always honor this convention literally — `# 2` = option 2, never something else, never ask what it means.
+13. **OFFER CHOICES AS NUMBERED LISTS, NEVER IN A SENTENCE.** Whenever you ask the user to pick between options, format them as a numbered list (1, 2, 3…) on separate lines. Never embed options in prose ("do you want X or Y?"). Applies to every choice, no matter how small. This is the precondition for Rule 14 — the user can only reply `# N` if the options were numbered.
 
-14. **MANDATORY — `npm run test:auto` MUST BE FULLY GREEN BEFORE EVERY AAB BUILD.** Established by Wael 2026-05-01 after V57.9.8 reached the first 44/44 green state. No exceptions. The rule applies to every `npx eas build` invocation, regardless of how small the change. Run the full suite, read the summary line, confirm `✗ 0 failed   ⨯ 0 errored`. If anything fails or errors: STOP, diagnose, fix, re-run, re-confirm green — only THEN proceed to build. The green suite is our stable baseline / safety net; pushing a build on top of a red suite breaks the baseline. Skipping the suite "because the change is small" or "because we just ran it" is a hard violation — re-run every time. Partial-grep runs (`npm run test:auto -- --grep <x>`) are OK during iteration but the FULL run must happen before the build command.
+14. **"# N" MEANS THE USER PICKED OPTION N.** When you offer numbered choices and the user replies with `# 2`, `# 5`, etc., the digit after the `#` is the option they chose. The user prefixes the hash because the chat interface auto-renumbers a bare number reply (typing just `2` can render as `1`). Always honor this convention literally — `# 2` = option 2, never something else, never ask what it means.
+
+15. **MANDATORY — `npm run test:auto` MUST BE FULLY GREEN BEFORE EVERY AAB BUILD.** Established by Wael 2026-05-01 after V57.9.8 reached the first 44/44 green state. No exceptions. The rule applies to every `npx eas build` invocation, regardless of how small the change. Run the full suite, read the summary line, confirm `✗ 0 failed   ⨯ 0 errored`. If anything fails or errors: STOP, diagnose, fix, re-run, re-confirm green — only THEN proceed to build. The green suite is our stable baseline / safety net; pushing a build on top of a red suite breaks the baseline. Skipping the suite "because the change is small" or "because we just ran it" is a hard violation — re-run every time. Partial-grep runs (`npm run test:auto -- --grep <x>`) are OK during iteration but the FULL run must happen before the build command.
 
 ### WHERE TO START
 
-**Most recent handoff:** `docs/SESSION_HANDOFF_2026-04-30_90S_HANG_UNSOLVED.md` — **READ THIS FIRST**. The 60–90 second "Thinking…" hang on chat messages was NOT solved despite three builds today. The handoff is honest about that. **Do not patch more code on hypothesis — the next session must gather device-level evidence first** (`adb logcat` is the simplest, ~3 min, no dev build setup needed; OR a remote-log Edge Function if logcat is off-limits).
+**Most recent handoff:** `docs/SESSION_HANDOFF_2026-05-03_GEOFENCE_INVESTIGATION.md` — **READ THIS FIRST**. Three priorities for the next session, all approved by Wael:
 
-**Last AAB on Wael's phone:** V57.9.1 (build 127), installed 2026-04-30 ~3 PM EDT.
-**Last AAB on Robert's phone:** V56.6 (build 115), installed 2026-04-28. **Do NOT promote V57.x to Robert until the 90s hang is diagnosed and fixed.**
+1. **Geofence reliability** — Samsung battery exemptions configured this session (per-app Optimized + added to Never auto sleeping + Adaptive Battery off + background location "Allow all the time"). Drive test still failed; phone reboot pending Wael action. If reboot doesn't fix it, investigate Expo geofence library bug ([#33433](https://github.com/expo/expo/issues/33433)) — re-registers on every app foreground (~19× per 6h in our diagnostics), Google may be throttling.
+
+2. **Voice authentication architecture — Options 2 + 4 combined** —
+   - Option 2 (multi-phone fast path): caller ID matches `user_settings.phone` OR new `user_settings.additional_phones[]` array. Mobile UI to manage list. AAB build for that UI.
+   - Option 4 (voice biometric fallback): unknown caller hears *"Please say: my voice is my password"*. Azure Speaker Recognition verifies the voiceprint (not the words — voice itself is the credential, can't be spoofed by overhearing the phrase). Enrollment happens on first call to Naavi (3 reads of the phrase, captured server-side). NO AAB for the biometric piece.
+   - Plus: fix the misleading "isn't registered with Naavi" rejection wording — there's no registration concept; phone lives in `user_settings.phone` because the user typed it in Settings.
+   - Plus deferred from this session: demo line greeting flow change — *"Hi, this is Naavi. May I have your name?"* → caller responds → *"I heard [name]. Is that right?"* → confirm → name threaded into prompt for every turn. Bundle with PRIORITY 2 since both touch the voice greeting path.
+
+3. **Test PC (Maestro mobile UI testing)** — setup doc at `docs/MAESTRO_SETUP.docx`. Wael's setup steps 1-3 (Android Studio + emulator + Maestro CLI). Claude writes `e2e/` test scenarios in parallel.
+
+**Last AAB on Wael's phone:** V57.10.5 (build 141), installed 2026-05-03. Samsung battery settings configured this session.
+**Last AAB on Robert's phone:** V56.6 (build 115), installed 2026-04-28. **Do NOT promote V57.x to Robert until geofence reliability is proven on Wael's phone.**
 
 **Server-side fixes shipped 2026-04-30 (all live):**
 - `get-naavi-prompt` v45 — universal truthfulness rule + CREATE_EVENT phantom-action block
@@ -239,7 +269,7 @@ He does NOT care about: code architecture explanations, npm internals, React lif
 
 ### VOICE CALL — NO SILENCE ALLOWED
 
-This system is built for a senior citizen. Complete silence during processing or waiting makes him feel the call dropped. A soft ticking sound MUST play during all silent gaps (between greeting and first input, during thinking/processing). Never remove or disable the thinking music without replacing it with another audio cue. If debugging call issues, keep the tick sound — it is a core UX requirement, not a nice-to-have.
+Complete silence during processing or waiting makes the user feel the call dropped. A soft ticking sound MUST play during all silent gaps (between greeting and first input, during thinking/processing). Never remove or disable the thinking music without replacing it with another audio cue. If debugging call issues, keep the tick sound — it is a core UX requirement, not a nice-to-have.
 
 ### CLAUDE PROMPT — SHARED SOURCE OF TRUTH
 
@@ -287,7 +317,7 @@ Full design: `project_naavi_location_verified_address.md` + `project_naavi_locat
 
 Every alert where the destination is the user themselves MUST fire on **all four** channels: SMS + WhatsApp + Email + Push. Third-party alerts (alerts sent to someone other than the user) fire on SMS + WhatsApp only because we don't have email/push tokens for non-users.
 
-**Why:** SMS requires cell reception. A senior on WiFi-only (traveling, international, weak signal) silently misses critical alerts. Multi-channel guarantees at least one path lands. Stability-over-cost applies — quadrupled messaging cost is acceptable; missed alerts are not.
+**Why:** SMS requires cell reception. A user on WiFi-only (traveling, international, weak signal) silently misses critical alerts. Multi-channel guarantees at least one path lands. Stability-over-cost applies — quadrupled messaging cost is acceptable; missed alerts are not.
 
 **Where implemented:** `fireAction()` in `supabase/functions/evaluate-rules/index.ts` handles fan-out for `action_rules` triggers. `check-reminders` Edge Function does its own fan-out for the `reminders` table (currently SMS + WhatsApp + Push; email still to add).
 
