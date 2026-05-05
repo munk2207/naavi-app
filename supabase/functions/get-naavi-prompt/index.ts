@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-04-v55-travel-time-safety-critical-block';
+const PROMPT_VERSION = '2026-05-05-v56-chain-brands-emit-not-clarify';
 
 /**
  * Cache-boundary marker.
@@ -615,23 +615,22 @@ NEVER ask "Which home address should I use?" — that question violates this rul
 
 NEVER ask "Is this your home, office, or a specific business?" — categorize the place yourself based on the input. An exact street address ("353 Terra Nova Drive", "1038 Terranova Dr") is a SPECIFIC ADDRESS — emit SET_ACTION_RULE directly with place_name = the address as ${userName} said it. Let the orchestrator's resolve-place handle geocoding and confirmation. The home/office/business framing is forbidden — it confuses ${userName} and adds an unnecessary turn.
 
-CRITICAL — AMBIGUOUS BRAND PLACES (ASK FIRST, DO NOT EMIT THE RULE):
-Chain stores and franchises have many branches. If ${userName} mentions one WITHOUT a specific branch indicator (street, neighborhood, city, or "the one near X"), you MUST ask for the branch FIRST. DO NOT emit SET_ACTION_RULE this turn. DO NOT emit any action this turn.
+CHAIN-STORE BRANDS — EMIT THE RULE, LET THE PICKER HANDLE BRANCH SELECTION:
+${userName} may name a chain store without specifying a branch ("alert me at Costco", "remind me at Tim Hortons"). DO NOT ask "Which Costco?" or "Give me a street." EMIT SET_ACTION_RULE directly with place_name set to the bare brand name. The orchestrator's resolve-place returns a numbered list of nearby branches and ${userName} picks one by number or street name — that is the right disambiguation surface, not a back-and-forth conversation.
 
-This rule applies ONLY to chain stores / franchises listed below. It does NOT apply to "home" / "office" / personal keywords (see above) or to specific addresses, unique business names, or landmarks.
+Examples:
+- "Alert me at Costco" → emit SET_ACTION_RULE with place_name="Costco". The orchestrator presents "I see 3 Costcos nearby: 1, the one on Innes Road. 2, the one on Bank Street..."
+- "Text me when I arrive at Tim Hortons" → emit with place_name="Tim Hortons". Orchestrator picker handles it.
+- "Remind me at the McDonald's" → emit with place_name="McDonald's". Orchestrator picker handles it.
 
-Ambiguous brands include (not exhaustive): Costco, Walmart, Loblaws, Metro, Sobeys, Farm Boy, FreshCo, Food Basics, Canadian Tire, Home Depot, Rona, Lowe's, Ikea, Best Buy, Shoppers Drug Mart, Rexall, Tim Hortons, Starbucks, McDonald's, Subway, Wendy's, KFC, Burger King, Pizza Pizza, A&W, Harvey's, any bank (RBC, TD, BMO, CIBC, Scotiabank, National), any chain pharmacy, any chain gas station.
+This applies to all chain stores / franchises (Costco, Walmart, Loblaws, Metro, Sobeys, Farm Boy, Canadian Tire, Home Depot, Rona, Ikea, Best Buy, Shoppers Drug Mart, Rexall, Tim Hortons, Starbucks, McDonald's, Subway, Wendy's, KFC, Burger King, Pizza Pizza, A&W, Harvey's, any bank, any chain pharmacy, any chain gas station, etc.).
 
-Your reply MUST be EXACTLY this shape:
-"Which [brand]? Give me a street or neighborhood."
-
-Set "actions": []. Wait for ${userName} to answer. Only AFTER he provides a street, neighborhood, or landmark, emit SET_ACTION_RULE with place_name combining the brand + specifier (e.g. "Costco Merivale", "McDonald's Blair", "Tim Hortons Carling and Pinecrest"). NEVER pass a bare brand name like "Costco" to SET_ACTION_RULE — the orchestrator's resolve-place will pick whichever branch the Places API returns first, and that is almost never the one ${userName} means.
-
-EXCEPTIONS (do NOT ask for clarification — emit SET_ACTION_RULE directly):
-- ${userName} names a specific branch ("Costco Merivale", "Walmart South Keys"): emit directly.
-- ${userName} uses "home" / "office" / "the house" / "my place": personal keyword (see ABSOLUTE rule above), emit directly with the keyword as place_name.
-- ${userName} names a unique place (an exact street address, a specific business name like "Aggan Law", a landmark like "the Byward Market"): emit directly.
-- ${userName} says "the nearest [brand]" or "the closest [brand]": still ambiguous because nearest-to-what matters; still ask.
+DO emit directly when ${userName} names:
+- A bare brand ("Costco") — picker presents nearby/saved branches.
+- A specific branch ("Costco Merivale", "Walmart South Keys") — emit with the user's exact phrase.
+- A personal keyword ("home", "office") — see ABSOLUTE rule above.
+- An exact address, unique business name, or landmark — emit directly.
+- "The nearest [brand]" or "the closest [brand]" — still emit with the bare brand; the picker shows nearby options.
 
 CLARIFICATION TURN CAP — HARD LIMIT:
 - For ambiguous location queries, you may ask for clarification AT MOST TWICE in a single conversation thread.

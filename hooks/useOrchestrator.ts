@@ -76,8 +76,12 @@ const NUMBER_WORDS: Record<string, number> = {
 export function pickShortAddress(address?: string | null): string | null {
   if (!address) return null;
   const firstSegment = address.split(',')[0]?.trim() ?? '';
-  // Drop the leading civic number if present.
-  const noCivic = firstSegment.replace(/^\s*\d+\s*[a-z]?\s*/i, '');
+  // Drop the leading civic number (and optional unit letter glued to it like
+  // "12A"). Mandatory whitespace AFTER the unit letter — V57.11.3 fix:
+  // without that, the optional [a-z] was eating the first letter of the
+  // street ("8 St. Joseph" → "t. Joseph"; "8501 Place d'Orléans" → "lace
+  // d'Orléans"). Wael 2026-05-05 caught this on Tim Hortons.
+  const noCivic = firstSegment.replace(/^\s*\d+[a-z]?\s+/i, '');
   // Drop the trailing street-type abbreviation so we keep only the name token.
   const streetTypeRe = /\s+(rd|road|st|street|ave|avenue|blvd|boulevard|dr|drive|ln|lane|way|ct|court|cres|crescent|hwy|highway|pkwy|parkway|pl|place|terr|terrace|sq|square)\.?$/i;
   const trimmed = noCivic.replace(streetTypeRe, '').trim();
@@ -748,11 +752,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             return;
           }
           const lines = pending.candidates.map((c, i) => {
-            const street = pickShortAddress(c.address);
-            return street ? `${i + 1}, the one on ${street}` : `${i + 1}, ${c.place_name}`;
+            const seg = String(c.address || '').split(',')[0]?.trim() || c.place_name;
+            return `${i + 1}. ${seg}`;
           });
           pendingLocationRef.current = pending;
-          emitPendingTurn(`I'm not sure which one. ${lines.join('. ')}. Say a number or the street name. Or say cancel to stop.`);
+          emitPendingTurn(`I'm not sure which one.\n${lines.join('\n')}\nSay a number or the street name. Or say cancel to stop.`);
           return;
         }
       }
@@ -1933,11 +1937,21 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                     };
                     locationIntercepted = true;
                     const sourcePhrase = data.source === 'memory' ? 'from your saved places' : 'nearby';
+                    // V57.11.3 — list format with newlines for the bubble (TTS
+                    // reads the newlines as brief pauses, which sounds natural).
+                    // Smart pluralization: don't add an 's' if the brand already
+                    // ends in 's' (e.g. "Tim Hortons", "Pizza Pizza"). Brand is
+                    // the user's exact phrase — Costco, Tim Hortons, McDonald's.
+                    // Always show the full first-segment of the address (with
+                    // civic number) so two branches on the same street are
+                    // unambiguously distinct. Wael 2026-05-05.
+                    const brand = placeName.trim();
+                    const brandPlural = /s$/i.test(brand) ? brand : `${brand}s`;
                     const lines = cands.map((c: any, i: number) => {
-                      const street = pickShortAddress(c.address);
-                      return street ? `${i + 1}, the one on ${street}` : `${i + 1}, ${c.place_name}`;
+                      const seg = String(c.address || '').split(',')[0]?.trim() || c.place_name;
+                      return `${i + 1}. ${seg}`;
                     });
-                    turnSpeechOverride = `I see ${cands.length} ${data.place_name ?? placeName.trim()}s ${sourcePhrase}: ${lines.join('. ')}. Say a number or the street name. Or say cancel to stop.`;
+                    turnSpeechOverride = `I see ${cands.length} ${brandPlural} ${sourcePhrase}:\n${lines.join('\n')}\nSay a number or the street name. Or say cancel to stop.`;
                     continue;
                   }
 
