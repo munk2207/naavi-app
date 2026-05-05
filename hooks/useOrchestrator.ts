@@ -1858,6 +1858,18 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       if (!handsfreeRef.current && turnDrafts.some(d => isConfirmable(d))) {
         finalSpeech = finalSpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
       }
+      // V57.11.2 — align spoken "Leave by" with the card's computed leave time.
+      // Claude composes a best-effort leave time (30-min default buffer per
+      // get-naavi-prompt:428); the card uses real Google Maps duration. Wael
+      // 2026-05-04 heard "Leave by 11:15 PM" while the card showed "Leave by
+      // 11:21 PM" — same trip, two answers. Replace Claude's leave-by with
+      // the card's authoritative leaveByLabel.
+      if (turnNav.length > 0 && turnNav[0].leaveByLabel) {
+        finalSpeech = finalSpeech.replace(
+          /\bleave\s+(?:by|around|at)\s+\d{1,2}(?::\d{2})?\s*(?:a|p)\.?\s*m\.?\b/gi,
+          turnNav[0].leaveByLabel
+        );
+      }
       console.log('[Orchestrator] finalSpeech (for TTS):', finalSpeech);
 
       // Check if this turn has a confirmable action (Phase A: DRAFT_MESSAGE)
@@ -2371,7 +2383,13 @@ async function playBase64AudioNative(base64: string): Promise<void> {
     await FileSystem.writeAsStringAsync(tempUri, base64, {
       encoding: 'base64' as any,
     });
+    // V57.11.2 — explicitly flip allowsRecordingIOS off before each TTS
+    // playback. Wael 2026-05-04: after a useWhisperMemo recording, audio
+    // mode stayed in record-mode and Naavi's "Alert set" reply was silent.
+    // Voice came back on the next turn (system flipped on its own) — the
+    // explicit reset eliminates the race.
     await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
       playsInSilentModeIOS: true,
       staysActiveInBackground: false,
       shouldDuckAndroid: true,
