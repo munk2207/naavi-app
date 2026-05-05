@@ -1577,6 +1577,7 @@ export default function HomeScreen() {
         <Pressable
           delayLongPress={300}
           onLongPress={onChatLongPress}
+          style={styles.flex}
         >
           {/* "← Brief" chip — only appears during an active conversation so
               Robert can bail back to the brief without scrolling. */}
@@ -2474,6 +2475,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 24,
     paddingBottom: 16,
+    // V57.11.4 — flexGrow: 1 makes the content container fill the visible
+    // scroll area when chat content is short. Without this, the inner
+    // Pressable (press-and-hold-anywhere) only captures touches on its
+    // small rendered area; the empty space below "Today's Brief" was
+    // outside the Pressable, so long-press did nothing. Wael 2026-05-05.
+    flexGrow: 1,
   },
   greeting: {
     fontSize: Typography.xl,

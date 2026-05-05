@@ -29,47 +29,57 @@ interface Props {
 export function ConversationBubble({ role, content, timestamp }: Props) {
   const isNaavi = role === 'assistant';
 
+  // V57.11.5 — bubble layout reworked. The maxWidth + alignSelf approach
+  // kept tripping Android's Yoga text measurement and dropping trailing
+  // words. Use a row container with justifyContent (left for Naavi, right
+  // for Robert) so the bubble has a clear flex parent. The inner bubble
+  // uses flexShrink: 1 so it fits within the row, and the Text inside
+  // gets explicit width so wrap is deterministic. This is the
+  // gifted-chat-style row pattern but with explicit Text width to avoid
+  // the residual Samsung clipping the previous attempts left behind.
   return (
-    <View style={[styles.container, isNaavi ? styles.naaviContainer : styles.robertContainer]}>
-      {isNaavi && (
-        <Text style={styles.label}>MyNaavi</Text>
-      )}
-      {isNaavi ? (
-        <View style={styles.naaviPlain}>
-          <Text style={styles.naaviText}>{content}</Text>
-        </View>
-      ) : (
-        <View style={[styles.bubble, styles.robertBubble]}>
-          <Text style={styles.robertText}>{content}</Text>
-        </View>
-      )}
-      {timestamp && (
-        <Text style={[styles.timestamp, !isNaavi && { textAlign: 'right' }]}>{timestamp}</Text>
-      )}
+    <View style={[styles.row, isNaavi ? styles.rowNaavi : styles.rowRobert]}>
+      <View style={styles.column}>
+        {isNaavi && <Text style={styles.label}>MyNaavi</Text>}
+        {isNaavi ? (
+          <View style={styles.naaviPlain}>
+            <Text style={styles.naaviText}>{content}</Text>
+          </View>
+        ) : (
+          <View style={[styles.bubble, styles.robertBubble]}>
+            <Text style={styles.robertText}>{content}</Text>
+          </View>
+        )}
+        {timestamp && (
+          <Text style={[styles.timestamp, !isNaavi && styles.timestampRight]}>{timestamp}</Text>
+        )}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  // V57.11.5 — outer row gives flex context so Yoga measures Text
+  // properly. justifyContent positions the bubble left (Naavi) or right
+  // (Robert). Width is full available; padding handled via container's
+  // paddingHorizontal in the parent ScrollView.
+  row: {
+    flexDirection: 'row',
     marginVertical: 6,
+    width: '100%',
+  },
+  rowNaavi: {
+    justifyContent: 'flex-start',
+  },
+  rowRobert: {
+    justifyContent: 'flex-end',
+  },
+  // Inner column wraps label + bubble + timestamp. flexShrink:1 lets
+  // it shrink within the row so Text can wrap. maxWidth caps it at
+  // 85% of screen.
+  column: {
+    flexShrink: 1,
     maxWidth: BUBBLE_MAX_WIDTH,
-  },
-  // V57.11.3 — removed the textRow + textFlex flex pattern entirely.
-  // It was added in V57.10.3 to fix Yoga measurement on Samsung Android
-  // (gifted-chat-style row wrapper + flex:0 + flexShrink:1 on the Text).
-  // The pattern fixed single-character clips but Wael 2026-05-04 caught
-  // it still dropping whole words on medium-length strings ("Navigate
-  // to my next meeting" → "Navigate to my next"). Bumping paddingRight
-  // 4 → 12 helped some lengths but not others. Dropping the row +
-  // flex props lets RN's default text layout wrap normally inside the
-  // maxWidth-constrained container, which is the simpler and correct
-  // pattern for a chat bubble.
-  naaviContainer: {
-    alignSelf: 'flex-start',
-  },
-  robertContainer: {
-    alignSelf: 'flex-end',
   },
   label: {
     fontSize: Typography.caption,
@@ -106,5 +116,8 @@ const styles = StyleSheet.create({
     color: Colors.textHint,
     marginTop: 4,
     marginHorizontal: 4,
+  },
+  timestampRight: {
+    textAlign: 'right',
   },
 });
