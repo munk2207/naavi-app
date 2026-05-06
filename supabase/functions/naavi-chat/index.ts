@@ -16,6 +16,7 @@
 
 import Anthropic from 'npm:@anthropic-ai/sdk@0.79.0';
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { NAAVI_TOOLS, TOOL_NAME_TO_ACTION_TYPE } from '../_shared/anthropic_tools.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -48,47 +49,6 @@ async function getUserPhone(
   } catch (_) { /* ignore */ }
   return ''; // empty — callers handle gracefully
 }
-
-// ── V57.9.8 phantom-action server-side backstop ────────────────────────────
-//
-// Mirrors hooks/useOrchestrator.ts::phantomCommitChecks. Mobile already has
-// this check on the client (since V57.9), but the server-side check ensures
-// the same guarantee for every caller — voice server, future surfaces, and
-// the auto-tester (which goes straight to naavi-chat without the mobile
-// orchestrator).
-//
-// Each entry: a regex over Claude's `speech` for a commit verb, the action
-// type that MUST exist for that verb to be honest, and the honest-fallback
-// speech to substitute when the action is missing.
-//
-// Keep IN SYNC with the mobile-side regex set when changing.
-const PHANTOM_CHECKS: Array<{ verbRe: RegExp; needsType: string; honestSpeech: string }> = [
-  { verbRe: /\b(?:i['']?ve\s+(?:scheduled|added|booked|put)|i['']?ll\s+(?:schedule|add|book|put)|added it to (?:your|the) calendar|put (?:it|that) on (?:your|the) calendar|booked it for you|scheduled it for you)\b/i,
-    needsType: 'CREATE_EVENT',
-    honestSpeech: "I tried to add that to your calendar but my system didn't run it. Can you say it again?" },
-  { verbRe: /\b(?:i['']?ve\s+(?:drafted|sent)|i['']?ll\s+(?:draft|send)|drafted (?:a|the) (?:message|email|text)|sent (?:a|the) (?:message|email|text))\b/i,
-    needsType: 'DRAFT_MESSAGE',
-    honestSpeech: "I tried to draft that message but my system didn't run it. Can you say it again?" },
-  { verbRe: /\b(?:i['']?ve\s+saved|saved to memory|i['']?ll\s+remember|noted that|got it[,.]?\s+(?:i['']?ve\s+)?saved|i['']?ve\s+remembered)\b/i,
-    needsType: 'REMEMBER',
-    honestSpeech: "I tried to save that to memory but my system didn't run it. Can you say it again?" },
-  { verbRe: /\b(?:i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+when|i['']?ll\s+(?:alert|let you know|notify|text|tell)\s+you\s+(?:as soon|the moment|if)|alert is set|i['']?ve\s+set\s+(?:the|that|up)\s+(?:up\s+)?(?:the\s+)?alert)\b/i,
-    needsType: 'SET_ACTION_RULE',
-    honestSpeech: "I tried to set that alert but my system didn't run it. Can you say it again?" },
-  // V57.10.4 — phantom forward-looking SPEND_SUMMARY speech without
-  // the action emitted. Wael 2026-05-02: asked "How much did I spend
-  // on Anthropic last month?", Naavi said "Let me add up your
-  // Anthropic invoices for last month." and never produced a number.
-  // The LLM emitted forward-looking intent but did NOT emit the
-  // SPEND_SUMMARY action. Without this rewrite the user stares at
-  // "Let me add up..." indefinitely. Narrow to unambiguous summation
-  // verbs (add up / tally / sum up / total) so we don't false-trigger
-  // on generic "let me check" / "let me look up" phrases that might
-  // be legitimately preface for non-action responses.
-  { verbRe: /\b(?:let me (?:add up|tally|sum up|total)|i['']?ll\s+(?:add up|tally|sum up|total)|adding up|tallying up|summing up|totalling up)\b/i,
-    needsType: 'SPEND_SUMMARY',
-    honestSpeech: "I couldn't pull that total up right now. Try asking again in a moment." },
-];
 
 /**
  * Extract the embedded JSON object from Claude's rawText. Haiku is
@@ -152,24 +112,6 @@ function extractAndParseJson(rawText: string): {
   return { parsed, reconstruct };
 }
 
-function rewritePhantomActionSpeech(rawText: string): string {
-  const { parsed, reconstruct } = extractAndParseJson(rawText);
-  if (!parsed) return rawText;
-  const speech = typeof parsed?.speech === 'string' ? parsed.speech : '';
-  if (!speech) return rawText;
-
-  const actions = Array.isArray(parsed.actions) ? parsed.actions : [];
-  for (const check of PHANTOM_CHECKS) {
-    if (!check.verbRe.test(speech)) continue;
-    const has = actions.some((a: any) => a?.type === check.needsType);
-    if (!has) {
-      console.warn(`[naavi-chat] phantom-action detected: speech promised ${check.needsType} but no matching action. Rewriting speech.`);
-      return reconstruct({ ...parsed, speech: check.honestSpeech });
-    }
-  }
-  return rawText;
-}
-
 /**
  * Normalize Claude's rawText output so downstream callers (mobile
  * client, voice server, auto-tester) always see a clean JSON string
@@ -181,6 +123,59 @@ function normalizeRawText(rawText: string): string {
   const { parsed } = extractAndParseJson(rawText);
   if (!parsed) return rawText;
   return JSON.stringify(parsed);
+}
+
+// ── Phase 3.5 location-tool converter ─────────────────────────────────────────
+//
+// The two split location tools (`set_location_rule_chain`,
+// `set_location_rule_address`) have FLAT input shapes — direction,
+// dwell_minutes, expiry, action_type, action_config, label, one_shot all at
+// top level. Downstream consumers (orchestrator, tests) still expect the
+// legacy SET_ACTION_RULE shape with trigger_type='location' and a nested
+// trigger_config object. This helper bridges the two shapes.
+//
+// For chain tool: place_name = `${chain_brand}` if no suffix supplied, else
+// the user-spoken suffix verbatim (which already contains the brand).
+function convertLocationToolToActionRule(
+  toolName: 'set_location_rule_chain' | 'set_location_rule_address',
+  input: Record<string, any>,
+): any {
+  let placeName: string;
+  if (toolName === 'set_location_rule_chain') {
+    const brand = typeof input.chain_brand === 'string' ? input.chain_brand.trim() : '';
+    const suffix = typeof input.place_name === 'string' ? input.place_name.trim() : '';
+    if (suffix && suffix.toLowerCase() !== brand.toLowerCase()) {
+      // User said "Costco Merivale" — Haiku returned chain_brand='Costco',
+      // place_name='Costco Merivale' (or 'Merivale'). Prefer the longer
+      // string when it already contains the brand; otherwise concatenate.
+      placeName = suffix.toLowerCase().includes(brand.toLowerCase())
+        ? suffix
+        : `${brand} ${suffix}`.trim();
+    } else {
+      placeName = brand;
+    }
+  } else {
+    placeName = typeof input.place_name === 'string' ? input.place_name : '';
+  }
+
+  const triggerConfig: Record<string, any> = {
+    place_name: placeName,
+    direction: input.direction,
+  };
+  if (typeof input.dwell_minutes === 'number') triggerConfig.dwell_minutes = input.dwell_minutes;
+  else triggerConfig.dwell_minutes = 2;
+  if (typeof input.expiry === 'string' && input.expiry) triggerConfig.expiry = input.expiry;
+
+  const result: Record<string, any> = {
+    type: 'SET_ACTION_RULE',
+    trigger_type: 'location',
+    trigger_config: triggerConfig,
+    action_type: input.action_type,
+    action_config: input.action_config,
+    label: input.label,
+    one_shot: typeof input.one_shot === 'boolean' ? input.one_shot : true,
+  };
+  return result;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -955,37 +950,67 @@ Deno.serve(async (req) => {
         ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
         : system;
     }
+    // V57.11.9 Phase 2 — Anthropic Structured Outputs migration.
+    // Switch from "JSON-in-prose" parsing to schema-constrained tool use.
+    // temperature=0 + tool schemas eliminate the prompt-drift cycle. Claude
+    // emits tool_use blocks for actions and a separate text block for speech.
+    // We synthesize the legacy { speech, actions, pendingThreads } rawText
+    // shape so existing downstream consumers (orchestrator, voice server,
+    // auto-tester) keep working unchanged. Phase 4 will remove the synthesis.
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: max_tokens ?? 2048,
       system: cachedSystem as any,
       messages: augmentedMessages,
+      tools: NAAVI_TOOLS as any,
+      temperature: 0,
     });
     const claudeMs = Date.now() - claudeStart;
 
-    let rawText = response.content[0].type === 'text' ? response.content[0].text : '';
+    // Extract speech (text blocks) and actions (tool_use blocks) from the
+    // structured response. Multiple text blocks (rare) are concatenated; tool
+    // calls preserve order so REMEMBER+CREATE_EVENT fanouts arrive in sequence.
+    const speechBlocks = response.content
+      .filter((b: any) => b.type === 'text')
+      .map((b: any) => String(b.text ?? ''))
+      .join('');
+    const toolUseBlocks = response.content.filter((b: any) => b.type === 'tool_use');
+
+    const actions = toolUseBlocks.map((b: any) => {
+      const actionType = TOOL_NAME_TO_ACTION_TYPE[b.name];
+      if (!actionType) {
+        console.warn(`[naavi-chat] Unknown tool name from Claude: ${b.name}`);
+        return null;
+      }
+      // Phase 3.5 — the two location tools have a flat input shape. Wrap them
+      // back into the SET_ACTION_RULE shape (trigger_type='location' +
+      // trigger_config={...}) the orchestrator and tests expect.
+      if (b.name === 'set_location_rule_chain' || b.name === 'set_location_rule_address') {
+        return convertLocationToolToActionRule(b.name, b.input ?? {});
+      }
+      return { type: actionType, ...(b.input ?? {}) };
+    }).filter((a: any) => a !== null);
+
+    // Backward-compat rawText: orchestrator's phantom-action regex still reads
+    // this. Synthesize a JSON-flavored representation so existing parsers
+    // (findActionInRawText, extractSpeech, mobile parseResponse) keep working.
+    let rawText = JSON.stringify({
+      speech: speechBlocks,
+      actions,
+      pendingThreads: [],
+    });
+
     const usage = (response as any).usage ?? {};
-    console.log(`[timing] ${elapsed()} | Claude call done | Claude=${claudeMs}ms | rawTextLen=${rawText.length}`);
+    console.log(
+      `[timing] ${elapsed()} | Claude call done | Claude=${claudeMs}ms | ` +
+      `speech=${speechBlocks.length}c | tool_calls=${actions.length} | ` +
+      `stop=${(response as any).stop_reason ?? '?'}`
+    );
     console.log(`[cache-debug] usage=${JSON.stringify(usage)}`);
 
-    // V57.9.8 — server-side phantom-action backstop. Mirrors the V57.9
-    // client-side check in hooks/useOrchestrator.ts. Catches the case
-    // where Haiku speaks a commit verb ("I've drafted...", "I've
-    // scheduled...") with empty actions[]. Without this, the server
-    // returns a misleading reply that makes the user think an action
-    // happened when it didn't. Speech is rewritten to an honest version;
-    // actions[] is left untouched (the "fix" is to admit the failure,
-    // not to fabricate the missing action).
-    rawText = rewritePhantomActionSpeech(rawText);
-
-    // V57.9.8 — normalize rawText so callers always see clean JSON.
-    // Haiku occasionally prepends preamble prose before the actual JSON
-    // block ("Here's the response:\n```json{...}```"). The mobile client's
-    // parseResponse handles this, but the server-side phantom backstop
-    // and the auto-tester's findActionInRawText do not — and that
-    // mismatch was the source of the priority-flag-critical flake. By
-    // normalizing here, EVERY downstream consumer sees a parseable
-    // JSON string. Falls through unchanged if no JSON is found.
+    // V57.9.8 normalizeRawText() was the legacy ```json fence stripper.
+    // With Phase 2 we already produce clean JSON.stringify output, so the
+    // pass-through is now a no-op for typical responses. Kept for safety.
     rawText = normalizeRawText(rawText);
 
     return jsonResponse({ rawText });
