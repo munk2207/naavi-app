@@ -77,6 +77,15 @@ const styles = StyleSheet.create({
   // Inner column wraps label + bubble + timestamp. flexShrink:1 lets
   // it shrink within the row so Text can wrap. maxWidth caps it at
   // 85% of screen.
+  // V57.11.7 — explicit maxWidth on the Text style itself (not just
+  // the column) is the fix for the chronic Yoga visual-truncation bug
+  // on Samsung Android. Wael 2026-05-06: V57.11.6 instrumentation
+  // proved data is FULL at every step (turn-stored = "Navigate to my
+  // next meeting." 28 chars) but the bubble cropped to "Navigate to my
+  // next" (19 chars). Pure rendering bug. Numeric maxWidth on the Text
+  // gives Yoga a hard pixel boundary it cannot mis-measure.
+  // BUBBLE_MAX_WIDTH - 32 subtracts the bubble's horizontal padding
+  // (16 left + 16 right) so the Text wraps inside the visible bubble.
   column: {
     flexShrink: 1,
     maxWidth: BUBBLE_MAX_WIDTH,
@@ -105,11 +114,17 @@ const styles = StyleSheet.create({
     fontSize: Typography.body,
     lineHeight: Typography.lineHeightBody,
     color: Colors.textPrimary,
+    // V57.11.7 — see column comment. Numeric maxWidth on the Text
+    // element bypasses the Yoga intrinsic-width measurement bug.
+    maxWidth: BUBBLE_MAX_WIDTH - 16,
   },
   robertText: {
     fontSize: Typography.body,
     lineHeight: Typography.lineHeightBody,
     color: Colors.textPrimary,
+    // V57.11.7 — see column comment. -32 accounts for the robertBubble's
+    // paddingHorizontal: 16 on both sides.
+    maxWidth: BUBBLE_MAX_WIDTH - 32,
   },
   timestamp: {
     fontSize: Typography.caption,

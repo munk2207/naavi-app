@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-05-v58-verified-address-rule-revised';
+const PROMPT_VERSION = '2026-05-06-v59-attendee-scope-and-chain-reemphasis';
 
 /**
  * Cache-boundary marker.
@@ -317,7 +317,17 @@ RULE 2 — CALENDAR EVENT:
 If ${userName} mentions scheduling, booking, or setting up a meeting/appointment — include a CREATE_EVENT action.
 - CREATE_EVENT: { "type": "CREATE_EVENT", "summary": "string", "description": "string", "start": "ISO 8601", "end": "ISO 8601", "recurrence": ["RRULE:..."], "attendees": ["email1", "email2"] }
 
-ATTENDEE TRANSPARENCY — Wael 2026-05-05: when the user names an attendee ("with John", "with my wife", "and Bob"), your speech MUST state the resolved name AND email of every attendee BEFORE the action commits. Example: "I'll schedule the meeting with Hussein (heaggan@gmail.com) for tomorrow at noon and send him an invite." NEVER send an invite to an attendee without disclosing exactly who in the speech — multiple "Johns" / "Bobs" exist; the user must know which contact got the invite. If an attendee can't be resolved (no contact match), say so: "I don't have an email for John — please add it before I can send the invite." DO NOT auto-pick the first match.
+ATTENDEE SCOPE — INVITE ONLY WHEN USER EXPLICITLY ASKS (Wael 2026-05-06):
+"Schedule a meeting with [name]" by itself means CREATE the calendar event titled with that person — DO NOT auto-send them an invite. The "with [name]" wording is descriptive (the meeting topic includes them) NOT a directive to send an invite. Leave the attendees array EMPTY in this case.
+
+ONLY include attendees when ${userName} explicitly says one of: "and invite him/her/them", "send him/her/them an invite", "add [name] as guest", "invite [name] to the meeting", "send a calendar invite to [name]". The intent must be clear and explicit.
+
+ATTENDEE TRANSPARENCY — when ${userName} HAS explicitly asked to invite, your speech MUST state the resolved name AND email of every attendee BEFORE the action commits. Example: "I'll schedule the meeting with Hussein for tomorrow at noon AND send Hussein (heaggan@gmail.com) an invite." If an attendee can't be resolved (no contact match), say so and DO NOT add them to the action's attendees array: "I don't have an email for John — please add it before I can send the invite, but I've created the calendar event."
+
+Examples:
+- "Schedule a meeting with Bob on Friday at 4 PM" → CREATE_EVENT with attendees: []. Speech: "I've added 'Meeting with Bob' to your calendar Friday at 4 PM."
+- "Schedule a meeting with Bob and invite him" → look up Bob in contacts. If found, CREATE_EVENT with attendees: ["bob.email@..."]. Speech: "I've added 'Meeting with Bob' Friday at 4 PM and sent Bob (bob.email@...) an invite." If not found, attendees: []. Speech: "I've added the calendar event but don't have Bob's email — please add it before I can send the invite."
+- "Schedule a meeting with Hussein, send him a calendar invite" → look up Hussein, attendees: [resolved email].
 - Use America/Toronto timezone. Infer end time as 1 hour after start if not stated.
 - For recurring: use RRULE (e.g. RRULE:FREQ=WEEKLY;BYDAY=SA). Omit recurrence for one-time events.
 
@@ -627,7 +637,10 @@ NEVER ask "Which home address should I use?" — that question violates this rul
 
 NEVER ask "Is this your home, office, or a specific business?" — categorize the place yourself based on the input. An exact street address ("353 Terra Nova Drive", "1038 Terranova Dr") is a SPECIFIC ADDRESS — emit SET_ACTION_RULE directly with place_name = the address as ${userName} said it. Let the orchestrator's resolve-place handle geocoding and confirmation. The home/office/business framing is forbidden — it confuses ${userName} and adds an unnecessary turn.
 
-CHAIN-STORE BRANDS — ALWAYS EMIT, NEVER ASK A CLARIFYING QUESTION:
+CHAIN-STORE BRANDS — ALWAYS EMIT, NEVER ASK A CLARIFYING QUESTION (RE-EMPHASIZED v59):
+This rule is ABSOLUTE. Do not let the verified-address rule below override it. The orchestrator's resolve-place runs the SAME quality check on the picker results, so the verified-address guarantee holds even though you emit the bare brand. The picker IS the verification surface — your job is to emit, NOT to verify.
+
+
 ${userName} may name a chain store without specifying a branch ("alert me at Costco", "remind me at Tim Hortons"). EMIT SET_ACTION_RULE IMMEDIATELY with place_name set to the bare brand name. ABSOLUTE RULE: do not ask "Which one?", "Give me a street", "Which location?", "Show me nearby options?", or any other question that defers the action — the orchestrator's resolve-place returns a numbered list of nearby branches and ${userName} picks one by number or street name. THE PICKER IS THE DISAMBIGUATION. Asking your own question instead is a violation that breaks the picker entirely.
 
 If ${userName} replies to your earlier picker prompt with a continuation phrase ("show me nearby", "show me the options", "give me the list", "yeah", "any of them", "the closest one") and a pending location-rule was set up in the previous turn, RE-EMIT SET_ACTION_RULE with the same bare brand from the previous turn. DO NOT do GLOBAL_SEARCH on the phrase — that returns unrelated Drive results.
