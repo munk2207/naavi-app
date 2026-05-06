@@ -128,40 +128,44 @@ If in doubt, ASK before creating parallel config.
 
 ### WHERE TO START
 
-**Most recent handoff:** `docs/SESSION_HANDOFF_2026-05-03_GEOFENCE_INVESTIGATION.md` — **READ THIS FIRST**. Three priorities for the next session, all approved by Wael:
+**Most recent handoff:** `docs/SESSION_HANDOFF_2026-05-06_FIX_AAB.md` — **READ THIS FIRST**. Long-running session 2026-05-05 → 06 that shipped V57.11.4 → V57.11.8 (build 150 currently on Wael's phone) and added a permanent prompt-regression test suite. The headline next-session priority is the **Anthropic Structured Outputs migration** (durable fix for the prompt-drift cycle the session uncovered).
 
-1. **Geofence reliability** — Samsung battery exemptions configured this session (per-app Optimized + added to Never auto sleeping + Adaptive Battery off + background location "Allow all the time"). Drive test still failed; phone reboot pending Wael action. If reboot doesn't fix it, investigate Expo geofence library bug ([#33433](https://github.com/expo/expo/issues/33433)) — re-registers on every app foreground (~19× per 6h in our diagnostics), Google may be throttling.
+**Top of next session — V57.11.9 bundle (priority order):**
 
-2. **Voice authentication architecture — Options 2 + 4 combined** —
-   - Option 2 (multi-phone fast path): caller ID matches `user_settings.phone` OR new `user_settings.additional_phones[]` array. Mobile UI to manage list. AAB build for that UI.
-   - Option 4 (voice biometric fallback): unknown caller hears *"Please say: my voice is my password"*. Azure Speaker Recognition verifies the voiceprint (not the words — voice itself is the credential, can't be spoofed by overhearing the phrase). Enrollment happens on first call to Naavi (3 reads of the phrase, captured server-side). NO AAB for the biometric piece.
-   - Plus: fix the misleading "isn't registered with Naavi" rejection wording — there's no registration concept; phone lives in `user_settings.phone` because the user typed it in Settings.
-   - Plus deferred from this session: demo line greeting flow change — *"Hi, this is Naavi. May I have your name?"* → caller responds → *"I heard [name]. Is that right?"* → confirm → name threaded into prompt for every turn. Bundle with PRIORITY 2 since both touch the voice greeting path.
+1. **Anthropic Structured Outputs migration** — research-agent recommendation backed by Anthropic's Nov 2025 GA docs. Replace JSON-in-prompt with schema-constrained generation. Removes the chain-store auto-fix bridge cleanly. ~1 day focused session, ~10-file blast radius. Detailed plan in the handoff doc.
 
-3. **Test PC (Maestro mobile UI testing)** — setup doc at `docs/MAESTRO_SETUP.docx`. Wael's setup steps 1-3 (Android Studio + emulator + Maestro CLI). Claude writes `e2e/` test scenarios in parallel.
+2. **Bubble truncation (Bug 4) — different angle.** Six layout attempts have failed (all logged in handoff doc). Pick ONE: (a) `lineHeight: 24` → `lineHeight: 20` for ratio 1.33 (matches react-native #35039 resolution), or (b) replace `<Text>` in ConversationBubble with `react-native-markdown-display`. **Do NOT make a 7th layout tweak.**
 
-**Last AAB on Wael's phone:** V57.10.5 (build 141), installed 2026-05-03. Samsung battery settings configured this session.
+3. **LIST_RULES synthesize-action backstop** — current backstop overrides speech but doesn't push a LIST_RULES action onto `actions[]`. Fix in same pattern as the chain-store auto-fix.
+
+4. **Verified-address rejection — name the address** — replace generic "I can't confirm that address" with "I can't confirm '<destination>' for your meeting today."
+
+5. **Stop button visibility during streaming** — V57.11.8 absolute positioning didn't hold. Investigate with status-transition remoteLogs first; fix evidence-based.
+
+6. **Haptic — VIBRATE permission + duration** — confirm permission in `app.json`, bump `Vibration.vibrate(80)` → `150` or pattern `[0,100,50,100]`.
+
+7. **Voice server chain-store mirror** — voice surface still hits Bug 11. Defer if Structured Outputs lands first (cleans up the need entirely).
+
+**Pending blocked:** Picovoice Eagle (approval), Polly Joanna (AWS account), Maestro full-suite (emulator Internal Testing install), Geofence reliability (phone reboot pending), Phase 2 demo data.
+
+**Last AAB on Wael's phone:** V57.11.8 build 150, installed 2026-05-06.
 **Last AAB on Robert's phone:** V56.6 (build 115), installed 2026-04-28. **Do NOT promote V57.x to Robert until geofence reliability is proven on Wael's phone.**
 
-**Server-side fixes shipped 2026-04-30 (all live):**
-- `get-naavi-prompt` v45 — universal truthfulness rule + CREATE_EVENT phantom-action block
-- `text-to-speech` — address-suffix expander (Dr→Drive)
-- `send-push-notification` — auto-prunes stale FCM tokens on 404 / NOT_FOUND / UNREGISTERED
-- `sync-gmail` — accepts `days_back` / `before_days_back` / `tier1_only` body params for one-shot backfills (cron path unchanged at 7 days)
+**Prompt-regression test suite** (NEW this session): `tests/catalogue/prompt-regression.ts` — 8 tests wired into `npm run test:auto`. Locks in known-good Claude action emissions. **Future prompt edits MUST keep this suite green.** Don't add a prompt rule without a corresponding regression test — that's how the v57→v58→v59 cycle started.
 
-**Email caches expanded:** Wael 442 days of tier-1 (1,735 emails), Hussein 360 days (210 emails). Both populated via the new sync-gmail backfill mode.
+**Strategic positioning** (Wael 2026-05-05): "senior" / "caregiver" / "elderly" / "active aging" are BANNED across all surfaces (code, prompts, docs, memory). The app is for EVERYONE. Use "user" by default; "older healthy independent adult" only when context demands. See top of this file.
 
-**Mobile fixes shipped (V57.9 → V57.9.1, but did NOT fully solve the hang):**
-- `getSessionWithTimeout()` 5s race wraps 33 call sites of `supabase.auth.getSession()`
-- `callNaaviEdgeFunction` adds `user_id` to body via in-memory cache (cache empties on force-stop — known gap)
-- Speech-on-409 (duplicate location alert) says "You already have an alert set"
-- Orchestrator outer-catch auto-resets `status='error'` to `'idle'` after 4s
-- Phantom-action client backstop overrides commit-verb speech if matching action is missing
-- `app/_layout.tsx` re-registers FCM token on every launch when permission granted (fixes long-term token rot)
+**Server-side state at session end:**
+- Prompt version live: `2026-05-06-v59-attendee-scope-and-chain-reemphasis`
+- `naavi-chat`: live calendar fetch with Cache-Control: no-cache (V57.11.6)
+- `resolve-place`: bare-brand multi-result + lat/lng dedupe (V57.11.6)
+- `client_diagnostics`: RLS enabled (V57.11.7 hotfix); `search_knowledge_fragments` search_path locked
+- `text-to-speech`: address-suffix expander (Dr→Drive); postal code letter phonetics
+- `send-push-notification`: auto-prunes stale FCM tokens
 
-**Auto-tester:** 31/32 green. Run with `npm run test:auto`. Multi-user matrix in `tests/catalogue/multiuser.ts`.
+**Auto-tester (latest):** 50 ✓ / 0 ✗ / 2 skipped. Run with `npm run test:auto`. Includes new `tests/catalogue/prompt-regression.ts` (8 tests). Multi-user matrix in `tests/catalogue/multiuser.ts`.
 
-**Current Claude prompt version:** `2026-04-30-v45-universal-truthfulness` (via `get-naavi-prompt` Edge Function).
+**Current Claude prompt version:** `2026-05-06-v59-attendee-scope-and-chain-reemphasis` (via `get-naavi-prompt` Edge Function).
 
 Prior handoffs for context: `docs/SESSION_HANDOFF_CONTINUOUS_FIX_V57.8.md`, `docs/SESSION_25_HANDOFF.md`, `docs/SESSION_22_HANDOFF.md`.
 
