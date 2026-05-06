@@ -42,15 +42,6 @@ export const promptRegressionTests: TestCase[] = [
     description: 'V57.11.6 regression — "alert me at Walmart" must emit SET_ACTION_RULE with bare brand and NOT ask "Which Walmart?"',
     timeoutMs: 30_000,
     async run(ctx) {
-      // V57.11.8 — temporarily skipped while the orchestrator-side
-      // chain-store auto-fix bridges the gap. Claude still asks "Which
-      // Walmart?" at the API level, but the mobile orchestrator detects
-      // the pattern and synthesizes a SET_ACTION_RULE so the user sees
-      // the picker. Re-enable this test once Anthropic Structured
-      // Outputs migration locks in deterministic action emission and
-      // the orchestrator-side bridge can be removed.
-      throw new TestSkippedError('Skipped until Structured Outputs migration. Orchestrator-side chain-store auto-fix bridges the gap (useOrchestrator.ts V57.11.8).');
-      // eslint-disable-next-line no-unreachable
       const { status, data } = await adapters.naaviChat(ctx, {
         messages: [{ role: 'user', content: 'alert me at Walmart' }],
         max_tokens: 1024,
@@ -76,8 +67,6 @@ export const promptRegressionTests: TestCase[] = [
     description: '"alert me at Tim Hortons" must emit SET_ACTION_RULE with bare brand "Tim Hortons" — no clarification question',
     timeoutMs: 30_000,
     async run(ctx) {
-      throw new TestSkippedError('Skipped until Structured Outputs migration. Orchestrator-side chain-store auto-fix bridges the gap (useOrchestrator.ts V57.11.8).');
-      // eslint-disable-next-line no-unreachable
       const { status, data } = await adapters.naaviChat(ctx, {
         messages: [{ role: 'user', content: 'alert me at Tim Hortons' }],
         max_tokens: 1024,
