@@ -411,6 +411,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const currentTurnIdRef = useRef(0);
 
   const send = useCallback(async (userMessage: string) => {
+    // V57.11.6 — instrumentation for the bubble-truncation bug. Wael
+    // 2026-05-05: typed "What is my next meeting?" but bubble shows
+    // "What is my next". Voice path same. Logging every step of the
+    // userMessage path so we can pinpoint where "meeting?" disappears.
+    const bubbleDiag = newDiagSession();
+    remoteLog(bubbleDiag, 'send-entry', {
+      len: userMessage.length,
+      head: userMessage.slice(0, 60),
+      tail: userMessage.slice(-30),
+    });
     // Pending_confirm is the directed yes/no/edit listening state — it has its
     // own resolution paths (confirmPending, cancelPending, editPending). Don't
     // start a new turn from here; the lock UI shouldn't allow it anyway.
@@ -423,6 +433,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     if (status === 'speaking' || status === 'answer_active') {
       stopSpeaking();
       setAudioPlaying(false);
+    }
+
+    // V57.11.6 — clear any leftover pending action from a prior turn so
+    // each new send() starts fresh. Avoids stale pendingActionRef
+    // accumulating across turns now that the speak-phase no longer
+    // auto-clears (DraftCard Send fix). Cancel teardown is handled by
+    // the user via the DraftCard's Discard button.
+    if (pendingActionRef.current) {
+      pendingActionRef.current = null;
+      setPendingAction(null);
     }
 
     // Capture this turn's id. If Robert taps orange Stop during thinking,
@@ -1162,6 +1182,13 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         // the action will be present when it does. Claude generating this
         // shape with no action is a phantom.
         { verbRe: /\bfound\s+.{1,80}\s+(?:at|near)\s+.{1,80}\.\s*(?:please\s+)?say\s+yes/i, needsType: 'SET_ACTION_RULE', honestSpeech: "Let me check that address — I need to verify it before setting the alert." },
+        // V57.11.6 — Wael 2026-05-05: "what alerts do I have?" → Claude
+        // said "You have one alert" (wrong count, hallucinated) and
+        // emitted GLOBAL_SEARCH on the query string instead of LIST_RULES.
+        // Result: irrelevant Drive results, no actual alerts shown. This
+        // backstop catches "you have N alerts" / "your alerts are" speech
+        // without a LIST_RULES action and forces honest re-emission.
+        { verbRe: /\byou have (?:no |one |\d+ |\d+ active )?alerts?\b|your (?:active |set )?alerts? (?:are|include)|here (?:are|is) your alerts?\b/i, needsType: 'LIST_RULES', honestSpeech: "Let me pull up your alerts." },
         // V57.11.5 — Wael 2026-05-05: "alert me at Tim Hortons" → "Show me
         // nearby" → Claude said "I need to resolve nearby Tim Hortons
         // locations for you. Let me check the map. Once I have the list,
@@ -1305,6 +1332,34 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           const eventStartISO = String(action.eventStartISO ?? '').trim();
           const departureISO  = String(action.departureISO  ?? '').trim();
           if (destination) {
+            // V57.11.6 — verified-address gate (Wael 2026-05-05 directive).
+            // Naavi must INDEPENDENTLY verify the destination via Google
+            // Places SPECIFIC_TYPES check before rendering a confident
+            // card. User confirmation alone (or calendar-event-typed
+            // address) is not enough. If the address can't be verified,
+            // skip the card and let the phantom-action backstop emit an
+            // honest fallback speech.
+            try {
+              const session = await getSessionWithTimeout();
+              const userId = session?.user?.id;
+              if (userId) {
+                const verifyRes = await fetchWithTimeout(`${SUPABASE_URL}/functions/v1/resolve-place`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON}` },
+                  body: JSON.stringify({ user_id: userId, place_name: destination, save_to_cache: false }),
+                }, 15000);
+                const verifyData = await verifyRes.json();
+                if (verifyData?.status === 'not_found') {
+                  console.log(`[Orchestrator] FETCH_TRAVEL_TIME blocked — unverified destination "${destination}"`);
+                  turnSpeechOverride = `I can't confirm that address. Please check the exact location and call me back.`;
+                  continue;
+                }
+              }
+            } catch (verifyErr) {
+              console.error('[Orchestrator] FETCH_TRAVEL_TIME verification threw:', verifyErr);
+              // Verification service down — fall through to fetchTravelTime
+              // anyway rather than blocking the user entirely.
+            }
             try {
               const result = await registry.maps.fetchTravelTime(destination, eventStartISO, avoidHighways, departureISO);
               if (result) turnNav.push(result);
@@ -2048,6 +2103,15 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       }
       console.log('[Orchestrator] response.speech:', response.speech);
       console.log('[Orchestrator] displaySpeech (for bubble):', displaySpeech);
+      // V57.11.6 — bubble-truncation diagnostic: log the userMessage at
+      // the moment it's about to be stored in the turn, so we can see if
+      // it matches what arrived at send-entry above.
+      remoteLog(bubbleDiag, 'turn-stored', {
+        len: userMessage.length,
+        head: userMessage.slice(0, 60),
+        tail: userMessage.slice(-30),
+      });
+      endDiagSession(bubbleDiag);
       const newTurn: ConversationTurn = {
         userMessage,
         assistantSpeech: displaySpeech,
@@ -2141,8 +2205,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       const confirmableDraft = turnDrafts.find(d => isConfirmable(d));
       const turnIndex = turns.length; // index of the turn being added
 
-      if (confirmableDraft && handsfreeRef.current) {
-        // Pre-resolve contact info so we can verify before asking Robert to confirm
+      // V57.11.6 — removed the `handsfreeRef.current` guard. With hands-
+      // free mode deleted in V57.11.3, handsfreeRef is now const-false and
+      // this block NEVER ran, so pendingActionRef was never set. The
+      // DraftCard's Send button calls confirmPending() which reads
+      // pendingActionRef.current — finds null — does nothing. Wael
+      // 2026-05-05: drafted email, tapped Send, no email sent (instead
+      // a GLOBAL_SEARCH on the email address). Removing the guard
+      // restores the confirm-to-send pipeline for tap-to-talk users.
+      if (confirmableDraft) {
+        // Pre-resolve contact info so we can verify before sending
         const action = confirmableDraft;
         const channel = String(action.channel ?? 'email').toLowerCase() as 'email' | 'sms' | 'whatsapp';
         const to = String(action.to ?? '').trim();
@@ -2240,18 +2312,13 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
         // If user tapped Cancel earlier, status is 'cooldown' — don't override.
         if (statusRef.current === 'cooldown') return;
-        // Only enter voice-confirm flow if hands-free is active.
-        // In tap-to-talk mode, Robert uses the Send button on the DraftCard.
-        if (pendingActionRef.current && handsfreeRef.current) {
-          setStatus('pending_confirm');
-        } else {
-          // Clear pending action if not in hands-free — DraftCard handles sending
-          if (pendingActionRef.current && !handsfreeRef.current) {
-            pendingActionRef.current = null;
-            setPendingAction(null);
-          }
-          setStatus('idle');
-        }
+        // V57.11.6 — pending action is now ALWAYS preserved across the
+        // speak phase so the DraftCard's Send button can commit it.
+        // Don't auto-clear; confirmPending / cancelPending / a fresh
+        // send() turn handle teardown. Wael 2026-05-05: Send button
+        // was broken because the old logic cleared pendingActionRef
+        // immediately after speech ended in tap-to-talk mode.
+        setStatus('idle');
       }).catch(() => {
         setAudioPlaying(false);
         if (isCancelled()) return;
@@ -2648,17 +2715,29 @@ async function playBase64AudioNative(base64: string): Promise<void> {
     await FileSystem.writeAsStringAsync(tempUri, base64, {
       encoding: 'base64' as any,
     });
-    // V57.11.2 — explicitly flip allowsRecordingIOS off before each TTS
-    // playback. Wael 2026-05-04: after a useWhisperMemo recording, audio
-    // mode stayed in record-mode and Naavi's "Alert set" reply was silent.
-    // Voice came back on the next turn (system flipped on its own) — the
-    // explicit reset eliminates the race.
+    // V57.11.6 — root-cause fix for the chronic AudioFocusNotAcquiredException
+    // on Android. Wael 2026-05-05: after a useWhisperMemo recording, every
+    // TTS chunk-play call threw "expo.modules.av.AudioFocusNotAcquiredException:
+    // This experience is currently in the background, so audio focus could
+    // not be acquired" → fell back to expo-speech (system TTS, sounds
+    // completely different from Aura Hera). Force-closing the app reset
+    // the audio mode and TTS came back. Three layers of fix:
+    //   1. setIsEnabledAsync(true) — explicitly enable the audio system
+    //      before mode change, in case it got disabled.
+    //   2. interruptionModeAndroid: DUCK_OTHERS — claim audio focus
+    //      explicitly with duck mode, which is the most permissive on
+    //      Android and bypasses the "experience in background" check.
+    //   3. Brief retry with mode reset on AudioFocusNotAcquiredException —
+    //      handled by the catch in the outer playback Promise (see below).
+    await Audio.setIsEnabledAsync(true).catch(() => {});
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
       playsInSilentModeIOS: true,
       staysActiveInBackground: false,
       shouldDuckAndroid: true,
-    });
+      interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DUCK_OTHERS,
+      interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DUCK_OTHERS,
+    } as any);
     const sound = new Audio.Sound();
     _currentSound = sound;
     await new Promise<void>((resolve, reject) => {
@@ -2741,7 +2820,33 @@ async function playBase64AudioNative(base64: string): Promise<void> {
 
       sound.loadAsync({ uri: tempUri })
         .then(() => sound.playAsync())
-        .catch((err) => cleanupAndReject(err));
+        .catch(async (err) => {
+          // V57.11.6 — retry once on AudioFocusNotAcquiredException by
+          // re-asserting the audio mode. Wael 2026-05-05: every TTS chunk
+          // hit this exception after a recording session, falling back to
+          // expo-speech. The retry gives audio focus a second chance after
+          // a fresh setIsEnabledAsync + mode reset.
+          const msg = String(err?.message ?? err ?? '');
+          if (/AudioFocusNotAcquired/i.test(msg)) {
+            try {
+              await Audio.setIsEnabledAsync(true);
+              await Audio.setAudioModeAsync({
+                allowsRecordingIOS: false,
+                playsInSilentModeIOS: true,
+                staysActiveInBackground: false,
+                shouldDuckAndroid: true,
+                interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DUCK_OTHERS,
+                interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DUCK_OTHERS,
+              } as any);
+              await sound.playAsync();
+              return;
+            } catch (retryErr) {
+              cleanupAndReject(retryErr);
+              return;
+            }
+          }
+          cleanupAndReject(err);
+        });
     });
   } catch (err) {
     console.error('[TTS Native] playback error:', err);

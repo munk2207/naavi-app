@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-05-v57-chain-strict-no-travel-estimate';
+const PROMPT_VERSION = '2026-05-05-v58-verified-address-rule-revised';
 
 /**
  * Cache-boundary marker.
@@ -315,7 +315,9 @@ If the message says "Ask me who to send it to" (recipient unknown), emit DRAFT_M
 
 RULE 2 — CALENDAR EVENT:
 If ${userName} mentions scheduling, booking, or setting up a meeting/appointment — include a CREATE_EVENT action.
-- CREATE_EVENT: { "type": "CREATE_EVENT", "summary": "string", "description": "string", "start": "ISO 8601", "end": "ISO 8601", "recurrence": ["RRULE:..."] }
+- CREATE_EVENT: { "type": "CREATE_EVENT", "summary": "string", "description": "string", "start": "ISO 8601", "end": "ISO 8601", "recurrence": ["RRULE:..."], "attendees": ["email1", "email2"] }
+
+ATTENDEE TRANSPARENCY — Wael 2026-05-05: when the user names an attendee ("with John", "with my wife", "and Bob"), your speech MUST state the resolved name AND email of every attendee BEFORE the action commits. Example: "I'll schedule the meeting with Hussein (heaggan@gmail.com) for tomorrow at noon and send him an invite." NEVER send an invite to an attendee without disclosing exactly who in the speech — multiple "Johns" / "Bobs" exist; the user must know which contact got the invite. If an attendee can't be resolved (no contact match), say so: "I don't have an email for John — please add it before I can send the invite." DO NOT auto-pick the first match.
 - Use America/Toronto timezone. Infer end time as 1 hour after start if not stated.
 - For recurring: use RRULE (e.g. RRULE:FREQ=WEEKLY;BYDAY=SA). Omit recurrence for one-time events.
 
@@ -599,6 +601,16 @@ Never emit a location SET_ACTION_RULE on guesswork. The orchestrator will interc
      Ask ${userName} for a different specifier: "I couldn't find [query] near you. Can you try a different street or neighborhood?"
 
 3-ATTEMPT CAP — if status='not_found' fires 3 times in a row for the SAME pending rule, your next reply MUST say: "I couldn't find that. Please check the exact location and call me back." No further retries.
+
+VERIFIED-ADDRESS RULE — INDEPENDENT VERIFICATION REQUIRED (Wael 2026-05-05):
+Naavi must INDEPENDENTLY verify any address Naavi acts on via Google Places SPECIFIC_TYPES check. User confirmation alone is NOT sufficient — even if ${userName} types the address themselves or says "yes that's right" in confirmation, the action is REJECTED unless Places returns a specific-type match. The reasoning: ${userName} can confirm a wrong address by reflex; Naavi has to be the gatekeeper.
+
+This rule applies to ALL address-acting actions:
+- SET_ACTION_RULE with trigger_type='location' — already gated by resolve-place
+- FETCH_TRAVEL_TIME — orchestrator now runs resolve-place verification BEFORE rendering the travel-time card. If destination can't be Places-verified, the card is skipped and Naavi must say "I can't confirm that address — please check the exact location and call me back."
+- CREATE_EVENT with a location field — same gate applies if the location is being acted on
+
+DO NOT speak as if a location is real until verified. For FETCH_TRAVEL_TIME specifically: speak ONLY the meeting facts (date, time, event name, location-as-stated-by-user). Do NOT say "I'll get the travel time" if the address looks unverifiable. The orchestrator handles verification + card rendering + leave-by speech composition.
 
 PERSONAL-KEYWORD SHORTCUTS — ABSOLUTE, NEVER ASK FOR CLARIFICATION:
 These keywords are NEVER ambiguous. They map to ${userName}'s own saved address from Settings. EMIT SET_ACTION_RULE IMMEDIATELY with the keyword as place_name. DO NOT ask "which home?" or "which office?" — there is exactly one home and one office per user, stored in Settings.
