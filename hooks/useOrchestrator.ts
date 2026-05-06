@@ -1609,21 +1609,81 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
 
         if (action.type === 'LIST_RULES') {
-          // Navigate to the Alerts screen instead of summarising inline.
-          // If Claude attached a "match" filter (e.g. "Costco"), forward it
-          // as a route param so the screen auto-expands the matching row.
-          const match = String((action as any).match ?? '').trim();
+          // V57.11.7 — read the alerts back as a numbered list. Wael
+          // 2026-05-06: previous handler navigated to /alerts which often
+          // failed (router.push threw → "Tap the three-dot menu" fallback,
+          // unhelpful). Per Wael's UX rule (every list-style answer must
+          // be a list, not a sentence), query action_rules directly and
+          // read each alert.
+          const match = String((action as any).match ?? '').trim().toLowerCase();
           try {
-            if (match) {
-              router.push({ pathname: '/alerts', params: { highlight: match } });
-              turnSpeechOverride = `Opening your ${match} alert.`;
-            } else {
-              router.push('/alerts');
-              turnSpeechOverride = 'Opening your alerts.';
+            const session = await getSessionWithTimeout();
+            if (!session?.user || !supabase) {
+              turnSpeechOverride = "I'm not signed in. Please sign in and try again.";
+              continue;
             }
+            const { data: rules, error: rulesErr } = await queryWithTimeout(
+              supabase.from('action_rules')
+                .select('id, trigger_type, trigger_config, action_type, action_config, label')
+                .eq('user_id', session.user.id)
+                .order('created_at', { ascending: false }),
+              15_000,
+              'list-rules-query',
+            );
+            if (rulesErr) {
+              console.error('[Orchestrator] LIST_RULES query failed:', rulesErr);
+              turnSpeechOverride = "I couldn't pull up your alerts. Try again in a moment.";
+              continue;
+            }
+            const allRules = (rules ?? []) as any[];
+            // Filter by match phrase if provided.
+            const filtered = match
+              ? allRules.filter(r => {
+                  const hay = JSON.stringify({
+                    label: r.label,
+                    trigger_config: r.trigger_config,
+                    action_config: r.action_config,
+                  }).toLowerCase();
+                  return hay.includes(match);
+                })
+              : allRules;
+            if (filtered.length === 0) {
+              turnSpeechOverride = match
+                ? `I don't have any alerts matching "${match}".`
+                : "You don't have any alerts set up yet.";
+              continue;
+            }
+            // Format each rule into a one-line description.
+            const describe = (r: any): string => {
+              const tc = r.trigger_config ?? {};
+              const ac = r.action_config ?? {};
+              if (r.trigger_type === 'location') {
+                const place = tc.place_name ?? r.label ?? 'somewhere';
+                const direction = tc.direction === 'leave' ? 'leave' : 'arrive at';
+                const ch = ac.channel === 'email' ? 'email' :
+                           ac.channel === 'whatsapp' ? 'WhatsApp' : 'text';
+                return `${ch} when you ${direction} ${place}`;
+              }
+              if (r.trigger_type === 'email') {
+                const from = tc.from_name || tc.from_email || tc.subject_keyword || 'matching email';
+                return `notify when an email arrives from ${from}`;
+              }
+              if (r.trigger_type === 'time') {
+                return `at ${tc.cron ?? tc.time ?? 'scheduled time'}: ${r.label ?? 'reminder'}`;
+              }
+              if (r.trigger_type === 'calendar') {
+                return `before calendar event: ${r.label ?? 'event'}`;
+              }
+              return r.label ?? `${r.trigger_type} alert`;
+            };
+            const lines = filtered.map((r, i) => `${i + 1}. ${describe(r)}`);
+            const intro = match
+              ? `I found ${filtered.length} ${filtered.length === 1 ? 'alert' : 'alerts'} matching "${match}":`
+              : `You have ${filtered.length} ${filtered.length === 1 ? 'alert' : 'alerts'} set up:`;
+            turnSpeechOverride = `${intro}\n${lines.join('\n')}`;
           } catch (err) {
-            console.error('[Orchestrator] LIST_RULES nav failed:', err);
-            turnSpeechOverride = "Tap the three-dot menu and then Alerts to see them.";
+            console.error('[Orchestrator] LIST_RULES read failed:', err);
+            turnSpeechOverride = "I couldn't pull up your alerts. Try again in a moment.";
           }
           continue;
         }

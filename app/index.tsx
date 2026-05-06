@@ -29,6 +29,7 @@ import {
   Linking as RNLinking,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { Vibration } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
 import { useTranslation } from 'react-i18next';
@@ -1133,8 +1134,12 @@ export default function HomeScreen() {
   const onChatLongPress = useCallback(() => {
     if (isInputLocked(status)) return;
     if (memoState !== 'idle') return;
-    // V57.11.6 — Heavy intensity. Medium was too subtle; Wael 2026-05-05
-    // didn't feel it on press-and-hold start.
+    // V57.11.7 — switch to RN Vibration API. expo-haptics' Heavy impact
+    // was still too subtle on Samsung even with system haptics at max.
+    // RN Vibration uses the OS vibrator API directly which Samsung
+    // honors more consistently. 80 ms is firm without being annoying.
+    // Wael 2026-05-06: maxed system haptics, still didn't feel Heavy.
+    Vibration.vibrate(80);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
     memoStartedAtRef.current = Date.now();
     startRecording();
