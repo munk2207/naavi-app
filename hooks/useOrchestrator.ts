@@ -1208,6 +1208,59 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       ];
       const claudeActions = Array.isArray(response.actions) ? response.actions : [];
       const claudeSpeech  = String(response.speech ?? '');
+
+      // V57.11.8 — Chain-store auto-fix (Wael 2026-05-06).
+      // Bug 11: prompt v57 → v58 → v59 cycle proved that prompt edits can't
+      // reliably keep Claude from asking "Which Walmart?" when the user
+      // clearly said "alert me at Walmart" with a bare brand. The agent's
+      // research said this is structural prompt drift — Claude's behavior
+      // varies turn-to-turn when prompts compete. Bridge solution: if the
+      // user's message contains a known chain brand AND Claude's speech is
+      // the "Which X?" clarification AND no SET_ACTION_RULE was emitted,
+      // synthesize the action programmatically using the bare brand. The
+      // orchestrator's SET_ACTION_RULE handler runs resolve-place which
+      // returns the multi-location picker — same UX the prompt was
+      // supposed to produce. Removed in a future build once Anthropic
+      // Structured Outputs migration locks in deterministic action emission.
+      const CHAIN_BRANDS = [
+        'walmart', 'costco', 'tim hortons', 'tims', 'starbucks',
+        'mcdonald', "mcdonald's", 'subway', 'wendy', "wendy's", 'burger king',
+        'kfc', 'pizza pizza', 'a&w', "harvey's", 'home depot', 'rona',
+        'lowe', "lowe's", 'ikea', 'best buy', 'canadian tire',
+        'loblaws', 'metro', 'sobeys', 'farm boy', 'freshco', 'food basics',
+        'shoppers drug mart', 'shoppers', 'rexall', 'pharmaprix',
+        'rbc', 'td', 'bmo', 'cibc', 'scotiabank', 'national bank',
+      ];
+      const lastUserMessage = String(userMessage ?? '').toLowerCase();
+      const matchedBrand = CHAIN_BRANDS.find(b => {
+        const re = new RegExp(`\\b${b.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i');
+        return re.test(lastUserMessage);
+      });
+      const isAlertIntent = /\b(?:alert|notify|text|tell|remind)\s+me\b|\bwhen\s+i\s+arrive\b/i.test(lastUserMessage);
+      const isClarifying = /\bwhich\s+(?:walmart|costco|tim\s+hortons|tims|starbucks|mcdonald|subway|wendy|burger king|kfc|pizza pizza|a&w|harvey|home depot|rona|lowe|ikea|best buy|canadian tire|loblaws|metro|sobeys|shoppers|rexall|rbc|td|bmo|cibc|scotiabank)\??\b|\bgive me a (?:street|neighborhood)\b|\bi need to know which\b/i.test(claudeSpeech);
+      const hasSetActionRule = claudeActions.some((a: any) => a?.type === 'SET_ACTION_RULE');
+      if (matchedBrand && isAlertIntent && isClarifying && !hasSetActionRule) {
+        console.warn(`[Orchestrator] chain-store auto-fix: synthesizing SET_ACTION_RULE for "${matchedBrand}" (Claude tried to ask "Which X?")`);
+        // Best effort: preserve the user's exact casing for the brand.
+        const brandRe = new RegExp(`\\b${matchedBrand.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'i');
+        const m = String(userMessage ?? '').match(brandRe);
+        const brandAsTyped = m ? m[0] : matchedBrand;
+        // Synthesize the action. Defaults match the personal-keyword
+        // shape (one-shot location alert with SMS to the user themselves).
+        const userPhoneCached = (typeof window !== 'undefined' ? '' : '');
+        const synth: any = {
+          type: 'SET_ACTION_RULE',
+          trigger_type: 'location',
+          trigger_config: { place_name: brandAsTyped, direction: 'arrive', dwell_minutes: 2 },
+          action_type: 'sms',
+          action_config: { body: `You've arrived at ${brandAsTyped}.` },
+          label: `${brandAsTyped} alert`,
+          one_shot: true,
+        };
+        claudeActions.push(synth);
+        turnSpeechOverride = `Pulling up nearby ${brandAsTyped} options.`;
+      }
+
       for (const check of phantomCommitChecks) {
         if (check.verbRe.test(claudeSpeech)) {
           const hasMatchingAction = claudeActions.some((a: any) => a?.type === check.needsType);

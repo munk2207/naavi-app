@@ -3099,13 +3099,25 @@ const styles = StyleSheet.create({
   memoBtnText: {
     fontSize: 22,
   },
+  // V57.11.8 — orange Stop button uses absolute positioning so a long
+  // Naavi reply (or keyboard pressure) can't push it off-screen below
+  // the input row. Wael 2026-05-06: long schedule reply caused the
+  // button to render initially then get cropped as ScrollView content
+  // grew. Now it floats at a fixed position above the input row,
+  // always visible while orangeVisible is true.
   stopSpeakingBtn: {
-    alignSelf: 'center',
+    position: 'absolute',
+    bottom: 130,             // sits above the input row + action button row
+    left: '50%',
+    marginLeft: -70,         // half of width (140/2) — centers horizontally
+    width: 140,
     backgroundColor: Colors.alert,
     borderRadius: 22,
     paddingHorizontal: 20,
     paddingVertical: 10,
-    marginBottom: 8,
+    zIndex: 100,
+    elevation: 8,
+    alignItems: 'center',    // centers the inner Text
   },
   stopSpeakingText: {
     color: '#fff',

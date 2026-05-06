@@ -85,3 +85,34 @@ export function findActionInRawText(rawText: string, type: string): any | null {
     return null;
   }
 }
+
+/**
+ * V57.11.7 — extract Claude's speech (the user-facing reply text) from
+ * the rawText JSON. Used by prompt-regression tests that need to assert
+ * speech content does or does not contain a phrase.
+ */
+export function extractSpeech(rawText: string): string {
+  if (typeof rawText !== 'string') return '';
+  const cleaned = rawText
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    return typeof parsed.speech === 'string' ? parsed.speech : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * V57.11.7 — assert speech does NOT match a regex (case-insensitive
+ * unless the pattern itself specifies). Throws if the rawText's speech
+ * contains the pattern.
+ */
+export function expectSpeechNotMatch(rawText: string, pattern: RegExp, label: string) {
+  const speech = extractSpeech(rawText);
+  if (pattern.test(speech)) {
+    throw new Error(`${label}: speech should NOT match ${pattern}, but got: "${speech.slice(0, 200)}"`);
+  }
+}
