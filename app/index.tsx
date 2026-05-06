@@ -79,7 +79,7 @@ import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
 import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout, getCachedUserId } from '@/lib/invokeWithTimeout';
 import { justForegrounded, msSinceForeground, getLifecycleSession } from '@/lib/appLifecycle';
-import { remoteLog } from '@/lib/remoteLog';
+import { remoteLog, newDiagSession } from '@/lib/remoteLog';
 
 // ─── Integrations data ────────────────────────────────────────────────────────
 
@@ -1133,7 +1133,9 @@ export default function HomeScreen() {
   const onChatLongPress = useCallback(() => {
     if (isInputLocked(status)) return;
     if (memoState !== 'idle') return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    // V57.11.6 — Heavy intensity. Medium was too subtle; Wael 2026-05-05
+    // didn't feel it on press-and-hold start.
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
     memoStartedAtRef.current = Date.now();
     startRecording();
   }, [status, memoState, startRecording]);
@@ -1245,6 +1247,17 @@ export default function HomeScreen() {
     Keyboard.dismiss();
     const text = (inputTextRef.current || inputText).trim();
     console.log('[handleSend] inputText ref=', JSON.stringify(inputTextRef.current), 'state=', JSON.stringify(inputText), 'trimmed=', JSON.stringify(text));
+    // V57.11.6 — bubble-truncation diagnostic. Log the typed-path entry
+    // values so we can see whether ref / state / trimmed differ when
+    // "meeting?" disappears between the input field and the bubble.
+    remoteLog(newDiagSession(), 'handle-send-typed', {
+      refLen: (inputTextRef.current ?? '').length,
+      refTail: (inputTextRef.current ?? '').slice(-30),
+      stateLen: inputText.length,
+      stateTail: inputText.slice(-30),
+      trimmedLen: text.length,
+      trimmedTail: text.slice(-30),
+    });
     // V57.11 — Send is gated by isSendLocked (looser than isInputLocked).
     // Mic / hands-free / Visits are still under the full input lock; only
     // typed-text Send is allowed during 'speaking' and 'answer_active' so
@@ -2207,12 +2220,37 @@ export default function HomeScreen() {
                 const lockForCurrentMode = hasText ? sendModeLocked : voiceModeLocked;
                 const disabled = isTranscribing || (lockForCurrentMode && !isRecording);
                 const onPress = () => {
+                  // V57.11.6 — mic-Stop-freeze diagnostic. Wael 2026-05-05:
+                  // Stop button froze, force-close required. Log the
+                  // state at every tap so we can see WHAT was true when
+                  // the button became unresponsive.
+                  remoteLog(newDiagSession(), 'mic-button-tap', {
+                    hasText,
+                    isRecording,
+                    isTranscribing,
+                    status,
+                    inputLocked,
+                    sendModeLocked,
+                    voiceModeLocked,
+                    lockForCurrentMode,
+                    disabled,
+                    msSinceRecordStart: isRecording ? Date.now() - memoStartedAtRef.current : -1,
+                  });
                   if (hasText && !isRecording && !isTranscribing) { handleSend(); return; }
                   if (isRecording) {
                     // Ignore stop taps within 1500ms of starting — prevents double-fire on web
                     if (Date.now() - memoStartedAtRef.current < 1500) return;
                     stopRecording(async (transcript) => {
                       if (!transcript.trim()) return;
+                      // V57.11.6 — bubble-truncation diagnostic for the
+                      // voice path: log the transcript exactly as
+                      // received from useWhisperMemo before we pass it
+                      // to send().
+                      remoteLog(newDiagSession(), 'mic-transcript-received', {
+                        len: transcript.length,
+                        head: transcript.slice(0, 60),
+                        tail: transcript.slice(-30),
+                      });
                       setMemoTranscript(transcript);
                       await send(transcript);
                       setTimeout(() => setMemoTranscript(null), 5000);

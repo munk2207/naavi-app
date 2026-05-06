@@ -429,7 +429,20 @@ async function fetchLiveCalendarEvents(
       + `?singleEvents=true&orderBy=startTime&maxResults=50`
       + `&timeMin=${encodeURIComponent(timeMin.toISOString())}`
       + `&timeMax=${encodeURIComponent(timeMax.toISOString())}`;
-    const eventsRes = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    // V57.11.6 — explicit Cache-Control: no-cache + Pragma: no-cache so
+    // Google Calendar API bypasses its CDN cache and returns fresh data.
+    // Without this, recently-edited event fields (e.g., the location
+    // field the user just changed) can read stale for up to ~30s.
+    // Wael 2026-05-05: changed Hussein meeting location in Google
+    // Calendar, asked Naavi "navigate to my next meeting" → Naavi read
+    // the OLD location.
+    const eventsRes = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
     if (!eventsRes.ok) return [];
     const eventsData = await eventsRes.json();
     const items = (eventsData?.items ?? []) as Array<{

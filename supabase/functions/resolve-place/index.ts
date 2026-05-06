@@ -307,7 +307,22 @@ serve(async (req) => {
     // saved-place multi-match landed above (we'd have returned earlier).
     if (bareBrand && specificResults.length >= 2) {
       console.log(`[resolve-place] bare-brand fresh multi: ${specificResults.length} matches for "${placeName}"`);
-      const candidates = specificResults.slice(0, 5).map(r => {
+      // V57.11.6 — dedupe by lat/lng rounded to 4 decimals (about 11 m).
+      // Wael 2026-05-05 saw 6 Walmarts in the picker with #2 and #6 at the
+      // same address ("1370 Michael St"). Different Google Places IDs at
+      // the same physical location. Dedupe BEFORE slicing, then re-slice
+      // to 5. Belt-and-braces — the .slice(0, 5) was supposed to cap at 5
+      // but a non-empty 6th was sneaking through; the explicit re-slice
+      // after dedupe enforces the ceiling.
+      const seen = new Set<string>();
+      const deduped: any[] = [];
+      for (const r of specificResults) {
+        const key = `${Math.round(r.geometry.location.lat * 10000)},${Math.round(r.geometry.location.lng * 10000)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        deduped.push(r);
+      }
+      const candidates = deduped.slice(0, 5).map(r => {
         const name = (typeof r.name === 'string' && r.name.trim())
           ? r.name.trim()
           : (typeof r.formatted_address === 'string' ? r.formatted_address.trim() : placeName);
