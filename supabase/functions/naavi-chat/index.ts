@@ -178,6 +178,55 @@ function convertLocationToolToActionRule(
   return result;
 }
 
+// ── Fallback speech for tool-only Claude responses (Bug E fix, V57.12.1) ─────
+//
+// Phase 2 structured outputs migration revealed that Anthropic Haiku
+// occasionally emits ONLY tool_use blocks without any companion text block,
+// for certain tool types (DELETE_RULE, DELETE_EVENT, SET_REMINDER,
+// SET_ACTION_RULE non-location). The orchestrator then renders an empty
+// chat turn and the user gets no feedback that the action succeeded.
+//
+// This helper synthesises a brief, action-specific confirmation when
+// `speechBlocks` is empty but `actions[]` is non-empty. The bubble always
+// shows SOMETHING, even if Claude itself failed to narrate.
+//
+// Templates intentionally short — the cards already convey specifics
+// (event title, rule label, etc.). Speech is just confirmation that
+// something happened.
+function buildFallbackSpeech(actions: any[]): string {
+  if (!Array.isArray(actions) || actions.length === 0) return '';
+  // Pick the first action's type for the headline. If a turn carries
+  // multiple actions (e.g. REMEMBER + CREATE_EVENT date-fact fanout) the
+  // first is usually the most user-meaningful.
+  const first = actions[0];
+  const type = String(first?.type ?? '');
+  switch (type) {
+    case 'SET_ACTION_RULE': return 'Alert set.';
+    case 'DELETE_RULE':     return actions.length > 1 ? 'Done — deleted those alerts.' : 'Alert deleted.';
+    case 'CREATE_EVENT':    return 'Added to your calendar.';
+    case 'DELETE_EVENT':    return 'Calendar event deleted.';
+    case 'SET_REMINDER':    return 'Reminder set.';
+    case 'REMEMBER':        return "Got it. I'll remember that.";
+    case 'DELETE_MEMORY':   return "I've removed that.";
+    case 'DRAFT_MESSAGE':   return "I've drafted that. Say yes to send, or tell me what to change.";
+    case 'LIST_RULES':      return 'Here are your alerts.';
+    case 'LIST_READ':       return 'Here it is.';
+    case 'LIST_CREATE':     return 'List created.';
+    case 'LIST_ADD':        return 'Added to the list.';
+    case 'LIST_REMOVE':     return 'Removed from the list.';
+    case 'GLOBAL_SEARCH':   return 'Looking that up.';
+    case 'DRIVE_SEARCH':    return 'Searching your Drive.';
+    case 'SAVE_TO_DRIVE':   return 'Saved to your Drive.';
+    case 'ADD_CONTACT':     return 'Contact added.';
+    case 'SCHEDULE_MEDICATION': return 'Medication schedule added.';
+    case 'FETCH_TRAVEL_TIME':   return 'Looking up travel time.';
+    case 'SPEND_SUMMARY':       return 'Calculating that for you.';
+    case 'UPDATE_MORNING_CALL': return 'Morning call updated.';
+    case 'START_CALL_RECORDING':return 'Recording started.';
+    default:                return 'Got it.';
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function jsonResponse(data: unknown, status = 200) {
@@ -991,11 +1040,26 @@ Deno.serve(async (req) => {
       return { type: actionType, ...(b.input ?? {}) };
     }).filter((a: any) => a !== null);
 
+    // V57.12.1 Bug E fix — Haiku occasionally emits tool_use without a
+    // companion text block, leaving speech empty and the chat blank.
+    // When that happens, synthesize a short action-specific confirmation
+    // so the user always gets feedback. Doesn't override Claude's own
+    // narration when present.
+    const speech = (speechBlocks && speechBlocks.trim().length > 0)
+      ? speechBlocks
+      : buildFallbackSpeech(actions);
+    if (!speechBlocks.trim() && actions.length > 0) {
+      console.log(
+        `[naavi-chat] Bug E fallback fired — empty speech, ${actions.length} actions, ` +
+        `first=${actions[0]?.type ?? '?'} → "${speech}"`
+      );
+    }
+
     // Backward-compat rawText: orchestrator's phantom-action regex still reads
     // this. Synthesize a JSON-flavored representation so existing parsers
     // (findActionInRawText, extractSpeech, mobile parseResponse) keep working.
     let rawText = JSON.stringify({
-      speech: speechBlocks,
+      speech,
       actions,
       pendingThreads: [],
     });
@@ -1003,7 +1067,7 @@ Deno.serve(async (req) => {
     const usage = (response as any).usage ?? {};
     console.log(
       `[timing] ${elapsed()} | Claude call done | Claude=${claudeMs}ms | ` +
-      `speech=${speechBlocks.length}c | tool_calls=${actions.length} | ` +
+      `speech=${speech.length}c (raw=${speechBlocks.length}c) | tool_calls=${actions.length} | ` +
       `stop=${(response as any).stop_reason ?? '?'}`
     );
     console.log(`[cache-debug] usage=${JSON.stringify(usage)}`);

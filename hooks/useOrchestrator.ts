@@ -41,7 +41,14 @@ const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 // Affirmative / negative patterns for the pending-location confirmation turn.
 // Kept tight so ambiguous replies fall through to the clarification branch.
 const AFFIRMATIVE_RE = /^(yes|yeah|yep|yup|sure|confirm|confirmed|correct|ok|okay|alright|do it|go ahead|set it|please|please do)[.!?]*$/i;
-const NEGATIVE_RE    = /^(no|nope|cancel|never ?mind|stop|forget it|don[']?t)[.!?]*$/i;
+// V57.12.1 Bug D fix — relaxed from strict-anchor to leading-word match
+// with optional "please" prefix. Previous regex required the message to be
+// EXACTLY one of the negative words (or that word + punctuation). That
+// rejected natural phrasings like "cancel that", "please cancel", "stop
+// this", as well as auto-correct / voice transcription artifacts. Wael
+// 2026-05-06 — pending-location state survived 31 min because his "cancel"
+// input variants kept missing the regex.
+const NEGATIVE_RE    = /^\s*(?:please\s+)?(no|nope|cancel|never ?mind|stop|forget it|don[']?t)\b/i;
 
 // Fresh-command pattern — detects when the user has clearly started a NEW
 // rule-creation command rather than clarifying the pending one. Prevents
@@ -372,6 +379,12 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       canonical_alias?: string;
     }>;
     candidatesSource?: 'memory' | 'fresh';
+    // V57.12.1 Bug B fix — timestamp at initial creation. Pending state
+    // older than 5 minutes is treated as abandoned and cleared on next
+    // intercept entry, so an abandoned picker can't hijack future
+    // unrelated questions (Wael 2026-05-06: 31 min old picker hijacked
+    // his calendar query).
+    createdAt: number;
   } | null>(null);
 
   // Cross-turn state for DELETE_RULE disambiguation. When a delete matched
@@ -587,6 +600,26 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     if (pendingLocationRef.current && supabase) {
       const pending = pendingLocationRef.current;
       const msg = userMessage.trim();
+
+      // V57.12.1 Bugs A, B, C fix — escape + timeout check at intercept entry.
+      // Bug B: pending-location state with no timeout would survive across
+      //   many minutes / many turns, hijacking unrelated questions into
+      //   the clarification path. 5-minute auto-expire prevents that.
+      // Bugs A + C: when user types a question / fresh command, drop pending
+      //   and let Claude answer normally — instead of falling into the
+      //   clarification path that re-resolved with a polluted query and
+      //   silently re-established pending. This check now applies BEFORE
+      //   any of the picker / resolved / clarification sub-states.
+      const ageMs = Date.now() - (pending.createdAt ?? 0);
+      const isStale  = ageMs > 5 * 60 * 1000;
+      const isEscape = QUESTION_ESCAPE_RE.test(msg) || FRESH_COMMAND_RE.test(msg);
+      if (isStale || isEscape) {
+        if (isStale)  console.log(`[Orchestrator] pending location expired (${Math.round(ageMs/1000)}s old) — dropping`);
+        if (isEscape) console.log('[Orchestrator] pending location dropped — escape pattern at intercept entry');
+        pendingLocationRef.current = null;
+        // Fall through to normal Claude flow (skip the entire intercept body
+        // below). Use a labeled block to avoid re-indenting ~360 lines.
+      } else {
       const isYes = AFFIRMATIVE_RE.test(msg);
       const isNo  = NEGATIVE_RE.test(msg);
 
@@ -951,6 +984,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           return;
         }
       }
+      } // V57.12.1 — close the escape-or-process else wrapper
     }
     // ── end pending location handler ──────────────────────────────────────────
 
@@ -1960,6 +1994,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                         radius_meters:   data.radius_meters,
                       },
                       attempts: 1,
+                      createdAt: Date.now(), // V57.12.1 Bug B
                     };
                     locationIntercepted = true;
                     turnSpeechOverride = `Found ${data.place_name}${data.address ? ' at ' + data.address : ''}. Say yes to set the alert, cancel to skip, or give me a different area.`;
@@ -1980,6 +2015,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                       candidates: cands,
                       candidatesSource: data.source === 'memory' ? 'memory' : 'fresh',
                       attempts: 1,
+                      createdAt: Date.now(), // V57.12.1 Bug B
                     };
                     locationIntercepted = true;
                     const sourcePhrase = data.source === 'memory' ? 'from your saved places' : 'nearby';
@@ -2016,6 +2052,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                       placeName,
                       resolved: null,
                       attempts: 1,
+                      createdAt: Date.now(), // V57.12.1 Bug B
                     };
                     locationIntercepted = true;
                     turnSpeechOverride = `I couldn't find "${placeName}" near you. Tell me a different street or neighborhood, or say cancel to stop.`;
