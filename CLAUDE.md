@@ -128,7 +128,7 @@ If in doubt, ASK before creating parallel config.
 
 ### WHERE TO START
 
-**Most recent handoff:** `docs/SESSION_HANDOFF_2026-05-06_FIX_AAB.md` — **READ THIS FIRST**. Long-running session 2026-05-05 → 06 that shipped V57.11.4 → V57.11.8 (build 150 currently on Wael's phone) and added a permanent prompt-regression test suite. The headline next-session priority is the **Anthropic Structured Outputs migration** (durable fix for the prompt-drift cycle the session uncovered).
+**Most recent handoff:** `docs/SESSION_HANDOFF_2026-05-06_STRUCTURED_OUTPUTS_V57.12.md` — **READ THIS FIRST**. Session 2026-05-06 (afternoon) that shipped the **Anthropic Structured Outputs migration** end-to-end (Phases 1-5) → V57.12.0 build 151 on Wael's phone. Auto-tester reached **52/0/0/0 — first clean run of the project**. Walmart + Tim Hortons regression tests now pass via enum-constrained `set_location_rule_chain` tool. ~200 lines of band-aid code deleted from the orchestrator. Voice server (Railway) migrated in parallel. One functional regression found post-install (picker addresses — pre-existing data/schema gap) queued as #1 for next session. Prior handoff (V57.11.4 → V57.11.8): `docs/SESSION_HANDOFF_2026-05-06_FIX_AAB.md`.
 
 **Top of next session — V57.11.9 bundle (priority order):**
 
@@ -148,7 +148,7 @@ If in doubt, ASK before creating parallel config.
 
 **Pending blocked:** Picovoice Eagle (approval), Polly Joanna (AWS account), Maestro full-suite (emulator Internal Testing install), Geofence reliability (phone reboot pending), Phase 2 demo data.
 
-**Last AAB on Wael's phone:** V57.11.8 build 150, installed 2026-05-06.
+**Last AAB on Wael's phone:** V57.12.0 build 151, installed 2026-05-06.
 **Last AAB on Robert's phone:** V56.6 (build 115), installed 2026-04-28. **Do NOT promote V57.x to Robert until geofence reliability is proven on Wael's phone.**
 
 **Prompt-regression test suite** (NEW this session): `tests/catalogue/prompt-regression.ts` — 8 tests wired into `npm run test:auto`. Locks in known-good Claude action emissions. **Future prompt edits MUST keep this suite green.** Don't add a prompt rule without a corresponding regression test — that's how the v57→v58→v59 cycle started.
