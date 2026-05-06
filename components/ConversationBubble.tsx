@@ -43,11 +43,21 @@ export function ConversationBubble({ role, content, timestamp }: Props) {
         {isNaavi && <Text style={styles.label}>MyNaavi</Text>}
         {isNaavi ? (
           <View style={styles.naaviPlain}>
-            <Text style={styles.naaviText}>{content}</Text>
+            {/* V57.11.8 — textBreakStrategy="simple" fixes the chronic
+                Samsung S22 / Android Yoga Text-intrinsic-width measurement
+                bug. Five layout attempts in V57.10.3..V57.11.7 fought
+                container width; the actual cause is Android's default
+                "highQuality" break strategy reporting a wrong intrinsic
+                width on Samsung's One UI Roboto. "simple" uses greedy
+                line-break, no width-balancing pass, intrinsic measurement
+                reports correctly. Android-only; ignored on iOS.
+                Evidence: react-native-paper #3472, #4395; react-native
+                #35039. Investigated 2026-05-06. */}
+            <Text style={styles.naaviText} textBreakStrategy="simple">{content}</Text>
           </View>
         ) : (
           <View style={[styles.bubble, styles.robertBubble]}>
-            <Text style={styles.robertText}>{content}</Text>
+            <Text style={styles.robertText} textBreakStrategy="simple">{content}</Text>
           </View>
         )}
         {timestamp && (
@@ -114,17 +124,13 @@ const styles = StyleSheet.create({
     fontSize: Typography.body,
     lineHeight: Typography.lineHeightBody,
     color: Colors.textPrimary,
-    // V57.11.7 — see column comment. Numeric maxWidth on the Text
-    // element bypasses the Yoga intrinsic-width measurement bug.
-    maxWidth: BUBBLE_MAX_WIDTH - 16,
+    // V57.11.7's maxWidth removed in V57.11.8 — was a no-op. The actual
+    // fix is textBreakStrategy="simple" on the Text element (see render).
   },
   robertText: {
     fontSize: Typography.body,
     lineHeight: Typography.lineHeightBody,
     color: Colors.textPrimary,
-    // V57.11.7 — see column comment. -32 accounts for the robertBubble's
-    // paddingHorizontal: 16 on both sides.
-    maxWidth: BUBBLE_MAX_WIDTH - 32,
   },
   timestamp: {
     fontSize: Typography.caption,
