@@ -117,37 +117,60 @@ serve(async (req) => {
         // Follows the ALERT FAN-OUT rule (project_naavi_alert_fanout.md).
         const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
-        // SMS
-        fetch(`${supabaseUrl}/functions/v1/send-sms`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({ to: reminder.phone_number, body: smsBody, user_id: reminder.user_id, source: 'reminder' }),
-        }).catch(err => console.error(`[check-reminders] SMS failed:`, err));
+        // V57.12.1 Bug I — surface non-2xx responses so silent fan-out
+        // failures (missing env var, expired Twilio template, etc.) show
+        // up in logs instead of vanishing. .catch() only catches network
+        // errors; an HTTP 502 from send-sms was being swallowed before.
+        const fanFetch = async (label: string, url: string, body: any) => {
+          try {
+            const res = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+              body: JSON.stringify(body),
+            });
+            if (!res.ok) {
+              const errText = await res.text().catch(() => '<no body>');
+              console.error(`[check-reminders] ${label} HTTP ${res.status}: ${errText.slice(0, 200)}`);
+            } else {
+              console.log(`[check-reminders] ${label} ok`);
+            }
+          } catch (err) {
+            console.error(`[check-reminders] ${label} threw:`, err);
+          }
+        };
 
-        // WhatsApp
-        fetch(`${supabaseUrl}/functions/v1/send-sms`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({ to: reminder.phone_number, body: smsBody, channel: 'whatsapp', user_id: reminder.user_id, source: 'reminder' }),
-        }).catch(err => console.error(`[check-reminders] WhatsApp failed:`, err));
+        // V57.12.1 — look up the user's name for WhatsApp template substitution.
+        // Without recipient_name passed in, send-sms defaults to "there" which
+        // can cause template rejection in some Twilio configurations.
+        const { data: settings } = await adminClient
+          .from('user_settings')
+          .select('name')
+          .eq('user_id', reminder.user_id)
+          .maybeSingle();
+        const recipientName = settings?.name || 'there';
 
-        // Email (via user's own Gmail OAuth)
-        fetch(`${supabaseUrl}/functions/v1/send-user-email`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({
+        // Self-reminder: SMS + WhatsApp + Email + Push (all four channels).
+        // Awaited via Promise.allSettled so failures don't cascade and we
+        // still mark the reminder fired even if one channel is broken.
+        await Promise.allSettled([
+          fanFetch('SMS', `${supabaseUrl}/functions/v1/send-sms`, {
+            to: reminder.phone_number, body: smsBody,
+            user_id: reminder.user_id, source: 'reminder',
+          }),
+          fanFetch('WhatsApp', `${supabaseUrl}/functions/v1/send-sms`, {
+            to: reminder.phone_number, body: smsBody, channel: 'whatsapp',
+            recipient_name: recipientName, sender_name: 'Naavi',
+            user_id: reminder.user_id, source: 'reminder',
+          }),
+          fanFetch('Email', `${supabaseUrl}/functions/v1/send-user-email`, {
             user_id: reminder.user_id,
             subject: `Reminder: ${reminder.title}`,
             body: smsBody,
           }),
-        }).catch(err => console.error(`[check-reminders] Email failed:`, err));
-
-        // Push notification — endpoint is send-push-notification (not send-push)
-        fetch(`${supabaseUrl}/functions/v1/send-push-notification`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({ user_id: reminder.user_id, title: 'Naavi Reminder', body: smsBody }),
-        }).catch(err => console.error(`[check-reminders] Push failed:`, err));
+          fanFetch('Push', `${supabaseUrl}/functions/v1/send-push-notification`, {
+            user_id: reminder.user_id, title: 'Naavi Reminder', body: smsBody,
+          }),
+        ]);
       }
 
       // Mark as fired
