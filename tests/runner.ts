@@ -36,6 +36,7 @@ import { waelTests } from './catalogue/wael-cases';
 import { multiUserTests } from './catalogue/multiuser';
 import { listsTests } from './catalogue/lists';
 import { promptRegressionTests } from './catalogue/prompt-regression';
+import { dataIntegrityTests } from './catalogue/data-integrity';
 
 // ────────────────────────────────────────────────────────────────────────────
 // .env loader (avoids adding dotenv as a dependency).
@@ -93,6 +94,7 @@ const ALL_TESTS: TestCase[] = [
   ...multiUserTests,
   ...listsTests,
   ...promptRegressionTests,
+  ...dataIntegrityTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────

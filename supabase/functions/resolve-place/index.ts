@@ -1,67 +1,46 @@
 /**
- * resolve-place Edge Function (v2 — verified-address-only)
+ * resolve-place Edge Function (v3 — data-integrity hardened, V57.13.1)
  *
- * Looks up a named place and returns coordinates, or indicates that the
- * user must confirm/clarify. Never silently caches a Google guess.
+ * Looks up a named place and returns coordinates + address, or indicates that
+ * the user must confirm/clarify. Writes are coords-keyed: if a place at the
+ * same physical location already exists for this user, the new alias is
+ * appended to that row's `aliases` array — no duplicate row is created.
+ *
+ * Data integrity contract (matches DB constraints in
+ * 20260507_user_places_integrity.sql):
+ *
+ *   - One row per (user_id, ROUND(lat,5), ROUND(lng,5))
+ *   - aliases text[] holds every name the user has called this place
+ *   - address text holds the Google-Places formatted_address (always populated
+ *     on new writes; legacy rows may have NULL until backfilled or re-saved)
+ *
+ * This function is the ONLY caller-visible write path to user_places. RLS
+ * blocks direct writes from the mobile app and voice server. Any future
+ * write logic must come through here.
  *
  * Lookup order:
- *   1. Personal keywords ("home"/"house"/"my home" → home_address;
- *      "office"/"work"/"my office" → work_address). If the user has the
- *      address set, resolve that address via Places API. If not set,
- *      return status='personal_unset' so Claude can tell the user to add
- *      it in Settings.
- *   2. Cache — user_places where (user_id, alias) matches the slugified
- *      place_name. Instant hit if a previous conversation saved it.
- *   3. Fresh — Google Places API biased by reference coordinates (from
- *      caller) or by the user's home_address if they have one. Returns
- *      the result WITHOUT writing to cache unless save_to_cache=true.
+ *   1. Personal keywords ("home"/"office" → user_settings.home_address /
+ *      .work_address). If unset, return personal_unset.
+ *   2. Memory — user_places where the slugified spoken name matches any
+ *      element of aliases (or fuzzy place_name match for bare brands).
+ *   3. Fresh — Google Places API biased by reference coords (caller-supplied
+ *      or user's home_address). Returns the result WITHOUT writing to cache
+ *      unless save_to_cache=true.
  *
- * Caching is explicit: callers must set save_to_cache=true AFTER the
- * user has confirmed the address. When saving, two rows are written:
- *   - Row A: slugified spoken name (what the user called the place)
- *   - Row B: slugified canonical name (what Places API named it)
- * Both point to the same coordinates. Subsequent lookups by either
- * name will hit the cache.
+ * Save path (save_to_cache=true):
+ *   1. Compute rounded coords (5 decimals = ~1.1m precision).
+ *   2. SELECT existing row for this user at those rounded coords.
+ *   3. If found → UPDATE: append spoken alias (and canonical, if different)
+ *      to aliases array; refresh last_used_at.
+ *   4. If not found → INSERT new row with aliases populated and address from
+ *      Google Places. The DB UNIQUE (user_id, ROUND(lat,5), ROUND(lng,5))
+ *      makes a duplicate-coord INSERT physically impossible.
  *
- * Request body:
- *   {
- *     user_id:         "uuid",                  // required
- *     place_name:      "Costco Merivale",       // required, what the user said
- *     reference_lat?:  number,                  // optional bias anchor
- *     reference_lng?:  number,
- *     radius_meters?:  number,                  // default 100
- *     save_to_cache?:  boolean,                 // default false
- *     canonical_alias?: string                  // only used when save_to_cache=true
- *   }
+ * Request body: same shape as v2.
  *
- * Response:
- *   Single-result:
- *   {
- *     status:        'ok' | 'personal_unset' | 'not_found',
- *     source:        'memory' | 'fresh' | 'settings_home' | 'settings_work' | null,
- *     alias:         "costco-merivale",
- *     canonical_alias?: "costco-wholesale",
- *     place_name:    "Costco Wholesale",
- *     address?:      "1280 Merivale Rd, Ottawa, ON",
- *     lat:           number,
- *     lng:           number,
- *     radius_meters: number
- *   }
- *
- *   Multi-result (V57.11.3 — bare-brand picker):
- *   {
- *     status:     'multiple',
- *     source:     'memory' | 'fresh',
- *     candidates: [
- *       { place_name, address, lat, lng, radius_meters, alias?, canonical_alias? },
- *       ...
- *     ]
- *   }
- *   Returned when the user said a bare brand name (≤2 words, no street /
- *   neighborhood / digit) and either:
- *     - user_places has 2+ rows matching the brand → source='memory'
- *     - Google Places returns 2+ specific-type results → source='fresh'
- *   Caller presents the list and asks the user to pick by number or street.
+ * Response: same shape as v2 PLUS:
+ *   - aliases?: string[]   — full alias array (single-result responses)
+ *   - candidates[].address — now populated for memory hits too
  */
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
@@ -75,8 +54,6 @@ const corsHeaders = {
 const PLACES_TEXT_SEARCH = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
 const PLACES_GEOCODE     = 'https://maps.googleapis.com/maps/api/geocode/json';
 
-// Personal-keyword map — aliases that resolve from user_settings columns.
-// Keys are slugified forms; compare against slugify(place_name).
 const PERSONAL_HOME = new Set([
   'home', 'my-home', 'house', 'the-house', 'my-house', 'my-place', 'home-address',
 ]);
@@ -88,17 +65,12 @@ function slugify(s: string): string {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80);
 }
 
-// V57.11.3 — bare-brand detection. A "bare brand" is a short query with no
-// street / neighborhood / digit disambiguators. When user says a bare brand
-// AND there are 2+ candidates (saved or fresh), return them as 'multiple' so
-// the caller can present a numbered list. Mirrors the voice server's S9d
-// guard but applied to memory-multi and fresh-multi consistently.
 function isBareBrand(spoken: string): boolean {
   const lower = spoken.toLowerCase().trim();
   const wordCount = lower.split(/\s+/).filter(Boolean).length;
   if (wordCount > 2) return false;
   if (/\d/.test(lower)) return false;
-  const disambiguator = /\b(street|st|road|rd|ave|avenue|blvd|boulevard|drive|dr|lane|ln|way|near|at the|the one|north|south|east|west|downtown|merivale|kanata|orleans|bayshore|bel\s*air|carling|innes|bank|merivale)\b/i;
+  const disambiguator = /\b(street|st|road|rd|ave|avenue|blvd|boulevard|drive|dr|lane|ln|way|near|at the|the one|north|south|east|west|downtown|merivale|kanata|orleans|bayshore|bel\s*air|carling|innes|bank)\b/i;
   if (disambiguator.test(lower)) return false;
   return true;
 }
@@ -152,7 +124,6 @@ serve(async (req) => {
 
     const alias = slugify(placeName);
 
-    // ── Load user_settings once — used by personal keywords + reference fallback
     const { data: settings } = await admin
       .from('user_settings')
       .select('home_address, work_address')
@@ -162,17 +133,11 @@ serve(async (req) => {
     const homeAddress = settings?.home_address as string | null;
     const workAddress = settings?.work_address as string | null;
 
-    console.log(`[resolve-place] called with place_name="${placeName}" alias="${alias}" home_set=${!!homeAddress} work_set=${!!workAddress}`);
+    console.log(`[resolve-place v3] place_name="${placeName}" alias="${alias}" home_set=${!!homeAddress} work_set=${!!workAddress}`);
 
-    // ── (1) Personal keywords — resolve via saved address or report unset
+    // ── (1) Personal keywords ────────────────────────────────────────────────
     if (PERSONAL_HOME.has(alias)) {
-      console.log(`[resolve-place] personal HOME keyword matched. home_address="${homeAddress ?? '(null)'}"`);
-      if (!homeAddress) {
-        return jsonResponse({
-          status: 'personal_unset',
-          personal: 'home',
-        });
-      }
+      if (!homeAddress) return jsonResponse({ status: 'personal_unset', personal: 'home' });
       return await resolveByAddress({
         admin, apiKey, user_id, placeName, alias,
         addressQuery: homeAddress,
@@ -181,13 +146,7 @@ serve(async (req) => {
       });
     }
     if (PERSONAL_WORK.has(alias)) {
-      console.log(`[resolve-place] personal WORK keyword matched. work_address="${workAddress ?? '(null)'}"`);
-      if (!workAddress) {
-        return jsonResponse({
-          status: 'personal_unset',
-          personal: 'work',
-        });
-      }
+      if (!workAddress) return jsonResponse({ status: 'personal_unset', personal: 'work' });
       return await resolveByAddress({
         admin, apiKey, user_id, placeName, alias,
         addressQuery: workAddress,
@@ -196,30 +155,29 @@ serve(async (req) => {
       });
     }
 
-    // ── (2) Memory lookup — any alias this user has previously confirmed
-    // V57.11.3 — for bare-brand queries, also search by partial alias / name
-    // so the picker can offer multiple saved branches ("Costco Bel Air",
-    // "Costco Innes") when the user just says "Costco".
+    // ── (2) Memory lookup ────────────────────────────────────────────────────
+    // Match the spoken alias against ANY element of the aliases array, or
+    // fuzzy-match place_name for bare brands.
     const bareBrand = isBareBrand(placeName);
     if (bareBrand) {
-      const aliasPattern = `${alias}-%`;
-      const namePattern  = `%${placeName}%`;
       const { data: multi } = await admin
         .from('user_places')
-        .select('alias, place_name, lat, lng, radius_meters')
+        .select('aliases, place_name, address, lat, lng, radius_meters')
         .eq('user_id', user_id)
-        .or(`alias.eq.${alias},alias.ilike.${aliasPattern},place_name.ilike.${namePattern}`)
+        .or(`aliases.cs.{${alias}},place_name.ilike.%${placeName}%`)
         .order('last_used_at', { ascending: false })
         .limit(5);
 
       if (multi && multi.length >= 2) {
-        console.log(`[resolve-place] bare-brand memory multi: ${multi.length} matches for "${placeName}"`);
+        console.log(`[resolve-place v3] bare-brand memory multi: ${multi.length} matches for "${placeName}"`);
         return jsonResponse({
           status: 'multiple',
           source: 'memory',
-          candidates: multi.map(r => ({
-            alias: r.alias,
+          candidates: multi.map((r: any) => ({
+            alias: (r.aliases ?? [])[0] ?? slugify(r.place_name),
+            aliases: r.aliases ?? [],
             place_name: r.place_name,
+            address: r.address ?? null,
             lat: r.lat,
             lng: r.lng,
             radius_meters: r.radius_meters,
@@ -227,55 +185,59 @@ serve(async (req) => {
         });
       }
       if (multi && multi.length === 1) {
-        const c = multi[0];
-        await admin.from('user_places')
-          .update({ last_used_at: new Date().toISOString() })
-          .eq('user_id', user_id).eq('alias', c.alias);
-        console.log(`[resolve-place] bare-brand memory single: ${c.alias}`);
+        const c: any = multi[0];
+        const finalAliases = await mergeAliasesIfSaving({
+          admin, existing: c, user_id,
+          newAliases: [alias, canonicalAlias].filter(Boolean) as string[],
+          saveToCache,
+        });
         return jsonResponse({
           status: 'ok',
           source: 'memory',
-          alias: c.alias,
+          alias: finalAliases[0] ?? alias,
+          aliases: finalAliases,
           place_name: c.place_name,
+          address: c.address ?? null,
           lat: c.lat,
           lng: c.lng,
           radius_meters: c.radius_meters,
         });
       }
-      // 0 saved matches → fall through to fresh Google Places multi-search below
+      // 0 saved matches → fall through to fresh
     } else {
+      // Exact-alias memory lookup using array containment
       const { data: cached } = await admin
         .from('user_places')
-        .select('alias, place_name, lat, lng, radius_meters')
+        .select('aliases, place_name, address, lat, lng, radius_meters')
         .eq('user_id', user_id)
-        .eq('alias', alias)
+        .contains('aliases', [alias])
         .maybeSingle();
 
       if (cached) {
-        await admin.from('user_places')
-          .update({ last_used_at: new Date().toISOString() })
-          .eq('user_id', user_id)
-          .eq('alias', alias);
-
-        console.log(`[resolve-place] memory hit: ${alias}`);
+        const finalAliases = await mergeAliasesIfSaving({
+          admin, existing: cached as any, user_id,
+          newAliases: [alias, canonicalAlias].filter(Boolean) as string[],
+          saveToCache,
+        });
         return jsonResponse({
           status: 'ok',
           source: 'memory',
-          alias: cached.alias,
-          place_name: cached.place_name,
-          lat: cached.lat,
-          lng: cached.lng,
-          radius_meters: cached.radius_meters,
+          alias,
+          aliases: finalAliases,
+          place_name: (cached as any).place_name,
+          address: (cached as any).address ?? null,
+          lat: (cached as any).lat,
+          lng: (cached as any).lng,
+          radius_meters: (cached as any).radius_meters,
         });
       }
     }
 
-    // ── (3) Fresh resolve via Places API
+    // ── (3) Fresh resolve via Places API ────────────────────────────────────
     if (!apiKey) {
       return jsonResponse({ status: 'error', error: 'GOOGLE_PLACES_API_KEY not configured' }, 500);
     }
 
-    // Pick reference anchor: explicit caller coords > user home_address > nothing
     let biasLat: number | null = referenceLat;
     let biasLng: number | null = referenceLng;
     if ((biasLat === null || biasLng === null) && homeAddress) {
@@ -289,7 +251,7 @@ serve(async (req) => {
     const qs = new URLSearchParams({ query: placeName, key: apiKey });
     if (biasLat !== null && biasLng !== null && Number.isFinite(biasLat) && Number.isFinite(biasLng)) {
       qs.set('location', `${biasLat},${biasLng}`);
-      qs.set('radius', '50000'); // 50km bias radius
+      qs.set('radius', '50000');
     }
 
     const res = await fetch(`${PLACES_TEXT_SEARCH}?${qs.toString()}`);
@@ -301,19 +263,8 @@ serve(async (req) => {
     const allResults: any[] = Array.isArray(data.results) ? data.results : [];
     const specificResults = allResults.filter(isSpecificResult);
 
-    // V57.11.3 — bare-brand fresh-multi: when user said "Costco" (bare brand)
-    // and Google returned 2+ specific-type results, present them as a list
-    // so the user can pick by number or street name. Only kicks in when no
-    // saved-place multi-match landed above (we'd have returned earlier).
     if (bareBrand && specificResults.length >= 2) {
-      console.log(`[resolve-place] bare-brand fresh multi: ${specificResults.length} matches for "${placeName}"`);
-      // V57.11.6 — dedupe by lat/lng rounded to 4 decimals (about 11 m).
-      // Wael 2026-05-05 saw 6 Walmarts in the picker with #2 and #6 at the
-      // same address ("1370 Michael St"). Different Google Places IDs at
-      // the same physical location. Dedupe BEFORE slicing, then re-slice
-      // to 5. Belt-and-braces — the .slice(0, 5) was supposed to cap at 5
-      // but a non-empty 6th was sneaking through; the explicit re-slice
-      // after dedupe enforces the ceiling.
+      // Dedupe by rounded coords
       const seen = new Set<string>();
       const deduped: any[] = [];
       for (const r of specificResults) {
@@ -322,7 +273,7 @@ serve(async (req) => {
         seen.add(key);
         deduped.push(r);
       }
-      const candidates = deduped.slice(0, 5).map(r => {
+      const candidates = deduped.slice(0, 5).map((r: any) => {
         const name = (typeof r.name === 'string' && r.name.trim())
           ? r.name.trim()
           : (typeof r.formatted_address === 'string' ? r.formatted_address.trim() : placeName);
@@ -338,20 +289,14 @@ serve(async (req) => {
       return jsonResponse({ status: 'multiple', source: 'fresh', candidates });
     }
 
-    // Single-result path: take the first specific result, or 404.
     const first = specificResults[0];
     if (!first) {
-      console.log(`[resolve-place] no specific-type results for "${placeName}"`);
       return jsonResponse({ status: 'not_found' });
     }
 
     const lat = first.geometry.location.lat;
     const lng = first.geometry.location.lng;
 
-    // Prefer Google's canonical form (formatted_address or name) over
-    // the user's typed input — otherwise a typo gets echoed back to
-    // the user as the "found" address. Only fall back to placeName if
-    // both Google fields are missing.
     const resolvedName = (typeof first.name === 'string' && first.name.trim())
       ? first.name.trim()
       : (typeof first.formatted_address === 'string' && first.formatted_address.trim())
@@ -360,19 +305,20 @@ serve(async (req) => {
     const resolvedAddr  = first.formatted_address ?? null;
     const canonicalSlug = slugify(resolvedName);
 
-    // If save_to_cache, write BOTH alias rows
+    let aliasesAfterSave: string[] = Array.from(new Set([alias, canonicalAlias ?? canonicalSlug].filter(Boolean) as string[]));
+
     if (saveToCache) {
-      await writeBothAliases({
+      const saveResult = await saveOrMerge({
         admin, user_id,
         spokenAlias: alias,
         canonicalAlias: canonicalAlias ?? canonicalSlug,
         placeName: resolvedName,
+        address: resolvedAddr,
         lat, lng,
         radius: radiusOverride,
       });
-      console.log(`[resolve-place] cached (confirmed) "${placeName}" → ${resolvedName} @ ${lat},${lng}`);
-    } else {
-      console.log(`[resolve-place] fresh (unsaved) "${placeName}" → ${resolvedName} @ ${lat},${lng}`);
+      aliasesAfterSave = saveResult.aliases;
+      console.log(`[resolve-place v3] saved (${saveResult.action}) "${placeName}" → ${resolvedName} @ ${lat},${lng} aliases=[${aliasesAfterSave.join(',')}]`);
     }
 
     return jsonResponse({
@@ -380,6 +326,7 @@ serve(async (req) => {
       source: 'fresh',
       alias,
       canonical_alias: canonicalSlug,
+      aliases: aliasesAfterSave,
       place_name: resolvedName,
       address: resolvedAddr,
       lat,
@@ -388,34 +335,79 @@ serve(async (req) => {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('[resolve-place] Error:', msg);
+    console.error('[resolve-place v3] Error:', msg);
     return jsonResponse({ status: 'error', error: msg }, 500);
   }
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-async function geocodeAddress(address: string, apiKey: string): Promise<{ lat: number; lng: number } | null> {
+/**
+ * On a memory hit with save_to_cache=true, merge any new aliases into the
+ * existing row's aliases array AND update last_used_at. If save_to_cache is
+ * false, only refresh last_used_at.
+ *
+ * Critical for the integrity contract: every save_to_cache call must add
+ * its alias to the row, even when the place is already cached. Otherwise a
+ * user who calls a place by a new name (after an earlier save) would never
+ * see that new name added to the row.
+ *
+ * Returns the final aliases array on the row (echoed in the response).
+ */
+async function mergeAliasesIfSaving(opts: {
+  admin: any;
+  existing: { aliases?: string[]; lat: number; lng: number };
+  user_id: string;
+  newAliases: string[];
+  saveToCache: boolean;
+}): Promise<string[]> {
+  const existingAliases = opts.existing.aliases ?? [];
+  const now = new Date().toISOString();
+
+  if (!opts.saveToCache) {
+    // Just refresh last_used_at, don't merge
+    await opts.admin.from('user_places')
+      .update({ last_used_at: now })
+      .eq('user_id', opts.user_id)
+      .eq('lat', opts.existing.lat)
+      .eq('lng', opts.existing.lng);
+    return existingAliases;
+  }
+
+  const merged = Array.from(new Set([...existingAliases, ...opts.newAliases.filter(Boolean)]));
+  // Skip the UPDATE if nothing changed to keep this idempotent
+  if (merged.length === existingAliases.length) {
+    await opts.admin.from('user_places')
+      .update({ last_used_at: now })
+      .eq('user_id', opts.user_id)
+      .eq('lat', opts.existing.lat)
+      .eq('lng', opts.existing.lng);
+    return existingAliases;
+  }
+
+  await opts.admin.from('user_places')
+    .update({ aliases: merged, alias: merged[0], last_used_at: now })
+    .eq('user_id', opts.user_id)
+    .eq('lat', opts.existing.lat)
+    .eq('lng', opts.existing.lng);
+  return merged;
+}
+
+
+async function geocodeAddress(address: string, apiKey: string): Promise<{ lat: number; lng: number; formatted: string | null } | null> {
   try {
     const qs = new URLSearchParams({ address, key: apiKey });
     const res = await fetch(`${PLACES_GEOCODE}?${qs.toString()}`);
-    if (!res.ok) {
-      console.error(`[geocode] HTTP ${res.status} for "${address}"`);
-      return null;
-    }
+    if (!res.ok) return null;
     const data = await res.json();
-    if (data.status && data.status !== 'OK') {
-      console.error(`[geocode] API status="${data.status}" error="${data.error_message ?? 'none'}" for "${address}"`);
-      return null;
-    }
+    if (data.status && data.status !== 'OK') return null;
     const first = data.results?.[0];
     const lat = first?.geometry?.location?.lat;
     const lng = first?.geometry?.location?.lng;
+    const formatted = first?.formatted_address ?? null;
     if (typeof lat === 'number' && typeof lng === 'number') {
-      console.log(`[geocode] "${address}" → ${first.formatted_address ?? 'unknown'} @ ${lat},${lng}`);
-      return { lat, lng };
+      return { lat, lng, formatted };
     }
-    console.error(`[geocode] no results / bad shape for "${address}"`);
     return null;
   } catch (err) {
     console.error(`[geocode] exception for "${address}":`, err instanceof Error ? err.message : String(err));
@@ -444,69 +436,103 @@ async function resolveByAddress(opts: {
     return jsonResponse({ status: 'not_found' });
   }
 
+  let aliasesAfterSave: string[] = Array.from(new Set([opts.alias, opts.canonicalAlias ?? opts.alias].filter(Boolean) as string[]));
+
   if (opts.saveToCache) {
-    await writeBothAliases({
+    const saveResult = await saveOrMerge({
       admin: opts.admin,
       user_id: opts.user_id,
       spokenAlias: opts.alias,
       canonicalAlias: opts.canonicalAlias ?? opts.alias,
       placeName: opts.addressQuery,
+      address: coords.formatted ?? opts.addressQuery,
       lat: coords.lat,
       lng: coords.lng,
       radius: opts.radiusOverride,
     });
+    aliasesAfterSave = saveResult.aliases;
   }
 
   return jsonResponse({
     status: 'ok',
     source: opts.source,
     alias: opts.alias,
+    aliases: aliasesAfterSave,
     place_name: opts.addressQuery,
-    address: opts.addressQuery,
+    address: coords.formatted ?? opts.addressQuery,
     lat: coords.lat,
     lng: coords.lng,
     radius_meters: opts.radiusOverride,
   });
 }
 
-async function writeBothAliases(opts: {
+/**
+ * Coords-keyed write — the heart of the integrity contract.
+ *
+ * Looks up an existing row by (user_id, rounded lat/lng). If found, appends
+ * the new aliases to that row's array (idempotent — won't duplicate). If not
+ * found, inserts a new row with aliases populated and address always set.
+ *
+ * Returns the final aliases array on the row so the response can echo it.
+ */
+async function saveOrMerge(opts: {
   admin: any;
   user_id: string;
   spokenAlias: string;
   canonicalAlias: string;
   placeName: string;
+  address: string | null;
   lat: number;
   lng: number;
   radius: number;
-}): Promise<void> {
+}): Promise<{ action: 'merged' | 'inserted'; aliases: string[] }> {
+  const newAliases = Array.from(new Set(
+    [opts.spokenAlias, opts.canonicalAlias].filter(Boolean) as string[],
+  ));
   const now = new Date().toISOString();
-  // Row A — spoken alias
-  await opts.admin.from('user_places')
-    .upsert(
-      {
-        user_id: opts.user_id,
-        alias: opts.spokenAlias,
-        place_name: opts.placeName,
-        lat: opts.lat, lng: opts.lng,
-        radius_meters: opts.radius,
-        last_used_at: now,
-      },
-      { onConflict: 'user_id,alias' },
-    );
 
-  // Row B — canonical alias (only if different from spoken)
-  if (opts.canonicalAlias && opts.canonicalAlias !== opts.spokenAlias) {
-    await opts.admin.from('user_places')
-      .upsert(
-        {
-          user_id: opts.user_id,
-          alias: opts.canonicalAlias,
-          place_name: opts.placeName,
-          lat: opts.lat, lng: opts.lng,
-          radius_meters: opts.radius,
-          last_used_at: now,
-        },
-        { onConflict: 'user_id,alias' },
-      );
+  // Look up existing row by rounded coords (5 decimals = ~1.1m).
+  // PostgREST doesn't expose ROUND() in filters, so we use lat/lng range
+  // queries that capture all rows within ~1.1m of the new coords.
+  const epsilon = 0.00001; // 5-decimal rounding tolerance
+  const { data: existing } = await opts.admin
+    .from('user_places')
+    .select('id, aliases')
+    .eq('user_id', opts.user_id)
+    .gte('lat', opts.lat - epsilon).lte('lat', opts.lat + epsilon)
+    .gte('lng', opts.lng - epsilon).lte('lng', opts.lng + epsilon)
+    .limit(1)
+    .maybeSingle();
+
+  if (existing) {
+    // Merge: union of existing aliases and new aliases, no duplicates
+    const merged = Array.from(new Set([...((existing as any).aliases ?? []), ...newAliases]));
+    await opts.admin
+      .from('user_places')
+      .update({
+        aliases: merged,
+        alias: merged[0],            // legacy column kept in sync
+        place_name: opts.placeName,  // refresh to latest spelling
+        address: opts.address,       // backfills NULL on legacy rows
+        last_used_at: now,
+      })
+      .eq('id', (existing as any).id);
+    return { action: 'merged', aliases: merged };
   }
+
+  // No existing row at these coords — insert new.
+  await opts.admin
+    .from('user_places')
+    .insert({
+      user_id: opts.user_id,
+      aliases: newAliases,
+      alias: newAliases[0],          // legacy column populated
+      place_name: opts.placeName,
+      address: opts.address,
+      lat: opts.lat,
+      lng: opts.lng,
+      radius_meters: opts.radius,
+      last_used_at: now,
+    });
+  return { action: 'inserted', aliases: newAliases };
 }
