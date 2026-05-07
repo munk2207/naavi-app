@@ -17,10 +17,60 @@ import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { invokeWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 import { justForegrounded, msSinceForeground, getLifecycleSession } from '@/lib/appLifecycle';
-import { remoteLog } from '@/lib/remoteLog';
+import { remoteLog, newDiagSession } from '@/lib/remoteLog';
 import { syncDeviceTimezone } from '@/lib/location';
 import { registerPushNotifications } from '@/lib/push';
 import { useGeofencing } from '@/hooks/useGeofencing';
+
+// V57.12.4 Bug H instrumentation — global JS error / unhandled-rejection
+// trap. The crash leaves diagnostic silence — no console.error trail and
+// no unhandledRejection log. Install global handlers HERE, at the
+// outermost layout, so any uncaught throw / rejection is captured before
+// the JS engine dies. Each event writes to client_diagnostics.
+//
+// This must run synchronously at module load so it's installed before
+// any other code can throw. We use a separate diag session so events
+// don't get interleaved with chat / orchestrator traffic.
+(function installGlobalErrorHandlers() {
+  const errorDiag = newDiagSession();
+  try {
+    const ErrUtils = (globalThis as any).ErrorUtils;
+    if (ErrUtils && typeof ErrUtils.setGlobalHandler === 'function') {
+      const previous = typeof ErrUtils.getGlobalHandler === 'function' ? ErrUtils.getGlobalHandler() : null;
+      ErrUtils.setGlobalHandler((err: any, isFatal: boolean) => {
+        try {
+          remoteLog(errorDiag, 'global-error', {
+            isFatal,
+            name: String(err?.name ?? ''),
+            message: String(err?.message ?? err ?? '').slice(0, 300),
+            stack: String(err?.stack ?? '').slice(0, 600),
+          });
+        } catch { /* never throw inside the handler */ }
+        // Chain to React Native's red-box / debug handler.
+        if (typeof previous === 'function') {
+          try { previous(err, isFatal); } catch { /* swallow */ }
+        }
+      });
+    }
+  } catch { /* swallow */ }
+
+  // Unhandled promise rejection. RN's promise polyfill emits this via
+  // HermesInternal in newer engines and via the global event in web.
+  try {
+    if (typeof (globalThis as any).addEventListener === 'function') {
+      (globalThis as any).addEventListener('unhandledrejection', (event: any) => {
+        try {
+          const reason = event?.reason;
+          remoteLog(errorDiag, 'unhandled-rejection', {
+            name: String(reason?.name ?? ''),
+            message: String(reason?.message ?? reason ?? '').slice(0, 300),
+            stack: String(reason?.stack ?? '').slice(0, 600),
+          });
+        } catch { /* never throw */ }
+      });
+    }
+  } catch { /* swallow */ }
+})();
 
 // Handle Google OAuth deep link callback (naavi://auth/callback#access_token=...)
 // V57.7 — wrapped in try/catch. A throw here was a candidate for the

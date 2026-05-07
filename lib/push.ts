@@ -12,6 +12,7 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { supabase } from './supabase';
 import { invokeWithTimeout } from './invokeWithTimeout';
+import { remoteLog, newDiagSession } from './remoteLog';
 
 const VAPID_PUBLIC_KEY = 'BLFs0BQ3pY83UL4XsckjlG3CUDJEVuN8c2H1g5hRIf-lp_5rpn2Cj0LfOCTCWHrCdZrueFldikCuFUZm862niW0';
 
@@ -20,19 +21,31 @@ const VAPID_PUBLIC_KEY = 'BLFs0BQ3pY83UL4XsckjlG3CUDJEVuN8c2H1g5hRIf-lp_5rpn2Cj0
 // Show the alert even when the app is open
 // ---------------------------------------------------------------------------
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    // V57.12.3 — expo-notifications 55 deprecated `shouldShowAlert` in
-    // favour of `shouldShowBanner` + `shouldShowList`. Returning the old
-    // shape was a strong-but-second hypothesis for Bug H; eliminating it
-    // here removes one variable from the next reproduction. Kept the
-    // legacy `shouldShowAlert: true` for older runtimes that still read
-    // it — both shapes coexist cleanly.
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async (notification) => {
+    // V57.12.4 Bug H instrumentation — log every push arrival so the
+    // next reproduction shows whether a push delivery correlates with
+    // the crash window. Cheap to log; one row per push.
+    try {
+      const content = notification?.request?.content as any;
+      remoteLog(newDiagSession(), 'push-handler-fired', {
+        title: String(content?.title ?? '').slice(0, 80),
+        body: String(content?.body ?? '').slice(0, 120),
+      });
+    } catch { /* never throw from a notification handler */ }
+    return {
+      // V57.12.3 — expo-notifications 55 deprecated `shouldShowAlert` in
+      // favour of `shouldShowBanner` + `shouldShowList`. Returning the old
+      // shape was a strong-but-second hypothesis for Bug H; eliminating it
+      // here removes one variable from the next reproduction. Kept the
+      // legacy `shouldShowAlert: true` for older runtimes that still read
+      // it — both shapes coexist cleanly.
+      shouldShowAlert: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    };
+  },
 });
 
 // ---------------------------------------------------------------------------
