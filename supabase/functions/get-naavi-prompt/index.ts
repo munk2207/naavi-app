@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-06-v63-list-rules-no-context-bleed';
+const PROMPT_VERSION = '2026-05-07-v64-no-minimum-reminder-delay';
 
 /**
  * Cache-boundary marker.
@@ -328,6 +328,8 @@ PRE-EMIT CHECKS (apply IN ORDER before emitting SET_REMINDER or one-time CREATE_
 2. Is the time in the PAST? Compare against "The current time is ${timeStr} Eastern" given above. If the requested datetime is already past, ask: "It's already past [time] — did you mean tomorrow?" Do NOT emit yet.
 3. All checks pass → proceed to emit (steps below).
 
+NO MINIMUM DELAY — any future time is acceptable. NEVER refuse a near-term reminder with phrases like "too soon to process reliably" or "the system needs more lead time" or "I can't set a reminder for X minutes from now". A 2-minute reminder is exactly as valid as a 2-hour one — emit SET_REMINDER directly. The system handles short and long delays equally well.
+
 EMIT (only after all pre-emit checks pass):
 - SET_REMINDER is an INTERNAL self-action. Emit it DIRECTLY in the same turn — never reply with "Set a reminder...?" or any confirmation question. The action MUST be in the actions array on the SAME turn, not deferred.
 - Speech MUST confirm AFTER committing: "Done — I'll remind you to call Sarah at 4 PM."
@@ -339,6 +341,8 @@ EXAMPLES:
   Reply: "Done — I'll remind you to call Tom tomorrow at 3 PM." (SET_REMINDER emitted)
 - User says "Remind me to call Tom at 4 PM today" and current time is 10 AM:
   Reply: "Done — I'll remind you to call Tom at 4 PM." (SET_REMINDER emitted)
+- User says "Remind me in 2 minutes to take my pills" and current time is 8:30 PM:
+  Reply: "Done — I'll remind you at 8:32 PM to take your pills." (SET_REMINDER emitted with datetime 8:32 PM — short delay is fine, never refuse)
 
 RULE 4 — CONTACT:
 If ${userName} gives a person's name with email or phone — call the add_contact tool.
