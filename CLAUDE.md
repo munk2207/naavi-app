@@ -94,6 +94,53 @@ The app has ONE canonical place for each type of configuration. Never create par
 
 If in doubt, ASK before creating parallel config.
 
+### DATA INTEGRITY — FOUR LAYERS (Wael 2026-05-07)
+
+**Established as a hard rule after the user_places duplicate-Walmart incident.** Every config table MUST have all four layers of defense so corrupted data is *physically impossible* to land in the DB. Configuration Discipline #5 (unique constraints) is the minimum, not the ceiling.
+
+**LAYER 1 — DB constraints (cannot be bypassed by any code path)**
+- A UNIQUE index on the **logical key** of the table — not just a surrogate column. For coordinate-bearing rows like `user_places`, that means `UNIQUE (user_id, ROUND(lat,5), ROUND(lng,5))` — same physical place cannot exist twice. NOT just `UNIQUE (user_id, alias)`.
+- NOT NULL on every column the application logic depends on.
+- CHECK constraints on every range-restricted value (lat ∈ [-90,90], lng ∈ [-180,180], radius > 0, etc.).
+
+**LAYER 2 — Single write entry point (one Edge Function, one validation pipeline)**
+- All writes to a given table MUST flow through ONE Edge Function. No mobile-app direct INSERTs, no voice-server direct INSERTs.
+- That function looks up existing rows by the logical key BEFORE inserting. If a match exists → UPDATE (merge). If no match → INSERT. Same-key INSERT must be impossible at the application layer too, before the DB constraint catches it.
+
+**LAYER 3 — RLS lockdown (client cannot bypass Layer 2)**
+- Drop any `FOR ALL` policy that lets authenticated users INSERT/UPDATE/DELETE the table directly.
+- Replace with a `FOR SELECT` policy for users + `FOR ALL ... USING (auth.role() = 'service_role')` for the Edge Function. Now every write must go through the Edge Function (which runs as service_role).
+
+**LAYER 4 — Schema redesign (eliminates footguns by construction)**
+- If the table has any "two rows for one logical thing" pattern (e.g. one alias per row, one phone-number variant per row, etc.) → collapse to one row with array column (`aliases text[]`, `phone_numbers text[]`).
+- The footgun is gone at the schema level — application code can't accidentally write 2 rows for one place even if it tries.
+
+**LAYER 5 (tests, not skippable)**
+- For each table protected by the above, add tests under `tests/catalogue/data-integrity.ts`:
+  - Try to insert a same-logical-key duplicate → must FAIL
+  - Try to insert with NULL on a NOT NULL column → must FAIL
+  - Try to insert as anon-key (not service_role) → must be blocked by RLS
+  - Verify alias-merge / array-merge correctness on save
+- These tests run on every `npm run test:auto`. Rule 15 stays in effect.
+
+**Pre-write checklist for any future agent touching a config table:**
+1. What's the logical key? (Often NOT the surrogate `id`.)
+2. Is there a UNIQUE constraint on that logical key? If no, add one in a migration.
+3. Is there a single Edge Function that owns all writes to this table? If multiple writers exist, consolidate.
+4. Does RLS block direct INSERT/UPDATE/DELETE from clients? If not, lock it down.
+5. Are there any "one row per X" patterns where X could naturally have multiple values? Collapse to an array column.
+6. Are there integrity tests in `tests/catalogue/data-integrity.ts` for this table? If not, add them.
+
+**Tables that already pass this checklist:**
+- `user_places` — V57.13.1, migration `20260507_user_places_integrity.sql`. Reference implementation.
+
+**Tables that still need this audit (work for future sessions):**
+- `action_rules` — has `(user_id, alias)` style constraints, hasn't been audited for the four-layer pattern
+- `contacts` — same status
+- `lists` — same status
+- `reminders` — same status
+- `user_settings` — single-row-per-user, lower risk but still worth auditing
+
 ### ABSOLUTE RULES — NEVER BREAK THESE
 
 1. **NO ACTION WITHOUT EXPLICIT APPROVAL.** Do not edit files, run commands, commit, push, build, or take any action until the user says "yes" or "go ahead." Even if the user provides a detailed plan, that is context — NOT permission to execute.
