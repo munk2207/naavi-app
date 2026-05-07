@@ -394,7 +394,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       alias?: string;
       canonical_alias?: string;
     }>;
-    candidatesSource?: 'memory' | 'fresh';
+    candidatesSource?: 'memory' | 'fresh' | 'memory_suggest';
     // V57.12.1 Bug B fix — timestamp at initial creation. Pending state
     // older than 5 minutes is treated as abandoned and cleared on next
     // intercept entry, so an abandoned picker can't hijack future
@@ -752,6 +752,134 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         maybePromptBatteryExemption().catch(() => {});
         return { ok: true, ruleId: insertedRule?.id ? String(insertedRule.id) : null };
       };
+
+      // ── CASE: V57.13.2 — memory_suggest turn ─────────────────────────────
+      // Pending holds 1+ qualified saved rows. We asked the user "use this or
+      // search for another?". Possible inputs:
+      //   - yes / use this / number pick → commit selected saved row
+      //   - search / another / no / cancel → re-call resolve-place with
+      //     force_fresh=true and present the fresh Google picker
+      if (pending.candidates && pending.candidatesSource === 'memory_suggest') {
+        const SEARCH_RE = /\b(search|another|different|other|new|fresh|find|elsewhere)\b/i;
+        const wantsSearch = SEARCH_RE.test(msg) || isNo;
+        if (wantsSearch) {
+          console.log('[Orchestrator] memory_suggest → user wants fresh search');
+          // Re-call resolve-place with force_fresh=true, replace pending.
+          const session = await getSessionWithTimeout();
+          if (!session?.user) {
+            pendingLocationRef.current = null;
+            emitPendingTurn("I'm not signed in. Please sign in and try again.");
+            return;
+          }
+          try {
+            const res = await fetchWithTimeout(`${SUPABASE_URL}/functions/v1/resolve-place`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON}` },
+              body: JSON.stringify({
+                user_id: session.user.id,
+                place_name: pending.placeName,
+                save_to_cache: false,
+                force_fresh: true,
+              }),
+            }, 30000);
+            const data = await res.json();
+            if (data?.status === 'multiple' && Array.isArray(data.candidates) && data.candidates.length >= 2) {
+              const cands = data.candidates.slice(0, 5);
+              pending.candidates = cands;
+              pending.candidatesSource = 'fresh';
+              pending.attempts = 1;
+              pendingLocationRef.current = pending;
+              const brand = pending.placeName.trim();
+              const brandPlural = /s$/i.test(brand) ? brand : `${brand}s`;
+              const lines = cands.map((c: any, i: number) => {
+                const seg = String(c.address || '').split(',')[0]?.trim() || c.place_name;
+                return `${i + 1}. ${seg}`;
+              });
+              emitPendingTurn(`I see ${cands.length} ${brandPlural} nearby:\n${lines.join('\n')}\nSay a number or the street name. Or say cancel to stop.`);
+              return;
+            }
+            if (data?.status === 'ok' && data.source === 'fresh') {
+              pending.resolved = {
+                place_name: data.place_name,
+                address: data.address,
+                lat: data.lat,
+                lng: data.lng,
+                canonical_alias: data.canonical_alias,
+                radius_meters: data.radius_meters,
+              };
+              pending.candidates = undefined;
+              pending.candidatesSource = undefined;
+              pendingLocationRef.current = pending;
+              emitPendingTurn(`Found ${data.place_name}${data.address ? ' at ' + data.address : ''}. Say yes to set the alert, cancel to skip, or give me a different area.`);
+              return;
+            }
+            if (data?.status === 'not_found') {
+              pendingLocationRef.current = null;
+              emitPendingTurn(`I couldn't find any ${pending.placeName} nearby. Try a different name or area.`);
+              return;
+            }
+            // Unexpected response — abort gracefully
+            pendingLocationRef.current = null;
+            emitPendingTurn("Something went wrong searching. Try again in a moment.");
+            return;
+          } catch (err) {
+            console.error('[Orchestrator] memory_suggest force_fresh re-call failed:', err);
+            pendingLocationRef.current = null;
+            emitPendingTurn("Something went wrong searching. Try again in a moment.");
+            return;
+          }
+        }
+
+        // Otherwise, treat input as a pick (yes / use this / number).
+        const idx = pending.candidates.length === 1
+          ? (isYes || /\b(use|that|this)\b/i.test(msg) ? 0 : -1)
+          : parseLocationPick(msg, pending.candidates);
+        if (idx >= 0) {
+          const sel = pending.candidates[idx];
+          pending.resolved = {
+            place_name: sel.place_name,
+            address: sel.address,
+            lat: sel.lat,
+            lng: sel.lng,
+            canonical_alias: sel.canonical_alias,
+            radius_meters: sel.radius_meters,
+          };
+          pending.candidates = undefined;
+          pending.candidatesSource = undefined;
+          // Saved place — commit immediately (user just said "yes" to it).
+          const session = await getSessionWithTimeout();
+          if (!session?.user) {
+            pendingLocationRef.current = null;
+            emitPendingTurn("I'm not signed in. Please sign in and try again.");
+            return;
+          }
+          const { ok, ruleId } = await commitPending(session.user.id, 'memory');
+          const oneShot = pending.originalAction?.one_shot ?? true;
+          const modeText = oneShot ? 'one time' : 'every time';
+          const speech = ok
+            ? `${sel.place_name} from your saved places — alert set ${modeText} you arrive.`
+            : `Couldn't save the rule — something went wrong.`;
+          const cards = ok && ruleId ? [{ ruleId, placeName: sel.place_name, oneShot }] : [];
+          pendingLocationRef.current = null;
+          emitPendingTurn(speech, cards);
+          return;
+        }
+
+        // No clear yes / pick / search → re-prompt with shorter guidance.
+        pending.attempts += 1;
+        if (pending.attempts > 3) {
+          pendingLocationRef.current = null;
+          emitPendingTurn("I couldn't tell what you meant. Please call me back when you're ready.");
+          return;
+        }
+        pendingLocationRef.current = pending;
+        if (pending.candidates.length === 1) {
+          emitPendingTurn(`Say "yes" to use the saved one, or "search" to find another.`);
+        } else {
+          emitPendingTurn(`Say a number to pick one, or "search" to find another.`);
+        }
+        return;
+      }
 
       // ── CASE: V57.11.3 — multi-candidate picker turn ─────────────────────
       // Pending has 2+ candidates from a bare-brand resolve. User picks by
@@ -1981,7 +2109,47 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                   }, 30000);
                   const data = await res.json();
 
+                  // V57.13.2 — memory_suggest: 1+ qualified saved rows. The
+                  // cache is treated as a SUGGESTION, not an answer. We ask the
+                  // user "Use this saved one or search for another?". On
+                  // "search" we re-call resolve-place with force_fresh=true
+                  // and present the fresh Google picker. This eliminates the
+                  // Toronto-vs-Ottawa shadowing bug where a saved row would
+                  // silently commit even when the user wanted a different
+                  // location.
+                  if (data?.status === 'memory_suggest' && Array.isArray(data.candidates) && data.candidates.length >= 1) {
+                    const cands = data.candidates.slice(0, 5);
+                    pendingLocationRef.current = {
+                      originalAction: action,
+                      placeName,
+                      resolved: null,
+                      candidates: cands,
+                      candidatesSource: 'memory_suggest',
+                      attempts: 1,
+                      createdAt: Date.now(),
+                    };
+                    locationIntercepted = true;
+                    const brand = placeName.trim();
+                    if (cands.length === 1) {
+                      const c = cands[0];
+                      const seg = String(c.address || '').split(',')[0]?.trim() || c.place_name;
+                      turnSpeechOverride = `I have ${c.place_name} at ${seg} from your saved places. Use this one, or search for another? Say yes to use it, or search for a different ${brand}.`;
+                    } else {
+                      const lines = cands.map((c: any, i: number) => {
+                        const seg = String(c.address || '').split(',')[0]?.trim() || c.place_name;
+                        return `${i + 1}. ${seg}`;
+                      });
+                      const brandPlural = /s$/i.test(brand) ? brand : `${brand}s`;
+                      turnSpeechOverride = `I have ${cands.length} ${brandPlural} from your saved places:\n${lines.join('\n')}\nPick a number to use one, or say "search" to find another.`;
+                    }
+                    continue;
+                  }
+
                   // 1. Memory / Settings hit → insert immediately with resolved coords.
+                  // V57.13.2 — memory single-row hits no longer reach this path
+                  // for bare-brand queries; they go through memory_suggest above.
+                  // settings_home / settings_work still instant-commit because
+                  // those are explicit pet-name shortcuts the user defined.
                   if (data?.status === 'ok' && (data.source === 'memory' || data.source === 'settings_home' || data.source === 'settings_work')) {
                     // V57.11 — explicitly carry radius_meters into trigger_config.
                     // Without this every rule landed with NULL radius (resolve-place

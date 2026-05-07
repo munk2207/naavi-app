@@ -117,6 +117,10 @@ serve(async (req) => {
     const radiusOverride = body.radius_meters !== undefined ? Number(body.radius_meters) : 100;
     const saveToCache    = body.save_to_cache === true;
     const canonicalAlias = body.canonical_alias ? String(body.canonical_alias) : null;
+    // V57.13.2 — when true, skip the memory cache entirely and go straight
+    // to fresh Google Places. Used by the mobile orchestrator when the user
+    // explicitly says "search for another" after seeing a memory suggestion.
+    const forceFresh     = body.force_fresh === true;
 
     if (!user_id || !placeName) {
       return jsonResponse({ status: 'error', error: 'Missing user_id or place_name' }, 400);
@@ -156,81 +160,73 @@ serve(async (req) => {
     }
 
     // ── (2) Memory lookup ────────────────────────────────────────────────────
-    // Match the spoken alias against ANY element of the aliases array, or
-    // fuzzy-match place_name for bare brands.
+    // V57.13.2 — fundamental rule change (Wael 2026-05-07):
+    //
+    // The cache is a SUGGESTION, not an answer. A saved row never silently
+    // shadows fresh Google Places — even when there's an exact match, the
+    // mobile UI must ask the user "Use this saved one, or search for another?"
+    // before committing.
+    //
+    // The previous design instant-committed bare-brand single-row memory hits
+    // and presented bare-brand multi-row hits as the only options. That
+    // produced the Toronto-vs-Ottawa bug: a saved Ottawa McDonald's would
+    // shadow every Toronto search forever.
+    //
+    // New flow:
+    //   - force_fresh=true → skip memory entirely, go to fresh Google.
+    //   - 0 qualified saved rows → fall through to fresh Google.
+    //   - 1+ qualified saved rows → return status='memory_suggest' with the
+    //     rows. Mobile asks the user: "Use this saved one or search?".
+    //     If user says "search", mobile re-calls with force_fresh=true.
+    //
+    // "Qualified" = address column is non-null AND non-empty. Legacy rows
+    // with NULL address are excluded; we'd rather pay one Google call than
+    // suggest a row we can't display meaningfully.
     const bareBrand = isBareBrand(placeName);
-    if (bareBrand) {
-      const { data: multi } = await admin
-        .from('user_places')
-        .select('aliases, place_name, address, lat, lng, radius_meters')
-        .eq('user_id', user_id)
-        .or(`aliases.cs.{${alias}},place_name.ilike.%${placeName}%`)
-        .order('last_used_at', { ascending: false })
-        .limit(5);
+    if (!forceFresh) {
+      const { data: rawMatches } = bareBrand
+        ? await admin
+            .from('user_places')
+            .select('aliases, place_name, address, lat, lng, radius_meters')
+            .eq('user_id', user_id)
+            .or(`aliases.cs.{${alias}},place_name.ilike.%${placeName}%`)
+            .order('last_used_at', { ascending: false })
+            .limit(5)
+        : await admin
+            .from('user_places')
+            .select('aliases, place_name, address, lat, lng, radius_meters')
+            .eq('user_id', user_id)
+            .contains('aliases', [alias])
+            .order('last_used_at', { ascending: false })
+            .limit(5);
 
-      if (multi && multi.length >= 2) {
-        console.log(`[resolve-place v3] bare-brand memory multi: ${multi.length} matches for "${placeName}"`);
+      const qualified = (rawMatches ?? []).filter((r: any) =>
+        typeof r.address === 'string' && r.address.trim().length > 0
+      );
+
+      if (qualified.length >= 1) {
+        console.log(`[resolve-place v4] memory_suggest: ${qualified.length} qualified saved row(s) for "${placeName}" (raw matches=${rawMatches?.length ?? 0}, bareBrand=${bareBrand})`);
         return jsonResponse({
-          status: 'multiple',
+          status: 'memory_suggest',
           source: 'memory',
-          candidates: multi.map((r: any) => ({
+          candidates: qualified.map((r: any) => ({
             alias: (r.aliases ?? [])[0] ?? slugify(r.place_name),
             aliases: r.aliases ?? [],
             place_name: r.place_name,
-            address: r.address ?? null,
+            address: r.address,
             lat: r.lat,
             lng: r.lng,
             radius_meters: r.radius_meters,
           })),
         });
       }
-      if (multi && multi.length === 1) {
-        const c: any = multi[0];
-        const finalAliases = await mergeAliasesIfSaving({
-          admin, existing: c, user_id,
-          newAliases: [alias, canonicalAlias].filter(Boolean) as string[],
-          saveToCache,
-        });
-        return jsonResponse({
-          status: 'ok',
-          source: 'memory',
-          alias: finalAliases[0] ?? alias,
-          aliases: finalAliases,
-          place_name: c.place_name,
-          address: c.address ?? null,
-          lat: c.lat,
-          lng: c.lng,
-          radius_meters: c.radius_meters,
-        });
-      }
-      // 0 saved matches → fall through to fresh
-    } else {
-      // Exact-alias memory lookup using array containment
-      const { data: cached } = await admin
-        .from('user_places')
-        .select('aliases, place_name, address, lat, lng, radius_meters')
-        .eq('user_id', user_id)
-        .contains('aliases', [alias])
-        .maybeSingle();
 
-      if (cached) {
-        const finalAliases = await mergeAliasesIfSaving({
-          admin, existing: cached as any, user_id,
-          newAliases: [alias, canonicalAlias].filter(Boolean) as string[],
-          saveToCache,
-        });
-        return jsonResponse({
-          status: 'ok',
-          source: 'memory',
-          alias,
-          aliases: finalAliases,
-          place_name: (cached as any).place_name,
-          address: (cached as any).address ?? null,
-          lat: (cached as any).lat,
-          lng: (cached as any).lng,
-          radius_meters: (cached as any).radius_meters,
-        });
+      if ((rawMatches?.length ?? 0) > 0 && qualified.length === 0) {
+        console.log(`[resolve-place v4] ${rawMatches!.length} unqualified saved row(s) for "${placeName}" — ignoring, going to fresh`);
       }
+      // 0 qualified → fall through to fresh Google
+    } else {
+      console.log(`[resolve-place v4] force_fresh=true for "${placeName}" — skipping memory, going to fresh`);
     }
 
     // ── (3) Fresh resolve via Places API ────────────────────────────────────

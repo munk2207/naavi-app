@@ -141,6 +141,32 @@ If in doubt, ASK before creating parallel config.
 - `reminders` — same status
 - `user_settings` — single-row-per-user, lower risk but still worth auditing
 
+### CACHE IS A SUGGESTION, NEVER AN ANSWER (V57.13.2)
+
+**Wael 2026-05-07 — established as a hard rule after the Toronto-McDonald's example.** A cache HIT must never silently shadow fresh discovery. The cache is a performance optimization, not a decision. If a cache row is good, ASK the user to confirm it; if they say no, fall through to fresh search.
+
+**Rule for any cache that backs user-facing decisions (locations, contacts, etc.):**
+
+1. **0 cache rows for the query → go fresh.** Standard.
+2. **1+ qualified cache rows for the query → return them flagged as a SUGGESTION, not as the answer.** The application asks: *"I have X you used before. Use this one, or search for another?"*
+3. **User says "use this" → commit the cached row.**
+4. **User says "search for another" → re-issue the lookup with `force_fresh=true` to skip the cache and present fresh results.**
+
+**"Qualified" filter:** any cache row that's missing fields needed to display meaningfully (e.g. `address` is NULL on a saved place) is **excluded from suggestions** entirely. Falls through to fresh as if the row didn't exist. Better to pay one Google call than to surface a degraded row.
+
+**Where this lives in code today:**
+- `supabase/functions/resolve-place/index.ts` v4 — `status: 'memory_suggest'` response, `force_fresh: boolean` request flag, qualified-row filter
+- `hooks/useOrchestrator.ts` — handles `memory_suggest` by storing pending state with `candidatesSource: 'memory_suggest'`, prompts user, accepts `yes`/`use this`/number-pick or `search`/`another`/`no` to trigger force_fresh re-call
+- `tests/catalogue/data-integrity.ts` — `integrity.memory-suggest-on-bare-brand`, `integrity.force-fresh-skips-memory`, `integrity.unqualified-rows-ignored`
+
+**Personal-keyword shortcuts (`home` / `office` / `my-house` etc.) are exempt** — those are explicit pet-name aliases the user defined; instant-commit is the right behavior.
+
+**Pre-commit checklist before introducing any new cache table:**
+- Does a cache hit ASK the user for confirmation (not silently commit)?
+- Is there a `force_fresh` (or equivalent) escape that bypasses the cache?
+- Does the qualified-row filter exclude rows missing required display fields?
+- Are there tests covering all three of the above?
+
 ### ABSOLUTE RULES — NEVER BREAK THESE
 
 1. **NO ACTION WITHOUT EXPLICIT APPROVAL.** Do not edit files, run commands, commit, push, build, or take any action until the user says "yes" or "go ahead." Even if the user provides a detailed plan, that is context — NOT permission to execute.
