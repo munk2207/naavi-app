@@ -628,7 +628,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       //   any of the picker / resolved / clarification sub-states.
       const ageMs = Date.now() - (pending.createdAt ?? 0);
       const isStale  = ageMs > 5 * 60 * 1000;
-      const isEscape = QUESTION_ESCAPE_RE.test(msg) || FRESH_COMMAND_RE.test(msg);
+      // V57.13.3 — when in memory_suggest mode, "search" and "find" are EXPECTED
+      // user inputs (the memory_suggest handler interprets them as force_fresh
+      // requests). Don't treat them as escape patterns. Other escape verbs
+      // (list, show, where, what, etc.) still drop pending. Without this guard
+      // the user typing "search" would silently fall through to general Claude
+      // flow instead of triggering the fresh-Google re-resolve.
+      const isInMemorySuggest = pending.candidatesSource === 'memory_suggest';
+      const wantsFreshSearch = /^\s*(search|find)\b/i.test(msg);
+      const isEscape = (QUESTION_ESCAPE_RE.test(msg) && !(isInMemorySuggest && wantsFreshSearch))
+                    || FRESH_COMMAND_RE.test(msg);
       if (isStale || isEscape) {
         if (isStale)  console.log(`[Orchestrator] pending location expired (${Math.round(ageMs/1000)}s old) — dropping`);
         if (isEscape) console.log('[Orchestrator] pending location dropped — escape pattern at intercept entry');
