@@ -1,24 +1,25 @@
 # CLAUDE.md — MyNaavi Project Instructions
 
-## ⭐ FOUNDATIONAL PRINCIPLE — SELF-CLEANSING DATA (Wael 2026-05-07)
+## ⭐ FOUNDATIONAL PRINCIPLE — NO CACHE, FRESH ALWAYS, USER PICKS (Wael 2026-05-07)
 
-**The system gets cleaner with use, not dirtier.** Every read is an opportunity to shed degraded data; every write must produce only fully-qualified rows. No periodic cleanup job is required — the conversation IS the cleanup job.
+**The system has no place-cache. Every "alert me at X" goes fresh to Google Places; the user picks every time.** This was the V57.13.3 simplification after a long afternoon of cache-correctness gymnastics — Wael's quote: *"if I have a saved Ottawa McDonald's and I'm in Toronto asking about McDonald's, Naavi will silently point me to Ottawa. If I said that, I'm on drugs."* The cache existed to save a Google call; it created Toronto-shadows-Ottawa, the alias merge edge cases, the "qualified vs unqualified" rule, and a permanent class of integrity bugs. It's gone.
 
-Three rules underwrite this for any table that touches the user:
+Three rules now underwrite the data architecture:
 
-1. **Cache is a suggestion, never an answer.** A saved row may inform Naavi's response, but the user always confirms (and can ignore the cache via `force_fresh`). Saved rows must never silently shadow fresh discovery — that's how the Toronto-McDonald's-shadows-Ottawa-McDonald's bug landed. See section "CACHE IS A SUGGESTION, NEVER AN ANSWER" below.
-2. **Fully qualified or deleted.** Any row missing fields that a UI / TTS surface needs to render meaningfully is **deleted on encounter**, not ignored. Better to pay a fresh API call than to surface or persist a degraded row. Applies to every source — cache, Google Places, Claude, Gmail, etc. See "DATA INTEGRITY — FOUR LAYERS" below.
-3. **One logical key, one row.** Every config table has a UNIQUE constraint on its true logical key (often coordinates or hash, NOT the surrogate id). Writes go through ONE Edge Function with coords-keyed merge logic. RLS blocks direct client writes. See "DATA INTEGRITY — FOUR LAYERS" for the full pattern.
+1. **No place-cache. Fresh Google every time.** `resolve-place` queries Google Places on every request and returns either a single result or a picker. The user always picks. The performance cost (~1s, ~$0.005 per call) is trivial compared to the bug cost the cache produced.
+2. **Saved places are absorbed by alerts.** If the user wants to be reminded at the same place repeatedly, they say *"alert me every time I arrive at X"* — that creates ONE recurring `action_rules` row with the resolved coordinates. The next time they say *"alert me at X"*, the orchestrator pre-checks `action_rules` and replies *"you already have an alert there."* The alerts ARE the saved-place memory.
+3. **One logical key, one row.** `action_rules` has a partial UNIQUE index on `(user_id, trigger_type, ROUND(lat,5), ROUND(lng,5)) WHERE trigger_type='location' AND enabled=true`. Two enabled location alerts at the same physical place for one user are physically impossible at the DB layer. Disabled rules don't block re-creation. RLS blocks direct client writes; only the orchestrator (with the user's session token) writes.
 
-Reference implementation: `user_places` (V57.13.2 — `20260507_user_places_integrity.sql` + `resolve-place` v4.2). Other tables (`action_rules`, `contacts`, `lists`, `reminders`, `user_settings`) need the same audit; details below.
+Reference implementation: `action_rules` location dedup (V57.13.3 — `20260507_drop_user_places_action_rules_dedup.sql` + `resolve-place` v5 + `useOrchestrator.ts::commitPending`).
 
 **Pre-commit checklist before adding ANY new table or write path:**
 - What's the logical key? Is there a UNIQUE constraint on it?
-- Is there exactly one Edge Function that owns writes? Does RLS block direct client writes?
-- What does "fully qualified" mean for this row? Does the read path delete unqualified rows on encounter?
-- Are there integrity tests (`tests/catalogue/data-integrity.ts`) covering all of the above?
+- Is there exactly one entry point that owns writes? Does RLS block direct client writes from elsewhere?
+- Does the application code pre-check for duplicates and surface a friendly message, or does it rely on the DB constraint to fire and the user to see a generic error?
+- Are there integrity tests (`tests/catalogue/data-integrity.ts`) covering: duplicate-key insert blocked, valid-different-key insert allowed, edge cases (e.g. disabled rows, partial-index WHERE clause)?
+- Does the table need a CACHE? **Default answer: NO.** Caches were the source of every place-related bug today. Only add one if the underlying source has a real performance or rate-limit problem; if you do, the cache MUST never silently override fresh data — it must surface as a SUGGESTION the user can override.
 
-If the answer to any of these is "no" or "I don't know" — STOP and add it before shipping. This file's "DATA INTEGRITY — FOUR LAYERS" and "CACHE IS A SUGGESTION" sections are the reference. The auto-tester (Rule 15) will catch regressions on every build.
+If the answer to any of these is "no" or "I don't know" — STOP and add it before shipping. This file's "DATA INTEGRITY — FOUR LAYERS" section below is the reference for tables that go beyond simple uniqueness. The auto-tester (Rule 15) will catch regressions on every build.
 
 ---
 
@@ -154,45 +155,16 @@ If in doubt, ASK before creating parallel config.
 6. Are there integrity tests in `tests/catalogue/data-integrity.ts` for this table? If not, add them.
 
 **Tables that already pass this checklist:**
-- `user_places` — V57.13.1, migration `20260507_user_places_integrity.sql`. Reference implementation.
+- `action_rules` (location dedup) — V57.13.3, migration `20260507_drop_user_places_action_rules_dedup.sql` + `resolve-place` v5 + `useOrchestrator.ts::commitPending` pre-INSERT check. Reference implementation.
 
 **Tables that still need this audit (work for future sessions):**
-- `action_rules` — has `(user_id, alias)` style constraints, hasn't been audited for the four-layer pattern
+- `action_rules` (non-location triggers — email, time, calendar, weather, contact_silence) — only the `location` trigger has the unique-coords partial index; other triggers may need their own dedup keys
 - `contacts` — same status
 - `lists` — same status
 - `reminders` — same status
 - `user_settings` — single-row-per-user, lower risk but still worth auditing
 
-### CACHE IS A SUGGESTION, NEVER AN ANSWER (V57.13.2)
-
-**Wael 2026-05-07 — established as a hard rule after the Toronto-McDonald's example.** A cache HIT must never silently shadow fresh discovery. The cache is a performance optimization, not a decision. If a cache row is good, ASK the user to confirm it; if they say no, fall through to fresh search.
-
-**Rule for any cache that backs user-facing decisions (locations, contacts, etc.):**
-
-1. **0 cache rows for the query → go fresh.** Standard.
-2. **1+ qualified cache rows for the query → return them flagged as a SUGGESTION, not as the answer.** The application asks: *"I have X you used before. Use this one, or search for another?"*
-3. **User says "use this" → commit the cached row.**
-4. **User says "search for another" → re-issue the lookup with `force_fresh=true` to skip the cache and present fresh results.**
-
-**"Qualified" filter:** any data Naavi presents to the user MUST be fully qualified — every field a UI / TTS surface needs to render meaningfully must be populated. This applies **regardless of source** (cache, Google Places, Claude, Gmail, Drive, Calendar, contacts, etc.). Wael 2026-05-07: *"Naavi MUST not answer Robert with anything not fully qualified, irrespective of where it received."*
-
-For each source:
-- **Cache (user_places, contacts, etc.)** — exclude unqualified rows from any picker; **delete them on encounter** (an unqualified row that lingers blocks future qualified writes at the same logical key, e.g. the `user_places_unique_rounded_coords_idx` would reject a fresh INSERT at the same coords as an existing NULL-address row).
-- **Google Places fresh results** — `isSpecificResult` rejects rows missing `formatted_address`. Single-result returns require it; multi-result pickers filter it out.
-- **Other Edge Functions and external APIs** — apply the same rule when they're added: every response that flows to the user is checked for required fields BEFORE being surfaced.
-
-**Where this lives in code today:**
-- `supabase/functions/resolve-place/index.ts` v4 — `status: 'memory_suggest'` response, `force_fresh: boolean` request flag, qualified-row filter
-- `hooks/useOrchestrator.ts` — handles `memory_suggest` by storing pending state with `candidatesSource: 'memory_suggest'`, prompts user, accepts `yes`/`use this`/number-pick or `search`/`another`/`no` to trigger force_fresh re-call
-- `tests/catalogue/data-integrity.ts` — `integrity.memory-suggest-on-bare-brand`, `integrity.force-fresh-skips-memory`, `integrity.unqualified-rows-ignored`
-
-**Personal-keyword shortcuts (`home` / `office` / `my-house` etc.) are exempt** — those are explicit pet-name aliases the user defined; instant-commit is the right behavior.
-
-**Pre-commit checklist before introducing any new cache table:**
-- Does a cache hit ASK the user for confirmation (not silently commit)?
-- Is there a `force_fresh` (or equivalent) escape that bypasses the cache?
-- Does the qualified-row filter exclude rows missing required display fields?
-- Are there tests covering all three of the above?
+**The user_places table was DROPPED in V57.13.3.** It existed as a place-cache for resolve-place but produced more bugs than performance. The "saved places" feature is now absorbed by `action_rules` — if a user wants to be reminded at a place repeatedly, they create one recurring rule. See "FOUNDATIONAL PRINCIPLE — NO CACHE, FRESH ALWAYS, USER PICKS" at the top of this file.
 
 ### ABSOLUTE RULES — NEVER BREAK THESE
 

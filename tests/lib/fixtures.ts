@@ -32,7 +32,6 @@ const OWNED_TABLES = [
   'people',
   'sent_messages',
   'pending_disambig',
-  'user_places',
   'documents',
   'email_actions',
 ];
