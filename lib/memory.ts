@@ -202,11 +202,24 @@ export async function savePerson(person: {
 }): Promise<void> {
   if (!supabase) return;
 
-  // Upsert — update if exists, insert if not
+  // V57.12.2 Bug K fix — pull user_id from the active session and pass it on
+  // every insert/update. Without this the people-table inserts hit RLS, failed
+  // silently, and lookupContact never found anyone the user added via
+  // ADD_CONTACT. CLAUDE.md Rule 10 — multi-user safety.
+  const session = await getSessionWithTimeout();
+  const userId = session?.user?.id;
+  if (!userId) {
+    console.error('[Memory] savePerson aborted — no user session');
+    return;
+  }
+
+  // Upsert — update if exists, insert if not. Scope the existence check to
+  // this user so a same-named row from another tester doesn't block the write.
   const { data: existing } = await queryWithTimeout(
     supabase
       .from('people')
       .select('id')
+      .eq('user_id', userId)
       .ilike('name', person.name)
       .limit(1),
     15_000,
@@ -214,20 +227,25 @@ export async function savePerson(person: {
   );
 
   if (existing && existing.length > 0) {
-    await queryWithTimeout(
+    const { error: updateErr } = await queryWithTimeout(
       supabase
         .from('people')
         .update({ ...person, updated_at: new Date().toISOString() })
-        .eq('id', existing[0].id),
+        .eq('id', existing[0].id)
+        .eq('user_id', userId),
       15_000,
       'update-person',
     );
+    if (updateErr) console.error('[Memory] Failed to update person:', updateErr.message);
+    else console.log('[Memory] Person updated:', person.name);
   } else {
-    await queryWithTimeout(
-      supabase.from('people').insert(person),
+    const { error: insertErr } = await queryWithTimeout(
+      supabase.from('people').insert({ ...person, user_id: userId }),
       15_000,
       'insert-person',
     );
+    if (insertErr) console.error('[Memory] Failed to save person:', insertErr.message);
+    else console.log('[Memory] Person saved:', person.name);
   }
 }
 

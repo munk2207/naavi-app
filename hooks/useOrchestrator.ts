@@ -1233,7 +1233,15 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             turnDocs.push({ title, webViewLink: file.webViewLink });
             await saveDriveNote({ title, webViewLink: file.webViewLink });
           } catch (err) {
-            console.error('[Orchestrator] SAVE_TO_DRIVE failed:', err);
+            // V57.12.2 Bug O fix — when the Drive save throws (now possible
+            // after the adapter no longer swallows failures), override the
+            // turn's speech so the user is told the truth instead of a
+            // false-positive "Saved." Previously a silent failure left the
+            // user thinking the note landed in Drive when nothing was
+            // written. Wael 2026-05-06.
+            const msg = err instanceof Error ? err.message : 'unknown error';
+            console.error('[Orchestrator] SAVE_TO_DRIVE failed:', msg);
+            turnSpeechOverride = `I couldn't save that to Drive — ${msg}.`;
           }
         }
 
@@ -1683,7 +1691,28 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               turnSpeechOverride = match ? `I couldn't find an alert matching "${match}".` : "You have no alerts to delete.";
               pendingDeleteRef.current = null;
             } else if (matches.length > 1 && !deleteAll) {
-              const hints = matches.slice(0, 3).map(r => String(r.trigger_type) + (r.trigger_config?.place_name ? ` ${r.trigger_config.place_name}` : r.trigger_config?.from_name ? ` ${r.trigger_config.from_name}` : ''));
+              // V57.12.2 Bug G fix — disambiguation prompt was rendering the
+              // bare trigger_type as the option label. Two time-triggered
+              // rules collapsed to "time, or time?" — useless. Build a
+              // distinguishing hint per rule using whatever the rule
+              // actually carries (label, place_name, from_name, time, etc.).
+              const distinguishingHint = (r: any): string => {
+                const tc = r.trigger_config ?? {};
+                const labelText = String(r.label ?? '').trim();
+                if (tc.place_name) return `${tc.place_name}${tc.direction ? ` (${tc.direction})` : ''}`;
+                if (tc.from_name) return `from ${tc.from_name}`;
+                if (tc.from_email) return `from ${tc.from_email}`;
+                if (r.trigger_type === 'time') {
+                  const when = tc.cron || tc.time || tc.datetime || 'scheduled';
+                  return labelText ? `${when} — ${labelText}` : String(when);
+                }
+                if (r.trigger_type === 'weather' && tc.condition) {
+                  return `${tc.condition} alert`;
+                }
+                if (labelText) return labelText;
+                return String(r.trigger_type ?? 'alert');
+              };
+              const hints = matches.slice(0, 3).map(r => `"${distinguishingHint(r)}"`);
               turnSpeechOverride = `I found ${matches.length} alerts matching. Which one — ${hints.join(', or ')}? Or say "all" to delete every match.`;
               // Stash the matched IDs so a "all" / "every" reply on the next
               // turn can delete them without going back to Claude.
@@ -1761,6 +1790,32 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               setTimeout(() => {
                 sendPushNotification(reminderTitle, 'Time for your reminder', '/').catch(() => {});
               }, delayMs);
+            }
+
+            // V57.12.2 Bug H instrumentation — drop a 12-tick heartbeat
+            // (every 10s for 120s) so the next reproduction lets us see
+            // when the JS thread stops responding. Wael 2026-05-06: black
+            // screen ~30-60s after a SET_REMINDER turn, requires Clear
+            // Data to recover. The crash trigger is unknown; the heartbeat
+            // gives us a wall-clock anchor in client_diagnostics. Each
+            // tick logs the elapsed-since-set, the in-flight timer count
+            // estimate, and JS heap size when available.
+            const reminderDiag = newDiagSession();
+            remoteLog(reminderDiag, 'set-reminder-rendered', {
+              title: reminderTitle.slice(0, 60),
+              datetimeISO: reminderDatetime,
+              localPushDelayMs: delayMs > 0 ? delayMs : null,
+            });
+            const hbStart = Date.now();
+            for (let tick = 1; tick <= 12; tick++) {
+              setTimeout(() => {
+                const heap = (globalThis as any).performance?.memory?.usedJSHeapSize;
+                remoteLog(reminderDiag, `heartbeat-${tick}`, {
+                  elapsedMs: Date.now() - hbStart,
+                  heap: typeof heap === 'number' ? heap : null,
+                });
+                if (tick === 12) endDiagSession(reminderDiag);
+              }, tick * 10_000);
             }
           }
         } else if (action.type === 'LOG_CONCERN') {
@@ -2120,6 +2175,47 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           .replace(/\s+—\s*$/, '.')
           .replace(/\.+$/, '.')
           .trim();
+      }
+      // V57.12.2 Bug M fix — apply LIST_READ and GLOBAL_SEARCH appendings to
+      // the bubble too, not only to TTS. Previously only finalSpeech got these
+      // tail-appends, so screen-only users saw a filler bubble ("Looking that
+      // up.") while voice users heard the actual answer. Wael 2026-05-06 sweep
+      // surfaced this as a voice/text mismatch on FETCH_TRAVEL_TIME and
+      // GLOBAL_SEARCH paths. The bubble now mirrors what TTS will say.
+      if (turnSpeechOverride === null) {
+        for (const lr of turnLists) {
+          if (lr.action === 'read' && lr.items && lr.items.length > 0) {
+            const itemsText = lr.items.map((item: string, i: number) => `${i + 1}. ${item}`).join('. ');
+            displaySpeech += ` Here are the items: ${itemsText}.`;
+          }
+        }
+      }
+      const appendTailToDisplay =
+        turnSpeechOverride === null &&
+        turnGlobalSearch &&
+        turnGlobalSearch.origin === 'claude-action';
+      if (appendTailToDisplay && turnGlobalSearch!.results.length > 0) {
+        const labelFor = (src: string) => {
+          if (src === 'calendar') return 'calendar';
+          if (src === 'contacts') return 'contacts';
+          if (src === 'lists') return 'lists';
+          if (src === 'gmail') return 'email';
+          if (src === 'sent_messages') return 'sent messages';
+          if (src === 'rules') return 'automations';
+          if (src === 'knowledge') return 'memory';
+          return src;
+        };
+        const top = turnGlobalSearch!.results.slice(0, 3);
+        const phrases = top.map(r => {
+          const text = (r.snippet && r.snippet.trim()) || r.title;
+          return `In ${labelFor(r.source)}: ${text}`;
+        });
+        displaySpeech += ` ${phrases.join('. ')}.`;
+        if (turnGlobalSearch!.results.length > top.length) {
+          displaySpeech += ` Plus ${turnGlobalSearch!.results.length - top.length} more.`;
+        }
+      } else if (appendTailToDisplay) {
+        displaySpeech += ` I didn't find anything for ${turnGlobalSearch!.query}.`;
       }
       console.log('[Orchestrator] response.speech:', response.speech);
       console.log('[Orchestrator] displaySpeech (for bubble):', displaySpeech);
