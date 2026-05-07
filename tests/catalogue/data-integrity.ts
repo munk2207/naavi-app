@@ -187,12 +187,16 @@ export const dataIntegrityTests: TestCase[] = [
       const lat = first.data.lat;
       const lng = first.data.lng;
 
-      // Second save — same coords, different canonical_alias. Should MERGE
-      // into the existing row, not create a second.
+      // Second save — same place, force_fresh=true skips memory and goes
+      // through fresh Google. Coords should match the first call → saveOrMerge
+      // appends 'integrity-merge-test-b' to the existing row's aliases.
+      // V57.13.2: without force_fresh this would return memory_suggest, which
+      // doesn't merge (the cache is a suggestion, not an answer).
       const second = await adapters.resolvePlace(ctx, {
         place_name: placeName,
         save_to_cache: true,
         canonical_alias: 'integrity-merge-test-b',
+        force_fresh: true,
       });
       expectEqual(second.status, 200, 'second resolve-place call');
 
@@ -210,6 +214,161 @@ export const dataIntegrityTests: TestCase[] = [
       expectTruthy(
         aliases.includes('integrity-merge-test-a') && aliases.includes('integrity-merge-test-b'),
         `expected aliases to contain both 'integrity-merge-test-a' and 'integrity-merge-test-b', got ${JSON.stringify(aliases)}`,
+      );
+    },
+  },
+
+  {
+    id: 'integrity.memory-suggest-on-bare-brand',
+    category: 'integrity',
+    description: 'V57.13.2 — when a qualified saved row exists for a bare-brand query, resolve-place returns memory_suggest (NOT ok). The cache is a suggestion, not an answer.',
+    timeoutMs: 60_000,
+    async setup(ctx) {
+      // Pre-seed a saved row directly in the DB so the test is independent
+      // of Google Places — bypasses resolve-place's save path entirely.
+      await fetch(
+        `${ctx.supabaseUrl}/rest/v1/user_places?user_id=eq.${ctx.testUserId}`
+          + `&aliases=cs.{integrity-suggest-test}`,
+        { method: 'DELETE', headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}` } },
+      );
+      await fetch(`${ctx.supabaseUrl}/rest/v1/user_places`, {
+        method: 'POST',
+        headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}`, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+        body: JSON.stringify({
+          user_id: ctx.testUserId,
+          alias: 'integrity-suggest-test',
+          aliases: ['integrity-suggest-test', 'suggesttest'],
+          place_name: 'SuggestTest',
+          address: '100 Suggest Test Way, Ottawa',
+          lat: 45.42600,
+          lng: -75.69500,
+          radius_meters: 100,
+        }),
+      });
+    },
+    async teardown(ctx) {
+      await fetch(
+        `${ctx.supabaseUrl}/rest/v1/user_places?user_id=eq.${ctx.testUserId}`
+          + `&aliases=cs.{integrity-suggest-test}`,
+        { method: 'DELETE', headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}` } },
+      );
+    },
+    async run(ctx) {
+      // Query the unique brand name → should find our seeded row in memory
+      const result = await adapters.resolvePlace(ctx, {
+        place_name: 'SuggestTest',
+        save_to_cache: false,
+      });
+      expectEqual(result.status, 200, 'resolve-place call');
+      expectEqual(result.data?.status, 'memory_suggest', `expected memory_suggest, got ${result.data?.status}`);
+      expectTruthy(Array.isArray(result.data?.candidates) && result.data.candidates.length === 1,
+        `expected 1 candidate, got ${result.data?.candidates?.length}`);
+      expectTruthy(result.data.candidates[0]?.address?.includes('Suggest Test Way'),
+        `expected the seeded address, got ${result.data.candidates[0]?.address}`);
+    },
+  },
+
+  {
+    id: 'integrity.force-fresh-skips-memory',
+    category: 'integrity',
+    description: 'V57.13.2 — force_fresh=true bypasses the memory check entirely, goes straight to Google',
+    timeoutMs: 60_000,
+    async setup(ctx) {
+      // Pre-seed a saved row so memory has something to skip
+      await fetch(
+        `${ctx.supabaseUrl}/rest/v1/user_places?user_id=eq.${ctx.testUserId}`
+          + `&aliases=cs.{integrity-fresh-test}`,
+        { method: 'DELETE', headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}` } },
+      );
+      await fetch(`${ctx.supabaseUrl}/rest/v1/user_places`, {
+        method: 'POST',
+        headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: ctx.testUserId,
+          alias: 'integrity-fresh-test',
+          aliases: ['integrity-fresh-test', 'cn-tower-toronto'],
+          place_name: 'CN Tower Toronto',
+          address: '290 Bremner Blvd, Toronto, ON',
+          lat: 43.642566,
+          lng: -79.387057,
+          radius_meters: 100,
+        }),
+      });
+    },
+    async teardown(ctx) {
+      await fetch(
+        `${ctx.supabaseUrl}/rest/v1/user_places?user_id=eq.${ctx.testUserId}`
+          + `&aliases=cs.{integrity-fresh-test}`,
+        { method: 'DELETE', headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}` } },
+      );
+    },
+    async run(ctx) {
+      // Without force_fresh: should hit memory and return memory_suggest
+      const cached = await adapters.resolvePlace(ctx, {
+        place_name: 'CN Tower Toronto',
+        save_to_cache: false,
+      });
+      expectEqual(cached.data?.status, 'memory_suggest', `without force_fresh, expected memory_suggest, got ${cached.data?.status}`);
+
+      // With force_fresh: should bypass memory and go to Google
+      const fresh = await adapters.resolvePlace(ctx, {
+        place_name: 'CN Tower Toronto',
+        save_to_cache: false,
+        force_fresh: true,
+      });
+      expectTruthy(
+        fresh.data?.status === 'ok' && fresh.data?.source === 'fresh',
+        `with force_fresh, expected status=ok source=fresh, got status=${fresh.data?.status} source=${fresh.data?.source}`,
+      );
+    },
+  },
+
+  {
+    id: 'integrity.unqualified-rows-ignored',
+    category: 'integrity',
+    description: 'V57.13.2 — saved rows with NULL/empty address are excluded from memory_suggest. Naavi falls through to fresh Google.',
+    timeoutMs: 60_000,
+    async setup(ctx) {
+      // Pre-seed a saved row with NULL address (the legacy degraded state)
+      await fetch(
+        `${ctx.supabaseUrl}/rest/v1/user_places?user_id=eq.${ctx.testUserId}`
+          + `&aliases=cs.{integrity-unqual-test}`,
+        { method: 'DELETE', headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}` } },
+      );
+      await fetch(`${ctx.supabaseUrl}/rest/v1/user_places`, {
+        method: 'POST',
+        headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: ctx.testUserId,
+          alias: 'integrity-unqual-test',
+          aliases: ['integrity-unqual-test', 'unqualtest'],
+          place_name: 'UnqualTest',
+          address: null, // ← unqualified
+          lat: 45.42700,
+          lng: -75.69500,
+          radius_meters: 100,
+        }),
+      });
+    },
+    async teardown(ctx) {
+      await fetch(
+        `${ctx.supabaseUrl}/rest/v1/user_places?user_id=eq.${ctx.testUserId}`
+          + `&aliases=cs.{integrity-unqual-test}`,
+        { method: 'DELETE', headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}` } },
+      );
+    },
+    async run(ctx) {
+      // Query for the unique brand. The saved row has NULL address so should
+      // be filtered out. Result: not memory_suggest. Falls through to fresh
+      // Google → not_found (no real "UnqualTest" business in Google).
+      const result = await adapters.resolvePlace(ctx, {
+        place_name: 'UnqualTest',
+        save_to_cache: false,
+      });
+      expectEqual(result.status, 200, 'resolve-place call');
+      expectTruthy(
+        result.data?.status !== 'memory_suggest',
+        `unqualified row should NOT trigger memory_suggest, got status=${result.data?.status} (the saved row was returned despite NULL address)`,
       );
     },
   },

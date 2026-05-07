@@ -93,7 +93,7 @@ export const adapters = {
   /** resolve-place — verified-address-only resolver. */
   async resolvePlace(
     ctx: TestContext,
-    args: { place_name: string; save_to_cache?: boolean; canonical_alias?: string },
+    args: { place_name: string; save_to_cache?: boolean; canonical_alias?: string; force_fresh?: boolean },
     opts: CallOptions = {},
   ) {
     return callEdgeFunction(ctx, 'resolve-place', {
@@ -101,6 +101,7 @@ export const adapters = {
       place_name: args.place_name,
       save_to_cache: args.save_to_cache ?? false,
       canonical_alias: args.canonical_alias,
+      force_fresh: args.force_fresh ?? false,
     }, opts);
   },
 
