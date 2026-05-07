@@ -2525,9 +2525,24 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       // (~6s) but short enough that a hang doesn't feel like "the app
       // froze". Per-chunk TTS playback already has its own internal
       // timeouts so this only fires on edge cases.
+      // V57.13.5 — the safety net used to fire force-idle after 8s for any
+      // non-idle status, INCLUDING 'speaking'. That hid the orange Stop
+      // button for any TTS reply >8s, even when audio was still playing
+      // cleanly. Wael 2026-05-07: a 40-second answer had the Stop button
+      // disappear after a few seconds; user had no way to interrupt.
+      // Fix: if state is 'speaking' AND audio is still playing, the state
+      // is NOT stuck — let the normal cleanup (via .then on speakResponse)
+      // handle the transition when speech ends. Force-idle only fires for
+      // genuine hangs (state stuck but no audio activity).
       setTimeout(() => {
         const stuckStatus = statusRef.current;
         if (stuckStatus !== 'idle' && stuckStatus !== 'cooldown' && stuckStatus !== 'answer_active') {
+          if (stuckStatus === 'speaking' && isAudioPlayingRef.current) {
+            console.log('[Orchestrator] stuck-state safety — speaking + audio playing, NOT forcing idle');
+            remoteLog(diagSession, 'orch-stuck-safety-skip-speaking', { lastStatus: stuckStatus });
+            endDiagSession(diagSession);
+            return;
+          }
           console.warn(`[Orchestrator] stuck-state safety — forcing idle (was ${stuckStatus})`);
           remoteLog(diagSession, 'orch-stuck-safety-fired', { lastStatus: stuckStatus });
           setError(null);
