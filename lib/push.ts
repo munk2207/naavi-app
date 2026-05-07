@@ -21,7 +21,15 @@ const VAPID_PUBLIC_KEY = 'BLFs0BQ3pY83UL4XsckjlG3CUDJEVuN8c2H1g5hRIf-lp_5rpn2Cj0
 // ---------------------------------------------------------------------------
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
+    // V57.12.3 — expo-notifications 55 deprecated `shouldShowAlert` in
+    // favour of `shouldShowBanner` + `shouldShowList`. Returning the old
+    // shape was a strong-but-second hypothesis for Bug H; eliminating it
+    // here removes one variable from the next reproduction. Kept the
+    // legacy `shouldShowAlert: true` for older runtimes that still read
+    // it — both shapes coexist cleanly.
     shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),
