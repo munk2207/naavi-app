@@ -432,6 +432,17 @@ Plus user_id filters added to all four lookup steps (multi-user safety).
 - **Bug C verification** — resolved-state escape (deliberate flow into yes/no/different state then escape)
 - **Maestro test brittleness** — 10/13 fail on assertions that don't match current LLM output
 
+### Queued enhancements (Wael 2026-05-06)
+
+- **Email live-overlay (Option #3, no cron change).** Today email lives behind a 1-hour pg_cron via `sync-gmail`, while calendar and Drive are live-fetched. Wael flagged the asymmetry — Bob emails at 10:00, Robert asks at 10:01, cache is empty until the next cron tick. Decision: keep the hourly cron exactly as it is (don't reduce the interval — cost and Twilio/Anthropic load), but add a parallel **live overlay** at query time:
+  - When the user asks an email-shaped question, naavi-chat (or a pre-search step) reads the `gmail_messages` cache AND fires a small live Gmail API call with `q=newer_than:1h` in parallel
+  - Merge results (de-dupe by message ID), answer with the union
+  - Async-trigger the heavy pipeline (`extract-email-actions`, `harvest-attachment`, `extract-document-text`) on any newly-surfaced messages so the next follow-up question (e.g. "what's the invoice from Bob?") finds the metadata even though the message is brand new
+  - Coverage proof: hourly cron + 1-hour overlay always overlap; no email from the last hour is invisible
+  - Cost: small. Live call only fetches headers + body for the few messages newer than the cache; pipeline runs once per message exactly as it does on the cron path. No Twilio impact.
+  - Build cost: server-side only. No AAB.
+  - Defer until after V57.12.2 sweep + Bug H investigation. Then ship as a focused enhancement.
+
 ---
 
 ## Closing note
