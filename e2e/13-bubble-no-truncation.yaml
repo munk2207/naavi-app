@@ -1,0 +1,52 @@
+appId: ca.naavi.app
+name: 13 — Chat bubble shows full user message (no Yoga truncation)
+tags:
+  - regression
+  - ui
+---
+# This scenario reproduces the chronic Yoga visual-truncation bug on
+# Android (Samsung specifically). Symptom: user types "What is my next
+# meeting?" (28 chars) — the data is stored fully but the chat bubble
+# crops to "What is my next" (19 chars) on render. Reason: Yoga measures
+# the Text element's intrinsic width incorrectly; the bubble auto-sizes
+# to that wrong measurement and Text never wraps.
+#
+# Regression history:
+#   - V57.10.3: paddingRight 4 + includeFontPadding fix — partial
+#   - V57.11.2: paddingRight 12 — partial
+#   - V57.11.3: drop row+flex pattern — still cropped
+#   - V57.11.5: outer row + column flexShrink + maxWidth — still cropped
+#   - V57.11.6: maxWidth on bubble — still cropped (instrumentation proved
+#     data is full at every step; pure rendering bug)
+#   - V57.11.7: numeric maxWidth on Text element directly — should hold
+#
+# This test types a sentence whose length sits in the cropping zone, then
+# asserts the FULL string appears in the chat (not the truncated form).
+
+- launchApp:
+    clearState: false
+
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "What is my next meeting?"
+- pressKey: Enter
+
+# V57.12.3 — assert on the QUESTION MARK at the end of the user
+# message. If Yoga truncates "What is my next meeting?" anywhere
+# before the "?", the punctuation never renders and the assertion
+# fails. This is a stricter detector than the previous "meeting"
+# substring check (Naavi's reply could also contain "meeting" and
+# mask a real truncation).
+- extendedWaitUntil:
+    visible:
+      text: "meeting?"
+    timeout: 15000
+
+# Wait for Naavi's reply to settle (input placeholder reappears =
+# status returned to idle). Don't assert on specific reply prose.
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 30000
+
+- takeScreenshot: 13-bubble-full-text-visible
