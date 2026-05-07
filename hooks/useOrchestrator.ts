@@ -14,7 +14,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem, type GlobalSearchResult } from '@/lib/naavi-client';
@@ -2853,14 +2853,28 @@ async function playBase64AudioNative(base64: string): Promise<void> {
     //   3. Brief retry with mode reset on AudioFocusNotAcquiredException —
     //      handled by the catch in the outer playback Promise (see below).
     await Audio.setIsEnabledAsync(true).catch(() => {});
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: false,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-      shouldDuckAndroid: true,
-      interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DUCK_OTHERS,
-      interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DUCK_OTHERS,
-    } as any);
+    // V57.12.3 Bug H + no-voice fix — expo-av 16 (SDK 55) renamed the
+    // module-level constants. The legacy `Audio.INTERRUPTION_MODE_*_DUCK_OTHERS`
+    // references are now `undefined`, and expo-av's setAudioModeAsync throws
+    // "interruptionModeIOS was set to an invalid value" on every TTS chunk.
+    // Cumulative audio-state churn after several chunks deadlocked Android's
+    // audio service (~40-50s) and crashed the JS thread silently — Bug H.
+    // Use the named enum imports introduced in expo-av 15+ instead.
+    // Wrapped in try/catch as defence-in-depth: even if the mode fails to
+    // set, chunk playback now falls through cleanly without leaving the
+    // audio session half-mutated.
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+        interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+      });
+    } catch (modeErr) {
+      console.warn('[TTS Native] setAudioModeAsync failed, continuing without explicit mode:', modeErr);
+    }
     const sound = new Audio.Sound();
     _currentSound = sound;
     await new Promise<void>((resolve, reject) => {
@@ -2953,14 +2967,18 @@ async function playBase64AudioNative(base64: string): Promise<void> {
           if (/AudioFocusNotAcquired/i.test(msg)) {
             try {
               await Audio.setIsEnabledAsync(true);
+              // V57.12.3 Bug H fix — same enum import fix as the primary
+              // audio-mode call site above. Without this the retry path
+              // throws on the same `undefined` constants and the audio
+              // session never recovers.
               await Audio.setAudioModeAsync({
                 allowsRecordingIOS: false,
                 playsInSilentModeIOS: true,
                 staysActiveInBackground: false,
                 shouldDuckAndroid: true,
-                interruptionModeAndroid: Audio.INTERRUPTION_MODE_ANDROID_DUCK_OTHERS,
-                interruptionModeIOS: Audio.INTERRUPTION_MODE_IOS_DUCK_OTHERS,
-              } as any);
+                interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+                interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+              });
               await sound.playAsync();
               return;
             } catch (retryErr) {
