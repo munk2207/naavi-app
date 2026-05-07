@@ -6,7 +6,11 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "test:auto": "tsx tests/runner.ts",
+    "test:mobile": "node scripts/run-maestro.js",
+    "test:mobile:one": "node scripts/run-maestro.js --one",
+    "seed:test-user": "node scripts/seed-test-user.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",
@@ -44,6 +48,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.2"
   },
   "private": true

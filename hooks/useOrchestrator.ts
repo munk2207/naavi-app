@@ -639,8 +639,14 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       const isYes = AFFIRMATIVE_RE.test(msg);
       const isNo  = NEGATIVE_RE.test(msg);
 
-      // Helper — emit a text-only turn and reset status. Optionally accepts
-      // a location-rule card to attach (V57.4 Part B).
+      // Helper — emit a turn AND speak the reply. Optionally accepts a
+      // location-rule card to attach (V57.4 Part B). V57.13 — previously the
+      // helper skipped speakResponse and went straight to 'idle', which made
+      // every picker-resolution reply silent (Bug S) and also hid the Stop
+      // button (visible only while convState === 'speaking', Bug T). Now we
+      // route through the same speaking → idle transition the rest of the
+      // orchestrator uses, so picker replies have voice AND the Stop button
+      // stays visible until speech ends.
       const emitPendingTurn = (
         speech: string,
         locationRules: { ruleId: string; placeName: string; oneShot: boolean }[] = [],
@@ -655,7 +661,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
                    + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
         }]);
-        setStatus('idle');
+        if (speech?.trim()) {
+          setStatus('speaking');
+          setAudioPlaying(true);
+          speakResponse(speech, language).finally(() => {
+            setAudioPlaying(false);
+            setStatus('idle');
+          });
+        } else {
+          setStatus('idle');
+        }
       };
 
       // Helper — commit the pending rule (used by yes-path AND clarification-memory-hit-path).
@@ -724,12 +739,13 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             }),
           }, 30000).catch((err) => console.error('[Orchestrator] save-to-cache failed:', err));
         }
-        try {
-          const { syncGeofencesForUser } = await import('@/hooks/useGeofencing');
-          await syncGeofencesForUser(sessionUserId);
-        } catch (err) {
-          console.error('[Orchestrator] geofence sync after confirmed location rule:', err);
-        }
+        // V57.13 — fire-and-forget. Awaiting syncGeofencesForUser added ~7-8s
+        // between user "yes" and the chat turn rendering (Bug U). Geofence
+        // wiring runs in the background; the rule is already in the DB by
+        // the time we get here.
+        import('@/hooks/useGeofencing')
+          .then(({ syncGeofencesForUser }) => syncGeofencesForUser(sessionUserId))
+          .catch((err) => console.error('[Orchestrator] geofence sync after confirmed location rule:', err));
         // V57.9.7 — first-time battery-exemption nudge so Robert's
         // arrival alerts actually fire on time (Wael 2026-05-01: 28-min
         // delay due to Android Doze).
@@ -2024,12 +2040,12 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                         placeName: data.place_name,
                         oneShot,
                       });
-                      try {
-                        const { syncGeofencesForUser } = await import('@/hooks/useGeofencing');
-                        await syncGeofencesForUser(session.user.id);
-                      } catch (err) {
-                        console.error('[Orchestrator] geofence sync after memory-hit insert:', err);
-                      }
+                      // V57.13 Bug U — fire-and-forget so memory-hit replies
+                      // don't wait 7-8s on geofence registration before the
+                      // chat turn renders.
+                      import('@/hooks/useGeofencing')
+                        .then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id))
+                        .catch((err) => console.error('[Orchestrator] geofence sync after memory-hit insert:', err));
                       // V57.9.7 — first-time battery-exemption nudge.
                       maybePromptBatteryExemption().catch(() => {});
                     }

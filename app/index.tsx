@@ -653,7 +653,6 @@ export default function HomeScreen() {
   // load on the chat page (Wael feedback 2026-04-29).
   const [expandedTurns, setExpandedTurns] = useState<Set<number>>(new Set());
   const [briefDays, setBriefDays] = useState<number>(1); // default: today only
-  const [recordingPrompt, setRecordingPrompt] = useState<{ title: string; endMs: number } | null>(null);
 
   // Marketing-hook tip for the empty-brief state. Picked once per mount so it
   // doesn't flicker on re-render. Copy comes from lib/brief-logic.ts.
@@ -935,88 +934,6 @@ export default function HomeScreen() {
     savedDocLink,
   } = useConversationRecorder();
 
-  // Recording prompt — checks every 60s for events starting within 10 minutes
-  //
-  // V57.12.5 Bug H ROOT-CAUSE FIX (Wael 2026-05-07):
-  //
-  // Previous version had `recordingPrompt` in the dep array AND called
-  // `setRecordingPrompt({ title, endMs })` with a NEW object reference
-  // inside the body. That created an infinite render loop whenever the
-  // brief contained a calendar event within 10 min:
-  //
-  //   1. brief refresh → effect runs
-  //   2. body finds the upcoming event → setRecordingPrompt({...new obj})
-  //   3. recordingPrompt state changes (new ref) → effect re-runs
-  //   4. body finds the same event → setRecordingPrompt({...another new obj})
-  //   5. → → → React: "Maximum update depth exceeded" (50+ renders)
-  //   6. RN bridgeless mode handles via getOrCreateDestroyTask() →
-  //      tears down all React surfaces → black screen
-  //   7. Process stays alive but UI is gone → user perceives as crash
-  //
-  // This was Wael's "Bug H" — reproducible 50s after SET_REMINDER "in 2
-  // minutes" (the short-delay calendar event is what triggers the
-  // <=10min filter below). Long-delay reminders (2hr+) don't trigger
-  // because their calendar event doesn't match the 10-min window.
-  // Other actions don't create short-future calendar events.
-  //
-  // Two changes:
-  //   (a) Drop `recordingPrompt` from the dep array — the effect should
-  //       only re-evaluate when `brief` or `convState` changes, never
-  //       when its own output changes.
-  //   (b) Use functional setState to no-op when the value is unchanged —
-  //       defends against any future caller that re-runs the effect, so
-  //       setting the same {title, endMs} doesn't allocate a new object
-  //       and trigger pointless re-renders.
-  useEffect(() => {
-    function checkUpcomingEvents() {
-      const now = Date.now();
-
-      // Auto-stop if currently recording and event ended
-      if (convState === 'recording') {
-        setRecordingPrompt(prev => {
-          if (prev && now > prev.endMs) {
-            stopConvRecording();
-            return null;
-          }
-          return prev; // unchanged → React skips re-render
-        });
-        return; // don't show a new prompt while already recording
-      }
-
-      // Find next calendar event starting within 10 minutes
-      let nextPrompt: { title: string; endMs: number } | null = null;
-      for (const item of brief) {
-        if (item.category !== 'calendar' || !item.startISO) continue;
-        const startMs = new Date(item.startISO).getTime();
-        const minutesUntil = (startMs - now) / 60000;
-        if (minutesUntil > 0 && minutesUntil <= 10) {
-          const endMs = item.endISO
-            ? new Date(item.endISO).getTime()
-            : startMs + 60 * 60 * 1000; // default 1hr
-          nextPrompt = { title: item.title, endMs };
-          break;
-        }
-      }
-
-      setRecordingPrompt(prev => {
-        // No event in window → clear (only when idle)
-        if (!nextPrompt) {
-          if (convState === 'idle' && prev !== null) return null;
-          return prev;
-        }
-        // Same event already prompted — keep prev (no new object alloc)
-        if (prev && prev.title === nextPrompt.title && prev.endMs === nextPrompt.endMs) {
-          return prev;
-        }
-        // Different event → swap
-        return nextPrompt;
-      });
-    }
-
-    checkUpcomingEvents();
-    const interval = setInterval(checkUpcomingEvents, 60_000);
-    return () => clearInterval(interval);
-  }, [brief, convState]);
 
   // Navigation alert timer — checks every 30s if it's time to leave
   useEffect(() => {
@@ -1431,30 +1348,6 @@ export default function HomeScreen() {
                 : `🚗 Time to leave — ${navAlert.title}. Tap to navigate`}
             </Text>
           </TouchableOpacity>
-        )}
-
-        {/* Recording prompt banner — event starting within 10 minutes */}
-        {recordingPrompt && convState === 'idle' && (
-          <View style={styles.recordingPromptBanner}>
-            <Text style={styles.recordingPromptText}>
-              🩺 {recordingPrompt.title} — start recording?
-            </Text>
-            <TouchableOpacity
-              style={styles.recordingPromptBtn}
-              onPress={() => {
-                setLocalTitle(recordingPrompt.title);
-                clearLive();
-                startConvRecording();
-                startLive();
-                setRecordingPrompt(prev => prev); // keep for auto-stop
-              }}
-            >
-              <Text style={styles.recordingPromptBtnText}>Start</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setRecordingPrompt(null)}>
-              <Text style={styles.recordingPromptDismiss}>✕</Text>
-            </TouchableOpacity>
-          </View>
         )}
 
         <IntegrationsModal visible={showIntegrations} onClose={() => setShowIntegrations(false)} />
@@ -2990,36 +2883,6 @@ const styles = StyleSheet.create({
   memoBtnRecording: {
     backgroundColor: Colors.alert,
     opacity: 0.8,
-  },
-  recordingPromptBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.moderate,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    gap: 10,
-  },
-  recordingPromptText: {
-    flex: 1,
-    color: '#fff',
-    fontSize: Typography.body,
-    fontWeight: '600',
-  },
-  recordingPromptBtn: {
-    backgroundColor: Colors.bgElevated,
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  recordingPromptBtnText: {
-    color: Colors.moderate,
-    fontWeight: '700',
-    fontSize: Typography.body,
-  },
-  recordingPromptDismiss: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 18,
-    paddingHorizontal: 4,
   },
   convActionsHeader: {
     fontSize: Typography.body,
