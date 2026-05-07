@@ -26,8 +26,29 @@ interface Props {
   timestamp?: string;
 }
 
+// V57.13.6 — short user messages get a trailing dot pad as a workaround for
+// the Yoga single-line intrinsic-width measurement bug on Samsung One UI
+// (react-native#35039). Yoga reports a slightly-too-small width, so the LAST
+// word of short single-line messages gets clipped ("Alert me at Walmart" →
+// "Alert me at"). Long messages that already wrap to 2+ lines self-heal.
+// Padding short text with visible dots pushes the truncation point onto the
+// dots instead of the user's real word; user's text stays whole.
+//
+// Only applied to user messages under TRUNCATION_PAD_THRESHOLD chars.
+// Naavi messages don't truncate (they routinely wrap to multiple lines).
+const TRUNCATION_PAD_THRESHOLD = 50;
+const TRUNCATION_PAD = '. . . . . .';
+
+function maybePad(content: string, isNaavi: boolean): string {
+  if (isNaavi) return content;
+  if (!content) return content;
+  if (content.length >= TRUNCATION_PAD_THRESHOLD) return content;
+  return `${content} ${TRUNCATION_PAD}`;
+}
+
 export function ConversationBubble({ role, content, timestamp }: Props) {
   const isNaavi = role === 'assistant';
+  const displayContent = maybePad(content, isNaavi);
 
   // V57.11.5 — bubble layout reworked. The maxWidth + alignSelf approach
   // kept tripping Android's Yoga text measurement and dropping trailing
@@ -57,7 +78,7 @@ export function ConversationBubble({ role, content, timestamp }: Props) {
           </View>
         ) : (
           <View style={[styles.bubble, styles.robertBubble]}>
-            <Text style={styles.robertText} textBreakStrategy="simple">{content}</Text>
+            <Text style={styles.robertText} textBreakStrategy="simple">{displayContent}</Text>
           </View>
         )}
         {timestamp && (
