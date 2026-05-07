@@ -824,6 +824,12 @@ export default function HomeScreen() {
   // the "Enable location" banner even after the user granted from Settings.
   useEffect(() => {
     const sub = AppState.addEventListener('change', async (state) => {
+      // V57.12.4 Bug H instrumentation — log EVERY AppState change with
+      // a wall-clock timestamp so the next reproduction shows whether
+      // the app went background between SET_REMINDER and the crash. JS
+      // timers throttle when an Android RN app is in background, so a
+      // missing heartbeat between alive states could be an explanation.
+      remoteLog(newDiagSession(), 'app-state-change', { state });
       if (state === 'active' && currentUserId) {
         // V57.10.1 — banner hides when EITHER foreground or background
         // permission is granted (see initial-check useEffect above).

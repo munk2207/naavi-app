@@ -310,7 +310,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   // Always-current status ref — callbacks (like onOrangeButtonPressed) need
   // to read the current status without being recreated on every status change.
   const statusRef = useRef<OrchestratorStatus>('idle');
-  useEffect(() => { statusRef.current = status; }, [status]);
+  // V57.12.4 Bug H instrumentation — log every status transition with a
+  // wall-clock timestamp so the next reproduction shows the exact state-
+  // machine path between SET_REMINDER and the crash. Use a single
+  // long-lived diag session keyed off mount so transitions correlate
+  // across turns. Cheap to log (one row per transition).
+  const statusDiagRef = useRef<string>(newDiagSession());
+  useEffect(() => {
+    statusRef.current = status;
+    remoteLog(statusDiagRef.current, 'status-transition', { status });
+  }, [status]);
 
   // True ONLY while TTS is actively emitting audio. Drives the orange Stop
   // button visibility — the button hides when nothing is being spoken, even
@@ -1799,14 +1808,19 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               }, delayMs);
             }
 
-            // V57.12.2 Bug H instrumentation — drop a 12-tick heartbeat
-            // (every 10s for 120s) so the next reproduction lets us see
-            // when the JS thread stops responding. Wael 2026-05-06: black
-            // screen ~30-60s after a SET_REMINDER turn, requires Clear
-            // Data to recover. The crash trigger is unknown; the heartbeat
-            // gives us a wall-clock anchor in client_diagnostics. Each
-            // tick logs the elapsed-since-set, the in-flight timer count
-            // estimate, and JS heap size when available.
+            // V57.12.4 Bug H instrumentation v2 — finer heartbeats. V57.12.3
+            // narrowed the crash to "after voice + card render". V57.12.3
+            // also fixed the audio-mode constants (ttsfallback-expo no
+            // longer fires) and the geofence sync now succeeds with 9
+            // registered fences. The crash signature changed: V57.12.2 had
+            // heartbeats 1-4 logged then silence; V57.12.3 had only
+            // heartbeat-1 logged but syncGeofences-end fired at +23s
+            // (proving JS thread alive past +20s), then silence until
+            // cold-start at +54s. Heartbeat-2 (+20s) DID NOT log even
+            // though the thread was alive — suggests remoteLog calls were
+            // swallowed for that tick. v2 drops the interval to 2s so
+            // partial failures of any single tick still leave neighbors
+            // intact, narrowing the crash window from 10s to 2s.
             const reminderDiag = newDiagSession();
             remoteLog(reminderDiag, 'set-reminder-rendered', {
               title: reminderTitle.slice(0, 60),
@@ -1814,15 +1828,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               localPushDelayMs: delayMs > 0 ? delayMs : null,
             });
             const hbStart = Date.now();
-            for (let tick = 1; tick <= 12; tick++) {
+            // 60 ticks × 2s = 120s total coverage, matching v1.
+            for (let tick = 1; tick <= 60; tick++) {
               setTimeout(() => {
                 const heap = (globalThis as any).performance?.memory?.usedJSHeapSize;
                 remoteLog(reminderDiag, `heartbeat-${tick}`, {
                   elapsedMs: Date.now() - hbStart,
                   heap: typeof heap === 'number' ? heap : null,
                 });
-                if (tick === 12) endDiagSession(reminderDiag);
-              }, tick * 10_000);
+                if (tick === 60) endDiagSession(reminderDiag);
+              }, tick * 2_000);
             }
           }
         } else if (action.type === 'LOG_CONCERN') {
