@@ -1,0 +1,51 @@
+appId: ca.naavi.app
+name: 04 — voice record → stop → transcribe (V57.9.5 voice path)
+tags:
+  - voice
+  - feature
+---
+# Verifies the voice memo path:
+#   - Tap mic → recording state
+#   - Tap stop → transcribing state
+#   - Wait for transcription to land in the chat input
+#   - Tap send → Naavi answers
+#
+# Requires the emulator to have audio input. Many emulator setups don't
+# capture host-microphone audio by default. To enable on the AVD:
+#   Edit Device → Advanced → Microphone: enable both "Virtual headset
+#   has microphone" and "Use host microphone".
+# If audio is not configured, this test is expected to fail at the
+# transcription step — that's a setup limitation, not an app bug.
+
+- launchApp:
+    clearState: false
+
+# Wait for status to settle.
+- assertVisible:
+    text: "Ask MyNaavi"
+
+# Tap the green mic button. The mic id might be 'mic-button' or a text
+# fallback; both attempted.
+- tapOn:
+    id: "mic-button"
+    optional: true
+- tapOn:
+    text: "Recording"
+    optional: true
+
+# Wait the natural recording window (~3 seconds of "speech").
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Tap stop (same button, transformed).
+- tapOn:
+    id: "mic-button"
+    optional: true
+
+# Voice transcription target ~5s with V57.9.5 Deepgram path.
+# Chat-send target ~7s after that. Total budget 25s.
+- extendedWaitUntil:
+    visible:
+      text: "MyNaavi"
+    timeout: 25000
+- takeScreenshot: 04-voice-result

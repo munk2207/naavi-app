@@ -1,0 +1,75 @@
+appId: ca.naavi.app
+name: 02 — five consecutive typed sends (V57.9.5 connection-leak catcher)
+tags:
+  - regression
+  - critical
+---
+# This scenario reproduces the exact bug pattern that broke V57.9.5 in
+# production: after 2-3 successful sends, the third+ send hung 60-120s
+# because remoteLog leaked HTTP connections in the OkHttp pool.
+#
+# After V57.9.6 (the fix), all 5 sends should complete in <10s each
+# with a Naavi reply visible after each.
+#
+# V57.12.3 — assertions now check that the input placeholder
+# "Ask MyNaavi" reappears (status returned to idle = response complete)
+# rather than asserting on Naavi's specific prose ("It's"). The latter
+# kept drifting as the LLM prompt evolved across V57.x.
+
+- launchApp:
+    clearState: false
+
+# --- Send 1 ---
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "What is the time"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
+- takeScreenshot: 02-after-send-1
+
+# --- Send 2 ---
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "What day is today"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
+- takeScreenshot: 02-after-send-2
+
+# --- Send 3 (the call that hung in V57.9.5) ---
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "What is the date"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
+- takeScreenshot: 02-after-send-3
+
+# --- Send 4 ---
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "Hello again"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
+- takeScreenshot: 02-after-send-4
+
+# --- Send 5 ---
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "Thank you"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
+- takeScreenshot: 02-after-send-5

@@ -1,0 +1,45 @@
+appId: ca.naavi.app
+name: 12 — Multi-location picker fires for chain-store query
+tags:
+  - regression
+  - prompt
+---
+# This scenario verifies the chain-store rule (prompt v57+): when the user
+# says "alert me at Walmart" (a chain with no specific branch), Naavi must
+# emit SET_ACTION_RULE immediately and the orchestrator's resolve-place
+# returns multiple candidates → picker shows "I see N Walmarts ..." with
+# numbered list.
+#
+# Regression history:
+#   - Before v57: Claude asked "Which Walmart? Give me a street."
+#   - V57.11.5 (v57): Picker fired ✓
+#   - V57.11.6 (v58): Verified-address rule diluted the chain rule, "Which
+#     Walmart?" question came back ✗
+#   - V57.11.7 (v59): Chain rule re-emphasized, picker should fire again ✓
+
+- launchApp:
+    clearState: false
+
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "alert me at Walmart"
+- pressKey: Enter
+
+# Picker speech includes a numbered list and a prompt to say a number
+# or the street name.
+#
+# V57.12.3 — dropped the "Walmarts" plural assertion. Smart pluralization
+# is sensitive to brand-name shape and the chain enum may render as
+# "Walmart" without the 's' on some prompt versions. The "Say a number"
+# prompt is more stable, and the numbered "1." prefix is proof of list
+# rendering.
+- extendedWaitUntil:
+    visible:
+      text: "Say a number"
+    timeout: 30000
+
+# Confirm at least the "1." numbered prefix appears (proves it's a list).
+- assertVisible:
+    text: "1."
+
+- takeScreenshot: 12-walmart-picker-rendered
