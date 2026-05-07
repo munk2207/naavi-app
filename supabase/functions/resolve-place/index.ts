@@ -289,7 +289,13 @@ serve(async (req) => {
     const allResults: any[] = Array.isArray(data.results) ? data.results : [];
     const specificResults = allResults.filter(isSpecificResult);
 
-    if (bareBrand && specificResults.length >= 2) {
+    // V57.13.3 — drop bareBrand gate on the multi-picker. Whenever Google
+    // returns 2+ specific results, show ALL of them as a picker, regardless
+    // of how many words the user said. Wael 2026-05-07: a 3-word query
+    // ("Movati athletic club") returned a single Orleans result while Google
+    // had 4 valid Movati locations; user must be given the choice every
+    // time multiple options exist. The user always picks, never assume.
+    if (specificResults.length >= 2) {
       // Dedupe by rounded coords
       const seen = new Set<string>();
       const deduped: any[] = [];
