@@ -936,20 +936,55 @@ export default function HomeScreen() {
   } = useConversationRecorder();
 
   // Recording prompt — checks every 60s for events starting within 10 minutes
+  //
+  // V57.12.5 Bug H ROOT-CAUSE FIX (Wael 2026-05-07):
+  //
+  // Previous version had `recordingPrompt` in the dep array AND called
+  // `setRecordingPrompt({ title, endMs })` with a NEW object reference
+  // inside the body. That created an infinite render loop whenever the
+  // brief contained a calendar event within 10 min:
+  //
+  //   1. brief refresh → effect runs
+  //   2. body finds the upcoming event → setRecordingPrompt({...new obj})
+  //   3. recordingPrompt state changes (new ref) → effect re-runs
+  //   4. body finds the same event → setRecordingPrompt({...another new obj})
+  //   5. → → → React: "Maximum update depth exceeded" (50+ renders)
+  //   6. RN bridgeless mode handles via getOrCreateDestroyTask() →
+  //      tears down all React surfaces → black screen
+  //   7. Process stays alive but UI is gone → user perceives as crash
+  //
+  // This was Wael's "Bug H" — reproducible 50s after SET_REMINDER "in 2
+  // minutes" (the short-delay calendar event is what triggers the
+  // <=10min filter below). Long-delay reminders (2hr+) don't trigger
+  // because their calendar event doesn't match the 10-min window.
+  // Other actions don't create short-future calendar events.
+  //
+  // Two changes:
+  //   (a) Drop `recordingPrompt` from the dep array — the effect should
+  //       only re-evaluate when `brief` or `convState` changes, never
+  //       when its own output changes.
+  //   (b) Use functional setState to no-op when the value is unchanged —
+  //       defends against any future caller that re-runs the effect, so
+  //       setting the same {title, endMs} doesn't allocate a new object
+  //       and trigger pointless re-renders.
   useEffect(() => {
     function checkUpcomingEvents() {
       const now = Date.now();
 
       // Auto-stop if currently recording and event ended
       if (convState === 'recording') {
-        if (recordingPrompt && now > recordingPrompt.endMs) {
-          stopConvRecording();
-          setRecordingPrompt(null);
-        }
+        setRecordingPrompt(prev => {
+          if (prev && now > prev.endMs) {
+            stopConvRecording();
+            return null;
+          }
+          return prev; // unchanged → React skips re-render
+        });
         return; // don't show a new prompt while already recording
       }
 
       // Find next calendar event starting within 10 minutes
+      let nextPrompt: { title: string; endMs: number } | null = null;
       for (const item of brief) {
         if (item.category !== 'calendar' || !item.startISO) continue;
         const startMs = new Date(item.startISO).getTime();
@@ -958,19 +993,30 @@ export default function HomeScreen() {
           const endMs = item.endISO
             ? new Date(item.endISO).getTime()
             : startMs + 60 * 60 * 1000; // default 1hr
-          setRecordingPrompt({ title: item.title, endMs });
-          return;
+          nextPrompt = { title: item.title, endMs };
+          break;
         }
       }
 
-      // Clear prompt if no upcoming event
-      if (convState === 'idle') setRecordingPrompt(null);
+      setRecordingPrompt(prev => {
+        // No event in window → clear (only when idle)
+        if (!nextPrompt) {
+          if (convState === 'idle' && prev !== null) return null;
+          return prev;
+        }
+        // Same event already prompted — keep prev (no new object alloc)
+        if (prev && prev.title === nextPrompt.title && prev.endMs === nextPrompt.endMs) {
+          return prev;
+        }
+        // Different event → swap
+        return nextPrompt;
+      });
     }
 
     checkUpcomingEvents();
     const interval = setInterval(checkUpcomingEvents, 60_000);
     return () => clearInterval(interval);
-  }, [brief, convState, recordingPrompt]);
+  }, [brief, convState]);
 
   // Navigation alert timer — checks every 30s if it's time to leave
   useEffect(() => {
