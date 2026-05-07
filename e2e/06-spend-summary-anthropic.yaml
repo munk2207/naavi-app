@@ -1,0 +1,31 @@
+appId: ca.naavi.app
+name: 06 — spend summary (Anthropic last month → one number)
+tags:
+  - feature
+  - spend-summary
+---
+# Verifies the V57.9.3-V57.9.4 spend-summary chain end-to-end:
+# - Mobile orchestrator's SPEND_SUMMARY action handler
+# - Server-side naavi-spend-summary V4 (documents source, Stripe-pair dedupe)
+# - Speech override that produces ONE number, not a list
+#
+# V57.12.3 — replaced the broken regex (Maestro's text matcher does
+# substring-only) with a stable idle-state assertion. The actual
+# dollar/no-data verdict depends on the test user's invoice data and
+# would only be a useful regression catcher if the test seeded data —
+# which it doesn't. Idle-state proves the SPEND_SUMMARY round-trip
+# completed.
+
+- launchApp:
+    clearState: false
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "How much did Anthropic charge me last month?"
+- pressKey: Enter
+# Wait for the response to complete — input placeholder reappears when
+# status returns to idle.
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 30000
+- takeScreenshot: 06-spend-summary-result

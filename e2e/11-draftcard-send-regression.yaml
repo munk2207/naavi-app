@@ -1,0 +1,58 @@
+appId: ca.naavi.app
+name: 11 — DraftCard Send commits the message (V57.11.6 regression catcher)
+tags:
+  - regression
+  - critical
+---
+# This scenario reproduces the bug pattern that broke V57.11.6 in production:
+# after hands-free mode was removed in V57.11.3, the voice-confirm block
+# guarded by `handsfreeRef.current` never ran. pendingActionRef was never
+# set. DraftCard's Send button → confirmPending() → read null pendingAction
+# → no-op. Result: tap Send, nothing happens, no message goes out.
+#
+# After V57.11.6 (the fix removed the guard), tapping Send must commit the
+# action and the card must update to "SMS SENT" / "EMAIL SENT".
+#
+# V57.12.3 — switched the test recipient from "Hussein" (a name that
+# requires Google People API or a saved contact, which the emulator
+# may not have) to a literal phone number. This bypasses the contact
+# lookup entirely and exercises only the DraftCard Send commit path
+# this test was designed to catch.
+
+- launchApp:
+    clearState: false
+
+# Tap the input field and type a draft request with a literal phone
+# number — bypasses contact lookup, exercises only the Send-commit
+# path that this regression catcher was written for.
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "text 6135551234 hi from maestro testing"
+- pressKey: Enter
+
+# Naavi composes the draft. The DraftCard label is stable from the
+# React component (SMS DRAFT READY); the Send/Discard buttons hang
+# off it.
+- extendedWaitUntil:
+    visible:
+      text: "SMS DRAFT READY"
+    timeout: 20000
+- assertVisible:
+    text: "Send"
+
+- takeScreenshot: 11-after-draft-rendered
+
+# Tap the Send button on the DraftCard. After this, the orchestrator
+# fires send-sms via Edge Function. (Twilio will reject 6135551234 as
+# not a deliverable number, but the SMS SENT card transitions on
+# Twilio HTTP 2xx, not on actual delivery — the round-trip succeeds
+# regardless.)
+- tapOn:
+    text: "Send"
+
+- extendedWaitUntil:
+    visible:
+      text: "SMS SENT"
+    timeout: 30000
+
+- takeScreenshot: 11-after-send-confirmed

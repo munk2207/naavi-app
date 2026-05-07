@@ -1,0 +1,39 @@
+appId: ca.naavi.app
+name: 09 — clear chat returns to brief
+tags:
+  - chat-ui
+---
+# Verifies the X Clear chat affordance unwinds the chat state and
+# returns the user to the brief view.
+#
+# V57.12.3 — extended timeout for the response and waited for it to
+# fully complete before checking the Clear chat affordance. Previous
+# version ran the assertion before the response settled.
+
+- launchApp:
+    clearState: false
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "Hello"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 20000
+
+# Clear chat link appears once a turn exists. Wait explicitly for it.
+- extendedWaitUntil:
+    visible:
+      text: "Clear chat"
+    timeout: 5000
+- tapOn:
+    text: "Clear chat"
+
+# After clear, the brief should be visible again.
+- extendedWaitUntil:
+    visible:
+      text: "Brief"
+    timeout: 5000
+- assertNotVisible:
+    text: "Earlier:"
+- takeScreenshot: 09-cleared

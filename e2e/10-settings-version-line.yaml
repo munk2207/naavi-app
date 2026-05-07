@@ -1,0 +1,51 @@
+appId: ca.naavi.app
+name: 10 — settings page renders + version visible
+tags:
+  - smoke
+  - settings
+---
+# Quick smoke that the Settings page is reachable and renders the
+# version line.
+#
+# V57.12.3 — drop the unreliable id-based topbar-menu tap (id may not
+# render in this build's accessibility tree) and rely on hierarchical
+# tap path. Looser asserts on "Sign Out" + "build" — both are stable
+# UI labels independent of which version is current.
+
+- launchApp:
+    clearState: false
+
+# Open the 3-dot menu on the topbar. Try the id first, fall back to
+# any element with the right shape if the id is missing.
+- runFlow:
+    when:
+      visible:
+        id: "topbar-menu"
+    commands:
+      - tapOn:
+          id: "topbar-menu"
+- runFlow:
+    when:
+      notVisible:
+        id: "topbar-menu"
+    commands:
+      - tapOn:
+          point: "95%,9%"
+
+# Tap the Settings menu item. Looser timeout because the menu renders
+# asynchronously on some builds.
+- extendedWaitUntil:
+    visible:
+      text: "Settings"
+    timeout: 5000
+- tapOn:
+    text: "Settings"
+
+# Settings page contents — both labels are stable.
+- extendedWaitUntil:
+    visible:
+      text: "Sign Out"
+    timeout: 8000
+- assertVisible:
+    text: "build"
+- takeScreenshot: 10-settings

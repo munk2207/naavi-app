@@ -1,0 +1,19 @@
+appId: ca.naavi.app
+name: 01 — smoke launch (home brief renders)
+tags:
+  - smoke
+---
+- launchApp:
+    clearState: false
+- assertVisible:
+    text: "MyNaavi"
+# Use TODAY'S BRIEF (the actual uppercase heading) — Maestro is case
+# sensitive. "WEATHER" is also a stable card label always present on
+# the home screen.
+- assertVisible:
+    text: "TODAY'S BRIEF"
+- assertVisible:
+    text: "WEATHER"
+- assertVisible:
+    text: "Ask MyNaavi"
+- takeScreenshot: 01-smoke-launch
