@@ -1858,6 +1858,7 @@ export default function HomeScreen() {
                   key={`loc-${rule.ruleId}-${i}`}
                   ruleId={rule.ruleId}
                   placeName={rule.placeName}
+                  address={rule.address ?? null}
                   initialOneShot={rule.oneShot}
                 />
               ))}

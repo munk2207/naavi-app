@@ -271,7 +271,7 @@ export interface ConversationTurn {
   // showing the alert + a "Make it recurring / Make it one-time" toggle so
   // Robert can flip the mode with a tap instead of having to re-issue a
   // verbal command. Empty array on every other turn type.
-  locationRules: { ruleId: string; placeName: string; oneShot: boolean }[];
+  locationRules: { ruleId: string; placeName: string; address?: string | null; oneShot: boolean }[];
   timestamp?: string;
 }
 
@@ -649,7 +649,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       // stays visible until speech ends.
       const emitPendingTurn = (
         speech: string,
-        locationRules: { ruleId: string; placeName: string; oneShot: boolean }[] = [],
+        locationRules: { ruleId: string; placeName: string; address?: string | null; oneShot: boolean }[] = [],
       ) => {
         setTurns(prev => [...prev, {
           userMessage,
@@ -884,8 +884,9 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           ? `Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.`
           : `Couldn't save the rule — something went wrong. Try again?`;
         // V57.4 Part B — attach the toggle card when the rule was saved.
+        // V57.13.4 — also pass address so the card shows the street segment.
         const cards = ok && ruleId
-          ? [{ ruleId, placeName: pending.resolved.place_name, oneShot }]
+          ? [{ ruleId, placeName: pending.resolved.place_name, address: pending.resolved.address ?? null, oneShot }]
           : [];
         pendingLocationRef.current = null;
         emitPendingTurn(speech, cards);
@@ -992,7 +993,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                 ? `${data.place_name}${sourceText ? ' ' + sourceText : ''} — alert set ${modeText} you arrive.`
                 : `Couldn't save the rule — something went wrong.`;
               const cards = ok && ruleId
-                ? [{ ruleId, placeName: data.place_name, oneShot }]
+                ? [{ ruleId, placeName: data.place_name, address: data.address ?? null, oneShot }]
                 : [];
               emitPendingTurn(speech, cards);
               return;
@@ -1046,7 +1047,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     // V57.4 Part B — location rules created in this turn. Filled by the
     // SET_ACTION_RULE intercept after a successful insert; rendered as an
     // inline card with a "Make it recurring / Make it one-time" toggle.
-    const turnLocationRules: { ruleId: string; placeName: string; oneShot: boolean }[] = [];
+    const turnLocationRules: { ruleId: string; placeName: string; address?: string | null; oneShot: boolean }[] = [];
     let turnGlobalSearch: {
       query: string;
       results: GlobalSearchResult[];
@@ -2050,6 +2051,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                       turnLocationRules.push({
                         ruleId: String(insertedRule!.id),
                         placeName: data.place_name,
+                        address: data.address ?? null,
                         oneShot,
                       });
                       // V57.13 Bug U — fire-and-forget so memory-hit replies
