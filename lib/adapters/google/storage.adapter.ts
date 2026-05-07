@@ -60,6 +60,17 @@ export class GoogleStorageAdapter implements StorageAdapter {
 
   async save(title: string, content: string, _userId: string, category?: 'transcript' | 'brief' | 'note' | 'list'): Promise<StorageFile> {
     const result = await googleSave({ title, content, category });
+    // V57.12.2 Bug O fix — propagate save failures by throwing instead of
+    // silently returning a fake StorageFile with empty webViewLink. The
+    // previous code accepted `{success: false, error: "..."}` from
+    // saveToDrive and built a "valid" looking object anyway, which caused
+    // the orchestrator to render a card pointing to nothing AND speak
+    // "Saved." while the file never existed in Drive. Wael 2026-05-06 sweep
+    // surfaced this on the SAVE_TO_DRIVE path (LIST_CREATE didn't hit it
+    // because manage-list calls save-to-drive through a different wrapper).
+    if (!result.success) {
+      throw new Error(result.error ?? 'Drive save failed');
+    }
     return {
       id:            result.fileId      ?? `gdrive_${Date.now()}`,
       name:          title,

@@ -373,6 +373,67 @@ Auto-tester: **52 passed / 0 failed / 0 errored / 0 skipped** — Bug E fallback
 
 ---
 
+## V57.12.2 hotfix shipped (2026-05-06 evening, after V57.12.1 sweep)
+
+V57.12.1 manual sweep on Wael's phone + emulator surfaced **5 new bugs (K-O)** that existed pre-V57.12.0 but only appeared once Bugs A-E were out of the way. Bug H was confirmed reproducible and INDEPENDENT of Bug E (the V57.12.1 hypothesis was wrong). V57.12.2 fixes the easily-localized bugs and adds instrumentation for Bug H.
+
+### V57.12.1 sweep results
+
+3 prior bugs verified fixed live: A (picker escape), D (relaxed cancel), E (speech fallback).
+1 prior bug confirmed still active: H (black-screen crash on SET_REMINDER, requires Clear Data to recover).
+5 new bugs found while testing on V57.12.1 — all pre-existing in V57.12.0, just not surfaced last time.
+
+### V57.12.2 fixes
+
+**Bug K — savePerson missing user_id (now FIXED).** `savePerson()` in `lib/memory.ts` was inserting into `people` without a `user_id`, so RLS rejected the writes silently (return value not error-checked). The people table was never populated, which cascaded into Bug L. Fix: pull `user_id` from `getSessionWithTimeout()`, scope the upsert existence check to that user, surface insert/update errors via `console.error`. Multi-user safety per CLAUDE.md Rule 10.
+
+**Bug L — DRAFT_MESSAGE contact lookup gap (now FIXED).** Two issues:
+- `lookupContact` step 4 (legacy `contacts` table) explicitly forced `phone: null` even though the table HAS a phone column (migration `20260419_contacts_phone.sql`). Saving John's phone via ADD_CONTACT wrote it to the table, but the lookup step that draft-flow used never read it. Fix: select + return the phone column, scope the query to the active user.
+- Step 1 (Google People API) was short-circuiting on a null-phone-null-email Google match, blocking the local-table fallback that DID have the data. Fix: only return the Google match when it carries at least one usable channel.
+
+Plus user_id filters added to all four lookup steps (multi-user safety).
+
+**Bug M — voice/text mismatch (now FIXED).** In `useOrchestrator.ts`, `finalSpeech` (TTS) was getting LIST_READ items and GLOBAL_SEARCH tail-appends but `displaySpeech` (bubble) wasn't. The bubble showed only the filler ("Looking that up.") while TTS spoke the actual answer. Fix: mirror the same appendings to displaySpeech BEFORE the `setTurns` call. The bubble now matches what the user hears.
+
+**Bug O — SAVE_TO_DRIVE silent failure (now FIXED).** `lib/adapters/google/storage.adapter.ts::save()` was ignoring the `result.success` flag from `saveToDrive()` and constructing a "valid" StorageFile with empty `webViewLink` on failure. The orchestrator's catch block never fired and Naavi spoke "Saved." while the file was never created in Drive. Fix: throw on `result.success === false`. Plus the orchestrator's SAVE_TO_DRIVE catch now overrides the speech with the actual error message ("I couldn't save that to Drive — <reason>") so the user is told the truth.
+
+**Bug F — LIST_RULES context-bleed (now MITIGATED via prompt rule).** Added an explicit hard rule to `get-naavi-prompt` v63 forbidding Claude from inferring the `match` parameter from earlier turns. Only the current message decides whether `match` is filled. Non-deterministic LLM behaviour, so this is a guardrail rather than a guarantee.
+
+**Bug G — DELETE_RULE label collapse (now FIXED).** The disambiguation prompt was rendering bare `trigger_type` as the option label, collapsing two time-triggered rules to "time, or time?". Fix: `distinguishingHint()` helper builds a rule-type-aware hint (place_name + direction for location, "from <name>" for email/contact_silence, "<cron/time> — <label>" for time triggers, condition for weather, with rule label as fallback). Quoted hints in the prompt for clarity.
+
+**Bubble truncation — different angle this time.** Six prior layout tweaks failed at the 1.6 lineHeight ratio (15 × 1.6 = 24). Per react-native#35039 the documented escape is the 1.33 ratio. `ConversationBubble.tsx` `naaviText` and `robertText` styles now use `lineHeight: 20` directly, scoped to the bubble component only so other text sites keep their existing spacing.
+
+**Bug H instrumentation (no fix yet).** Added a 12-tick heartbeat (every 10s for 120s) after each SET_REMINDER turn. Each tick writes a `client_diagnostics` row with elapsed-ms-since-set + JS heap size when the runtime exposes it. Next reproduction: Wael creates a reminder, watches for the crash, we read `client_diagnostics` for the diag-session ID. The last heartbeat that landed tells us when the JS thread stopped responding. The crash trigger is still unknown — the obvious paths (saveReminder, registry.calendar.createEvent, the local push setTimeout) don't fire at the right time. The setTimeout for "in 2 minutes" reminders fires at 2 min; Wael's crash was at ~1 min, before the setTimeout. Something else is the trigger.
+
+### Files modified for V57.12.2
+
+- `app.json` — versionCode 152 → 153
+- `app/settings.tsx` — V57.12.1 → V57.12.2
+- `hooks/useOrchestrator.ts` — Bug M (displaySpeech mirroring), Bug G (disambiguation hints), Bug O (catch override), Bug H (heartbeat instrumentation)
+- `lib/contacts.ts` — Bug L (read phone from contacts table, scope all queries to user_id, fix Google-People short-circuit)
+- `lib/memory.ts` — Bug K (savePerson user_id + error surfacing)
+- `lib/adapters/google/storage.adapter.ts` — Bug O (throw on failure instead of fake StorageFile)
+- `components/ConversationBubble.tsx` — bubble lineHeight 24 → 20
+- `constants/typography.ts` — untouched (kept lineHeightBody at 24 for other components)
+- `supabase/functions/get-naavi-prompt/index.ts` — Bug F prompt rule, PROMPT_VERSION → v63
+- `scripts/build-demo-strategy-docx.js` — toll-free 888 number reference (separate commit, prior in session)
+
+### V57.12.2 deploy state
+
+- ✓ `get-naavi-prompt` deployed to Supabase (v63 prompt live)
+- ⏳ AAB build queued via EAS auto-submit
+- ⏳ User-end verification pending: re-test 5 + 6 + 7 (ADD_CONTACT) + 9 (DRAFT_MESSAGE) + 11 (SAVE_TO_DRIVE) once V57.12.2 lands. If Bug H reproduces, capture the diag session ID for the heartbeat trail.
+
+### Outstanding items for next session (V57.12.3+)
+
+- **Bug H root cause + fix** — using V57.12.2 heartbeat data
+- **Bug I verification** — WhatsApp on self-reminder once Bug H is fixed enough to test fan-out
+- **Bug B verification** — 5-min pending-location timeout (need a deliberate "leave picker, wait 6 min, return" test)
+- **Bug C verification** — resolved-state escape (deliberate flow into yes/no/different state then escape)
+- **Maestro test brittleness** — 10/13 fail on assertions that don't match current LLM output
+
+---
+
 ## Closing note
 
 The migration went from "tests can't stay green across unrelated edits" to "52/0/0/0 first clean run" in one session. The structural fix worked: schema-constrained generation removes the prompt-drift class entirely. The agent that diagnosed the root cause (912-line megaprompt + non-deterministic LLM + regex-on-free-text tests) gave the correct directional fix on first pass; the implementation matched it.

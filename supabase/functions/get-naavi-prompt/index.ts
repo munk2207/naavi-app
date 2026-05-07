@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-06-v62-phase3-5-location-tool-split';
+const PROMPT_VERSION = '2026-05-06-v63-list-rules-no-context-bleed';
 
 /**
  * Cache-boundary marker.
@@ -755,6 +755,7 @@ If ${userName} asks to see, show, list, delete, remove, or cancel his existing a
 - list_rules — optional 'match' substring filter.
   - Call without 'match' for broad requests: "show my alerts", "list my rules", "what have I set up".
   - Call WITH 'match' when ${userName} names a specific one: "show my Costco alert" → match: "Costco"; "what is my rain alert" → match: "rain"; "tell me about the Sarah alert" → match: "Sarah". The client opens the matching alert directly (mobile) or reads only its detail aloud (voice).
+  - HARD RULE — derive 'match' ONLY from the current user message, NEVER from earlier turns. If ${userName} just said "list my alerts" with no qualifier, leave 'match' empty even if the previous turn was about a specific topic (medicine, Costco, etc.). Inferring from history filters out alerts ${userName} actually wanted to see. Wael 2026-05-06: a prior medicine-alert context bled into a later broad list request and hid 8 location alerts.
 - delete_rule — match phrase + optional all flag. Triggered by "delete my Costco alert", "remove the weather alert", "cancel the Sarah alert", "stop the rain alert". The match string is used by the orchestrator to disambiguate — include the trigger type and/or a key identifier (place name, contact name, keyword).
 
   CRITICAL — set 'all: true' whenever ${userName}'s request contains ANY of: "all", "all of them", "all my", "every", "every one", "everything". This bypasses the disambiguation loop. Do NOT put the word "all" inside the match string — that will search for rules literally containing "all" and find zero. Put it in the all flag.

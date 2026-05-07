@@ -10,7 +10,7 @@
  */
 
 import { supabase } from './supabase';
-import { invokeWithTimeout, queryWithTimeout } from './invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
 
 export interface Contact {
   name: string;
@@ -50,6 +50,13 @@ export async function lookupContact(name: string): Promise<Contact | null> {
 
   const nameLower = name.toLowerCase().trim();
 
+  // V57.12.2 Bug L fix — capture user_id once and use it on every Supabase
+  // query so cross-user rows can't leak into a single-user lookup, and so
+  // RLS-scoped tables actually return rows to the caller. Multi-user
+  // safety per CLAUDE.md Rule 10.
+  const session = await getSessionWithTimeout();
+  const userId = session?.user?.id ?? null;
+
   // 1. Google People API — the CANONICAL source for user-owned contacts.
   //    It reads the user's real address book and returns the actual phone
   //    numbers Robert has curated. Put first because anything else is at
@@ -58,7 +65,13 @@ export async function lookupContact(name: string): Promise<Contact | null> {
   //    Test Drive recording by a greedy digit regex).
   try {
     const { data, error } = await invokeWithTimeout<any>('lookup-contact', { body: { name } }, 15_000);
-    if (!error && !data?.error && data?.contact) {
+    if (!error && !data?.error && data?.contact && (data.contact.phone || data.contact.email)) {
+      // V57.12.2 Bug L fix — only short-circuit when Google People API
+      // returned a contact with at least one usable channel. Previously a
+      // null-phone-null-email Google match blocked the local-table fallback
+      // that DID have the phone number. Wael 2026-05-06 saved John locally,
+      // tried to text him, hit "no phone for John" because Google had a
+      // partial record without a number.
       console.log('[contacts] Found via Google People API:', data.contact.name);
       return data.contact;
     }
@@ -66,11 +79,12 @@ export async function lookupContact(name: string): Promise<Contact | null> {
 
   // 2. Local `people` table — populated by the ADD_CONTACT action when the
   //    user asks Naavi to save someone. Structured, safe.
-  try {
+  if (userId) try {
     const { data } = await queryWithTimeout(
       supabase
         .from('people')
         .select('name, phone, email')
+        .eq('user_id', userId)
         .ilike('name', `%${nameLower}%`)
         .limit(1),
       15_000,
@@ -85,11 +99,12 @@ export async function lookupContact(name: string): Promise<Contact | null> {
 
   // 3. Gmail sender cache — email-only fallback when the person has emailed
   //    the user but isn't in their Google contacts yet.
-  try {
+  if (userId) try {
     const { data } = await queryWithTimeout(
       supabase
         .from('gmail_messages')
         .select('sender_name, sender_email')
+        .eq('user_id', userId)
         .ilike('sender_name', `%${nameLower}%`)
         .not('sender_email', 'is', null)
         .limit(1),
@@ -102,22 +117,25 @@ export async function lookupContact(name: string): Promise<Contact | null> {
     }
   } catch { /* continue */ }
 
-  // 4. Legacy `contacts` table — kept for email-only lookup; do not add a
-  //    phone column here. This table is sparse and being deprecated in
-  //    favour of Google People API (step 1).
-  try {
+  // 4. `contacts` table — written by saveContact during ADD_CONTACT. Has BOTH
+  //    name+email AND a phone column (migration 20260419_contacts_phone.sql)
+  //    even though older code paths only read the email. V57.12.2 Bug L fix —
+  //    now read the phone column too so a saved contact with a phone but no
+  //    email still resolves on the SMS draft path.
+  if (userId) try {
     const { data } = await queryWithTimeout(
       supabase
         .from('contacts')
-        .select('name, email')
+        .select('name, email, phone')
+        .eq('user_id', userId)
         .ilike('name', `%${nameLower}%`)
         .limit(1),
       15_000,
       'select-contacts-by-name',
     );
 
-    if (data && data.length > 0 && data[0].email) {
-      return { name: data[0].name, email: data[0].email, phone: null };
+    if (data && data.length > 0 && (data[0].phone || data[0].email)) {
+      return { name: data[0].name, email: data[0].email ?? null, phone: data[0].phone ?? null };
     }
   } catch { /* continue */ }
 

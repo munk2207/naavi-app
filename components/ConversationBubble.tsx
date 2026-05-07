@@ -122,14 +122,17 @@ const styles = StyleSheet.create({
   },
   naaviText: {
     fontSize: Typography.body,
-    lineHeight: Typography.lineHeightBody,
+    // V57.12.2 — drop bubble lineHeight from 24 (1.6 × 15) to 20 (1.33 × 15)
+    // to escape react-native#35039's bubble-truncation regime. Six prior
+    // layout tweaks at the 1.6 ratio failed; 1.33 is the documented
+    // resolution. Bubble-specific override so other text sites keep their
+    // current spacing.
+    lineHeight: 20,
     color: Colors.textPrimary,
-    // V57.11.7's maxWidth removed in V57.11.8 — was a no-op. The actual
-    // fix is textBreakStrategy="simple" on the Text element (see render).
   },
   robertText: {
     fontSize: Typography.body,
-    lineHeight: Typography.lineHeightBody,
+    lineHeight: 20,
     color: Colors.textPrimary,
   },
   timestamp: {
