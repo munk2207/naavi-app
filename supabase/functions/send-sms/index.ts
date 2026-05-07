@@ -97,14 +97,28 @@ serve(async (req) => {
       // Template: "Hi {{1}}, {{2}} shared this message with you: {{3}} — Sent via MyNaavi."
       const templateSid = Deno.env.get('TWILIO_WHATSAPP_TEMPLATE_MESSAGE_SID');
       if (templateSid) {
+        // V57.12.6 Bug I fix — Twilio rejects ContentVariables with
+        // newlines, certain emojis, em-dashes, etc. (error 21656 "The
+        // Content Variables parameter is invalid"). Sanitize the body
+        // for the template-variable slot ONLY: collapse newlines to
+        // spaces, drop characters outside Basic Multilingual Plane
+        // (emoji, etc.), keep ASCII + common punctuation. The full
+        // emoji-rich body still flows on SMS / email — only the
+        // WhatsApp template slot needs flat ASCII.
+        const sanitizedBody = body
+          .replace(/\r?\n/g, ' ')
+          .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}]/gu, '')
+          .replace(/—/g, '-')
+          .replace(/\s+/g, ' ')
+          .trim();
         params = new URLSearchParams({
           To: twilioTo,
           From: twilioFrom,
           ContentSid: templateSid,
           ContentVariables: JSON.stringify({
-            '1': recipient_name || 'there',
-            '2': sender_name || 'Naavi',
-            '3': body,
+            '1': (recipient_name || 'there').slice(0, 60),
+            '2': (sender_name || 'Naavi').slice(0, 60),
+            '3': sanitizedBody.slice(0, 1024),
           }),
         });
       } else {
