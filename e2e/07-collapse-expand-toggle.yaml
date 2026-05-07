@@ -1,0 +1,67 @@
+appId: ca.naavi.app
+name: 07 — collapse-expand toggle is bidirectional (V57.9.7)
+tags:
+  - regression
+  - chat-ui
+---
+# Wael 2026-05-01: older chat turns could be expanded but not collapsed
+# back to one-line summary. V57.9.7 added a "tap to collapse"
+# affordance under each expanded older turn.
+#
+# Strategy:
+#   1. Send 2 messages so we have a "previous" turn that auto-collapses.
+#   2. Tap the collapsed summary to expand it.
+#   3. Verify a "tap to collapse" hint appears.
+#   4. Tap that hint and verify the summary collapses again.
+
+- launchApp:
+    clearState: false
+
+# Send #1
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "What is the time"
+- pressKey: Enter
+# V57.12.3 — wait for idle (placeholder reappears) instead of asserting
+# on Naavi's prose. Prose drifts; idle state is stable.
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
+
+# Send #2 — pushes the first turn into "Earlier:" collapsed form.
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "What is the date"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 12000
+
+# Verify the collapsed summary for turn #1 is visible.
+- assertVisible:
+    text: "Earlier:"
+- assertVisible:
+    text: "tap to expand"
+
+# Tap to expand the older turn.
+- tapOn:
+    text: "tap to expand"
+
+# After expand, V57.9.7 adds a "tap to collapse" affordance.
+- extendedWaitUntil:
+    visible:
+      text: "tap to collapse"
+    timeout: 5000
+
+# Tap it — collapse should reverse.
+- tapOn:
+    text: "tap to collapse"
+
+# Back to the collapsed summary.
+- extendedWaitUntil:
+    visible:
+      text: "tap to expand"
+    timeout: 5000
+- takeScreenshot: 07-collapsed-again

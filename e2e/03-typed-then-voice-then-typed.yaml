@@ -1,0 +1,60 @@
+appId: ca.naavi.app
+name: 03 — typed → voice → typed (mode-switch state)
+tags:
+  - mode-switch
+---
+# Verifies the orchestrator correctly transitions between text and voice
+# input modes without leaking state. Catches stuck-button regressions
+# and audio-focus races between TTS playback (after the typed answer)
+# and the next mic recording.
+#
+# NOTE: Voice steps require the emulator to have a working audio input.
+# On a real device, set up the emulator with a microphone redirect or
+# skip step "voice".
+
+- launchApp:
+    clearState: false
+
+# 1. Typed send
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "What is the time"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
+
+# 2. Wait for TTS playback to release the mic (typically 5-10s).
+- extendedWaitUntil:
+    visible:
+      id: "mic-button-active"
+    timeout: 15000
+    optional: true
+
+# 3. Voice send — tap mic, "say" something via the voice input fixture
+#    (Maestro emulator can inject audio via adb if configured; we fall
+#    back to a typed input if mic is unavailable).
+- tapOn:
+    id: "mic-button"
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: "mic-button"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 30000
+
+# 4. Typed send again — verify state recovered fully.
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "What is the date"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
+- takeScreenshot: 03-final

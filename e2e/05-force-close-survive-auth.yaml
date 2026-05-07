@@ -1,0 +1,55 @@
+appId: ca.naavi.app
+name: 05 — force-close survives auth (V57.9.7 SecureStore catcher)
+tags:
+  - regression
+  - critical
+  - auth
+---
+# This scenario reproduces the V57.9.7 fix: the install-then-restart-app
+# auth bug that broke V57.9.4-V57.9.6. After the V57.9.7 SecureStore
+# dual-write fix, force-killing and reopening the app should NOT log
+# the user out and should NOT show the "Sign-in expired — tap to fix"
+# banner.
+
+- launchApp:
+    clearState: false
+- assertVisible:
+    text: "MyNaavi"
+
+# Send one message to confirm session is alive at start.
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "Hello"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
+
+# Force-stop the app — Maestro's stopApp closes it cleanly without
+# uninstall. Roughly equivalent to swiping it from the recent-apps
+# switcher.
+- stopApp
+
+# Relaunch.
+- launchApp:
+    clearState: false
+- assertVisible:
+    text: "MyNaavi"
+
+# CRITICAL — the stale-auth banner must NOT be visible.
+# If it shows up, the SecureStore dual-write didn't restore the session
+# (V57.9.7 regression).
+- assertNotVisible:
+    text: "Sign-in expired"
+- takeScreenshot: 05-after-relaunch-no-banner
+
+# And a fresh send should still work without manual sign-in.
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "Still here"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
