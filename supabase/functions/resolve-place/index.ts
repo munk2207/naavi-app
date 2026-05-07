@@ -90,6 +90,10 @@ function isSpecificResult(r: any): boolean {
   if (r?.partial_match === true && !hasSpecific) return false;
   if (typeof r?.geometry?.location?.lat !== 'number') return false;
   if (typeof r?.geometry?.location?.lng !== 'number') return false;
+  // V57.13.2 — fully-qualified rule. A result without a formatted_address
+  // cannot be displayed meaningfully in a picker (no street to show the
+  // user) or saved as a qualified row. Reject it irrespective of source.
+  if (typeof r?.formatted_address !== 'string' || r.formatted_address.trim().length === 0) return false;
   return true;
 }
 
@@ -187,14 +191,14 @@ serve(async (req) => {
       const { data: rawMatches } = bareBrand
         ? await admin
             .from('user_places')
-            .select('aliases, place_name, address, lat, lng, radius_meters')
+            .select('id, aliases, place_name, address, lat, lng, radius_meters')
             .eq('user_id', user_id)
             .or(`aliases.cs.{${alias}},place_name.ilike.%${placeName}%`)
             .order('last_used_at', { ascending: false })
             .limit(5)
         : await admin
             .from('user_places')
-            .select('aliases, place_name, address, lat, lng, radius_meters')
+            .select('id, aliases, place_name, address, lat, lng, radius_meters')
             .eq('user_id', user_id)
             .contains('aliases', [alias])
             .order('last_used_at', { ascending: false })
@@ -203,6 +207,35 @@ serve(async (req) => {
       const qualified = (rawMatches ?? []).filter((r: any) =>
         typeof r.address === 'string' && r.address.trim().length > 0
       );
+      const unqualified = (rawMatches ?? []).filter((r: any) =>
+        typeof r.address !== 'string' || r.address.trim().length === 0
+      );
+
+      // V57.13.2 — DELETE unqualified rows on encounter (Wael 2026-05-07).
+      // Reasons:
+      //   - They cannot be displayed meaningfully in a picker (no street).
+      //   - They block future qualified saves at the same coords (the
+      //     UNIQUE on rounded coords would reject the INSERT).
+      //   - "Fully qualified or deleted" is the rule — no degraded rows
+      //     are allowed to persist in user_places.
+      if (unqualified.length > 0) {
+        // Need ids — re-query if SELECT didn't include them
+        const ids: string[] = unqualified.map((r: any) => r.id).filter(Boolean);
+        if (ids.length === 0) {
+          // Fall back to coord-based delete for the unqualified rows
+          for (const u of unqualified) {
+            await admin.from('user_places')
+              .delete()
+              .eq('user_id', user_id)
+              .eq('lat', u.lat)
+              .eq('lng', u.lng)
+              .is('address', null);
+          }
+        } else {
+          await admin.from('user_places').delete().in('id', ids);
+        }
+        console.log(`[resolve-place v4] deleted ${unqualified.length} unqualified row(s) for "${placeName}"`);
+      }
 
       if (qualified.length >= 1) {
         console.log(`[resolve-place v4] memory_suggest: ${qualified.length} qualified saved row(s) for "${placeName}" (raw matches=${rawMatches?.length ?? 0}, bareBrand=${bareBrand})`);
@@ -221,9 +254,6 @@ serve(async (req) => {
         });
       }
 
-      if ((rawMatches?.length ?? 0) > 0 && qualified.length === 0) {
-        console.log(`[resolve-place v4] ${rawMatches!.length} unqualified saved row(s) for "${placeName}" — ignoring, going to fresh`);
-      }
       // 0 qualified → fall through to fresh Google
     } else {
       console.log(`[resolve-place v4] force_fresh=true for "${placeName}" — skipping memory, going to fresh`);
