@@ -295,16 +295,50 @@ export async function saveReminder(reminder: {
   if (!supabase) return;
   const session = await getSessionWithTimeout();
   const userId = session?.user?.id;
+
+  // V57.12.6 Bug P fix — always populate `phone_number` on the
+  // reminders row. The check-reminders cron filters with
+  // `.not('phone_number', 'is', null)` (see check-reminders/index.ts:46),
+  // so a reminder with NULL phone is silently skipped EVERY minute and
+  // never fires its fan-out (SMS / WhatsApp / Email / Push). Wael
+  // 2026-05-07 found 8 such orphans accumulated since V57.12.0 — none
+  // had ever fired despite being overdue by hours. Fix: when the caller
+  // doesn't pass a phone (Claude usually doesn't for self-reminders),
+  // fetch the user's number from user_settings.phone and stamp it on
+  // the row before insert.
+  let phoneNumber = reminder.phone_number?.trim() || '';
+  if (!phoneNumber && userId) {
+    try {
+      const { data } = await queryWithTimeout(
+        supabase.from('user_settings').select('phone').eq('user_id', userId).single(),
+        5_000,
+        'select-user-phone-for-reminder',
+      );
+      const settingsPhone = (data as any)?.phone;
+      if (typeof settingsPhone === 'string' && settingsPhone.trim()) {
+        phoneNumber = settingsPhone.trim();
+      }
+    } catch (err) {
+      console.error('[Supabase] saveReminder: phone lookup failed:', err);
+    }
+  }
+
   const { error } = await queryWithTimeout(
     supabase.from('reminders').insert({
-      ...reminder,
-      user_id: userId ?? null,
+      title:        reminder.title,
+      datetime:     reminder.datetime,
+      source:       reminder.source,
+      phone_number: phoneNumber || null,
+      user_id:      userId ?? null,
     }),
     15_000,
     'insert-reminder',
   );
-  if (error) console.error('[Supabase] Failed to save reminder:', error.message);
-  else console.log('[Supabase] Reminder saved:', reminder.title);
+  if (error) {
+    console.error('[Supabase] Failed to save reminder:', error.message);
+  } else {
+    console.log(`[Supabase] Reminder saved: "${reminder.title}" phone=${phoneNumber || '(none — will not fire via cron!)'}`);
+  }
 }
 
 // ─── Conversation persistence ──────────────────────────────────────────────────
