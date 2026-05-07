@@ -229,14 +229,21 @@ export function isTextInputLocked(_s: OrchestratorStatus): boolean {
 
 // Orange ⏹ Stop / ✕ Cancel button visibility.
 //   thinking          → ⏹ Stop (cancel in-flight request)
-//   speaking + audio  → ⏹ Stop (silence voice)
-//   speaking + silent → hidden  (nothing audible to stop)
+//   speaking          → ⏹ Stop (silence voice — visible whether audio is
+//                       playing right now or not, because TTS playback
+//                       has natural silent gaps between chunks and Wael
+//                        must be able to tap Stop reliably during the
+//                       whole speaking phase, not just on the audible
+//                       beats. V57.12.2 — replaced the prior
+//                       `isAudioPlaying`-gated visibility that flickered
+//                       the button off mid-speech and left users without
+//                       a way to interrupt.)
 //   answer_active     → ✕ Cancel (release the lock)
 //   cooldown          → hidden  (lock is auto-releasing)
 //   idle/pending/err  → hidden
-export function isOrangeButtonVisible(s: OrchestratorStatus, isAudioPlaying: boolean): boolean {
+export function isOrangeButtonVisible(s: OrchestratorStatus, _isAudioPlaying: boolean): boolean {
   if (s === 'thinking') return true;
-  if (s === 'speaking') return isAudioPlaying;
+  if (s === 'speaking') return true;
   if (s === 'answer_active') return true;
   return false;
 }
