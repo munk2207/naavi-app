@@ -102,7 +102,12 @@ function formatTriggerSummary(r: ActionRule): string {
     case 'location': {
       const place = (c as any).place_name ?? 'a place';
       const dir = (c as any).direction ?? 'arrive';
-      return `${dir === 'leave' ? 'Leave' : dir === 'inside' ? 'Inside' : 'Arrive at'} ${place}`;
+      // V57.13.4 — append the street segment so two alerts at different
+      // branches of the same brand are distinguishable in the list.
+      const address = (c as any).address as string | undefined;
+      const street = address ? String(address).split(',')[0]?.trim() : '';
+      const placeWithStreet = street ? `${place} · ${street}` : place;
+      return `${dir === 'leave' ? 'Leave' : dir === 'inside' ? 'Inside' : 'Arrive at'} ${placeWithStreet}`;
     }
     case 'weather': {
       const cond = (c as any).condition ?? 'weather';
@@ -169,9 +174,14 @@ function formatWhenDetail(r: ActionRule): string {
       const place = c.place_name ?? 'a place';
       const dir = c.direction ?? 'arrive';
       const dwell = c.dwell_minutes ?? 2;
-      if (dir === 'leave')  return `You leave ${place}.`;
-      if (dir === 'inside') return `You're at ${place} for at least ${dwell} minutes.`;
-      return `You arrive at ${place}${dwell ? ` (after staying ${dwell} minute${dwell === 1 ? '' : 's'})` : ''}.`;
+      // V57.13.4 — include the full Google-formatted address in the WHEN
+      // detail so the user can verify which physical branch this alert
+      // covers (matters when several branches of the same brand exist).
+      const address = c.address as string | undefined;
+      const placeFull = address ? `${place} at ${address}` : place;
+      if (dir === 'leave')  return `You leave ${placeFull}.`;
+      if (dir === 'inside') return `You're at ${placeFull} for at least ${dwell} minutes.`;
+      return `You arrive at ${placeFull}${dwell ? ` (after staying ${dwell} minute${dwell === 1 ? '' : 's'})` : ''}.`;
     }
     case 'weather': {
       const cond = c.condition ?? 'weather';

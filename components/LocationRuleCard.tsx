@@ -22,10 +22,15 @@ import { Colors } from '@/constants/Colors';
 interface Props {
   ruleId: string;
   placeName: string;
+  // V57.13.4 — full Google-formatted address shown under the place name so
+  // two alerts at different branches of the same brand are distinguishable.
+  // Optional: legacy rules created before V57.13.3 don't have address stored.
+  address?: string | null;
   initialOneShot: boolean;
 }
 
-export function LocationRuleCard({ ruleId, placeName, initialOneShot }: Props) {
+export function LocationRuleCard({ ruleId, placeName, address, initialOneShot }: Props) {
+  const street = address ? String(address).split(',')[0]?.trim() : '';
   const [oneShot, setOneShot] = useState(initialOneShot);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +87,7 @@ export function LocationRuleCard({ ruleId, placeName, initialOneShot }: Props) {
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Location alert</Text>
           <Text style={styles.place}>{placeName}</Text>
+          {street ? <Text style={styles.address}>{street}</Text> : null}
         </View>
         <View style={[styles.badge, oneShot ? styles.badgeOneTime : styles.badgeRecurring]}>
           <Text style={styles.badgeText}>{modeLabel}</Text>
@@ -134,6 +140,11 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.75)',
     fontSize: 13,
     marginTop: 1,
+  },
+  address: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 12,
+    marginTop: 2,
   },
   badge: {
     paddingHorizontal: 8,
