@@ -1,5 +1,27 @@
 # CLAUDE.md — MyNaavi Project Instructions
 
+## ⭐ FOUNDATIONAL PRINCIPLE — SELF-CLEANSING DATA (Wael 2026-05-07)
+
+**The system gets cleaner with use, not dirtier.** Every read is an opportunity to shed degraded data; every write must produce only fully-qualified rows. No periodic cleanup job is required — the conversation IS the cleanup job.
+
+Three rules underwrite this for any table that touches the user:
+
+1. **Cache is a suggestion, never an answer.** A saved row may inform Naavi's response, but the user always confirms (and can ignore the cache via `force_fresh`). Saved rows must never silently shadow fresh discovery — that's how the Toronto-McDonald's-shadows-Ottawa-McDonald's bug landed. See section "CACHE IS A SUGGESTION, NEVER AN ANSWER" below.
+2. **Fully qualified or deleted.** Any row missing fields that a UI / TTS surface needs to render meaningfully is **deleted on encounter**, not ignored. Better to pay a fresh API call than to surface or persist a degraded row. Applies to every source — cache, Google Places, Claude, Gmail, etc. See "DATA INTEGRITY — FOUR LAYERS" below.
+3. **One logical key, one row.** Every config table has a UNIQUE constraint on its true logical key (often coordinates or hash, NOT the surrogate id). Writes go through ONE Edge Function with coords-keyed merge logic. RLS blocks direct client writes. See "DATA INTEGRITY — FOUR LAYERS" for the full pattern.
+
+Reference implementation: `user_places` (V57.13.2 — `20260507_user_places_integrity.sql` + `resolve-place` v4.2). Other tables (`action_rules`, `contacts`, `lists`, `reminders`, `user_settings`) need the same audit; details below.
+
+**Pre-commit checklist before adding ANY new table or write path:**
+- What's the logical key? Is there a UNIQUE constraint on it?
+- Is there exactly one Edge Function that owns writes? Does RLS block direct client writes?
+- What does "fully qualified" mean for this row? Does the read path delete unqualified rows on encounter?
+- Are there integrity tests (`tests/catalogue/data-integrity.ts`) covering all of the above?
+
+If the answer to any of these is "no" or "I don't know" — STOP and add it before shipping. This file's "DATA INTEGRITY — FOUR LAYERS" and "CACHE IS A SUGGESTION" sections are the reference. The auto-tester (Rule 15) will catch regressions on every build.
+
+---
+
 ## READ THIS FIRST — EVERY SESSION
 
 You are working on MyNaavi, an AI life orchestration companion for everyone — designed to feel especially friendly to older healthy independent adults, but never positioned as a senior product. The founder (Wael) is non-technical. He builds the product vision; you build the code.
