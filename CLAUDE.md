@@ -152,7 +152,12 @@ If in doubt, ASK before creating parallel config.
 3. **User says "use this" → commit the cached row.**
 4. **User says "search for another" → re-issue the lookup with `force_fresh=true` to skip the cache and present fresh results.**
 
-**"Qualified" filter:** any cache row that's missing fields needed to display meaningfully (e.g. `address` is NULL on a saved place) is **excluded from suggestions** entirely. Falls through to fresh as if the row didn't exist. Better to pay one Google call than to surface a degraded row.
+**"Qualified" filter:** any data Naavi presents to the user MUST be fully qualified — every field a UI / TTS surface needs to render meaningfully must be populated. This applies **regardless of source** (cache, Google Places, Claude, Gmail, Drive, Calendar, contacts, etc.). Wael 2026-05-07: *"Naavi MUST not answer Robert with anything not fully qualified, irrespective of where it received."*
+
+For each source:
+- **Cache (user_places, contacts, etc.)** — exclude unqualified rows from any picker; **delete them on encounter** (an unqualified row that lingers blocks future qualified writes at the same logical key, e.g. the `user_places_unique_rounded_coords_idx` would reject a fresh INSERT at the same coords as an existing NULL-address row).
+- **Google Places fresh results** — `isSpecificResult` rejects rows missing `formatted_address`. Single-result returns require it; multi-result pickers filter it out.
+- **Other Edge Functions and external APIs** — apply the same rule when they're added: every response that flows to the user is checked for required fields BEFORE being surfaced.
 
 **Where this lives in code today:**
 - `supabase/functions/resolve-place/index.ts` v4 — `status: 'memory_suggest'` response, `force_fresh: boolean` request flag, qualified-row filter

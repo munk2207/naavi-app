@@ -324,9 +324,9 @@ export const dataIntegrityTests: TestCase[] = [
   },
 
   {
-    id: 'integrity.unqualified-rows-ignored',
+    id: 'integrity.unqualified-rows-deleted',
     category: 'integrity',
-    description: 'V57.13.2 — saved rows with NULL/empty address are excluded from memory_suggest. Naavi falls through to fresh Google.',
+    description: 'V57.13.2 — saved rows with NULL/empty address are deleted on encounter. Naavi falls through to fresh Google.',
     timeoutMs: 60_000,
     async setup(ctx) {
       // Pre-seed a saved row with NULL address (the legacy degraded state)
@@ -370,6 +370,14 @@ export const dataIntegrityTests: TestCase[] = [
         result.data?.status !== 'memory_suggest',
         `unqualified row should NOT trigger memory_suggest, got status=${result.data?.status} (the saved row was returned despite NULL address)`,
       );
+
+      // V57.13.2 — verify the unqualified row was DELETED, not just ignored
+      const remaining = await db.select(
+        ctx,
+        'user_places',
+        `user_id=eq.${ctx.testUserId}&aliases=cs.{integrity-unqual-test}`,
+      );
+      expectEqual(remaining.length, 0, `unqualified row should have been DELETED, but ${remaining.length} still exist`);
     },
   },
 
