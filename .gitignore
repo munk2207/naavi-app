@@ -24,3 +24,18 @@ mynaavi-website/
 
 # Google Play service account key — used by EAS Submit. NEVER commit.
 google-play-key.json
+
+# Maestro test artifacts at repo root
+/0[0-9]-*.png
+/report.xml
+/tests/results/
+
+# Build artifacts (extracted AAB contents, split APKs at root)
+/split_config*.apk
+/naavi_files/
+
+# Local-only directories
+# - naavi-voice-server is a separate GitHub repo (munk2207/naavi-voice-server) checked out here for convenience
+# - backups holds local SQL/JSON snapshots of action_rules, user_places, etc.
+/naavi-voice-server/
+/backups/
