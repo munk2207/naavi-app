@@ -35,7 +35,6 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 
 | ID | Description | Surface | Notes | Server/AAB |
 |----|-------------|---------|-------|------------|
-| B1a | Voice live-calendar fetch (voice still on stale snapshot) | voice | Voice server `fetchCalendarEvents` (line 454) reads stale `calendar_events` snapshot. Mobile shipped fix V57.11.2 + V57.11.6 via `fetchLiveCalendarEvents` in `naavi-chat`. Port that pattern: Google Calendar API per-request with refresh-token + `Cache-Control: no-cache` + `Pragma: no-cache`. Swap call sites at lines 1441 / 3281 / 6744. ~30–60 min, server-only. | Server |
 | B1b | LIST_RULES synthesize-action backstop missing | both | Phantom-action detection loop in `hooks/useOrchestrator.ts` line 1280-1289 catches 'you have N alerts' speech without LIST_RULES action and overrides speech to 'Let me pull up your alerts.' — but doesn't synthesize a LIST_RULES action onto `claudeActions[]`. Naavi promises lookup and goes silent. Fix: parallel block to chain-store auto-fix at line 1258-1273; push `{type: 'LIST_RULES'}` when the backstop fires. ~20-30 min, ~10 lines. AAB required (mobile orchestrator). Voice server lacks the speech-override backstop entirely; bundle into voice server's LIST_RULES handler same session for surface parity (Server). | Both |
 | B1c | Email instant-search live-overlay (Option #3) | backend | **Architectural principle — Wael 2026-05-08:** every queryable channel = background sync at per-channel depth + live-overlay at question-time. Email today: 7-day sync window via `sync-gmail` cron stays as-is. ADD live Gmail API search at question-time — when user asks email question (voice or chat), `naavi-chat` triggers fresh Gmail API call with `q=` against subject + body for the question's keywords, `Cache-Control: no-cache`, merges with cached `gmail_messages` set, passes merged result to Claude. Same shape as `naavi-chat::fetchLiveCalendarEvents` (V57.11.2 / V57.11.6). Failure mode without it: Bell bill arrived 20 min ago → cron hasn't fired → Naavi says "no". ~30-60 min server-only port from calendar pattern. Unblocks F1b sequencing. | Server |
 | B2a | Voice missing SCHEDULE_MEDICATION action | voice | Holding-list framing was stale — DELETE_EVENT / LIST_RULES / DELETE_MEMORY already at parity in voice server (lines 1938, 6411, 1967). Only real gap: SCHEDULE_MEDICATION not handled by voice. Port mobile handler at `hooks/useOrchestrator.ts` line 1549; uses same backend (loop of `create-calendar-event`). Behavior-diff sweep on DELETE_MEMORY recommended (voice does direct DB DELETE, mobile path may differ). ~1 hour, server-only. | Server |
@@ -94,6 +93,7 @@ Items walked but not added to any table. Reopen if symptom recurs.
 | 4 | Geofence reliability (pending phone reboot) | Tested per Wael 2026-05-08 — no problems found. Will be reported if recurs. Underlying Google-OAuth disconnect bug (Phase 3 background-mode blocker) noted but not preemptively tracked — same rule. |
 | 12 | `naavi-spend-summary` Edge Function | Already shipped — function exists at `supabase/functions/naavi-spend-summary/index.ts`, aggregates `documents.extracted_amount_cents` directly, multi-user safe, multi-currency aware. Maestro `e2e/06-spend-summary-anthropic.yaml` PASSED in 2026-05-08 full-suite run. Holding-list "approved 2026-04-30, not built" was stale. |
 | 14 | Demo line "remind me" time-extraction loop | Symptom impossible by architecture — demo line is now fully canned (5 hard-coded scenarios via DTMF + speech routing); no real reminder path exists on demo. Underlying bug (time-extraction loop) may still affect authenticated users on production line — log if it surfaces. |
+| B1a | Voice live-calendar fetch (voice still on stale snapshot) | **Validated by user test 2026-05-08 (first item under CLAUDE.md Rule 17).** Wael created a fresh Google Calendar event, asked voice (PC) — correct answer. Changed time + location, asked voice and mobile — both correct. Bug as classified does NOT reproduce in real use. The architectural read (voice reads from Supabase snapshot table populated every 6h) was correct about the code path but did not predict user-visible behavior; some sync mechanism (frequent cron, app-trigger, or push notification) keeps the snapshot fresh enough that staleness is not perceived. Reopen only if surfaces. |
 
 ---
 
@@ -101,18 +101,18 @@ Items walked but not added to any table. Reopen if symptom recurs.
 
 | List | Count | IDs |
 |---|---|---|
-| Bugs (B) | 12 | B1a, B1b, B1c, B2a, B2b, B2c, B2d, B3a, B3b, B3c, B3d, B3e |
+| Bugs (B) | 11 | B1b, B1c, B2a, B2b, B2c, B2d, B3a, B3b, B3c, B3d, B3e |
 | Features (F) | 6 | F1a, F1b, F1c, F2a, F2b, F3a |
 | Tooling (T) | 3 | T1a, T2a, T2b |
 | Ideas (I) | 3 | I2a, I2b, I3a |
-| Closed without entry | 3 | Items 4, 12, 14 |
+| Closed without entry | 4 | Items 4, 12, 14, B1a |
 | **Total** | **27** | (26 holding-list + 1 missed item B1c added 2026-05-08) |
 
 ### Tally by Server/AAB
 
 | Scope | Count | Implication |
 |---|---|---|
-| Server-only | 14 | Ship without AAB cycle |
+| Server-only | 13 | Ship without AAB cycle |
 | AAB-only | 3 | Mobile build required (B3b, B3c) — bundle into next AAB |
 | Both | 7 | Cross-surface coordination |
 
@@ -120,7 +120,7 @@ Items walked but not added to any table. Reopen if symptom recurs.
 
 | Surface | Count | IDs |
 |---|---|---|
-| voice | 6 | B1a, B2a, B2b, B2c, B2d, F2b |
+| voice | 5 | B2a, B2b, B2c, B2d, F2b |
 | mobile | 4 | B3b, B3c, F1a, F2a, T2a |
 | both | 7 | B1b, B3a, B3d, F1c, F3a, T1a |
 | backend | 6 | B1c, F1b, T2b, I2a, I2b, I3a |
@@ -132,12 +132,12 @@ Items tagged `both` are the ones where Voice Completion Roadmap discipline matte
 
 | Severity | B | F | T | I | Total |
 |---|---|---|---|---|---|
-| 1 (top) | 3 | 3 | 1 | 0 | 7 |
+| 1 (top) | 2 | 3 | 1 | 0 | 6 |
 | 2 (medium) | 4 | 2 | 2 | 2 | 10 |
 | 3 (low) | 5 | 1 | 0 | 1 | 7 |
-| **Total** | 12 | 6 | 3 | 3 | **24** |
+| **Total** | 11 | 6 | 3 | 3 | **23** |
 
-(Total active = 24. Add 3 closed-without-entry to reach the 27-item total.)
+(Total active = 23. Add 4 closed-without-entry to reach the 27-item total.)
 
 ---
 

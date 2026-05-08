@@ -164,7 +164,6 @@ function surfaceFill(surface) {
 // ─── Data ──────────────────────────────────────────────────────────────────
 
 const bugs = [
-  { id: 'B1a', desc: 'Voice live-calendar fetch (voice still on stale snapshot)', surface: 'voice', notes: 'Voice server fetchCalendarEvents (line 454) reads stale calendar_events snapshot. Mobile shipped fix V57.11.2 + V57.11.6 via fetchLiveCalendarEvents in naavi-chat. Port that pattern: Google Calendar API per-request with refresh-token + Cache-Control: no-cache + Pragma: no-cache. Swap call sites at lines 1441 / 3281 / 6744. ~30–60 min, server-only.', sa: 'Server' },
   { id: 'B1b', desc: 'LIST_RULES synthesize-action backstop missing', surface: 'both', notes: 'Phantom-action detection loop in hooks/useOrchestrator.ts line 1280-1289 catches \'you have N alerts\' speech without LIST_RULES action and overrides speech to \'Let me pull up your alerts.\' — but doesn\'t synthesize a LIST_RULES action onto claudeActions[]. Naavi promises lookup and goes silent. Fix: parallel block to chain-store auto-fix at line 1258-1273; push {type: \'LIST_RULES\'} when the backstop fires. ~20-30 min, ~10 lines. AAB required (mobile orchestrator). Voice server lacks the speech-override backstop entirely; bundle into voice server\'s LIST_RULES handler same session for surface parity (Server).', sa: 'Both' },
   { id: 'B1c', desc: 'Email instant-search live-overlay (Option #3)', surface: 'backend', notes: 'Architectural principle — Wael 2026-05-08: every queryable channel = background sync at per-channel depth + live-overlay at question-time. Email today: 7-day sync window via sync-gmail cron stays as-is. ADD live Gmail API search at question-time — when user asks email question (voice or chat), naavi-chat triggers fresh Gmail API call with q= against subject + body for the question\'s keywords, Cache-Control: no-cache, merges with cached gmail_messages set, passes merged result to Claude. Same shape as naavi-chat::fetchLiveCalendarEvents (V57.11.2 / V57.11.6). Failure mode without it: Bell bill arrived 20 min ago → cron hasn\'t fired → Naavi says "no". ~30-60 min server-only port from calendar pattern. Unblocks F1b sequencing.', sa: 'Server' },
   { id: 'B2a', desc: 'Voice missing SCHEDULE_MEDICATION action', surface: 'voice', notes: 'Holding-list framing was stale — DELETE_EVENT / LIST_RULES / DELETE_MEMORY already at parity in voice server (lines 1938, 6411, 1967). Only real gap: SCHEDULE_MEDICATION not handled by voice. Port mobile handler at hooks/useOrchestrator.ts line 1549; uses same backend (loop of create-calendar-event). Behavior-diff sweep on DELETE_MEMORY recommended (voice does direct DB DELETE, mobile path may differ). ~1 hour, server-only.', sa: 'Server' },
@@ -203,6 +202,7 @@ const closed = [
   { num: 4,  item: 'Geofence reliability (pending phone reboot)', reason: 'Tested per Wael 2026-05-08 — no problems found. Will be reported if recurs. Underlying Google-OAuth disconnect bug (Phase 3 background-mode blocker) noted but not preemptively tracked — same rule.' },
   { num: 12, item: 'naavi-spend-summary Edge Function',          reason: 'Already shipped — function exists at supabase/functions/naavi-spend-summary/index.ts, aggregates documents.extracted_amount_cents directly, multi-user safe, multi-currency aware. Maestro e2e/06-spend-summary-anthropic.yaml PASSED in 2026-05-08 full-suite run. Holding-list "approved 2026-04-30, not built" was stale.' },
   { num: 14, item: 'Demo line "remind me" time-extraction loop', reason: 'Symptom impossible by architecture — demo line is now fully canned (5 hard-coded scenarios via DTMF + speech routing); no real reminder path exists on demo. Underlying bug (time-extraction loop) may still affect authenticated users on production line — log if it surfaces.' },
+  { num: 'B1a', item: 'Voice live-calendar fetch (voice still on stale snapshot)', reason: 'Validated by user test 2026-05-08 (first item under CLAUDE.md Rule 17). Wael created a fresh Google Calendar event, asked voice (PC) — correct answer. Changed time + location, asked voice and mobile — both correct. Bug as classified does NOT reproduce in real use. The architectural read (voice reads from Supabase snapshot table populated every 6h) was correct about the code path but did not predict user-visible behavior; some sync mechanism keeps the snapshot fresh enough that staleness is not perceived. Reopen only if surfaces.' },
 ];
 
 // ─── Build the document ────────────────────────────────────────────────────
@@ -281,20 +281,20 @@ const closedTable = new Table({
 children.push(closedTable);
 
 children.push(h1('Final tally'));
-children.push(bullet('Bugs (B): 12 — B1a, B1b, B1c, B2a, B2b, B2c, B2d, B3a, B3b, B3c, B3d, B3e'));
+children.push(bullet('Bugs (B): 11 — B1b, B1c, B2a, B2b, B2c, B2d, B3a, B3b, B3c, B3d, B3e'));
 children.push(bullet('Features (F): 6 — F1a, F1b, F1c, F2a, F2b, F3a'));
 children.push(bullet('Tooling (T): 3 — T1a, T2a, T2b'));
 children.push(bullet('Ideas (I): 3 — I2a, I2b, I3a'));
-children.push(bullet('Closed without entry: 3 — Items 4, 12, 14'));
+children.push(bullet('Closed without entry: 4 — Items 4, 12, 14, B1a'));
 children.push(bullet('Total: 27 (26 holding-list + 1 missed item B1c added 2026-05-08)'));
 
 children.push(h2('Tally by Server/AAB'));
-children.push(bullet('Server-only: 14 — ship without AAB cycle'));
+children.push(bullet('Server-only: 13 — ship without AAB cycle'));
 children.push(bullet('AAB-only: 3 — bundle into next AAB (B3b cosmetic ruler leak, B3c haptic vibration, plus AAB portion of Both items)'));
 children.push(bullet('Both: 7 — cross-surface coordination'));
 
 children.push(h2('Tally by Surface (cross-surface drift discipline)'));
-children.push(bullet('voice: 6 — B1a, B2a, B2b, B2c, B2d, F2b'));
+children.push(bullet('voice: 5 — B2a, B2b, B2c, B2d, F2b'));
 children.push(bullet('mobile: 4 — B3b, B3c, F1a, F2a, T2a'));
 children.push(bullet('both: 7 — B1b, B3a, B3d, F1c, F3a, T1a (parity-required when one surface ships)'));
 children.push(bullet('backend: 6 — B1c, F1b, T2b, I2a, I2b, I3a (shared backend; both surfaces benefit)'));
@@ -302,10 +302,10 @@ children.push(bullet('website: 1 — B3e (mynaavi-website only)'));
 children.push(p('Items tagged "both" are the ones where Voice Completion Roadmap discipline matters most — when one surface ships, the other must follow before drift accumulates. See CLAUDE.md Rule 16 for the commit-message convention enforcing this. Mechanical guarantee comes from Voice Roadmap W2 (Structured Outputs) + W3 (Voice Automated Regression Suite).'));
 
 children.push(h2('Tally by severity (active items only)'));
-children.push(bullet('1 (top): 7 — B1a + B1b + B1c, F1a + F1b + F1c, T1a'));
+children.push(bullet('1 (top): 6 — B1b + B1c, F1a + F1b + F1c, T1a'));
 children.push(bullet('2 (medium): 10 — B2a + B2b + B2c + B2d, F2a + F2b, T2a + T2b, I2a + I2b'));
 children.push(bullet('3 (low): 7 — B3a + B3b + B3c + B3d + B3e, F3a, I3a'));
-children.push(p('Total active = 24. Plus 3 closed-without-entry = 27.'));
+children.push(p('Total active = 23. Plus 4 closed-without-entry = 27.'));
 
 children.push(h1('Session method'));
 children.push(bullet('Walked all 26 holding-list items one at a time, with explicit user "done" signal between items.'));

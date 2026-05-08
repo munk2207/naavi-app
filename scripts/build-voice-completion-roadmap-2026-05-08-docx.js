@@ -294,8 +294,8 @@ children.push(dod('docs/MOBILE_VS_PHONE_AUDIT_2026-05-08.docx exists, replaces t
 children.push(workItemHeader('1', 'Voice Quality Foundation', 'Server-only'));
 children.push(p('Fix the things that make the user lose trust mid-conversation. Architectural principle (sync + live-overlay) lands here. Picker robustness and self-cleansing memory are quality issues, not new features.'));
 children.push(bulletRich([
-  new TextRun({ text: 'Voice live-calendar fetch (B1a) — ', bold: true }),
-  new TextRun('mirror naavi-chat::fetchLiveCalendarEvents into voice server. Replace fetchCalendarEvents call sites at lines 1441, 3281, 6744 with the live Google API path (refresh-token + Cache-Control: no-cache + Pragma: no-cache).'),
+  new TextRun({ text: 'Voice live-calendar fetch (B1a) — VERIFIED NOT REPRODUCING 2026-05-08. ', bold: true }),
+  new TextRun('Wael ran the user-facing test (CLAUDE.md Rule 17): created a fresh Google Calendar event, asked voice — correct; changed time + location, asked voice and mobile — both correct. Bug as classified does not reproduce. Item closed in classification doc. Removed from W1 active scope; left here only as a record. Some sync mechanism keeps the voice-server snapshot fresh enough that staleness is not perceived in real use.'),
 ]));
 children.push(bulletRich([
   new TextRun({ text: 'Stop-word interrupt regression (B2b) — ', bold: true }),
