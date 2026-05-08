@@ -164,7 +164,7 @@ function surfaceFill(surface) {
 // ─── Data ──────────────────────────────────────────────────────────────────
 
 const bugs = [
-  { id: 'B1b', desc: 'LIST_RULES synthesize-action backstop missing', surface: 'both', notes: 'Phantom-action detection loop in hooks/useOrchestrator.ts line 1280-1289 catches \'you have N alerts\' speech without LIST_RULES action and overrides speech to \'Let me pull up your alerts.\' — but doesn\'t synthesize a LIST_RULES action onto claudeActions[]. Naavi promises lookup and goes silent. Fix: parallel block to chain-store auto-fix at line 1258-1273; push {type: \'LIST_RULES\'} when the backstop fires. ~20-30 min, ~10 lines. AAB required (mobile orchestrator). Voice server lacks the speech-override backstop entirely; bundle into voice server\'s LIST_RULES handler same session for surface parity (Server).', sa: 'Both' },
+  { id: 'B1b', desc: 'LIST_RULES backstop on mobile (revised 2026-05-08 after user-test)', surface: 'mobile', notes: 'Validated 2026-05-08 under Rule 17. Voice (PC) tested CLEAN — correctly listed alerts; voice half closed. Mobile (MV) tested BROKEN — Naavi said "I don\'t have any alerts in your records" when 7+ alerts exist in Settings. Revised fix scope: the phantom-action backstop regex (hooks/useOrchestrator.ts line 1207) catches "you have N alerts" but NOT "I don\'t have any alerts" / "you don\'t have any" / "there are no alerts" (wrong-direction phrasings). Two-part fix: (1) extend the regex to cover wrong-direction patterns; (2) synthesize a {type: \'LIST_RULES\'} action onto claudeActions[] when the backstop fires (original B1b ask). ~30-40 min code in hooks/useOrchestrator.ts. AAB required. Fix deferred to next AAB cycle.', sa: 'AAB' },
   { id: 'B1c', desc: 'Email instant-search live-overlay (Option #3)', surface: 'backend', notes: 'Architectural principle — Wael 2026-05-08: every queryable channel = background sync at per-channel depth + live-overlay at question-time. Email today: 7-day sync window via sync-gmail cron stays as-is. ADD live Gmail API search at question-time — when user asks email question (voice or chat), naavi-chat triggers fresh Gmail API call with q= against subject + body for the question\'s keywords, Cache-Control: no-cache, merges with cached gmail_messages set, passes merged result to Claude. Same shape as naavi-chat::fetchLiveCalendarEvents (V57.11.2 / V57.11.6). Failure mode without it: Bell bill arrived 20 min ago → cron hasn\'t fired → Naavi says "no". ~30-60 min server-only port from calendar pattern. Unblocks F1b sequencing.', sa: 'Server' },
   { id: 'B2a', desc: 'Voice missing SCHEDULE_MEDICATION action', surface: 'voice', notes: 'Holding-list framing was stale — DELETE_EVENT / LIST_RULES / DELETE_MEMORY already at parity in voice server (lines 1938, 6411, 1967). Only real gap: SCHEDULE_MEDICATION not handled by voice. Port mobile handler at hooks/useOrchestrator.ts line 1549; uses same backend (loop of create-calendar-event). Behavior-diff sweep on DELETE_MEMORY recommended (voice does direct DB DELETE, mobile path may differ). ~1 hour, server-only.', sa: 'Server' },
   { id: 'B2b', desc: 'Voice "Naavi stop" stop-word regression', surface: 'voice', notes: 'Stop-word matcher (naavi-voice-server/src/index.js line 5161) compares exact strings. \'Naavi stop\' lower-cased = \'naavi stop\' which isn\'t in the array. Bare \'stop\' / \'enough\' / \'got it\' still work. Fix: strip leading wake-word (/^(na+h?v+ee?|naavi|navi)\\s+/i) before the stopWords lookup. Optional follow-up: also fire on interim transcripts (not just FINAL) for faster cut-off; track separately if mid-sentence interrupt feels laggy after the fix. ~30 min, server-only.', sa: 'Server' },
@@ -290,13 +290,13 @@ children.push(bullet('Total: 27 (26 holding-list + 1 missed item B1c added 2026-
 
 children.push(h2('Tally by Server/AAB'));
 children.push(bullet('Server-only: 13 — ship without AAB cycle'));
-children.push(bullet('AAB-only: 3 — bundle into next AAB (B3b cosmetic ruler leak, B3c haptic vibration, plus AAB portion of Both items)'));
-children.push(bullet('Both: 7 — cross-surface coordination'));
+children.push(bullet('AAB-only: 4 — bundle into next AAB (B1b LIST_RULES backstop, B3b cosmetic ruler leak, B3c haptic vibration, plus AAB portion of Both items)'));
+children.push(bullet('Both: 6 — cross-surface coordination'));
 
 children.push(h2('Tally by Surface (cross-surface drift discipline)'));
 children.push(bullet('voice: 5 — B2a, B2b, B2c, B2d, F2b'));
-children.push(bullet('mobile: 4 — B3b, B3c, F1a, F2a, T2a'));
-children.push(bullet('both: 7 — B1b, B3a, B3d, F1c, F3a, T1a (parity-required when one surface ships)'));
+children.push(bullet('mobile: 6 — B1b, B3b, B3c, F1a, F2a, T2a'));
+children.push(bullet('both: 5 — B3a, B3d, F1c, F3a, T1a (parity-required when one surface ships)'));
 children.push(bullet('backend: 6 — B1c, F1b, T2b, I2a, I2b, I3a (shared backend; both surfaces benefit)'));
 children.push(bullet('website: 1 — B3e (mynaavi-website only)'));
 children.push(p('Items tagged "both" are the ones where Voice Completion Roadmap discipline matters most — when one surface ships, the other must follow before drift accumulates. See CLAUDE.md Rule 16 for the commit-message convention enforcing this. Mechanical guarantee comes from Voice Roadmap W2 (Structured Outputs) + W3 (Voice Automated Regression Suite).'));

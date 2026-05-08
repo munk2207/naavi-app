@@ -376,8 +376,8 @@ children.push(bulletRich([
   new TextRun('port the mobile handler at hooks/useOrchestrator.ts line 1549 into the voice server switch statement. Uses the same backend (loop of create-calendar-event calls).'),
 ]));
 children.push(bulletRich([
-  new TextRun({ text: 'LIST_RULES voice-side speech-override backstop (B1b voice half) — ', bold: true }),
-  new TextRun('voice has the LIST_RULES handler at line 6411 but lacks the phantom-action speech-override that mobile got in V57.11.6. When voice Claude says "you have 3 alerts" without emitting LIST_RULES, voice has no guardrail. Add the backstop in same shape as mobile\'s useOrchestrator.ts line 1207 entry. (Mobile half — synthesizing the LIST_RULES action when the backstop fires — is B1b mobile-side; AAB-required.)'),
+  new TextRun({ text: 'LIST_RULES voice-side speech-override backstop (B1b voice half) — VERIFIED NOT NEEDED 2026-05-08. ', bold: true }),
+  new TextRun('Wael ran the user-facing test (CLAUDE.md Rule 17): asked voice (PC +12495235394) "what alerts do I have?" — voice correctly listed all 7+ alerts. Voice path is reliable in real use; the architectural concern (lacks speech-override backstop) does not manifest as a user-visible bug. Voice half closed. Mobile half (B1b in classification) is real and confirmed broken on the same test — deferred to next AAB cycle.'),
 ]));
 children.push(bulletRich([
   new TextRun({ text: 'DELETE_MEMORY behavior-diff sweep — ', bold: true }),
