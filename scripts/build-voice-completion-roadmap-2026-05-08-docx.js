@@ -200,6 +200,10 @@ children.push(bulletRich([
   new TextRun({ text: 'CORRECTED — Soft "Done when…" replaced with explicit parity tests. ', bold: true }),
   new TextRun('Each work item now has a measurable Parity test alongside a Done-when criterion. The parity test answers: does voice produce the same action emission / same answer as mobile for case X?'),
 ]));
+children.push(bulletRich([
+  new TextRun({ text: 'PROMOTED — W2 (Anthropic Structured Outputs) and W3 (Voice Automated Regression Suite). ', bold: true }),
+  new TextRun('Were W7 + W9 in initial 2026-05-08 draft. Promoted to right after W1 because together they form the MECHANICAL guarantee of cross-surface parity — once both land, drift detection is automated at deploy time and CLAUDE.md Rule 16 (parity-impact: on commits) auto-retires. Until they land, the Surface column on the holding-list classification + Rule 16 are the human-discipline net.'),
+]));
 
 // ────────────────────────────────────────────────────────────────
 children.push(h1('Definition: Voice Replicates Mobile + Voice-Native Dignity'));
@@ -320,9 +324,53 @@ children.push(bulletRich([
 children.push(parityCriterion('A 5-minute call covering "next meeting", "stop", a name lookup, "what time is it?", "did Bob email me about the renewal?" and a multi-result location query has zero stale answers, zero dropped first words, picks the right option from the picker, stops on command, and never persists a malformed memory entry. Voice answers match what mobile would say for the same questions.'));
 children.push(dod('All seven work items above are deployed and the test call passes. Self-cleansing memory log shows zero unhandled malformed-entry detections over a week.'));
 
-// W2 — Voice Action Parity ─────────────────────────────────────────
-children.push(workItemHeader('2', 'Voice Action Parity (rescoped)', 'Server-only'));
-children.push(p('2026-05-07 listed four missing actions; 2026-05-08 code research showed only one is genuinely missing. The other three are at parity post V57.12 voice tool-use migration. Plus the LIST_RULES backstop gap on voice.'));
+// W2 — Anthropic Structured Outputs Migration (promoted from W7) ────
+children.push(workItemHeader('2', 'Anthropic Structured Outputs Migration', 'Server-only'));
+children.push(p('PROMOTED 2026-05-08 — was W7 in initial 2026-05-08 draft. Promoted because this is the foundational sync mechanism: once both surfaces use response_format json_schema, action emission is mathematically constrained to be identical for identical inputs. Drift at the action layer becomes API-impossible. Mobile is on JSON-in-prompt today; voice is on tool-use post-V57.12. Neither uses Anthropic Structured Outputs (Nov 2025 GA). Migrating both surfaces eliminates the prompt-drift cycle at the API level. T1a in classification — top-severity Tooling.'));
+children.push(bulletRich([
+  new TextRun({ text: 'Both surfaces use response_format: json_schema — ', bold: true }),
+  new TextRun('schema-constrained generation, enforced at API level. Removes the chain-store auto-fix bridge (currently in mobile orchestrator).'),
+]));
+children.push(bulletRich([
+  new TextRun({ text: 'Drop voice-side band-aids — ', bold: true }),
+  new TextRun('JSON-fence stripping, similar shims. Same cleanup mobile got in V57.12.'),
+]));
+children.push(bulletRich([
+  new TextRun({ text: 'Voice prompt version unification — ', bold: true }),
+  new TextRun('voice and mobile fetch the same get-naavi-prompt v64+. Verify both surfaces emit identical actions for identical user inputs.'),
+]));
+children.push(bulletRich([
+  new TextRun({ text: 'Prompt-regression suite covers both surfaces — ', bold: true }),
+  new TextRun('the existing tests/catalogue/prompt-regression.ts covers mobile path. Extend or duplicate to cover voice path. Both must pass green.'),
+]));
+children.push(parityCriterion('For every test case in the prompt regression suite, voice and mobile emit byte-identical action arrays. The chain-store auto-fix bridge in useOrchestrator.ts is removed (no longer needed).'));
+children.push(dod('Both surfaces on Structured Outputs. ~200 lines of mobile orchestrator band-aid code removed. Prompt regression suite green for both surfaces.'));
+
+// W3 — Voice Automated Regression Suite (promoted from W9) ──────────
+children.push(workItemHeader('3', 'Voice Automated Regression Suite', 'Server-only'));
+children.push(p('PROMOTED 2026-05-08 — was W9 in initial draft. Promoted alongside W2 because together they form the mechanical guarantee for cross-surface parity. Mobile has Maestro for UI regression (13 scenarios, 6/13 passing today). Voice has zero automated coverage. Manual 30-min test calls are an acceptance gate, not a regression net. Build the voice analog so subsequent voice-server changes have a safety net — and so the parity tests defined throughout this document become enforced, not asserted.'));
+children.push(bulletRich([
+  new TextRun({ text: 'Test framework selection — ', bold: true }),
+  new TextRun('script Twilio outbound calls to a target Voice Server endpoint, capture Deepgram transcripts, parse Claude action emissions, assert against expected. Candidate stacks: Twilio test credentials + Node test runner; or third-party voice testing services. Pick based on cost and fidelity.'),
+]));
+children.push(bulletRich([
+  new TextRun({ text: 'Initial scenario set — ', bold: true }),
+  new TextRun('mirror the parity-test criteria from W0 + W1 + W2 already defined. Suite grows as W4-W10 land — each new work item adds its parity test as a new automated scenario. Plus a dozen voice-native scenarios (barge-in, stop, identity, privacy mode).'),
+]));
+children.push(bulletRich([
+  new TextRun({ text: 'CI integration — ', bold: true }),
+  new TextRun('hook into the same green-before-AAB rule as npm run test:auto. Voice changes (commits to naavi-voice-server) require the voice regression suite green before deploy. CLAUDE.md Rule 16 (parity-impact: on commits) retires once this is in place — the suite catches what humans miss.'),
+]));
+children.push(bulletRich([
+  new TextRun({ text: 'Failure-mode catalog — ', bold: true }),
+  new TextRun('document and test what happens when: Twilio drops the stream mid-call; Deepgram disconnects; Claude returns 5xx; voicemail picks up; cellular signal drops; user goes silent for 60s. Each has a defined recovery behavior.'),
+]));
+children.push(parityCriterion('Every parity criterion in this document has a corresponding automated voice regression test. CI runs the suite on every voice-server push. A push that breaks any parity test is blocked from deploying.'));
+children.push(dod('Voice regression suite running, green, integrated into the deploy gate. Failure-mode catalog complete with each entry verified by an automated test.'));
+
+// W4 — Voice Action Parity (was W2) ────────────────────────────────
+children.push(workItemHeader('4', 'Voice Action Parity (rescoped)', 'Server-only'));
+children.push(p('2026-05-07 listed four missing actions; 2026-05-08 code research showed only one is genuinely missing. The other three are at parity post V57.12 voice tool-use migration. Plus the LIST_RULES backstop gap on voice. Lands AFTER W2 (Structured Outputs) so action-emission parity is mechanically enforced from this point forward, AND AFTER W3 so the regression suite catches any subsequent drift.'));
 children.push(bulletRich([
   new TextRun({ text: 'SCHEDULE_MEDICATION on voice (B2a) — ', bold: true }),
   new TextRun('port the mobile handler at hooks/useOrchestrator.ts line 1549 into the voice server switch statement. Uses the same backend (loop of create-calendar-event calls).'),
@@ -335,11 +383,11 @@ children.push(bulletRich([
   new TextRun({ text: 'DELETE_MEMORY behavior-diff sweep — ', bold: true }),
   new TextRun('voice does direct DB DELETE on knowledge_fragments by ILIKE keyword (line 1967); mobile path may differ subtly. Verify same set of fragments is removed for the same input across both surfaces. Fix any divergence.'),
 ]));
-children.push(parityCriterion('On a single phone call, the user can: list their alerts ("you have 4 alerts: …" with the right count and the right alerts), schedule a medication ("remind me at 8 am and 8 pm to take Lipitor for 30 days") and see the events appear in Google Calendar, and forget a memory ("forget that I take Lipitor") and have the same number of fragments removed as the mobile equivalent would remove.'));
-children.push(dod('SCHEDULE_MEDICATION shipped on voice with the same Edge Function backend as mobile. LIST_RULES backstop deployed on voice. DELETE_MEMORY parity verified by side-by-side test (same input, same removal count).'));
+children.push(parityCriterion('On a single phone call, the user can: list their alerts ("you have 4 alerts: …" with the right count and the right alerts), schedule a medication ("remind me at 8 am and 8 pm to take Lipitor for 30 days") and see the events appear in Google Calendar, and forget a memory ("forget that I take Lipitor") and have the same number of fragments removed as the mobile equivalent would remove. W3 regression suite captures all three as automated tests.'));
+children.push(dod('SCHEDULE_MEDICATION shipped on voice with the same Edge Function backend as mobile. LIST_RULES backstop deployed on voice. DELETE_MEMORY parity verified by side-by-side test (same input, same removal count). Three corresponding automated scenarios added to W3 suite.'));
 
-// W3 — Voice Privacy UX ────────────────────────────────────────────
-children.push(workItemHeader('3', 'Voice Privacy UX (4-piece bundle)', 'Both'));
+// W5 — Voice Privacy UX (was W3) ────────────────────────────────────
+children.push(workItemHeader('5', 'Voice Privacy UX (4-piece bundle)', 'Both'));
 children.push(p('F1c — top-severity Feature, missing from 2026-05-07 entirely. Voice is the surface where users are in PUBLIC. Reading medical / financial / legal content aloud at full volume is a category-blocking failure. Wael 2026-04-20 directive: ship all four pieces together; piece 1 alone has no user-visible effect.'));
 children.push(bulletRich([
   new TextRun({ text: 'Per-result privacy labels — ', bold: true }),
@@ -360,8 +408,8 @@ children.push(bulletRich([
 children.push(parityCriterion('Privacy mode off → voice behavior unchanged from today (regression check). Privacy mode on, asked about a medical item → Naavi offers SMS fallback before reading. Reply "text it" → SMS arrives with full details and call continues. Category preference medical=always → medical items are private even when privacy mode is off.'));
 children.push(dod('All four pieces shipped together. Test plan above passes. Mobile Settings UI exposes the toggle + per-category preferences. Privacy mode honored on voice.'));
 
-// W4 — Voice Identity: Multi-Phone ─────────────────────────────────
-children.push(workItemHeader('4', 'Voice Identity — Multi-Phone Fast Path', 'Both'));
+// W6 — Voice Identity: Multi-Phone (was W4) ────────────────────────
+children.push(workItemHeader('6', 'Voice Identity — Multi-Phone Fast Path', 'Both'));
 children.push(p('Today, only one phone number per user is recognized. Calls from work cell / borrowed phone / etc. are rejected. Adding additional_phones[] is the cheap fix that covers the vast majority of secondary-phone cases — and decouples cleanly from the biometric work below.'));
 children.push(bulletRich([
   new TextRun({ text: 'Schema + lookup — ', bold: true }),
@@ -382,9 +430,9 @@ children.push(bulletRich([
 children.push(parityCriterion('A user with two verified phones can call from either and be recognized. A user trying to add an unverified phone is blocked at the SMS-code step. The rejection wording matches reality.'));
 children.push(dod('additional_phones[] schema deployed, voice lookup honors it, Settings UI ships in next AAB, SMS verification path verified end-to-end.'));
 
-// W5 — Voice Identity: Biometric ───────────────────────────────────
-children.push(workItemHeader('5', 'Voice Identity — Biometric Fallback', 'BLOCKED on Picovoice'));
-children.push(p('F3a — deferred per the holding-list classification (revisit when unknown-number caller confusion shows up as a real pattern). Path A approved 2026-05-07: wait on Picovoice with deadline; ID R&D as backup. Stays on this list as a forward-looking entry; does not block W4 multi-phone.'));
+// W7 — Voice Identity: Biometric (was W5) ──────────────────────────
+children.push(workItemHeader('7', 'Voice Identity — Biometric Fallback', 'BLOCKED on Picovoice'));
+children.push(p('F3a — deferred per the holding-list classification (revisit when unknown-number caller confusion shows up as a real pattern). Path A approved 2026-05-07: wait on Picovoice with deadline; ID R&D as backup. Stays on this list as a forward-looking entry; does not block W6 multi-phone.'));
 children.push(bulletRich([
   new TextRun({ text: 'Picovoice Eagle integration — ', bold: true }),
   new TextRun('server-side voiceprint capture + verification on each unknown caller. Sample phrase: "my voice is my password" (verifying voiceprint, not words).'),
@@ -404,8 +452,8 @@ children.push(bulletRich([
 children.push(parityCriterion('A user calling from any phone in the world can prove they are themselves by speaking the phrase. The rejection lane becomes a fallback only when both Caller ID and biometric fail.'));
 children.push(dod('Enrollment + verification ship; rejection lane is now last-resort.'));
 
-// W6 — Voice Unification: Polly Joanna ─────────────────────────────
-children.push(workItemHeader('6', 'Voice Unification — Polly Joanna', 'BLOCKED on AWS'));
+// W8 — Voice Unification: Polly Joanna (was W6) ────────────────────
+children.push(workItemHeader('8', 'Voice Unification — Polly Joanna', 'BLOCKED on AWS'));
 children.push(p('CORRECTED starting state: BOTH surfaces today run Aura Hera on production calls (verified in code 2026-05-08). The 2026-05-07 description claiming "phone Polly / mobile Aura" was wrong — Polly only appears on demo-line Twilio Say prompts. Migration target unchanged: everything → Polly Joanna.'));
 children.push(bulletRich([
   new TextRun({ text: 'Pre-flight: voice fragmentation verification (B3a) — ', bold: true }),
@@ -434,30 +482,8 @@ children.push(bulletRich([
 children.push(parityCriterion('A user hangs up the phone, opens the app, and Naavi sounds identical. Latency, intonation, and pronunciation match within tolerance. Postal codes, addresses, ordinals, names all read correctly on both surfaces.'));
 children.push(dod('Both surfaces on Polly Joanna with SSML rate control. TTS regression suite passes. Soft-tick still masks the small added Polly latency on calls.'));
 
-// W7 — Voice Structured Outputs Migration ──────────────────────────
-children.push(workItemHeader('7', 'Voice Structured Outputs Migration', 'Server-only'));
-children.push(p('Mobile is on JSON-in-prompt today; voice is on tool-use post-V57.12. Neither uses Anthropic Structured Outputs (Nov 2025 GA). Migrate both surfaces to Structured Outputs to eliminate prompt-drift cycle at the API level. T1a — top-severity Tooling.'));
-children.push(bulletRich([
-  new TextRun({ text: 'Both surfaces use response_format: json_schema — ', bold: true }),
-  new TextRun('schema-constrained generation, enforced at API level. Removes the chain-store auto-fix bridge (currently in mobile orchestrator).'),
-]));
-children.push(bulletRich([
-  new TextRun({ text: 'Drop voice-side band-aids — ', bold: true }),
-  new TextRun('JSON-fence stripping, similar shims. Same cleanup mobile got in V57.12.'),
-]));
-children.push(bulletRich([
-  new TextRun({ text: 'Voice prompt version unification — ', bold: true }),
-  new TextRun('voice and mobile fetch the same get-naavi-prompt v64+. Verify both surfaces emit identical actions for identical user inputs.'),
-]));
-children.push(bulletRich([
-  new TextRun({ text: 'Prompt-regression suite covers both surfaces — ', bold: true }),
-  new TextRun('the existing tests/catalogue/prompt-regression.ts covers mobile path. Extend or duplicate to cover voice path. Both must pass green.'),
-]));
-children.push(parityCriterion('For every test case in the prompt regression suite, voice and mobile emit byte-identical action arrays. The chain-store auto-fix bridge in useOrchestrator.ts is removed (no longer needed).'));
-children.push(dod('Both surfaces on Structured Outputs. ~200 lines of mobile orchestrator band-aid code removed. Prompt regression suite green for both surfaces.'));
-
-// W8 — Demo Line Maturity ──────────────────────────────────────────
-children.push(workItemHeader('8', 'Demo Line Maturity', 'Server-only'));
+// W9 — Demo Line Maturity (was W8) ─────────────────────────────────
+children.push(workItemHeader('9', 'Demo Line Maturity', 'Server-only'));
 children.push(p('F2b — three sub-pieces, kept together as one decision point. Today (2026-05-08) the demo line works as a canned 5-scenario flow with personalized greeting + name capture + SMS recap from +1-431-300-6228 + /start landing page. Now it needs to convert and be measurable.'));
 children.push(bulletRich([
   new TextRun({ text: 'Telemetry — ', bold: true }),
@@ -482,28 +508,6 @@ children.push(bulletRich([
 children.push(parityCriterion('A stranger calls 1-888-91-NAAVI, hears scenarios that map cleanly to capabilities visible in the real product, gives their name, opts into the SMS, visits /start, fills the form. Telemetry shows the funnel. Conversion attribution links the new signup back to the original demo call. Scenario richness reflects what telemetry says is engaging.'));
 children.push(dod('Telemetry events table populated. Conversion attribution proven end-to-end on a test call. Phase 2 demo data seeded. Scenario richness driven by telemetry data, not guesswork. Anti-abuse caps verified.'));
 
-// W9 — Voice Automated Regression Suite ────────────────────────────
-children.push(workItemHeader('9', 'Voice Automated Regression Suite', 'Server-only'));
-children.push(p('NEW 2026-05-08. Mobile has Maestro for UI regression (13 scenarios, 6/13 passing today). Voice has zero automated coverage. Manual 30-min test calls are an acceptance gate, not a regression net. Build the voice analog so subsequent voice-server changes have a safety net.'));
-children.push(bulletRich([
-  new TextRun({ text: 'Test framework selection — ', bold: true }),
-  new TextRun('script Twilio outbound calls to a target Voice Server endpoint, capture Deepgram transcripts, parse Claude action emissions, assert against expected. Candidate stacks: Twilio test credentials + Node test runner; or third-party voice testing services. Pick based on cost and fidelity.'),
-]));
-children.push(bulletRich([
-  new TextRun({ text: 'Initial scenario set — ', bold: true }),
-  new TextRun('mirror the parity-test criteria in W1-W8 above. One scenario per parity test in this document. Plus a dozen "voice-native" scenarios (barge-in, stop, identity, privacy mode).'),
-]));
-children.push(bulletRich([
-  new TextRun({ text: 'CI integration — ', bold: true }),
-  new TextRun('hook into the same green-before-AAB rule as npm run test:auto. Voice changes (commits to naavi-voice-server) require the voice regression suite green before deploy.'),
-]));
-children.push(bulletRich([
-  new TextRun({ text: 'Failure-mode catalog — ', bold: true }),
-  new TextRun('document and test what happens when: Twilio drops the stream mid-call; Deepgram disconnects; Claude returns 5xx; voicemail picks up; cellular signal drops; user goes silent for 60s. Each has a defined recovery behavior.'),
-]));
-children.push(parityCriterion('Every parity criterion in W0-W8 has a corresponding automated voice regression test. CI runs the suite on every voice-server push. A push that breaks any parity test is blocked from deploying.'));
-children.push(dod('Voice regression suite running, green, integrated into the deploy gate. Failure-mode catalog complete with each entry verified by an automated test.'));
-
 // W10 — Voice Polish + Final Verification ──────────────────────────
 children.push(workItemHeader('10', 'Voice Polish + Final Verification', 'Both'));
 children.push(p('Final TTS gaps and a structured verification pass on the full voice surface. Address read-back bundled (was scattered across S6 in 2026-05-07 and earlier). Plus the small B3d address-rejection wording fix.'));
@@ -524,10 +528,10 @@ children.push(bulletRich([
   new TextRun('verify the soft-tick thinking sound plays in every silent gap — including during the now-mandatory ~1s Google Places fetch on every "alert me at X" (V57.13.3 no-cache).'),
 ]));
 children.push(bulletRich([
-  new TextRun({ text: 'Full voice regression run via W9 — ', bold: true }),
-  new TextRun('use the regression suite from W9 as the structured 30-minute coverage of every action, every retrieval, every TTS edge case. No more manual one-shot acceptance test.'),
+  new TextRun({ text: 'Full voice regression run via W3 — ', bold: true }),
+  new TextRun('use the regression suite from W3 as the structured 30-minute coverage of every action, every retrieval, every TTS edge case. No more manual one-shot acceptance test.'),
 ]));
-children.push(parityCriterion('A full voice regression run via W9\'s suite passes every scenario. Address read-back is correct on every alert. Soft-tick fills every silent gap. The address-rejection message names the rejected address. Voice call recording end-to-end works on a real call.'));
+children.push(parityCriterion('A full voice regression run via W3\'s suite passes every scenario. Address read-back is correct on every alert. Soft-tick fills every silent gap. The address-rejection message names the rejected address. Voice call recording end-to-end works on a real call.'));
 children.push(dod('At this point voice replicates mobile and exceeds it in voice-native ways. The product is ready for real users to depend on as a daily driver.'));
 
 // ────────────────────────────────────────────────────────────────
@@ -569,23 +573,23 @@ children.push(bullet('New voice features beyond replicates-mobile + voice-native
 children.push(h1('Open Dependencies (External Blockers)'));
 children.push(bulletRich([
   new TextRun({ text: 'Picovoice Eagle approval — ', bold: true }),
-  new TextRun('W5 cannot start until the account is approved. Path A (wait with deadline) approved 2026-05-07; ID R&D as backup if no response.'),
+  new TextRun('W7 cannot start until the account is approved. Path A (wait with deadline) approved 2026-05-07; ID R&D as backup if no response.'),
 ]));
 children.push(bulletRich([
   new TextRun({ text: 'AWS account for Polly — ', bold: true }),
-  new TextRun('W6 needs AWS billing setup. One-time, < 30 minutes.'),
+  new TextRun('W8 needs AWS billing setup. One-time, < 30 minutes.'),
 ]));
 children.push(bulletRich([
   new TextRun({ text: 'Demo line curated user data — ', bold: true }),
-  new TextRun('W8 needs a demo user with rich, plausible Drive/calendar/contacts/alerts. Phase 1 calendar shipped; Phase 2 Gmail seed pending (T2b).'),
+  new TextRun('W9 needs a demo user with rich, plausible Drive/calendar/contacts/alerts. Phase 1 calendar shipped; Phase 2 Gmail seed pending (T2b).'),
 ]));
 children.push(bulletRich([
   new TextRun({ text: 'npm run test:auto fully green before each AAB — ', bold: true }),
-  new TextRun('hard rule (CLAUDE.md). W3, W4, W6 build AABs; all must pass the full suite first.'),
+  new TextRun('hard rule (CLAUDE.md). W5, W6, W8 build AABs; all must pass the full suite first.'),
 ]));
 children.push(bulletRich([
-  new TextRun({ text: 'Voice regression suite green before each voice deploy (after W9 lands) — ', bold: true }),
-  new TextRun('parallel rule. Once W9 is in place, voice-server commits gate on the voice regression suite the same way mobile commits gate on test:auto.'),
+  new TextRun({ text: 'Voice regression suite green before each voice deploy (after W3 lands) — ', bold: true }),
+  new TextRun('parallel rule. Once W3 is in place, voice-server commits gate on the voice regression suite the same way mobile commits gate on test:auto. CLAUDE.md Rule 16 (parity-impact: on commits) auto-retires once both W2 + W3 are in place — automation replaces human discipline.'),
 ]));
 
 // ────────────────────────────────────────────────────────────────
