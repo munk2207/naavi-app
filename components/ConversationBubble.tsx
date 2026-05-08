@@ -26,29 +26,18 @@ interface Props {
   timestamp?: string;
 }
 
-// V57.13.6 — short user messages get a trailing dot pad as a workaround for
-// the Yoga single-line intrinsic-width measurement bug on Samsung One UI
-// (react-native#35039). Yoga reports a slightly-too-small width, so the LAST
-// word of short single-line messages gets clipped ("Alert me at Walmart" →
-// "Alert me at"). Long messages that already wrap to 2+ lines self-heal.
-// Padding short text with visible dots pushes the truncation point onto the
-// dots instead of the user's real word; user's text stays whole.
-//
-// Only applied to user messages under TRUNCATION_PAD_THRESHOLD chars.
-// Naavi messages don't truncate (they routinely wrap to multiple lines).
-const TRUNCATION_PAD_THRESHOLD = 50;
-const TRUNCATION_PAD = '. . . . . .';
-
-function maybePad(content: string, isNaavi: boolean): string {
-  if (isNaavi) return content;
-  if (!content) return content;
-  if (content.length >= TRUNCATION_PAD_THRESHOLD) return content;
-  return `${content} ${TRUNCATION_PAD}`;
-}
+// V57.13.7 — bubble truncation via two-layer overlay (Wael 2026-05-07: "#3 is better").
+// Why: V57.13.7's always-visible trailing dots cluttered every user bubble.
+// Two-layer fix: a ruler Text (invisible user content + faded dot pad) gives
+// Yoga a long string to measure, so Samsung One UI's intrinsic-width bug
+// can't trim past the actual content. The user's text is then drawn on top
+// via position: absolute, inheriting the ruler's bounds — no wrap math, no
+// intrinsic-width guess. Visible result: user words at top-left, faded dots
+// fill only the trailing space.
+const DOT_RULER = '. '.repeat(20);
 
 export function ConversationBubble({ role, content, timestamp }: Props) {
   const isNaavi = role === 'assistant';
-  const displayContent = maybePad(content, isNaavi);
 
   // V57.11.5 — bubble layout reworked. The maxWidth + alignSelf approach
   // kept tripping Android's Yoga text measurement and dropping trailing
@@ -78,7 +67,11 @@ export function ConversationBubble({ role, content, timestamp }: Props) {
           </View>
         ) : (
           <View style={[styles.bubble, styles.robertBubble]}>
-            <Text style={styles.robertText} textBreakStrategy="simple">{displayContent}</Text>
+            <Text style={styles.bubbleRuler} textBreakStrategy="simple">
+              <Text style={styles.bubbleRulerInvisible}>{content}</Text>
+              <Text style={styles.bubbleRulerDots}>{DOT_RULER}</Text>
+            </Text>
+            <Text style={styles.bubbleOverlay} textBreakStrategy="simple">{content}</Text>
           </View>
         )}
         {timestamp && (
@@ -151,7 +144,22 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: Colors.textPrimary,
   },
-  robertText: {
+  bubbleRuler: {
+    fontSize: Typography.body,
+    lineHeight: 20,
+  },
+  bubbleRulerInvisible: {
+    color: 'transparent',
+  },
+  bubbleRulerDots: {
+    color: Colors.textHint,
+    opacity: 0.35,
+  },
+  bubbleOverlay: {
+    position: 'absolute',
+    top: 12,
+    left: 16,
+    right: 16,
     fontSize: Typography.body,
     lineHeight: 20,
     color: Colors.textPrimary,
