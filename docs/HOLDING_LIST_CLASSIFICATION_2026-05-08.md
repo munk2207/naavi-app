@@ -35,7 +35,7 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 
 | ID | Description | Surface | Notes | Server/AAB |
 |----|-------------|---------|-------|------------|
-| B1b | LIST_RULES synthesize-action backstop missing | both | Phantom-action detection loop in `hooks/useOrchestrator.ts` line 1280-1289 catches 'you have N alerts' speech without LIST_RULES action and overrides speech to 'Let me pull up your alerts.' — but doesn't synthesize a LIST_RULES action onto `claudeActions[]`. Naavi promises lookup and goes silent. Fix: parallel block to chain-store auto-fix at line 1258-1273; push `{type: 'LIST_RULES'}` when the backstop fires. ~20-30 min, ~10 lines. AAB required (mobile orchestrator). Voice server lacks the speech-override backstop entirely; bundle into voice server's LIST_RULES handler same session for surface parity (Server). | Both |
+| B1b | LIST_RULES backstop on mobile (revised 2026-05-08 after user-test) | mobile | **Validated 2026-05-08 under Rule 17.** Voice (PC) tested CLEAN — correctly listed alerts; voice half closed. Mobile (MV) tested BROKEN — Naavi said *"I don't have any alerts in your records"* when 7+ alerts exist in Settings. Revised fix scope: the phantom-action backstop regex (`hooks/useOrchestrator.ts` line 1207) catches *"you have N alerts"* but NOT *"I don't have any alerts"* / *"you don't have any"* / *"there are no alerts"* (wrong-direction phrasings). Two-part fix: (1) extend the regex to cover wrong-direction patterns; (2) synthesize a `{type: 'LIST_RULES'}` action onto `claudeActions[]` when the backstop fires (original B1b ask). ~30-40 min code in `hooks/useOrchestrator.ts`. AAB required. **Fix deferred to next AAB cycle.** | AAB |
 | B1c | Email instant-search live-overlay (Option #3) | backend | **Architectural principle — Wael 2026-05-08:** every queryable channel = background sync at per-channel depth + live-overlay at question-time. Email today: 7-day sync window via `sync-gmail` cron stays as-is. ADD live Gmail API search at question-time — when user asks email question (voice or chat), `naavi-chat` triggers fresh Gmail API call with `q=` against subject + body for the question's keywords, `Cache-Control: no-cache`, merges with cached `gmail_messages` set, passes merged result to Claude. Same shape as `naavi-chat::fetchLiveCalendarEvents` (V57.11.2 / V57.11.6). Failure mode without it: Bell bill arrived 20 min ago → cron hasn't fired → Naavi says "no". ~30-60 min server-only port from calendar pattern. Unblocks F1b sequencing. | Server |
 | B2a | Voice missing SCHEDULE_MEDICATION action | voice | Holding-list framing was stale — DELETE_EVENT / LIST_RULES / DELETE_MEMORY already at parity in voice server (lines 1938, 6411, 1967). Only real gap: SCHEDULE_MEDICATION not handled by voice. Port mobile handler at `hooks/useOrchestrator.ts` line 1549; uses same backend (loop of `create-calendar-event`). Behavior-diff sweep on DELETE_MEMORY recommended (voice does direct DB DELETE, mobile path may differ). ~1 hour, server-only. | Server |
 | B2b | Voice "Naavi stop" stop-word regression | voice | Stop-word matcher (`naavi-voice-server/src/index.js` line 5161) compares exact strings. 'Naavi stop' lower-cased = 'naavi stop' which isn't in the array. Bare 'stop' / 'enough' / 'got it' still work. Fix: strip leading wake-word (`/^(na+h?v+ee?|naavi|navi)\s+/i`) before the stopWords lookup. Optional follow-up: also fire on interim transcripts (not just FINAL) for faster cut-off; track separately if mid-sentence interrupt feels laggy after the fix. ~30 min, server-only. | Server |
@@ -113,16 +113,16 @@ Items walked but not added to any table. Reopen if symptom recurs.
 | Scope | Count | Implication |
 |---|---|---|
 | Server-only | 13 | Ship without AAB cycle |
-| AAB-only | 3 | Mobile build required (B3b, B3c) — bundle into next AAB |
-| Both | 7 | Cross-surface coordination |
+| AAB-only | 4 | Mobile build required (B1b, B3b, B3c) — bundle into next AAB |
+| Both | 6 | Cross-surface coordination |
 
 ### Tally by Surface (cross-surface drift discipline)
 
 | Surface | Count | IDs |
 |---|---|---|
 | voice | 5 | B2a, B2b, B2c, B2d, F2b |
-| mobile | 4 | B3b, B3c, F1a, F2a, T2a |
-| both | 7 | B1b, B3a, B3d, F1c, F3a, T1a |
+| mobile | 6 | B1b, B3b, B3c, F1a, F2a, T2a |
+| both | 5 | B3a, B3d, F1c, F3a, T1a |
 | backend | 6 | B1c, F1b, T2b, I2a, I2b, I3a |
 | website | 1 | B3e |
 
