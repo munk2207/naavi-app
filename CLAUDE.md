@@ -200,46 +200,73 @@ If in doubt, ASK before creating parallel config.
 
 ### WHERE TO START
 
-**Most recent handoff:** `docs/SESSION_HANDOFF_2026-05-06_STRUCTURED_OUTPUTS_V57.12.md` — **READ THIS FIRST**. Session 2026-05-06 (afternoon) that shipped the **Anthropic Structured Outputs migration** end-to-end (Phases 1-5) → V57.12.0 build 151 on Wael's phone. Auto-tester reached **52/0/0/0 — first clean run of the project**. Walmart + Tim Hortons regression tests now pass via enum-constrained `set_location_rule_chain` tool. ~200 lines of band-aid code deleted from the orchestrator. Voice server (Railway) migrated in parallel. One functional regression found post-install (picker addresses — pre-existing data/schema gap) queued as #1 for next session. Prior handoff (V57.11.4 → V57.11.8): `docs/SESSION_HANDOFF_2026-05-06_FIX_AAB.md`.
+**Most recent handoff:** `docs/SESSION_HANDOFF_2026-05-07_V57.13.7_BUILD_165.md` — **READ THIS FIRST**. Session 2026-05-07 shipped V57.13 series (159 → 165). Two structural wins: (1) **No-cache architecture** (V57.13.3) — `user_places` cache dropped entirely; `resolve-place` v5 hits Google fresh every time; `action_rules` absorbs "saved places" via partial UNIQUE on rounded coords. ~806 net lines deleted. (2) **Bubble truncation fix** (V57.13.7) — option #3 two-layer overlay (ruler Text + absolute-positioned user content) lands user content correctly on Samsung One UI after six prior layout attempts failed. Cosmetic ruler-leak deferred to next AAB. Auto-tester: **55/0/0/0 pre-build**. Demo line productized: `1-888-91-NAAVI` runs 5 cross-domain scenarios + name capture + personalized SMS from `+14313006228` + `mynaavi.com/start` landing page. Prior handoff (V57.12.6 build 158 sweep): `docs/SESSION_HANDOFF_2026-05-07_V57.12.6_BUILD_158.md`.
 
-**Top of next session — V57.11.9 bundle (priority order):**
+**Top of next session — TOP PRIORITY (Wael 2026-05-07):**
 
-1. **Anthropic Structured Outputs migration** — research-agent recommendation backed by Anthropic's Nov 2025 GA docs. Replace JSON-in-prompt with schema-constrained generation. Removes the chain-store auto-fix bridge cleanly. ~1 day focused session, ~10-file blast radius. Detailed plan in the handoff doc.
+The Voice Completion Roadmap is the headline plan for the coming sessions. Goal: bring the phone (Twilio voice) surface to the same level of completeness as mobile so it becomes the daily driver, not the configuration surface. Updated 8-session structure (originally 6 in 2026-05-04 doc, expanded after V57.13 work):
 
-2. **Bubble truncation (Bug 4) — different angle.** Six layout attempts have failed (all logged in handoff doc). Pick ONE: (a) `lineHeight: 24` → `lineHeight: 20` for ratio 1.33 (matches react-native #35039 resolution), or (b) replace `<Text>` in ConversationBubble with `react-native-markdown-display`. **Do NOT make a 7th layout tweak.**
+- **S1** Voice Quality Foundation (+ picker robustness + self-cleansing memory bullets) — server-only
+- **S2** Voice Action Parity (DELETE_EVENT, LIST_RULES, DELETE_MEMORY, SCHEDULE_MEDICATION) — server-only
+- **S3** Demo Line Maturity *(NEW)* — richer scenarios, conversion path back to a real account, telemetry — AAB
+- **S4** Voice Identity — Multi-Phone (`additional_phones[]`) — AAB *(was S3)*
+- **S5** Voice Identity — Biometric (Picovoice Eagle) — server-only — **blocked on Picovoice approval** *(was S4)*
+- **S6** Voice Unification — Polly Joanna (mobile→Polly so phone+app sound identical) — AAB — **blocked on AWS Polly setup** *(was S5)*
+- **S7** Voice Structured Outputs Migration *(NEW)* — voice still on JSON-in-prompt; mobile shipped V57.12; ~200 lines drift — server-only
+- **S8** Voice Polish + Final Verification — bundles address read-back / postal phonetics / suffix expansion / ordinals as one trust bar; voice call recording end-to-end; soft-tick audit; 30-min regression call *(was S6)*
 
-3. **LIST_RULES synthesize-action backstop** — current backstop overrides speech but doesn't push a LIST_RULES action onto `actions[]`. Fix in same pattern as the chain-store auto-fix.
+Roadmap source: `docs/VOICE_COMPLETION_ROADMAP_2026-05-04.docx` (original 6-session) — superseded but kept for history. Updated 2026-05-07 docx to be drafted; until then, the 8-session list above is canonical.
 
-4. **Verified-address rejection — name the address** — replace generic "I can't confirm that address" with "I can't confirm '<destination>' for your meeting today."
-
-5. **Stop button visibility during streaming** — V57.11.8 absolute positioning didn't hold. Investigate with status-transition remoteLogs first; fix evidence-based.
-
-6. **Haptic — VIBRATE permission + duration** — confirm permission in `app.json`, bump `Vibration.vibrate(80)` → `150` or pattern `[0,100,50,100]`.
-
-7. **Voice server chain-store mirror** — voice surface still hits Bug 11. Defer if Structured Outputs lands first (cleans up the need entirely).
-
-**Pending blocked:** Picovoice Eagle (approval), Polly Joanna (AWS account), Maestro full-suite (emulator Internal Testing install), Geofence reliability (phone reboot pending), Phase 2 demo data.
-
-**Last AAB on Wael's phone:** V57.12.0 build 151, installed 2026-05-06.
+**Last AAB on Wael's phone:** V57.13.7 build 165, installed 2026-05-07.
 **Last AAB on Robert's phone:** V56.6 (build 115), installed 2026-04-28. **Do NOT promote V57.x to Robert until geofence reliability is proven on Wael's phone.**
 
-**Prompt-regression test suite** (NEW this session): `tests/catalogue/prompt-regression.ts` — 8 tests wired into `npm run test:auto`. Locks in known-good Claude action emissions. **Future prompt edits MUST keep this suite green.** Don't add a prompt rule without a corresponding regression test — that's how the v57→v58→v59 cycle started.
+**Auto-tester (latest):** 55 ✓ / 0 ✗ / 0 errored / 0 skipped. Run with `npm run test:auto`. Includes `tests/catalogue/prompt-regression.ts` (8 tests) and `tests/catalogue/data-integrity.ts` (3 action_rules dedup tests). Multi-user matrix in `tests/catalogue/multiuser.ts`.
+
+**Current Claude prompt version:** `2026-05-07-v64-no-minimum-reminder-delay` (via `get-naavi-prompt` Edge Function).
+
+**Prompt-regression test suite:** `tests/catalogue/prompt-regression.ts` locks in known-good Claude action emissions. **Future prompt edits MUST keep this suite green.** Don't add a prompt rule without a corresponding regression test — that's how the v57→v58→v59 cycle started.
 
 **Strategic positioning** (Wael 2026-05-05): "senior" / "caregiver" / "elderly" / "active aging" are BANNED across all surfaces (code, prompts, docs, memory). The app is for EVERYONE. Use "user" by default; "older healthy independent adult" only when context demands. See top of this file.
 
-**Server-side state at session end:**
-- Prompt version live: `2026-05-06-v59-attendee-scope-and-chain-reemphasis`
-- `naavi-chat`: live calendar fetch with Cache-Control: no-cache (V57.11.6)
-- `resolve-place`: bare-brand multi-result + lat/lng dedupe (V57.11.6)
-- `client_diagnostics`: RLS enabled (V57.11.7 hotfix); `search_knowledge_fragments` search_path locked
-- `text-to-speech`: address-suffix expander (Dr→Drive); postal code letter phonetics
-- `send-push-notification`: auto-prunes stale FCM tokens
+### HOLDING LIST — services/features in queue
 
-**Auto-tester (latest):** 50 ✓ / 0 ✗ / 2 skipped. Run with `npm run test:auto`. Includes new `tests/catalogue/prompt-regression.ts` (8 tests). Multi-user matrix in `tests/catalogue/multiuser.ts`.
+Canonical list of pending work, organized by what's blocking each. Mirror in `docs/SESSION_HANDOFF_2026-05-07_V57.13.7_BUILD_165.md`. Add to / remove from this list as work moves.
 
-**Current Claude prompt version:** `2026-05-06-v59-attendee-scope-and-chain-reemphasis` (via `get-naavi-prompt` Edge Function).
+**Blocked on external approvals:**
+1. Picovoice Eagle (voice biometric) — waiting on account approval
+2. AWS Polly (voice unification mobile→Polly Joanna) — needs AWS account setup
+3. Maestro full-suite — needs emulator Internal Testing install
+4. Geofence reliability — pending phone reboot
 
-Prior handoffs for context: `docs/SESSION_HANDOFF_CONTINUOUS_FIX_V57.8.md`, `docs/SESSION_25_HANDOFF.md`, `docs/SESSION_22_HANDOFF.md`.
+**Server-side queue (no AAB needed):**
+5. Voice live-calendar fetch (mobile shipped V57.11.6, voice still on stale snapshot)
+6. Voice action parity — DELETE_EVENT, LIST_RULES, DELETE_MEMORY, SCHEDULE_MEDICATION
+7. Voice stop-word interrupt regression
+8. Voice Deepgram first-word truncation on barge-in
+9. Voice name-search phonetic fallback ("Hussein" STT failure)
+10. Voice migration to Anthropic Structured Outputs (~200 lines drift vs mobile)
+11. Inbound SMS/WhatsApp queryability (outbound covered; inbound has no capture path)
+12. Spend summary Edge Function (approved 2026-04-30, not built — `naavi-spend-summary`)
+13. LIST_RULES synthesize-action backstop in orchestrator
+14. Demo line "remind me" time-extraction loop fix
+
+**AAB-required queue:**
+15. Multi-phone identity (`additional_phones[]` schema + Settings UI)
+16. Demo line maturity (richer scenarios + conversion path + telemetry)
+17. **Cosmetic ruler leak fix** (`color:'transparent'` → `opacity:0` on inline Text in `components/ConversationBubble.tsx`)
+18. Haptic VIBRATE permission + duration
+19. Mobile-side todo-list-per-alert (each alert has attached list; lazy-create on first add; cascade-delete on alert removal). **NOT implemented — design only.**
+20. Verified-address rejection — name the address ("I can't confirm '<destination>' for your meeting today")
+21. Voice privacy UX (4-piece feature, not started)
+22. Blog age reframe (2 articles still on age framing)
+
+**Deferred by design (open questions before code):**
+23. `list_change` trigger (7 design questions — see `project_naavi_list_change_trigger_deferred.md`)
+24. Health trigger (Epic integration required)
+25. Price trigger (scraping complexity)
+26. Phase 2 demo data
+
+Prior handoffs for context: `docs/SESSION_HANDOFF_2026-05-06_STRUCTURED_OUTPUTS_V57.12.md`, `docs/SESSION_HANDOFF_2026-05-06_FIX_AAB.md`, `docs/SESSION_HANDOFF_CONTINUOUS_FIX_V57.8.md`.
 
 **Then read memory files listed in the MEMORY.md index** — the short list that future sessions need (alert fan-out rule, verified-address rule, context fields pattern, location-trigger plan, feedback/test discipline).
 
