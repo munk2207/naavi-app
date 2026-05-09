@@ -1033,6 +1033,7 @@ Deno.serve(async (req) => {
       const liveEmails = await fetchLiveRecentEmails(supabase, userId);
       console.log(`[timing] ${elapsed()} | B1c — live email fetch returned ${liveEmails.length} message(s)`);
       if (liveEmails.length > 0 && typeof system === 'string') {
+        const now = Date.now();
         const liveEmailSection = '\n\n## Recent emails (last hour, fetched live just now)\n'
           + liveEmails.map(e => {
               // From header often arrives as "Display Name <addr@domain>" — strip the
@@ -1040,7 +1041,15 @@ Deno.serve(async (req) => {
               const senderShort = e.sender.replace(/<[^>]+>/g, '').replace(/"/g, '').trim() || e.sender;
               const subject = e.subject || '(no subject)';
               const tail = e.snippet ? ` — ${e.snippet}` : '';
-              return `- From ${senderShort}: ${subject}${tail}`;
+              let when = '';
+              const t = e.receivedAt ? Date.parse(e.receivedAt) : NaN;
+              if (Number.isFinite(t)) {
+                const diffMin = Math.max(0, Math.round((now - t) / 60000));
+                when = diffMin < 1 ? ' [just now]'
+                     : diffMin === 1 ? ' [1 minute ago]'
+                     : ` [${diffMin} minutes ago]`;
+              }
+              return `- From ${senderShort}: ${subject}${when}${tail}`;
             }).join('\n');
         system = system + liveEmailSection;
       }
