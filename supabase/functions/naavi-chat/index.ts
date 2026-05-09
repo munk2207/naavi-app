@@ -1033,7 +1033,6 @@ Deno.serve(async (req) => {
       const liveEmails = await fetchLiveRecentEmails(supabase, userId);
       console.log(`[timing] ${elapsed()} | B1c — live email fetch returned ${liveEmails.length} message(s)`);
       if (liveEmails.length > 0 && typeof system === 'string') {
-        const now = Date.now();
         const liveEmailSection = '\n\n## Recent emails (last hour, fetched live just now)\n'
           + liveEmails.map(e => {
               // From header often arrives as "Display Name <addr@domain>" — strip the
@@ -1044,10 +1043,10 @@ Deno.serve(async (req) => {
               let when = '';
               const t = e.receivedAt ? Date.parse(e.receivedAt) : NaN;
               if (Number.isFinite(t)) {
-                const diffMin = Math.max(0, Math.round((now - t) / 60000));
-                when = diffMin < 1 ? ' [just now]'
-                     : diffMin === 1 ? ' [1 minute ago]'
-                     : ` [${diffMin} minutes ago]`;
+                // Hardcoded America/Toronto matches calendarContext upstream;
+                // replace with user_settings.timezone when global-first lands.
+                const clock = new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Toronto' });
+                when = ` [arrived at ${clock}]`;
               }
               return `- From ${senderShort}: ${subject}${when}${tail}`;
             }).join('\n');
