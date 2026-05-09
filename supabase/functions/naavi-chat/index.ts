@@ -275,6 +275,15 @@ function detectEmailAlert(msg: string): { fromName: string | null; subjectKeywor
 const CALENDAR_INTENT_RE =
   /\b(when|what\s+(date|day|time)|how\s+many\s+days|next|first|last|upcoming)\b[\s\S]{0,80}\b(school|pa\s*day|holiday|break|semester|term|class|practice|game|tournament|match|concert|report\s*card|parent\s*teacher|exam|final)\b/i;
 
+// B1c — email instant-search live-overlay intent detection (Wael 2026-05-08).
+// When the user asks about recent email, sync-gmail's hourly cron may not have
+// caught emails that arrived in the last 60 minutes. This regex detects email-
+// query intent so we trigger fetchLiveRecentEmails only when needed (cost-tuned).
+// Tuning is iterative — false negatives mean the user sees the bug; false
+// positives waste a Gmail API call.
+const EMAIL_QUERY_INTENT_RE =
+  /\b(email|emails|inbox|new\s*mail|mailbox|did\s+\w+\s+(email|mail|message|write|send)|any\s+(messages?|mail|emails?)|new\s+messages?|unread|just\s+(got|received)|did\s+i\s+(get|receive))\b/i;
+
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const CHUNK = 0x8000;
@@ -531,6 +540,97 @@ async function fetchLiveCalendarEvents(
       });
   } catch (err) {
     console.error('[fetchLiveCalendarEvents] failed:', (err as Error)?.message);
+    return [];
+  }
+}
+
+// B1c — email instant-search live-overlay (Wael 2026-05-08).
+// Mirrors fetchLiveCalendarEvents shape but for Gmail. Fires only when
+// EMAIL_QUERY_INTENT_RE matched the user's question (cost-tuned: not every turn).
+// Returns the last hour of email metadata so Claude can answer "did Bob email
+// me?" / "any new bills?" without waiting for the next sync-gmail cron tick.
+// Bounded to 10 messages max to keep cost predictable. Body is intentionally
+// not fetched — too expensive in the hot path; full content stays with the
+// hourly sync.
+async function fetchLiveRecentEmails(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<{ id: string; sender: string; subject: string; snippet: string; receivedAt: string }[]> {
+  try {
+    const { data: tokenRow } = await supabase
+      .from('user_tokens')
+      .select('refresh_token')
+      .eq('user_id', userId)
+      .eq('provider', 'google')
+      .maybeSingle();
+    const refreshToken = (tokenRow as { refresh_token?: string } | null)?.refresh_token;
+    if (!refreshToken) return [];
+
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: Deno.env.get('GOOGLE_CLIENT_ID') ?? '',
+        client_secret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '',
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }),
+    });
+    const tokenData = await tokenRes.json();
+    const accessToken = typeof tokenData?.access_token === 'string' ? tokenData.access_token : null;
+    if (!accessToken) return [];
+
+    // Gmail list API — newer_than:1h matches the sync-gmail cron interval so
+    // the overlay covers exactly the freshness gap (older messages are in
+    // gmail_messages already).
+    const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=newer_than:1h&maxResults=10`;
+    const listRes = await fetch(listUrl, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
+    });
+    if (!listRes.ok) return [];
+    const listData = await listRes.json();
+    const messageIds = ((listData?.messages ?? []) as Array<{ id?: string }>)
+      .map(m => m.id)
+      .filter((id): id is string => typeof id === 'string');
+    if (messageIds.length === 0) return [];
+
+    // For each message, metadata-only fetch (From / Subject / Date headers + snippet).
+    const messages = await Promise.all(messageIds.slice(0, 10).map(async (id) => {
+      try {
+        const msgUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}`
+          + `?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`;
+        const msgRes = await fetch(msgUrl, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+          },
+        });
+        if (!msgRes.ok) return null;
+        const msg = await msgRes.json();
+        const headers = (msg?.payload?.headers ?? []) as Array<{ name: string; value: string }>;
+        const fromHdr = headers.find(h => h.name === 'From')?.value ?? '';
+        const subjectHdr = headers.find(h => h.name === 'Subject')?.value ?? '';
+        const dateHdr = headers.find(h => h.name === 'Date')?.value ?? '';
+        return {
+          id: typeof msg?.id === 'string' ? msg.id : id,
+          sender: fromHdr,
+          subject: subjectHdr,
+          snippet: String(msg?.snippet ?? '').slice(0, 200),
+          receivedAt: dateHdr,
+        };
+      } catch {
+        return null;
+      }
+    }));
+
+    return messages.filter((m): m is NonNullable<typeof m> => m !== null);
+  } catch (err) {
+    console.error('[fetchLiveRecentEmails] failed:', (err as Error)?.message);
     return [];
   }
 }
@@ -920,6 +1020,30 @@ Deno.serve(async (req) => {
       }
       system = assembled;
       console.log(`[timing] ${elapsed()} | server-assembled system | len=${assembled.length}`);
+    }
+
+    // B1c — Email instant-search live-overlay (Wael 2026-05-08). Fires only
+    // when the user is asking an email-shaped question. Pulls the last hour
+    // of Gmail metadata directly so Claude sees emails the cron sync hasn't
+    // indexed yet. Falls back gracefully on any error (live fetch returns []
+    // → no overlay added → Claude proceeds same as before fix). Lands in
+    // the system prompt's no-cache tail so cache hits aren't broken.
+    if (userId && EMAIL_QUERY_INTENT_RE.test(userText)) {
+      console.log(`[timing] ${elapsed()} | B1c — email intent detected, fetching last hour live`);
+      const liveEmails = await fetchLiveRecentEmails(supabase, userId);
+      console.log(`[timing] ${elapsed()} | B1c — live email fetch returned ${liveEmails.length} message(s)`);
+      if (liveEmails.length > 0 && typeof system === 'string') {
+        const liveEmailSection = '\n\n## Recent emails (last hour, fetched live just now)\n'
+          + liveEmails.map(e => {
+              // From header often arrives as "Display Name <addr@domain>" — strip the
+              // address for readability while keeping the display name.
+              const senderShort = e.sender.replace(/<[^>]+>/g, '').replace(/"/g, '').trim() || e.sender;
+              const subject = e.subject || '(no subject)';
+              const tail = e.snippet ? ` — ${e.snippet}` : '';
+              return `- From ${senderShort}: ${subject}${tail}`;
+            }).join('\n');
+        system = system + liveEmailSection;
+      }
     }
 
     // Calendar ask-time PDF injection — when the user asks a date question
