@@ -2924,10 +2924,15 @@ async function playBase64AudioNative(base64: string): Promise<void> {
     // set, chunk playback now falls through cleanly without leaving the
     // audio session half-mutated.
     try {
+      // staysActiveInBackground: true — B3a fix (Wael 2026-05-09). Lets cloud
+      // Aura play even when the app is backgrounded so we never fall back to
+      // Android native TTS impersonating Naavi. Without this, Android denies
+      // audio focus to backgrounded apps and we hit the AudioFocusNotAcquired
+      // path → expo-speech fallback → "third voice" perception.
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
+        staysActiveInBackground: true,
         shouldDuckAndroid: true,
         interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
         interruptionModeIOS: InterruptionModeIOS.DuckOthers,
@@ -3034,7 +3039,7 @@ async function playBase64AudioNative(base64: string): Promise<void> {
               await Audio.setAudioModeAsync({
                 allowsRecordingIOS: false,
                 playsInSilentModeIOS: true,
-                staysActiveInBackground: false,
+                staysActiveInBackground: true,
                 shouldDuckAndroid: true,
                 interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
                 interruptionModeIOS: InterruptionModeIOS.DuckOthers,
