@@ -95,6 +95,7 @@ Stages 1–5 + 7 are server-only. Stage 6 needs an AAB (bundle with B1b, B3a ver
 |---|---|
 | **B1b** LIST_RULES backstop on mobile | Validated broken; deferred to next AAB |
 | **B2a** SCHEDULE_MEDICATION on voice | Validated broken; server-side fix, ~1 hour. Not started this session. |
+| **B2e** Naavi misses 1+ hour-old emails (added end of session) | Both surfaces. Live-overlay window is `newer_than:1h`; gap until next sync-gmail cron. Validated 2026-05-09 (BD party email at 2:19, asked at 3:46, no record). Fix: widen window or trigger sync on demand. ~30 min server-side. |
 | **B3a** Mobile cloud→native TTS fallback | Path-1 fix queued in commit `9e85807` for next AAB; verify after build |
 | **B3b** Cosmetic ruler leak on long-wrap user bubbles | Mobile fix; queued for next AAB |
 | **B3c** Haptic vibration too subtle on Samsung | Mobile fix; queued for next AAB |
@@ -117,13 +118,13 @@ Stages 1–5 + 7 are server-only. Stage 6 needs an AAB (bundle with B1b, B3a ver
 
 | Category | Start of session | End of session |
 |---|---|---|
-| Bugs (B) | 10 | 7 |
+| Bugs (B) | 10 | 8 |
 | Features (F) | 7 | 6 |
 | Tooling (T) | 3 | 3 |
 | Ideas (I) | 3 | 3 |
 | Closed without entry | 5 | 10 |
-| **Active items** | **23** | **19** |
-| **Total items** | **28** | **29** (F1d new entry) |
+| **Active items** | **23** | **20** |
+| **Total items** | **28** | **30** (F1d + B2e new entries) |
 
 ## Auto-tester baseline
 
