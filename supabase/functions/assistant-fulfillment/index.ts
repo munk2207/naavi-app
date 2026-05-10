@@ -53,6 +53,70 @@ function wrap(text: string): { ssml: string; plainText: string } {
   return { ssml: `<speak>${text}</speak>`, plainText: text };
 }
 
+// Strip "<addr@x.com>" + quotes from a Gmail "From" header → display name.
+function senderDisplayName(rawFrom: string): string {
+  if (!rawFrom) return '';
+  const stripped = rawFrom.replace(/<[^>]+>/g, '').replace(/"/g, '').trim();
+  if (stripped) return stripped;
+  const m = /([A-Za-z0-9._%+-]+)@/.exec(rawFrom);
+  return m ? m[1] : rawFrom;
+}
+
+// Fetch unread email senders from Gmail. Returns up to `limit` display
+// names of unread email senders, most recent first. Empty array on any
+// error (graceful) — the brief continues without an email count rather
+// than failing entirely.
+//
+// Wael 2026-05-10: brief moved off email_actions to a descriptive
+// unread count + sender list. Naavi reports facts; user decides what
+// needs attention.
+async function fetchUnreadEmailSenders(
+  adminClient: ReturnType<typeof createClient>,
+  userId: string,
+  limit = 10,
+): Promise<{ senders: string[]; count: number }> {
+  try {
+    const { data: tokenRow } = await adminClient
+      .from('user_tokens')
+      .select('refresh_token')
+      .eq('user_id', userId)
+      .eq('provider', 'google')
+      .maybeSingle();
+    const refreshToken = (tokenRow as { refresh_token?: string } | null)?.refresh_token;
+    if (!refreshToken) return { senders: [], count: 0 };
+
+    const accessToken = await getGoogleAccessToken(refreshToken);
+
+    const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread&maxResults=${limit}`;
+    const listRes = await fetch(listUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!listRes.ok) return { senders: [], count: 0 };
+    const listData = await listRes.json();
+    const ids = ((listData?.messages ?? []) as Array<{ id?: string }>)
+      .map(m => m.id)
+      .filter((id): id is string => typeof id === 'string');
+    if (ids.length === 0) return { senders: [], count: 0 };
+
+    const messages = await Promise.all(ids.slice(0, limit).map(async (id) => {
+      try {
+        const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From`;
+        const r = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (!r.ok) return null;
+        const msg = await r.json();
+        const hdrs = (msg?.payload?.headers ?? []) as Array<{ name: string; value: string }>;
+        const fromHdr = hdrs.find(h => h.name === 'From')?.value ?? '';
+        return senderDisplayName(fromHdr);
+      } catch { return null; }
+    }));
+    const senders = messages.filter((s): s is string => typeof s === 'string' && s.length > 0);
+    return { senders, count: ids.length };
+  } catch (err) {
+    console.error('[assistant-fulfillment] fetchUnreadEmailSenders error:', (err as Error)?.message);
+    return { senders: [], count: 0 };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Intent handlers
 // ---------------------------------------------------------------------------
@@ -83,7 +147,7 @@ async function handleBrief(
   const todayEnd   = new Date(now); todayEnd.setHours(23, 59, 59, 999);
   const sevenDays  = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  const [{ data: events }, { data: actions }] = await Promise.all([
+  const [{ data: events }, unreadResult] = await Promise.all([
     adminClient
       .from('calendar_events')
       .select('title, start_time, end_time, location')
@@ -92,17 +156,12 @@ async function handleBrief(
       .lte('start_time', todayEnd.toISOString())
       .order('start_time')
       .limit(5),
-    // Morning brief now pulls from structured email_actions (populated by
-    // extract-email-actions), NOT raw gmail_messages. We surface only items
-    // that are actually actionable for the user this week — no "you have
-    // 237 unread" noise.
-    adminClient
-      .from('email_actions')
-      .select('action_type, title, vendor, due_date, urgency, summary, created_at')
-      .eq('user_id', userId)
-      .eq('dismissed', false)
-      .order('due_date', { ascending: true, nullsFirst: false })
-      .limit(20),
+    // Wael 2026-05-10: brief reports unread email count + sender list,
+    // descriptively. Naavi cannot truthfully claim "items needing
+    // attention" — that's the user's judgment. The previous email_actions
+    // filter is no longer used for the brief (still populated by
+    // extract-email-actions for other surfaces).
+    fetchUnreadEmailSenders(adminClient, userId, 10),
   ]);
 
   const sentences: string[] = [];
@@ -126,47 +185,20 @@ async function handleBrief(
     sentences.push('Your calendar is clear today.');
   }
 
-  // Wael 2026-05-10 — TRUTH AT USER LAYER: surface only items still
-  // actionable as of today. Old logic trusted urgency='today'/'this_week'
-  // forever, so a "Power shutdown tonight" email extracted a year ago kept
-  // surfacing every morning even though that night had long since passed.
-  //
-  // New logic:
-  //   - Drop if explicit deadline is in the past.
-  //   - Keep if explicit deadline is within the next 7 days.
-  //   - Keep if urgency='today'/'this_week' AND the email arrived in the
-  //     last 7 days (urgency tag is fresh, not frozen from last year).
-  //   - Drop otherwise.
-  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const allActions = (actions as EmailAction[] | null) ?? [];
-  const actionList = allActions.filter((a) => {
-    if (a.due_date) {
-      const due = new Date(a.due_date);
-      if (due < now) return false;
-      if (due >= now && due <= sevenDays) return true;
+  // Email — descriptive count + senders. No "needing attention" claim.
+  const { count: unreadCount, senders } = unreadResult;
+  if (unreadCount > 0) {
+    const noun = unreadCount === 1 ? 'unread email' : 'unread emails';
+    if (senders.length > 0) {
+      const top = senders.slice(0, 3).join(', ');
+      const tail = unreadCount > senders.length || senders.length > 3 ? ', and others' : '';
+      sentences.push(`You have ${unreadCount} ${noun}, from ${top}${tail}.`);
+    } else {
+      sentences.push(`You have ${unreadCount} ${noun}.`);
     }
-    if ((a.urgency === 'today' || a.urgency === 'this_week') && a.created_at) {
-      const created = new Date(a.created_at);
-      if (created >= sevenDaysAgo) return true;
-    }
-    return false;
-  });
-
-  if (actionList.length > 0) {
-    const count = actionList.length;
-    const noun = count === 1 ? 'item' : 'items';
-    sentences.push(`You have ${count} email ${noun} needing attention.`);
-    for (const a of actionList.slice(0, 3)) {
-      const line = a.summary?.trim() || `${a.action_type} from ${a.vendor}`;
-      // Ensure the line ends with a period for clean TTS pacing.
-      sentences.push(line.endsWith('.') ? line : `${line}.`);
-    }
-    if (count > 3) {
-      sentences.push(`Plus ${count - 3} more in your email.`);
-    }
+  } else {
+    sentences.push('You have 0 unread emails.');
   }
-  // If nothing actionable, stay silent about email — silence beats noise for
-  // a senior user. The rest of the brief still plays.
 
   return wrap(sentences.join(' '));
 }
