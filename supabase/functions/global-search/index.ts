@@ -96,6 +96,42 @@ async function runAdapter(
   }
 }
 
+// ── Source-intent detection (Wael 2026-05-10) ────────────────────────────────
+//
+// When the user names a specific source ("email about X", "meeting about X",
+// "note about X", "document about X"), Naavi must answer ONLY about that
+// source. Ground rule from `project_naavi_truth_at_user_layer.md`. This
+// function detects source intent and returns the adapter names to run.
+// Returns null when the phrasing is open-ended ("what do we know about X")
+// or when no clear source is named — in those cases ALL adapters run.
+//
+// Design choice: conservative. When ambiguous, return null (run all). The
+// risk of over-filtering (hiding a legitimate hit) is worse than under-
+// filtering (extra hits that the prompt's truth-at-user-layer rule then
+// ignores). Defense-in-depth.
+//
+// Open-ended phrasings ALWAYS take precedence — even if they also contain
+// a source noun. *"What do we know about my email"* → run all (open intent).
+function detectSourceIntent(query: string): string[] | null {
+  const lower = query.toLowerCase();
+
+  // Open-ended phrasings → never filter.
+  const OPEN_ENDED =
+    /(?:what do (?:we|you) know|tell me about|anything (?:about|on)|what do you have on|do you know|stored about|find anything|search for|what(?:'s|\s+is)\s+stored)/i;
+  if (OPEN_ENDED.test(lower)) return null;
+
+  // Source nouns — first match wins. Word boundaries prevent partial matches.
+  if (/\b(?:emails?|inbox|gmail|mailbox)\b/.test(lower)) return ['gmail', 'email_actions'];
+  if (/\b(?:calendars?|meetings?|appointments?|events?)\b/.test(lower)) return ['calendar'];
+  if (/\b(?:notes?|memor(?:y|ies))\b/.test(lower)) return ['knowledge'];
+  if (/\b(?:drives?|documents?|files?|pdfs?|attachments?)\b/.test(lower)) return ['drive'];
+  if (/\bcontacts?\b/.test(lower)) return ['contacts'];
+  if (/\blists?\b/.test(lower)) return ['lists'];
+  if (/\b(?:reminders?|alerts?|rules?)\b/.test(lower)) return ['rules', 'reminders'];
+
+  return null;
+}
+
 // ── Merge + rank ─────────────────────────────────────────────────────────────
 
 function mergeAndRank(allResults: SearchResult[]): SearchResult[] {
@@ -149,13 +185,21 @@ Deno.serve(async (req) => {
       supabase,
     };
 
+    // Wael 2026-05-10: detect source intent. When user names a source
+    // ("email about X"), only run that adapter — the rest are irrelevant
+    // and only confuse Claude's reply (truth-at-user-layer principle).
+    const allowedSources = detectSourceIntent(trimmedQuery);
+    const adaptersToRun = allowedSources
+      ? adapters.filter((a) => allowedSources.includes(a.name))
+      : adapters;
+
     console.log(
-      `[global-search] user=${userId} query="${ctx.query}" variants=${JSON.stringify(queryVariants)} adapters=${adapters.length}`,
+      `[global-search] user=${userId} query="${ctx.query}" variants=${JSON.stringify(queryVariants)} adapters=${adaptersToRun.length}/${adapters.length}${allowedSources ? ` (source-intent: ${allowedSources.join(',')})` : ' (open-ended)'}`,
     );
 
-    // Run every adapter in parallel. Each adapter is isolated — its failure
-    // cannot sink another adapter's results.
-    const runs = await Promise.all(adapters.map(a => runAdapter(a, ctx)));
+    // Run filtered adapters in parallel. Each adapter is isolated — its
+    // failure cannot sink another adapter's results.
+    const runs = await Promise.all(adaptersToRun.map(a => runAdapter(a, ctx)));
 
     const byGroup: Record<
       string,
