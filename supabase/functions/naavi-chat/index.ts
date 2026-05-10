@@ -1049,8 +1049,16 @@ Deno.serve(async (req) => {
               if (Number.isFinite(t)) {
                 // Hardcoded America/Toronto matches calendarContext upstream;
                 // replace with user_settings.timezone when global-first lands.
-                const clock = new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Toronto' });
-                when = ` [arrived at ${clock}]`;
+                // Wael 2026-05-10: include "today"/"yesterday" — with the 24h
+                // window (B2e fix), emails can span across midnight. Without
+                // the day label Claude defaults to assuming "today" and gets
+                // it wrong.
+                const tDate = new Date(t);
+                const todayStr = new Date().toLocaleDateString('en-US', { timeZone: 'America/Toronto' });
+                const tStr = tDate.toLocaleDateString('en-US', { timeZone: 'America/Toronto' });
+                const dayLabel = (tStr === todayStr) ? 'today' : 'yesterday';
+                const clock = tDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Toronto' });
+                when = ` [arrived ${dayLabel} at ${clock}]`;
               }
               return `- From ${senderShort}: ${subject}${when}${tail}`;
             }).join('\n');
