@@ -11,6 +11,78 @@
 
 import type { SearchAdapter, SearchContext, SearchResult } from './_interface.ts';
 
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GMAIL_MESSAGES_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages';
+
+// Freshness-verify timeout. If Gmail is slow we fail OPEN (return all
+// cached rows) rather than block the user's search. Wael 2026-05-10:
+// stale-cache risk is preferable to unresponsive search.
+const FRESHNESS_TIMEOUT_MS = 2_000;
+
+async function getGoogleAccessToken(refreshToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id:     Deno.env.get('GOOGLE_CLIENT_ID')     ?? '',
+        client_secret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '',
+        refresh_token: refreshToken,
+        grant_type:    'refresh_token',
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data.access_token === 'string' ? data.access_token : null;
+  } catch {
+    return null;
+  }
+}
+
+// Returns the set of gmail_message_ids that still exist in Gmail's INBOX
+// (i.e. not deleted, not in TRASH or SPAM).
+//
+// FAIL-OPEN behavior — if no token, no access, network error, timeout, or
+// any unexpected response shape, we return the input set unchanged. The
+// freshness check is best-effort: a token-expiry blip must NOT silently
+// erase every email the user can recall. Wael 2026-05-10.
+async function verifyMessagesAlive(
+  refreshToken: string | null,
+  messageIds: string[],
+): Promise<Set<string>> {
+  const passthrough = new Set(messageIds);
+  if (!refreshToken || messageIds.length === 0) return passthrough;
+
+  const accessToken = await getGoogleAccessToken(refreshToken);
+  if (!accessToken) return passthrough;
+
+  const verify = async (id: string): Promise<string | null> => {
+    try {
+      const url = `${GMAIL_MESSAGES_URL}/${id}?format=minimal`;
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (r.status === 404) return null; // permanently deleted
+      if (!r.ok) return id;               // transient error → keep (fail-open)
+      const data = await r.json();
+      const labels: string[] = Array.isArray(data?.labelIds) ? data.labelIds : [];
+      if (labels.includes('TRASH') || labels.includes('SPAM')) return null;
+      return id;
+    } catch {
+      return id; // any error → keep (fail-open)
+    }
+  };
+
+  try {
+    const verifyAll = Promise.all(messageIds.map(verify));
+    const timeout = new Promise<(string | null)[]>((resolve) => {
+      setTimeout(() => resolve(messageIds.map((id) => id)), FRESHNESS_TIMEOUT_MS);
+    });
+    const results = await Promise.race([verifyAll, timeout]);
+    return new Set(results.filter((id): id is string => id !== null));
+  } catch {
+    return passthrough;
+  }
+}
+
 type GmailRow = {
   id: string;
   gmail_message_id: string;
@@ -101,7 +173,33 @@ export const gmailAdapter: SearchAdapter = {
       return [];
     }
 
-    const rows = (data ?? []) as GmailRow[];
+    const rowsRaw = (data ?? []) as GmailRow[];
+
+    // Freshness verify against Gmail (Option 2 of B1d stale-cache fix,
+    // Wael 2026-05-10). Excludes rows that have been deleted or moved to
+    // TRASH/SPAM since sync-gmail last ran. Best-effort with FAIL-OPEN
+    // semantics — locked in by tests/catalogue/gmail-freshness.ts.
+    let rows: GmailRow[] = rowsRaw;
+    if (rowsRaw.length > 0) {
+      const { data: tokenRow } = await ctx.supabase
+        .from('user_tokens')
+        .select('refresh_token')
+        .eq('user_id', ctx.userId)
+        .eq('provider', 'google')
+        .maybeSingle();
+      const refreshToken =
+        (tokenRow as { refresh_token?: string } | null)?.refresh_token ?? null;
+      const aliveIds = await verifyMessagesAlive(
+        refreshToken,
+        rowsRaw.map((r) => r.gmail_message_id),
+      );
+      rows = rowsRaw.filter((r) => aliveIds.has(r.gmail_message_id));
+      if (rows.length !== rowsRaw.length) {
+        console.log(
+          `[gmail-adapter] freshness: ${rowsRaw.length} cached → ${rows.length} alive (${rowsRaw.length - rows.length} excluded)`,
+        );
+      }
+    }
 
     const hits: SearchResult[] = [];
     for (const r of rows) {
