@@ -214,9 +214,13 @@ serve(async (req) => {
       const beforeTs = beforeDaysBack !== null
         ? Math.floor((Date.now() - beforeDaysBack * 24 * 60 * 60 * 1000) / 1000)
         : null;
+      // Wael 2026-05-10: Naavi treats only Gmail's Primary tab as
+      // relevant — Promotions / Updates / Social / Forums are noise. The
+      // category:primary filter applies to both cron and backfill so the
+      // gmail_messages cache only ever holds Primary email going forward.
       const query = beforeTs !== null
-        ? `after:${cutoffTs} before:${beforeTs}`
-        : `after:${cutoffTs}`;
+        ? `after:${cutoffTs} before:${beforeTs} category:primary`
+        : `after:${cutoffTs} category:primary`;
 
       // Paginate through Gmail's 500-per-page list. In cron mode (7 days)
       // we cap at 500 messages; in backfill mode we fetch everything in the

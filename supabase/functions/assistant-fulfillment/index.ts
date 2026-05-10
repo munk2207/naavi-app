@@ -87,7 +87,9 @@ async function fetchUnreadEmailSenders(
 
     const accessToken = await getGoogleAccessToken(refreshToken);
 
-    const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread&maxResults=${limit}`;
+    // Wael 2026-05-10: Primary tab only — Promotions / Updates / Social
+    // / Forums unread don't count for the brief.
+    const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is:unread+category:primary&maxResults=${limit}`;
     const listRes = await fetch(listUrl, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });

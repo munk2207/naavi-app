@@ -592,7 +592,9 @@ async function fetchLiveRecentEmails(
     // Party email at position #11 of 31 messages in the 24h window, which
     // pushed it OUT of the live-overlay. 30 covers a busier inbox without
     // adding meaningful per-call cost (Gmail metadata fetch is parallel).
-    const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=newer_than:1d&maxResults=30`;
+    // Wael 2026-05-10: Primary tab only — Naavi treats other Gmail
+    // categories (Promotions / Updates / Social / Forums) as irrelevant.
+    const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=newer_than:1d+category:primary&maxResults=30`;
     const listRes = await fetch(listUrl, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
