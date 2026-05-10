@@ -1106,9 +1106,12 @@ export default function HomeScreen() {
     // V57.11.7 — switch to RN Vibration API. expo-haptics' Heavy impact
     // was still too subtle on Samsung even with system haptics at max.
     // RN Vibration uses the OS vibrator API directly which Samsung
-    // honors more consistently. 80 ms is firm without being annoying.
-    // Wael 2026-05-06: maxed system haptics, still didn't feel Heavy.
-    Vibration.vibrate(80);
+    // honors more consistently.
+    // Wael 2026-05-10 (B3c): bumped duration 80 → 150 ms — earlier 80 ms
+    // was still too subtle on Samsung even with system haptics maxed.
+    // 150 is firm-but-not-annoying. If still subtle, try a pattern next
+    // (e.g. Vibration.vibrate([0, 100, 50, 100])) for a double-tap feel.
+    Vibration.vibrate(150);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
     memoStartedAtRef.current = Date.now();
     startRecording();

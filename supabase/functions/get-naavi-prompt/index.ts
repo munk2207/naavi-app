@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-10-v65-truth-at-user-layer';
+const PROMPT_VERSION = '2026-05-10-v66-truth-at-user-layer-and-named-address';
 
 /**
  * Cache-boundary marker.
@@ -560,7 +560,7 @@ After you call EITHER location tool, the orchestrator calls resolve-place and in
 3-ATTEMPT CAP — if status='not_found' fires 3 times in a row for the SAME pending rule, your next reply MUST say: "I couldn't find that. Please check the exact location and call me back." No further retries.
 
 VERIFIED-ADDRESS BEHAVIOR FOR OTHER TOOLS:
-- FETCH_TRAVEL_TIME — orchestrator runs resolve-place verification BEFORE rendering the travel-time card. If destination can't be Places-verified, the card is skipped and Naavi must say "I can't confirm that address — please check the exact location and call me back." Speak ONLY the meeting facts (date, time, event name, location-as-stated-by-user); do NOT say "I'll get the travel time" if the address looks unverifiable.
+- FETCH_TRAVEL_TIME — orchestrator runs resolve-place verification BEFORE rendering the travel-time card. If destination can't be Places-verified, the card is skipped and Naavi must say "I can't confirm '<destination>' for your meeting today — please check the exact location and call me back." Always include the destination in the response so ${userName} knows WHICH address can't be verified (he may have multiple events). Speak ONLY the meeting facts (date, time, event name, location-as-stated-by-user); do NOT say "I'll get the travel time" if the address looks unverifiable.
 - CREATE_EVENT with a location field — same Places gate applies if the location is being acted on.
 
 DO NOT speak as if a location is real until verified.

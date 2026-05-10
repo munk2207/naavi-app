@@ -1271,6 +1271,25 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         return out;
       })();
 
+      // B1b backstop (Wael 2026-05-10): if the user clearly asked to list /
+      // show / count their alerts but Claude didn't emit a LIST_RULES action,
+      // synthesize one so the orchestrator's LIST_RULES handler runs and
+      // produces the canonical "You have N alerts: ..." reply. Without this
+      // backstop, Claude occasionally says "you don't have any alerts" or
+      // "I don't have any alerts in your records" even when alerts exist —
+      // since the system prompt context doesn't include the alert list,
+      // Claude can't see them. The handler queries action_rules directly,
+      // so the synthesized action gets the truthful answer.
+      const LIST_RULES_INTENT_RE =
+        /\b(?:list|show|what(?:'s|\s+are|\s+do\s+i\s+have)|how many|tell me about|do i have)\s+(?:my\s+|the\s+)?(?:active\s+|current\s+|all\s+)?(?:alerts?|rules?|reminders?|notifications?)\b/i;
+      if (
+        LIST_RULES_INTENT_RE.test(userMessage) &&
+        !dedupedActions.some(a => a.type === 'LIST_RULES')
+      ) {
+        console.log('[Orchestrator] B1b backstop — user asked to list alerts but no LIST_RULES action; synthesizing one');
+        dedupedActions.push({ type: 'LIST_RULES' } as NaaviAction);
+      }
+
       for (const action of dedupedActions) {
         if (action.type === 'SAVE_TO_DRIVE') {
           const title = String(action.title ?? 'Naavi Note');
@@ -1365,7 +1384,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                 const verifyData = await verifyRes.json();
                 if (verifyData?.status === 'not_found') {
                   console.log(`[Orchestrator] FETCH_TRAVEL_TIME blocked — unverified destination "${destination}"`);
-                  turnSpeechOverride = `I can't confirm that address. Please check the exact location and call me back.`;
+                  // Wael 2026-05-10 (B3d): name the destination in the
+                  // rejection so the user knows WHICH address Naavi
+                  // couldn't confirm. Generic "that address" was
+                  // confusing — they can have multiple events.
+                  turnSpeechOverride = `I can't confirm '${destination}' for your meeting today. Please check the exact location and call me back.`;
                   continue;
                 }
               }
