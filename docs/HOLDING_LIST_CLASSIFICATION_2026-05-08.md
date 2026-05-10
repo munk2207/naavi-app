@@ -55,7 +55,6 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 | F1d | User-controlled mute on PC + Mobile (replaces F1c) | both | The user can stop Naavi mid-reply when in public — tap on mobile, *"stop"* / *"no sound"* on phone — and Naavi then offers to text the rest privately. Replaces the auto-classify approach (F1c, rejected 2026-05-09): pre-tagging items as "private" forced an awkward public dialogue and false positives put the user in socially awkward positions. Reactive user-controlled mute leaves the choice in the user's hands every time. Server-side on phone, mobile already has the stop-button infrastructure. | Both |
 | F2a | Onboarding Review (multi-phone + 7 other gaps) | mobile | Onboarding doc + Settings UI covering 8 gaps (multi-phone setup, voice keyterms capture at setup, quiet hours field, verified-address expectation, consolidated privacy callout, post-install rehearsal with starter prompts, re-install / new-phone flow, first-week-vs-week-two expectation calibration). Postponed 2026-05-09 — not all 8 have crisp product decisions; needs a dedicated session looking at onboarding end-to-end. Settings UI changes require AAB; doc is a build-script regen. | Both |
 | F2b | Demo line maturity (richer scenarios + conversion path + telemetry) | voice | Demo phone line gets richer scenarios, a conversion path back to a real account, and telemetry to see what works. Postponed 2026-05-09 — marketing/growth decisions (which metrics matter, which scenarios resonate) need a focused session. Three sub-pieces in sequence: telemetry first (total calls, scenario popularity, opt-in rate, signup conversion), conversion attribution second (per-call token in the SMS link), scenario richness third (medication scheduling, navigation, recurring delegation, variable data, light branching). Already shipped: 5 canned scenarios, name capture, personalized SMS recap. | Server |
-| F2c | Walkie-talkie style turn-taking on voice — explicit end-of-message signal | voice | On phone, each speaker says a clear end-marker word ("over" or alternative) to signal *"I'm done, your turn"* — borrowed from the radio convention. Replaces silence-detection guesswork. Postponed 2026-05-09 — forces a new convention on the user; marker word ambiguity unresolved (*"over"* appears in everyday speech). Parallel track regardless: keep improving silence-detection (echo cancellation, smarter timing). Don't bet F2c on fixing other voice interrupt bugs. | Server |
 | F3a | Picovoice Eagle voice biometric (caller voiceprint ID) | both | Naavi recognizes who's speaking on a shared phone via voiceprint ID. Deferred until unknown-number caller confusion shows up as a real user pattern. Decoupled from F2a multi-phone work — multi-phone ships first via the additional-phones list, no biometric coupling. Vendor: Picovoice Eagle primary, ID R&D backup. Stays in Features (not Ideas) — solution exists; only vendor selection is open. | Both |
 
 ---
@@ -95,9 +94,10 @@ Items walked but not added to any table. Reopen if symptom recurs.
 | B1c | Naavi misses brand-new emails for up to an hour | **Closed 2026-05-09 — fully verified on both surfaces.** When the user asks an email-shaped question, Naavi now reaches Gmail directly so brand-new emails show up even before the hourly cron sync picks them up. Mobile half verified 2026-05-08 (Bob Invitation email found 3 min after arrival). Voice half initially appeared inconsistent on 2026-05-08; root cause traced 2026-05-09 to missing Railway env vars (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) — without them the voice OAuth refresh failed silently and the live-overlay never reached Gmail. After adding the env vars, both surfaces verified working with fresh emails (Football Game and Birthday Cake tests). Companion enhancement same session: live-overlay now states arrival time as clock time (e.g. "arrived at 10:59 AM") instead of relative minutes, on both surfaces. |
 | B2b | You can't interrupt Naavi mid-sentence on the phone | **Closed 2026-05-09 — improved by music-queue drain fix.** Root cause was Twilio's outbound audio queue holding 5+ seconds of thinking music ahead of Naavi's reply; `stopMusic()` only cancelled the music interval but didn't drain the queue. Fix: `stopMusic()` now sends Twilio `event: 'clear'` to drain the outbound buffer. After the fix, "Naavi stop" successfully interrupts; first attempt sometimes missed (likely phone-side echo cancellation in speakerphone mode), second attempt always works. Was "broken" → now "works on second attempt 100%, first attempt sometimes missed." Real usability gain. Reopen if first-interrupt miss becomes a recurring complaint. |
 | B2c | You can't talk over Naavi on the phone | **Closed 2026-05-09 — same root cause and fix as B2b.** Both interrupts share the `stopMusic()` code path; the queue drain that fixed B2b also fixes B2c. Same first-interrupt-miss limitation in speakerphone mode. |
-| B2d | Voice name-search mistranscription ("Hussein") | **Pivoted to Feature 2026-05-08.** User-facing test surfaced that name mistranscription is one symptom of a deeper architectural issue: voice (PC) uses an always-on noisy channel where Naavi has to guess turn boundaries; mobile (MV) uses clean push-to-talk. The right fix is structural (walkie-talkie style turn-taking) rather than name-by-name STT tuning. Tracked as **F2c**. |
+| B2d | Voice name-search mistranscription ("Hussein") | **Closed 2026-05-10 — the F2c structural fix was decided not to implement.** Originally pivoted to F2c (walkie-talkie turn-taking) on 2026-05-08, but F2c was closed 2026-05-10 (marker-word ambiguity + today's latency work reduced the underlying pain). The remaining mitigation for name-search STT failures is the existing keyterms-capture feature and the continuing silence-detection improvements. Reopen if Hussein-style mistranscription recurs as a real user pattern. |
 | F1b | Inbound SMS / WhatsApp queryability | **Closed 2026-05-09 — no viable architecture identified.** WhatsApp inbound is structurally impossible (Meta restricts the WhatsApp Business API to business-to-customer messaging; would require Robert's contacts to message a separately-verified business number, not viable). SMS via OS-level `READ_SMS` carries Google Play rejection risk (use case not on Google's allowlist for AI assistants) and iOS isn't supported at all. SMS via Twilio proxy / carrier forwarding requires every contact to change behavior or carrier-level config most users can't set up alone. Email already covers ~80% of the underlying use case. Reopen if a clean architectural path emerges. Reference memory: `project_naavi_inbound_sms_whatsapp.md`. |
 | F1c | Voice privacy UX (4-piece auto-classification bundle) | **Closed 2026-05-09 — superseded by F1d (user-controlled mute).** The 4-piece bundle would have auto-classified items as private (medical / financial / legal) and offered SMS alternatives at read time. Wael 2026-05-09: auto-classification creates an unfixable social problem — forcing Robert to publicly engage in the privacy dialogue (*"want me to text it?"*) itself reveals he has something to hide. False positives compound this: a pharmacy newsletter wrongly tagged "medical" would force the dialogue for nothing. Robert can't gracefully recover from misclassification in a public setting. The simpler reactive approach (F1d) — Robert decides in the moment whether to mute — avoids the false-positive social cost entirely while solving the same underlying privacy need. Reference memory: `project_naavi_voice_privacy.md`. |
+| F2c | Walkie-talkie style turn-taking on voice — explicit end-of-message signal | **Closed 2026-05-10 — decided not to implement.** Marker-word ambiguity remained unresolved (*"over"* appears in everyday speech; alternatives like *"go ahead"* / sentence-ending *"Naavi"* each had their own issues). Today's voice-call latency work (Polly gate prompt, pre-fetch on call connect, Haiku for brief, Twilio AMD removal) brought the answer-to-brief gap from ~13s to ~6s — the turn-boundary pain F2c targeted is less acute now. Existing silence-detection improvements (echo cancellation, smarter timing) remain the right ongoing path. Reopen only if a concrete marker-word design plus a real recurring turn-boundary symptom both surface. |
 
 ---
 
@@ -114,17 +114,17 @@ Items not in the original 26-item holding list but addressed during the session:
 | List | Count | IDs |
 |---|---|---|
 | Bugs (B) | 9 | B1b, B1d, B2a, B2e, B3a, B3b, B3c, B3d, B3e |
-| Features (F) | 6 | F1a, F1d, F2a, F2b, F2c, F3a |
+| Features (F) | 5 | F1a, F1d, F2a, F2b, F3a |
 | Tooling (T) | 3 | T1a, T2a, T2b |
 | Ideas (I) | 3 | I2a, I2b, I3a |
-| Closed without entry | 10 | Items 4, 12, 14, B1a, B1c, B2b, B2c, B2d, F1b, F1c |
-| **Total** | **31** | (26 holding-list + 1 missed item B1c added 2026-05-08 + 1 new feature F2c added 2026-05-08 + 1 new feature F1d added 2026-05-09 superseding F1c + 1 new bug B2e added 2026-05-09 + 1 new bug B1d added 2026-05-10) |
+| Closed without entry | 11 | Items 4, 12, 14, B1a, B1c, B2b, B2c, B2d, F1b, F1c, F2c |
+| **Total** | **31** | (26 holding-list + 1 missed item B1c added 2026-05-08 + 1 new feature F2c added 2026-05-08 — closed 2026-05-10 + 1 new feature F1d added 2026-05-09 superseding F1c + 1 new bug B2e added 2026-05-09 + 1 new bug B1d added 2026-05-10) |
 
 ### Tally by Server/AAB
 
 | Scope | Count | Implication |
 |---|---|---|
-| Server-only | 10 | Ship without AAB cycle |
+| Server-only | 9 | Ship without AAB cycle |
 | AAB-only | 5 | Mobile build required (B1b, B1d, B3b, B3c) — bundle into next AAB |
 | Both | 6 | Cross-surface coordination |
 
@@ -132,7 +132,7 @@ Items not in the original 26-item holding list but addressed during the session:
 
 | Surface | Count | IDs |
 |---|---|---|
-| voice | 3 | B2a, F2b, F2c |
+| voice | 2 | B2a, F2b |
 | mobile | 7 | B1b, B1d, B3b, B3c, F1a, F2a, T2a |
 | both | 6 | B2e, B3a, B3d, F1d, F3a, T1a |
 | backend | 4 | T2b, I2a, I2b, I3a |
@@ -145,11 +145,11 @@ Items tagged `both` are the ones where Voice Completion Roadmap discipline matte
 | Severity | B | F | T | I | Total |
 |---|---|---|---|---|---|
 | 1 (top) | 2 | 2 | 1 | 0 | 5 |
-| 2 (medium) | 2 | 3 | 2 | 2 | 9 |
+| 2 (medium) | 2 | 2 | 2 | 2 | 8 |
 | 3 (low) | 5 | 1 | 0 | 1 | 7 |
-| **Total** | 9 | 6 | 3 | 3 | **21** |
+| **Total** | 9 | 5 | 3 | 3 | **20** |
 
-(Total active = 21. Add 10 closed-without-entry to reach the 31-item total.)
+(Total active = 20. Add 11 closed-without-entry to reach the 31-item total.)
 
 ---
 
