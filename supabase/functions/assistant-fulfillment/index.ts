@@ -71,6 +71,7 @@ interface EmailAction {
   due_date: string | null;
   urgency: string;
   summary: string;
+  created_at: string | null;
 }
 
 async function handleBrief(
@@ -97,7 +98,7 @@ async function handleBrief(
     // 237 unread" noise.
     adminClient
       .from('email_actions')
-      .select('action_type, title, vendor, due_date, urgency, summary')
+      .select('action_type, title, vendor, due_date, urgency, summary, created_at')
       .eq('user_id', userId)
       .eq('dismissed', false)
       .order('due_date', { ascending: true, nullsFirst: false })
@@ -125,17 +126,28 @@ async function handleBrief(
     sentences.push('Your calendar is clear today.');
   }
 
-  // Filter email actions to things worth mentioning this morning:
-  //   - due within 7 days (if due_date exists), OR
-  //   - urgency is "today" or "this_week" (no date but still pressing).
-  // "soon" (7-30 days) and "info" items are skipped — they belong in the app,
-  // not in a spoken brief that should stay under ~30 seconds.
+  // Wael 2026-05-10 — TRUTH AT USER LAYER: surface only items still
+  // actionable as of today. Old logic trusted urgency='today'/'this_week'
+  // forever, so a "Power shutdown tonight" email extracted a year ago kept
+  // surfacing every morning even though that night had long since passed.
+  //
+  // New logic:
+  //   - Drop if explicit deadline is in the past.
+  //   - Keep if explicit deadline is within the next 7 days.
+  //   - Keep if urgency='today'/'this_week' AND the email arrived in the
+  //     last 7 days (urgency tag is fresh, not frozen from last year).
+  //   - Drop otherwise.
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const allActions = (actions as EmailAction[] | null) ?? [];
   const actionList = allActions.filter((a) => {
-    if (a.urgency === 'today' || a.urgency === 'this_week') return true;
     if (a.due_date) {
       const due = new Date(a.due_date);
-      return due >= now && due <= sevenDays;
+      if (due < now) return false;
+      if (due >= now && due <= sevenDays) return true;
+    }
+    if ((a.urgency === 'today' || a.urgency === 'this_week') && a.created_at) {
+      const created = new Date(a.created_at);
+      if (created >= sevenDaysAgo) return true;
     }
     return false;
   });
