@@ -40,11 +40,29 @@ function stemWord(word: string): string {
   return word;
 }
 
+// Noise-prefix strip — many natural-language queries arrive as "email
+// about X" / "any emails about X" / "message from X" / etc. Adapters do
+// literal substring matching against stored content (subject, body,
+// contact name). Without stripping the noise prefix, ILIKE %email about
+// X% never matches subject "X". Bug discovered 2026-05-10 during Wael's
+// deep test of the birthday-party email — gmail adapter returned 0 hits
+// because the variant was "email about birthday party", not "birthday
+// party". Locked in via tests/catalogue/search-normalization.ts.
+//
+// We KEEP the original variant as well — adapters get both. The
+// stripped variant is a hint, never a replacement, so over-stripping
+// (a subject literally containing "email about ...") still finds it.
+const NOISE_PREFIX_RE =
+  /^(?:any|an?|the|some|my)?\s*(?:emails?|messages?|mails?|inbox)\s+(?:about|on|from|regarding|re|with|mentioning|saying|involving)\s+/i;
+
 export function expandQuery(raw: string): string[] {
   const lower = raw.toLowerCase().trim();
   if (!lower) return [];
 
   const variants = new Set<string>([lower]);
+
+  const stripped = lower.replace(NOISE_PREFIX_RE, '').trim();
+  if (stripped && stripped !== lower) variants.add(stripped);
 
   const words = lower.split(/\s+/).filter(Boolean);
   const stems = words.map(stemWord);
