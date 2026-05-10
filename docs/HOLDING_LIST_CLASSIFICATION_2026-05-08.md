@@ -50,8 +50,7 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 | ID | Description | Surface | Notes | Server/AAB |
 |----|-------------|---------|-------|------------|
 | F1a | Mobile-side todo-list-per-alert | mobile | **Pre-flight: 4 design questions to answer before code:** (1) voice phrasing to reference the attached list vs shared lists; (2) coexistence with `list_name` field — both allowed or mutually exclusive? backwards compat for existing rules using `list_name`?; (3) visibility — show in Lists view or only inline with alert?; (4) reuse — what happens to the attached list when the alert is duplicated? Build pieces: schema migration `ALTER TABLE action_rules ADD COLUMN list_id UUID REFERENCES lists(id)` + cascade trigger; manage-list lazy-create when adding to alert-attached list; prompt teaching voice phrasing; `buildAlertBody` read path (mirror `list_name`); alert-detail UI (AAB); disambiguation logic for 'add X to my Y list'. Wael 2026-05-08 rationale: removes post-creation friction (current `tasks[]` is set-once, `list_name` requires shared-list management), matches the Costco accumulating-items pattern, and could simplify architecture by absorbing `tasks[]`. ~1 session total: ½ design + ½ implementation. | Both |
-| F1b | Inbound SMS / WhatsApp queryability | backend | Both SMS AND WhatsApp inbound coverage. Outbound already covered via `sent_messages` + adapter; inbound has no capture path on either channel. Plan in memory `project_naavi_inbound_sms_whatsapp.md` (2026-05-06). New `inbound_messages` table with `channel` column (`sms` / `whatsapp`) + 2 Twilio webhooks (one per channel) → voice-server endpoints → upsert; `extract-message-actions` Edge Function (Haiku) for action-candidate extraction; Global Search adapter; live-overlay path on `naavi-chat`. ~1–2 sessions, server-only, no AAB. Sequence after B1c email live-overlay (live-overlay pattern paid once). Out of scope: auto-reply (CLAUDE.md Rule 12), MMS/OCR, threading. | Server |
-| F1c | Voice privacy UX (4-piece bundle) | both | 4-piece bundle (Wael 2026-04-20 directive: ship all four together): (1) per-result `privacyTag` from `document_type` in `_interface.ts` + drive / email_actions adapters; (2) privacy mode toggle — `user_settings.privacy_mode_default` column + Settings UI + voice command 'I'm not alone'; (3) voice-server decision layer in `naavi-voice-server` — pre-TTS check, SMS-offer dialog, response handling; (4) per-category preferences — `privacy_medical` / `privacy_financial` / `privacy_legal` columns + Settings UI. End-state: privacy-tagged items prompt 'Want me to text it?' instead of being read aloud. Already in place: `SearchAdapter.privacyTag` field exists (hardcoded 'general'), `send-sms` supports `user_id`+`source`. ~2 sessions. Server portions ship without AAB; Settings UI requires AAB. | Both |
+| F1d | User-controlled mute on PC + Mobile (replaces F1c) | both | Robert in a taxi, waiting room, or anywhere with company can stop Naavi mid-reply by tapping the screen (mobile) or saying *"no sound"* / *"stop"* / similar (phone call). After the mute fires, Naavi offers *"Want me to text the rest to your phone?"* — Robert can opt in privately to get the content without re-broadcasting. **Replaces F1c's auto-classification approach** which was rejected 2026-05-09: pre-tagging items as "private" forces Robert into a public privacy dialogue (*"Naavi thinks this is private — want me to text it?"*) which itself reveals he has something to hide, and false positives put Robert in socially awkward positions he can't gracefully recover from. Reactive user-controlled mute leaves the decision in Robert's hands every time. Smaller scope than F1c: hours of work, no schema migration, no Settings UI for privacy categories. Server-only on PC (extends existing barge-in/stop-word handler); mobile already has stop-button infrastructure. Severity 1: privacy is still the biggest UX gap for the older healthy independent adult persona; the implementation is just simpler than F1c's bundle. | Both |
 | F2a | Onboarding Review (multi-phone + 7 other gaps) | mobile | **Pre-implementation: every item below to be reviewed and approved by Wael before any code/doc work begins.** Bundle: (1) multi-phone — `additional_phones[]` schema + Settings UI + per-phone SMS verify; (2) voice keyterms capture at setup (ties to B2d); (3) quiet hours field in First-Day Settings (currently checklist-only); (4) verified-address-rule expectation under 'What Naavi Learns'; (5) consolidated 'data NOT to share' privacy callout; (6) post-install first-call rehearsal with 5 starter prompts; (7) re-install / new-phone flow guidance; (8) first-week-vs-week-two expectation calibration. Source doc: `scripts/build-onboarding-guide-docx.js` → `docs/MYNAAVI_ONBOARDING_GUIDE.docx`. Settings UI additions require AAB; doc is a build-script regen. | Both |
 | F2b | Demo line maturity (richer scenarios + conversion path + telemetry) | voice | Three sub-pieces, kept together as one decision point: **(1) Telemetry** — today everything is `console.log()`, nothing aggregates. Add events table + dashboard query: total calls, avg scenarios played, % opt-in for SMS, click-through on link, conversion to signup, scenario popularity, drop-off points. ~½ day. **(2) Conversion attribution** — SMS link `mynaavi.com/start` doesn't track which demo call the lead came from. Add per-call signup token in the SMS link; form captures token; DB join lets us see scenario-to-signup correlations. ~½ day. **(3) Scenario richness** — current 5 scenarios are fully hardcoded. Add more scenarios (medication scheduling, navigation, recurring delegation), variable data per call, one-level branching with canned follow-up responses. ~1–2 days. Sequencing: 1+2 first (measurement infrastructure unlocks decisions); 3 deferred until telemetry says which scenarios engage / fall flat. All server-side, no AAB. Already shipped: 5 canned scenarios, DTMF+speech routing, personalized greeting + name capture, 3-scenario / 5-min cap, personalized SMS recap from +14313006228. | Server |
 | F2c | Walkie-talkie style turn-taking on voice — explicit end-of-message signal | voice | Today on the phone, Naavi has to guess when you've finished talking. She uses silence detection — if you stop speaking for a while, she assumes you're done. This guessing causes problems: your full message can get cut off if you pause to think, the system can mistake background noise for speech, and there's no clear way to interrupt Naavi mid-sentence. The walkie-talkie idea: borrow the radio convention where each speaker says a clear end-marker word (*"Over"* is traditional) to signal *"I'm done, your turn."* Apply this to phone calls — you say a designated word at the end of your message; Naavi knows the message is complete and responds. **Open design question:** which end-marker word to use. *"Over"* is the standard walkie-talkie term but appears in everyday speech (*"the meeting is over there"*, *"I have over fifty emails"*); Wael agrees *"Over"* is the standard term but probably not the right word for this case. Alternatives to consider: *"Naavi"* at sentence end, *"go ahead"*, or a hybrid where the marker is optional and silence-detection still works as fallback. **May address** the cluster of voice-input bugs (B2a / B2b / B2c) by replacing the always-listening, guess-when-done architecture they all depend on — though that's a hypothesis to validate during design, not a guaranteed outcome. Server-only change, no app build. Significant scope: design (pick end-marker, decide on hybrid vs strict) + implementation + user education. Pick the end-marker word before coding. | Server |
@@ -95,6 +94,8 @@ Items walked but not added to any table. Reopen if symptom recurs.
 | B2b | You can't interrupt Naavi mid-sentence on the phone | **Closed 2026-05-09 — improved by music-queue drain fix.** Root cause was Twilio's outbound audio queue holding 5+ seconds of thinking music ahead of Naavi's reply; `stopMusic()` only cancelled the music interval but didn't drain the queue. Fix: `stopMusic()` now sends Twilio `event: 'clear'` to drain the outbound buffer. After the fix, "Naavi stop" successfully interrupts; first attempt sometimes missed (likely phone-side echo cancellation in speakerphone mode), second attempt always works. Was "broken" → now "works on second attempt 100%, first attempt sometimes missed." Real usability gain. Reopen if first-interrupt miss becomes a recurring complaint. |
 | B2c | You can't talk over Naavi on the phone | **Closed 2026-05-09 — same root cause and fix as B2b.** Both interrupts share the `stopMusic()` code path; the queue drain that fixed B2b also fixes B2c. Same first-interrupt-miss limitation in speakerphone mode. |
 | B2d | Voice name-search mistranscription ("Hussein") | **Pivoted to Feature 2026-05-08.** User-facing test surfaced that name mistranscription is one symptom of a deeper architectural issue: voice (PC) uses an always-on noisy channel where Naavi has to guess turn boundaries; mobile (MV) uses clean push-to-talk. The right fix is structural (walkie-talkie style turn-taking) rather than name-by-name STT tuning. Tracked as **F2c**. |
+| F1b | Inbound SMS / WhatsApp queryability | **Closed 2026-05-09 — no viable architecture identified.** WhatsApp inbound is structurally impossible (Meta restricts the WhatsApp Business API to business-to-customer messaging; would require Robert's contacts to message a separately-verified business number, not viable). SMS via OS-level `READ_SMS` carries Google Play rejection risk (use case not on Google's allowlist for AI assistants) and iOS isn't supported at all. SMS via Twilio proxy / carrier forwarding requires every contact to change behavior or carrier-level config most users can't set up alone. Email already covers ~80% of the underlying use case. Reopen if a clean architectural path emerges. Reference memory: `project_naavi_inbound_sms_whatsapp.md`. |
+| F1c | Voice privacy UX (4-piece auto-classification bundle) | **Closed 2026-05-09 — superseded by F1d (user-controlled mute).** The 4-piece bundle would have auto-classified items as private (medical / financial / legal) and offered SMS alternatives at read time. Wael 2026-05-09: auto-classification creates an unfixable social problem — forcing Robert to publicly engage in the privacy dialogue (*"want me to text it?"*) itself reveals he has something to hide. False positives compound this: a pharmacy newsletter wrongly tagged "medical" would force the dialogue for nothing. Robert can't gracefully recover from misclassification in a public setting. The simpler reactive approach (F1d) — Robert decides in the moment whether to mute — avoids the false-positive social cost entirely while solving the same underlying privacy need. Reference memory: `project_naavi_voice_privacy.md`. |
 
 ---
 
@@ -111,17 +112,17 @@ Items not in the original 26-item holding list but addressed during the session:
 | List | Count | IDs |
 |---|---|---|
 | Bugs (B) | 7 | B1b, B2a, B3a, B3b, B3c, B3d, B3e |
-| Features (F) | 7 | F1a, F1b, F1c, F2a, F2b, F2c, F3a |
+| Features (F) | 6 | F1a, F1d, F2a, F2b, F2c, F3a |
 | Tooling (T) | 3 | T1a, T2a, T2b |
 | Ideas (I) | 3 | I2a, I2b, I3a |
-| Closed without entry | 8 | Items 4, 12, 14, B1a, B1c, B2b, B2c, B2d |
-| **Total** | **28** | (26 holding-list + 1 missed item B1c added 2026-05-08 + 1 new feature F2c added 2026-05-08) |
+| Closed without entry | 10 | Items 4, 12, 14, B1a, B1c, B2b, B2c, B2d, F1b, F1c |
+| **Total** | **29** | (26 holding-list + 1 missed item B1c added 2026-05-08 + 1 new feature F2c added 2026-05-08 + 1 new feature F1d added 2026-05-09 superseding F1c) |
 
 ### Tally by Server/AAB
 
 | Scope | Count | Implication |
 |---|---|---|
-| Server-only | 10 | Ship without AAB cycle |
+| Server-only | 9 | Ship without AAB cycle |
 | AAB-only | 4 | Mobile build required (B1b, B3b, B3c) — bundle into next AAB |
 | Both | 6 | Cross-surface coordination |
 
@@ -131,8 +132,8 @@ Items not in the original 26-item holding list but addressed during the session:
 |---|---|---|
 | voice | 3 | B2a, F2b, F2c |
 | mobile | 6 | B1b, B3b, B3c, F1a, F2a, T2a |
-| both | 5 | B3a, B3d, F1c, F3a, T1a |
-| backend | 5 | F1b, T2b, I2a, I2b, I3a |
+| both | 5 | B3a, B3d, F1d, F3a, T1a |
+| backend | 4 | T2b, I2a, I2b, I3a |
 | website | 1 | B3e |
 
 Items tagged `both` are the ones where Voice Completion Roadmap discipline matters most — when one surface ships, the other must follow before drift accumulates.
@@ -141,12 +142,12 @@ Items tagged `both` are the ones where Voice Completion Roadmap discipline matte
 
 | Severity | B | F | T | I | Total |
 |---|---|---|---|---|---|
-| 1 (top) | 1 | 3 | 1 | 0 | 5 |
+| 1 (top) | 1 | 2 | 1 | 0 | 4 |
 | 2 (medium) | 1 | 3 | 2 | 2 | 8 |
 | 3 (low) | 5 | 1 | 0 | 1 | 7 |
-| **Total** | 7 | 7 | 3 | 3 | **20** |
+| **Total** | 7 | 6 | 3 | 3 | **19** |
 
-(Total active = 20. Add 8 closed-without-entry to reach the 28-item total.)
+(Total active = 19. Add 10 closed-without-entry to reach the 29-item total.)
 
 ---
 
