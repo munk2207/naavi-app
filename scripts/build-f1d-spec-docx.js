@@ -202,12 +202,12 @@ children.push(numbered([
   new TextRun(" for this turn (the server already has the complete text before TTS starts; F1d just doesn't discard it on mute)."),
 ]));
 children.push(numbered([
-  new TextRun({ text: 'Naavi immediately asks: ', bold: true }),
+  new TextRun({ text: 'Naavi asks (binary phrase): ', bold: true }),
   new TextRun({ text: '"Want me to text the rest to your phone?"', italics: true }),
 ]));
 children.push(numbered([
   new TextRun({ text: "Robert's reply", bold: true }),
-  new TextRun(' is classified using the same three-mode framework as DRAFT_MESSAGE confirmation:'),
+  new TextRun(' is classified using the existing yes/no/edit classifier from the voice-confirm framework:'),
 ]));
 children.push(bullet([
   new TextRun({ text: '"yes / send / go ahead / ok"', italics: true }),
@@ -218,29 +218,45 @@ children.push(bullet([
   new TextRun(' → response is discarded; Naavi moves on.'),
 ]));
 children.push(bullet([
-  new TextRun({ text: 'Silence for ~3 seconds', bold: true }),
-  new TextRun(' → treated as cancel; response is discarded.'),
+  new TextRun({ text: 'Silence for 30 seconds', bold: true }),
+  new TextRun(' (matches existing CONFIRM_TIMEOUT_MS in lib/voice-confirm.ts) → treated as cancel; response is discarded. Same UX as DRAFT_MESSAGE confirmation.'),
+]));
+children.push(p([
+  new TextRun({ text: 'Note: simpler binary phrase', bold: true }),
+  new TextRun(', not the standardized "yes to confirm, no to cancel, or tell me what to change" used elsewhere. Reason: the "change" option doesn\'t fit naturally for SMS-the-rest (mostly binary). The yes/no classifier handles edge phrases under the hood.'),
 ]));
 
 // Content delivery
-children.push(h1('Content delivery — smart split'));
-children.push(p('Below ~500 characters: SMS with full content, verbatim.'));
-children.push(p([
-  new TextRun({ text: 'Above ~500 characters: ', bold: true }),
-  new TextRun('email + SMS notification with a hot link.'),
-]));
+children.push(h1('Content delivery — always email + SMS hot link'));
+children.push(p('Every reply uses the same delivery path regardless of length: email with full content + SMS notification with a hot link.'));
 children.push(bullet([
   new TextRun({ text: 'Email', bold: true }),
-  new TextRun(' carries the full response content (no length issue; readable formatting).'),
+  new TextRun(' carries the full response content. Subject: "MyNaavi: re: <your question>" (e.g., "MyNaavi: re: did I get any new emails about football?"). Body: brief friendly header ("You asked about <question>. Here\'s what I found:") + the response text. Plain text, readable formatting.'),
 ]));
 children.push(bullet([
   new TextRun({ text: 'SMS', bold: true }),
-  new TextRun(' contains a brief notification: "Naavi sent you a longer reply — tap to read: [link]" — the link opens the email or a hosted view of the content.'),
+  new TextRun(' contains a brief notification: "MyNaavi sent you a reply — tap to read: <link>" — the link is a '),
+  new TextRun({ text: 'plain HTTPS URL', bold: true }),
+  new TextRun(' (https://mynaavi.com/r/<token>) that opens a hosted web page rendering the email content. Universal — works on any device with a browser; no app required.'),
 ]));
-children.push(bullet('Robert taps the link from his phone → reads the full content silently.'));
+children.push(bullet([
+  new TextRun({ text: 'Token security: ', bold: true }),
+  new TextRun('plain unauthenticated token. Anyone with the link can read the content. Trade-off accepted: phone hijack / shared device = potential leak; security-vs-friction tilted toward friction-free reading.'),
+]));
+
+children.push(h2('Recursive mute (mute during the offer)'));
+children.push(p('If Robert says "no sound" / "quiet" / "shh" DURING Naavi\'s "Want me to text the rest?" offer itself:'));
+children.push(bullet('The offer\'s audio is drained (Naavi stops mid-question).'));
+children.push(bullet([
+  new TextRun({ text: 'The offer stays pending', bold: true }),
+  new TextRun(' — Robert can still reply "yes" or "no" within the 30-second window.'),
+]));
+children.push(bullet('The recursive mute does NOT cancel the underlying offer or discard the response.'));
+
 children.push(h2('Fallbacks'));
 children.push(bullet('If Robert has no email configured (rare), fall back to SMS-only with multi-segment delivery (Twilio handles fragmentation automatically).'));
-children.push(bullet('If Robert has no phone configured, fall back to email-only with a different message: "I emailed it to you."'));
+children.push(bullet('If Robert has no phone configured, fall back to email-only and Naavi says "I emailed it to you." — no SMS sent.'));
+children.push(bullet('If Robert has neither, Naavi says "OK, stopping. I don\'t have a way to send the rest right now." and discards the response.'));
 
 // Recovery
 children.push(h1('Recovery'));
@@ -282,7 +298,15 @@ children.push(bullet([
 ]));
 children.push(bullet([
   new TextRun({ text: 'Mute mid-list (Naavi reading 5 calendar events, Robert mutes after item 3): ', bold: true }),
-  new TextRun('SMS contains the FULL list (items 1–5), not just items 4+. The point is private delivery of the content, not partial replay of where Robert muted.'),
+  new TextRun('Email contains the FULL list (items 1–5), not just items 4+. The point is private delivery of the content, not partial replay of where Robert muted.'),
+]));
+children.push(bullet([
+  new TextRun({ text: 'Recursive mute (mute during the offer itself): ', bold: true }),
+  new TextRun('Naavi\'s "Want me to text the rest?" audio drains; the offer stays pending. Robert can still reply yes/no within the 30-second window.'),
+]));
+children.push(bullet([
+  new TextRun({ text: 'Robert silent for 30 seconds after the offer: ', bold: true }),
+  new TextRun('Treated as cancel (matches existing CONFIRM_TIMEOUT_MS). Response discarded.'),
 ]));
 
 // Engineering scope
@@ -291,9 +315,11 @@ children.push(p('Roughly 0.5–1 session to ship. Server-only on PC (no AAB need
 children.push(h2('Server-side (no AAB needed)'));
 children.push(numbered('Add new privacy-mute words to the voice-server stop-handler. Add a separate match for "no sound" / "quiet" / "shh" parallel to the existing kill-response matcher.'));
 children.push(numbered('Preserve pendingText on privacy-mute instead of clearing it. The drain (event:\'clear\' on Twilio) handles audio silencing; the response text stays in memory for this turn.'));
-children.push(numbered('Inject the SMS-the-rest follow-up as Naavi\'s next utterance: "Want me to text the rest to your phone?" Use the standard three-option confirmation framework.'));
-children.push(numbered('On confirm: smart-split delivery. Below threshold → call existing send-sms Edge Function. Above threshold → call existing send-email + send SMS with the hot link.'));
+children.push(numbered('Inject the SMS-the-rest follow-up as Naavi\'s next utterance: "Want me to text the rest to your phone?" (binary phrase, not the standardized three-option). Use the existing yes/no/edit classifier from lib/voice-confirm.ts.'));
+children.push(numbered('On confirm: always email + SMS hot link. Generate a token, store the response content in a hosted-link backend keyed by the token (TTL: 30 days). Send email via existing send-email Edge Function (subject: "MyNaavi: re: <question>", body: framed header + response text). Send SMS via existing send-sms Edge Function with the notification + https://mynaavi.com/r/<token> link.'));
+children.push(numbered('New web endpoint at mynaavi.com/r/<token> to render the stored content as a hosted page (plain HTML, no auth, token-only access).'));
 children.push(numbered('Voice prompt update in get-naavi-prompt: teach Claude the new mute vocabulary and the SMS-the-rest interaction pattern.'));
+children.push(numbered('Recursive-mute handling: when Robert says a privacy-mute word during the SMS-the-rest offer, drain Naavi\'s offer audio but DON\'T cancel the pending offer state; keep the 30-second window alive.'));
 children.push(h2('Mobile (no AAB needed for v1; only if adding SMS-the-rest later)'));
 children.push(numbered('Update onChatLongPress handler (app/index.tsx) to call stopSpeaking() when isAudioPlaying is true; existing hands-free behavior otherwise.'));
 children.push(h2('Testing'));
