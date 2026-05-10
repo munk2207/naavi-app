@@ -84,27 +84,37 @@ When Robert says one of the privacy-mute words during TTS:
 
 1. **Drain the Twilio outbound audio queue immediately** (same `event: 'clear'` mechanism shipped 2026-05-09 for music-queue latency). Audio stops within 100 ms.
 2. **Preserve the full response text in memory** for this turn (the server already has the complete text before TTS starts; F1d just doesn't discard it on mute).
-3. **Naavi immediately asks:** *"Want me to text the rest to your phone?"*
-4. **Robert's reply** is classified using the same three-mode framework as DRAFT_MESSAGE confirmation:
+3. **Naavi asks (binary phrase):** *"Want me to text the rest to your phone?"*
+4. **Robert's reply** is classified using the existing yes/no/edit classifier from the voice-confirm framework:
    - *"yes / send / go ahead / ok"* → confirm and deliver content (see Content Delivery below).
    - *"no / cancel / never mind"* → response is discarded; Naavi moves on.
-   - **Silence for ~3 seconds** → treated as cancel; response is discarded.
+   - **Silence for 30 seconds** (matches the existing `CONFIRM_TIMEOUT_MS` in [`lib/voice-confirm.ts:34`](lib/voice-confirm.ts:34)) → treated as cancel; response is discarded. Same UX as DRAFT_MESSAGE confirmation.
+
+**Note: simpler binary phrase**, not the standardized *"yes to confirm, no to cancel, or tell me what to change"* used elsewhere. Reason: the *"change"* option doesn't fit naturally for SMS-the-rest (mostly binary). The yes/no classifier handles edge phrases under the hood.
 
 ---
 
-## Content delivery — smart split
+## Content delivery — always email + SMS hot link
 
-Below ~500 characters: SMS with full content, verbatim.
+Every reply uses the same delivery path regardless of length: **email with full content + SMS notification with a hot link**.
 
-Above ~500 characters: **email + SMS notification with a hot link**.
+- **Email** carries the full response content. Subject: *"MyNaavi: re: \<your question\>"* (e.g., *"MyNaavi: re: did I get any new emails about football?"*). Body: brief friendly header (*"You asked about \<question\>. Here's what I found:"*) + the response text. Plain text, readable formatting.
+- **SMS** contains a brief notification: *"MyNaavi sent you a reply — tap to read: \<link\>"* — the link is a **plain HTTPS URL** (`https://mynaavi.com/r/<token>`) that opens a hosted web page rendering the email content. Universal — works on any device with a browser; no app required.
+- **Token security:** plain unauthenticated token. Anyone with the link can read the content. Trade-off accepted: phone hijack / shared device = potential leak; security-vs-friction tilted toward friction-free reading.
 
-- **Email** carries the full response content (no length issue; readable formatting).
-- **SMS** contains a brief notification: *"Naavi sent you a longer reply — tap to read: [link]"* — the link opens the email or a hosted view of the content.
-- Robert taps the link from his phone → reads the full content silently.
+### Recursive mute (mute during the offer)
 
-If Robert has no email configured (rare), fall back to SMS-only with multi-segment delivery (Twilio handles fragmentation automatically).
+If Robert says *"no sound"* / *"quiet"* / *"shh"* DURING Naavi's *"Want me to text the rest?"* offer itself:
 
-If Robert has no phone configured, fall back to email-only with a different message: *"I emailed it to you."*
+- The offer's audio is drained (Naavi stops mid-question).
+- The offer **stays pending** — Robert can still reply *"yes"* or *"no"* within the 30-second window.
+- The recursive mute does NOT cancel the underlying offer or discard the response.
+
+### Fallbacks
+
+- If Robert has no email configured (rare), fall back to SMS-only with multi-segment delivery (Twilio handles fragmentation automatically).
+- If Robert has no phone configured, fall back to email-only and Naavi says *"I emailed it to you."* — no SMS sent.
+- If Robert has neither, Naavi says *"OK, stopping. I don't have a way to send the rest right now."* and discards the response.
 
 ---
 
@@ -124,12 +134,14 @@ The SMS or email Robert received via the SMS-the-rest path is the **only** way t
 
 | Case | Behavior |
 |---|---|
-| Mute when no SMS phone configured | Fall back to email-only with notification *"I emailed it to you."* |
+| Mute when no SMS phone configured | Email-only path; Naavi says *"I emailed it to you."* No SMS notification sent. |
 | Mute when no email configured either | Naavi acknowledges the mute but cannot offer follow-up: *"OK, stopping. I don't have a way to send the rest right now."* Response is discarded. |
 | Mute during DRAFT_MESSAGE confirmation prompt | Mute cancels the confirmation prompt; the draft stays available. Robert can confirm later (*"send it"*) without re-drafting. |
 | Mute during the initial greeting | Greeting is silenced; no SMS-the-rest offer (greeting isn't sensitive content). |
 | Multiple consecutive mutes in one call | Each works independently. No special accumulation behavior; the response from each muted turn is independently offered for SMS-the-rest. |
-| Mute mid-list (Naavi reading 5 calendar events, Robert mutes after item 3) | SMS contains the FULL list (items 1–5), not just items 4+. The point is private delivery of the content, not partial replay of where Robert muted. |
+| Mute mid-list (Naavi reading 5 calendar events, Robert mutes after item 3) | Email contains the FULL list (items 1–5), not just items 4+. The point is private delivery of the content, not partial replay of where Robert muted. |
+| Recursive mute (mute during the offer itself) | Naavi's *"Want me to text the rest?"* audio drains; the offer stays pending. Robert can still reply yes/no within the 30-second window. |
+| Robert silent for 30 seconds after the offer | Treated as cancel (matches existing `CONFIRM_TIMEOUT_MS`). Response discarded. |
 
 ---
 
@@ -141,9 +153,11 @@ Roughly **0.5–1 session** to ship. Server-only on PC (no AAB needed); mobile a
 
 1. **Add new privacy-mute words to the voice-server stop-handler.** Add a separate match for *"no sound" / "quiet" / "shh"* parallel to the existing kill-response matcher.
 2. **Preserve `pendingText` on privacy-mute** instead of clearing it. The drain (`event: 'clear'` on Twilio) handles audio silencing; the response text stays in memory for this turn.
-3. **Inject the SMS-the-rest follow-up** as Naavi's next utterance: *"Want me to text the rest to your phone?"* Use the standard three-option confirmation framework.
-4. **On confirm:** smart-split delivery. Below threshold → call existing `send-sms` Edge Function. Above threshold → call existing `send-email` + send SMS with the hot link.
-5. **Voice prompt update** in `get-naavi-prompt`: teach Claude the new mute vocabulary and the SMS-the-rest interaction pattern.
+3. **Inject the SMS-the-rest follow-up** as Naavi's next utterance: *"Want me to text the rest to your phone?"* (binary phrase, not the standardized three-option). Use the existing yes/no/edit classifier from `lib/voice-confirm.ts`.
+4. **On confirm:** always email + SMS hot link. Generate a token, store the response content in a hosted-link backend keyed by the token (TTL: 30 days). Send email via existing `send-email` Edge Function (subject: *"MyNaavi: re: \<question\>"*, body: framed header + response text). Send SMS via existing `send-sms` Edge Function with the notification + `https://mynaavi.com/r/<token>` link.
+5. **New web endpoint** at `mynaavi.com/r/<token>` to render the stored content as a hosted page (plain HTML, no auth, token-only access).
+6. **Voice prompt update** in `get-naavi-prompt`: teach Claude the new mute vocabulary and the SMS-the-rest interaction pattern.
+7. **Recursive-mute handling:** when Robert says a privacy-mute word during the SMS-the-rest offer, drain Naavi's offer audio but DON'T cancel the pending offer state; keep the 30-second window alive.
 
 ### Mobile (no AAB needed for v1; only if adding SMS-the-rest later)
 
