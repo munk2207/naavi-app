@@ -36,6 +36,7 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 | ID | Description | Surface | Notes | Server/AAB |
 |----|-------------|---------|-------|------------|
 | B1b | LIST_RULES backstop on mobile (revised 2026-05-08 after user-test) | mobile | **Validated 2026-05-08 under Rule 17.** Voice (PC) tested CLEAN — correctly listed alerts; voice half closed. Mobile (MV) tested BROKEN — Naavi said *"I don't have any alerts in your records"* when 7+ alerts exist in Settings. Revised fix scope: the phantom-action backstop regex (`hooks/useOrchestrator.ts` line 1207) catches *"you have N alerts"* but NOT *"I don't have any alerts"* / *"you don't have any"* / *"there are no alerts"* (wrong-direction phrasings). Two-part fix: (1) extend the regex to cover wrong-direction patterns; (2) synthesize a `{type: 'LIST_RULES'}` action onto `claudeActions[]` when the backstop fires (original B1b ask). ~30-40 min code in `hooks/useOrchestrator.ts`. AAB required. **Fix deferred to next AAB cycle.** | AAB |
+| B1d | Pre-search "Nothing matched" gag overrides server-side live-overlay | mobile | **Identified 2026-05-10.** Pattern: after force-stopping the mobile app and reopening, the first question is answered correctly; the second question (same phrasing) is answered wrongly with *"I don't have an email"* — even when the email IS in the system prompt's Recent emails section. Root cause traced to `hooks/useOrchestrator.ts:1202`: when the client-side pre-search (`global-search` Edge Function) returns 0 hits, the orchestrator injects a hard gag into the user message: *"Nothing matched. Say that plainly — do not guess."* This rides INSIDE the user message and overrides the server-side live-overlay in the system prompt. Claude obeys the gag. **Fix shipped to main 2026-05-10 (commit b667115):** downgraded the gag to a softer *"Defer to live data in the system prompt"* instruction. Pre-search empty just means the cron-indexed cache had no hits — not that the data doesn't exist. AAB required to pick up. Bundle with next AAB cycle. | AAB |
 | B2a | Voice promises to schedule medication but doesn't create the events | voice | When you ask voice to schedule a medication (*"aspirin once a day for the next 5 days"*), Naavi confirms verbally that she'll set it up — but nothing actually gets created in your Google Calendar. Validated 2026-05-08: voice said *"I'll set up your aspirin schedule for once daily over the next 5 days"* and zero events landed in Google Calendar. The mobile app already does this correctly. The fix copies the mobile path over to voice. Server-only change, no app build. About an hour of work. **Fix deferred to next focused server-side session.** While at it, double-check that voice memory-deletion (*"forget about X"*) removes the same items mobile would for the same input. | Server |
 | B2e | Naavi misses recent emails (1+ hours old) until the hourly sync runs | both | Today Naavi reaches Gmail directly only for emails arrived in the **last 1 hour** (`newer_than:1h` live-overlay window in `fetchLiveRecentEmails`). Emails older than 1 hour are only visible if the hourly `sync-gmail` cron has already run and indexed them into `gmail_messages` (then `GLOBAL_SEARCH` finds them). Between 1 hour and the next cron run there's a **gap** where Naavi sees neither path. Validated 2026-05-09: Wael's "Birthday Party" email arrived at 2:19 PM, Wael asked Naavi at 3:46 PM (87 min later), Naavi said *"I don't have any email about a birthday party in your records."* — bug reproduced. **Affects both surfaces** — same code pattern in `naavi-chat` (mobile) and `naavi-voice-server` (voice). Fix candidates: (1) widen the live-overlay window from `newer_than:1h` to 24h or until-last-sync — simplest, slightly higher Gmail API cost; (2) reduce `sync-gmail` cron interval to every 15 min — narrower gap but still a gap; (3) trigger on-demand sync-gmail when an email-shaped query fires and live-overlay returns no results — guaranteed coverage but more code paths. Pick (1) for simplicity unless cost is a concern. Server-only change, no AAB. ~30 min. | Server |
 | B3a | User hears two voices on mobile: Naavi's voice + the phone's built-in voice | both | Voice fragmentation confirmed 2026-05-08 by direct user observation (Wael heard the "other voice" on a long Naavi reply about Bob's invitation). Trace: the mobile app prefers Deepgram Aura via the cloud text-to-speech path, but falls back to the phone's built-in voice (Android native TTS via expo-speech) whenever the cloud path fails — Edge Function error, JWT expired, network blip, audio-focus hiccup, or any audio chunk returns null. The two sound noticeably different because they're separate TTS engines entirely. **The architecture is intentional** (cloud-preferred + native fallback so a reply is never silent). The user experience of "two voices" means the cloud path is failing often enough to be noticeable. Real fix is not "use one voice everywhere" — both are by design. Real fix: make cloud TTS reliable enough that fallback rarely fires. Connected to existing memory `project_naavi_mobile_tts_loss.md` (V54.2 fixed full-failure variant; per-call partial failures still happen). Diagnosis is server-side (check remote-logs for `tts-chunk-null` and `tts-fallback-expo` events). Fix scope depends on what diagnosis reveals — could be Edge Function reliability, JWT lifecycle, network timeout tuning, or chunked-fetch resilience. **Phone-call (PC) fragmentation perception originally reported separately is NOT yet traced** — different TTS architecture (voice server streams Aura via Twilio); may be a different phenomenon from the mobile fallback. | Server |
@@ -112,19 +113,19 @@ Items not in the original 26-item holding list but addressed during the session:
 
 | List | Count | IDs |
 |---|---|---|
-| Bugs (B) | 8 | B1b, B2a, B2e, B3a, B3b, B3c, B3d, B3e |
+| Bugs (B) | 9 | B1b, B1d, B2a, B2e, B3a, B3b, B3c, B3d, B3e |
 | Features (F) | 6 | F1a, F1d, F2a, F2b, F2c, F3a |
 | Tooling (T) | 3 | T1a, T2a, T2b |
 | Ideas (I) | 3 | I2a, I2b, I3a |
 | Closed without entry | 10 | Items 4, 12, 14, B1a, B1c, B2b, B2c, B2d, F1b, F1c |
-| **Total** | **30** | (26 holding-list + 1 missed item B1c added 2026-05-08 + 1 new feature F2c added 2026-05-08 + 1 new feature F1d added 2026-05-09 superseding F1c + 1 new bug B2e added 2026-05-09) |
+| **Total** | **31** | (26 holding-list + 1 missed item B1c added 2026-05-08 + 1 new feature F2c added 2026-05-08 + 1 new feature F1d added 2026-05-09 superseding F1c + 1 new bug B2e added 2026-05-09 + 1 new bug B1d added 2026-05-10) |
 
 ### Tally by Server/AAB
 
 | Scope | Count | Implication |
 |---|---|---|
 | Server-only | 10 | Ship without AAB cycle |
-| AAB-only | 4 | Mobile build required (B1b, B3b, B3c) — bundle into next AAB |
+| AAB-only | 5 | Mobile build required (B1b, B1d, B3b, B3c) — bundle into next AAB |
 | Both | 6 | Cross-surface coordination |
 
 ### Tally by Surface (cross-surface drift discipline)
@@ -132,7 +133,7 @@ Items not in the original 26-item holding list but addressed during the session:
 | Surface | Count | IDs |
 |---|---|---|
 | voice | 3 | B2a, F2b, F2c |
-| mobile | 6 | B1b, B3b, B3c, F1a, F2a, T2a |
+| mobile | 7 | B1b, B1d, B3b, B3c, F1a, F2a, T2a |
 | both | 6 | B2e, B3a, B3d, F1d, F3a, T1a |
 | backend | 4 | T2b, I2a, I2b, I3a |
 | website | 1 | B3e |
@@ -143,12 +144,12 @@ Items tagged `both` are the ones where Voice Completion Roadmap discipline matte
 
 | Severity | B | F | T | I | Total |
 |---|---|---|---|---|---|
-| 1 (top) | 1 | 2 | 1 | 0 | 4 |
+| 1 (top) | 2 | 2 | 1 | 0 | 5 |
 | 2 (medium) | 2 | 3 | 2 | 2 | 9 |
 | 3 (low) | 5 | 1 | 0 | 1 | 7 |
-| **Total** | 8 | 6 | 3 | 3 | **20** |
+| **Total** | 9 | 6 | 3 | 3 | **21** |
 
-(Total active = 20. Add 10 closed-without-entry to reach the 30-item total.)
+(Total active = 21. Add 10 closed-without-entry to reach the 31-item total.)
 
 ---
 
