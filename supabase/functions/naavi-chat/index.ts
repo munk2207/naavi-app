@@ -585,9 +585,14 @@ async function fetchLiveRecentEmails(
     // practice emails arriving 1-2h before a query (after the last sync ran)
     // sat in a gap where neither path saw them. 24h covers a full day of
     // arrivals, the natural cadence for "did anyone email me today" queries.
-    // maxResults stays at 10 — typical inboxes don't get more than that
-    // through-queue in 24h for a single user.
-    const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=newer_than:1d&maxResults=10`;
+    //
+    // Part B of B1d fix (Wael 2026-05-10): raised maxResults from 10 to 30.
+    // The original "10 covers typical inbox" assumption was wrong for users
+    // with newsletter subscriptions — Wael's deep test showed his Birthday
+    // Party email at position #11 of 31 messages in the 24h window, which
+    // pushed it OUT of the live-overlay. 30 covers a busier inbox without
+    // adding meaningful per-call cost (Gmail metadata fetch is parallel).
+    const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=newer_than:1d&maxResults=30`;
     const listRes = await fetch(listUrl, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -603,7 +608,8 @@ async function fetchLiveRecentEmails(
     if (messageIds.length === 0) return [];
 
     // For each message, metadata-only fetch (From / Subject / Date headers + snippet).
-    const messages = await Promise.all(messageIds.slice(0, 10).map(async (id) => {
+    // Cap matches the Gmail list maxResults (30 — see comment on listUrl above).
+    const messages = await Promise.all(messageIds.slice(0, 30).map(async (id) => {
       try {
         const msgUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}`
           + `?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`;
