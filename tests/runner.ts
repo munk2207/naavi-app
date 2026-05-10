@@ -39,6 +39,7 @@ import { promptRegressionTests } from './catalogue/prompt-regression';
 import { dataIntegrityTests } from './catalogue/data-integrity';
 import { searchNormalizationTests } from './catalogue/search-normalization';
 import { gmailFreshnessTests } from './catalogue/gmail-freshness';
+import { truthAtUserLayerTests } from './catalogue/truth-at-user-layer';
 
 // ────────────────────────────────────────────────────────────────────────────
 // .env loader (avoids adding dotenv as a dependency).
@@ -99,6 +100,7 @@ const ALL_TESTS: TestCase[] = [
   ...dataIntegrityTests,
   ...searchNormalizationTests,
   ...gmailFreshnessTests,
+  ...truthAtUserLayerTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
