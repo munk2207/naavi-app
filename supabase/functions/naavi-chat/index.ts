@@ -580,10 +580,14 @@ async function fetchLiveRecentEmails(
     const accessToken = typeof tokenData?.access_token === 'string' ? tokenData.access_token : null;
     if (!accessToken) return [];
 
-    // Gmail list API — newer_than:1h matches the sync-gmail cron interval so
-    // the overlay covers exactly the freshness gap (older messages are in
-    // gmail_messages already).
-    const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=newer_than:1h&maxResults=10`;
+    // B2e fix (Wael 2026-05-09): widened from newer_than:1h to newer_than:1d.
+    // The 1h window matched the sync-gmail cron cadence in theory, but in
+    // practice emails arriving 1-2h before a query (after the last sync ran)
+    // sat in a gap where neither path saw them. 24h covers a full day of
+    // arrivals, the natural cadence for "did anyone email me today" queries.
+    // maxResults stays at 10 — typical inboxes don't get more than that
+    // through-queue in 24h for a single user.
+    const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=newer_than:1d&maxResults=10`;
     const listRes = await fetch(listUrl, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -1033,7 +1037,7 @@ Deno.serve(async (req) => {
       const liveEmails = await fetchLiveRecentEmails(supabase, userId);
       console.log(`[timing] ${elapsed()} | B1c — live email fetch returned ${liveEmails.length} message(s)`);
       if (liveEmails.length > 0 && typeof system === 'string') {
-        const liveEmailSection = '\n\n## Recent emails (last hour, fetched live just now)\n'
+        const liveEmailSection = '\n\n## Recent emails (last 24 hours, fetched live just now)\n'
           + liveEmails.map(e => {
               // From header often arrives as "Display Name <addr@domain>" — strip the
               // address for readability while keeping the display name.
