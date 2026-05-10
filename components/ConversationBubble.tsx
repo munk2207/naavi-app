@@ -149,7 +149,12 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   bubbleRulerInvisible: {
-    color: 'transparent',
+    // Wael 2026-05-10 (B3b): color:'transparent' renders as faintly visible
+    // glyphs on Samsung One UI long-wrap user bubbles (compositor doesn't
+    // fully suppress). opacity:0 hides at the compositor level instead, no
+    // glyph leak. Architecture (invisible-user-content sizes the bubble
+    // height) intact.
+    opacity: 0,
   },
   bubbleRulerDots: {
     color: Colors.textHint,
