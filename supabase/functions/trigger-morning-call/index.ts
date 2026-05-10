@@ -152,12 +152,14 @@ Deno.serve(async (req) => {
       // separately — Twilio rejects a single space-joined value.
       body.append('StatusCallbackEvent', 'answered');
       body.append('StatusCallbackEvent', 'completed');
-      // Async Twilio Answering Machine Detection. Webhook fires IMMEDIATELY on
-      // pickup (no 4-second synchronous-AMD wait); AMD runs in parallel and
-      // AnsweredBy appears on the /call-status 'completed' event. The voice
-      // server no longer trusts AMD to gate playback — a spoken "hello" gate
-      // inside the media stream is the gatekeeper for real-human pickups.
-      body.append('MachineDetection', 'DetectMessageEnd');
+      // Wael 2026-05-10: removed MachineDetection entirely. Even in async
+      // mode, DetectMessageEnd added 5-7 seconds of perceived pickup-to-
+      // first-audio delay (Twilio holds analysis before letting TwiML
+      // play). The voice server's spoken-"hello" gate inside the media
+      // stream is already the human-vs-machine gatekeeper, so AMD was
+      // double-duty. If voicemail picks up, the gate prompt plays, no
+      // reply within 6s, voice server hangs up — same outcome as before
+      // without the 5-7s of dead air.
 
       const callRes = await fetch(
         `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`,
