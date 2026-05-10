@@ -36,10 +36,7 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 | ID | Description | Surface | Notes | Server/AAB |
 |----|-------------|---------|-------|------------|
 | B1b | LIST_RULES backstop on mobile (revised 2026-05-08 after user-test) | mobile | **Validated 2026-05-08 under Rule 17.** Voice (PC) tested CLEAN — correctly listed alerts; voice half closed. Mobile (MV) tested BROKEN — Naavi said *"I don't have any alerts in your records"* when 7+ alerts exist in Settings. Revised fix scope: the phantom-action backstop regex (`hooks/useOrchestrator.ts` line 1207) catches *"you have N alerts"* but NOT *"I don't have any alerts"* / *"you don't have any"* / *"there are no alerts"* (wrong-direction phrasings). Two-part fix: (1) extend the regex to cover wrong-direction patterns; (2) synthesize a `{type: 'LIST_RULES'}` action onto `claudeActions[]` when the backstop fires (original B1b ask). ~30-40 min code in `hooks/useOrchestrator.ts`. AAB required. **Fix deferred to next AAB cycle.** | AAB |
-| B1c | Naavi misses brand-new emails for up to an hour | both | **SHIPPED + PARTIALLY VERIFIED 2026-05-08.** Mobile half deployed in `naavi-chat` Edge Function (commit 694b601) — verified working: Naavi correctly found "Bob Invitation" email arrived 3 min prior. Voice half deployed in `naavi-voice-server` (commit ae2e9a4) — partially verified: "Dinner Meeting" test 9:23 AM succeeded (Naavi found it and read the body); "Buying Home" test 9:30 AM failed (Naavi said "I don't have it"). Voice behaves inconsistently — same caller, same flow, different results minutes apart. **Open follow-up:** investigate Railway logs for the Buying Home call to see whether `fetchLiveRecentEmails` fired and what it returned. Surface revised from "backend" to "both" — separate code paths in naavi-chat (mobile) vs naavi-voice-server (voice); each surface required its own implementation. Original architectural-read assumption that one Edge Function serves both was wrong. | Server |
 | B2a | Voice promises to schedule medication but doesn't create the events | voice | When you ask voice to schedule a medication (*"aspirin once a day for the next 5 days"*), Naavi confirms verbally that she'll set it up — but nothing actually gets created in your Google Calendar. Validated 2026-05-08: voice said *"I'll set up your aspirin schedule for once daily over the next 5 days"* and zero events landed in Google Calendar. The mobile app already does this correctly. The fix copies the mobile path over to voice. Server-only change, no app build. About an hour of work. **Fix deferred to next focused server-side session.** While at it, double-check that voice memory-deletion (*"forget about X"*) removes the same items mobile would for the same input. | Server |
-| B2b | You can't interrupt Naavi mid-sentence on the phone | voice | When Naavi is reading a long answer aloud and you want to cut her off, neither *"Naavi stop"* nor just *"stop"* makes her stop talking. Validated 2026-05-08: both forms tested, neither worked — Naavi kept reading. The original classification said only *"Naavi stop"* was broken and that bare *"stop"* still cut her off; that's no longer true. The whole interrupt path needs a fresh look, not just the wake-word handling. Server-only change, no app build. **Fix deferred to next focused server-side session.** | Server |
-| B2c | You can't talk over Naavi on the phone | voice | When Naavi is reading aloud and you want to cut in with a new question (e.g. *"What time is it?"*) without waiting for her to finish, nothing happens — she keeps reading and your interrupt has no visible effect. Validated 2026-05-08: tried a mid-sentence question while Naavi was talking; she kept reading and never acknowledged it. **Likely the same root cause as B2b** (stop words don't interrupt either) since both produce the same observable outcome — but the test does not distinguish *"system never received your audio"* from *"system received it but didn't act on it."* Root cause TBD pending further investigation (server log check, or a follow-up test where we listen for whether the interrupt question gets processed AFTER Naavi finishes). Original classification was a narrower hypothesis (Deepgram dropping the first word). Server-only change once root cause is confirmed. **Fix deferred — investigate B2b and B2c together; they may be one bug or two.** | Server |
 | B3a | User hears two voices on mobile: Naavi's voice + the phone's built-in voice | both | Voice fragmentation confirmed 2026-05-08 by direct user observation (Wael heard the "other voice" on a long Naavi reply about Bob's invitation). Trace: the mobile app prefers Deepgram Aura via the cloud text-to-speech path, but falls back to the phone's built-in voice (Android native TTS via expo-speech) whenever the cloud path fails — Edge Function error, JWT expired, network blip, audio-focus hiccup, or any audio chunk returns null. The two sound noticeably different because they're separate TTS engines entirely. **The architecture is intentional** (cloud-preferred + native fallback so a reply is never silent). The user experience of "two voices" means the cloud path is failing often enough to be noticeable. Real fix is not "use one voice everywhere" — both are by design. Real fix: make cloud TTS reliable enough that fallback rarely fires. Connected to existing memory `project_naavi_mobile_tts_loss.md` (V54.2 fixed full-failure variant; per-call partial failures still happen). Diagnosis is server-side (check remote-logs for `tts-chunk-null` and `tts-fallback-expo` events). Fix scope depends on what diagnosis reveals — could be Edge Function reliability, JWT lifecycle, network timeout tuning, or chunked-fetch resilience. **Phone-call (PC) fragmentation perception originally reported separately is NOT yet traced** — different TTS architecture (voice server streams Aura via Twilio); may be a different phenomenon from the mobile fallback. | Server |
 | B3b | Cosmetic ruler leak on long-wrap user bubbles | mobile | V57.13.7 two-layer overlay design (`components/ConversationBubble.tsx` on `main`): ruler Text contains invisible user content (`color: 'transparent'`) + faded dots; overlay Text positioned absolute on top. On long-wrap, Samsung One UI renders `color: 'transparent'` as faintly visible text glyphs (compositor doesn't fully suppress). One-line fix: `bubbleRulerInvisible: { color: 'transparent' }` → `bubbleRulerInvisible: { opacity: 0 }`. Compositor-level invisibility instead of glyph-level. AAB required. Architecture (invisible-user-content in ruler) must stay — it's what gives the bubble correct HEIGHT for long messages; just dots wouldn't size right. | AAB |
 | B3c | Haptic vibration feels too subtle on Samsung long-press | mobile | Permission half already done — `VIBRATE` is in `app.json` line 31. Remaining: bump `Vibration.vibrate(80)` at `app/index.tsx:1104` to `150` or pattern `[0, 100, 50, 100]` for stronger / more distinctive long-press confirmation. Fires on `onChatLongPress` (primary hands-free entry). Wael's feedback 2026-05-06: even with system haptics maxed, 80 ms feels too subtle on Samsung. AAB required. A/B during next AAB cycle: try 150 single buzz first, fall back to pattern if still subtle. | AAB |
@@ -94,7 +91,18 @@ Items walked but not added to any table. Reopen if symptom recurs.
 | 12 | `naavi-spend-summary` Edge Function | Already shipped — function exists at `supabase/functions/naavi-spend-summary/index.ts`, aggregates `documents.extracted_amount_cents` directly, multi-user safe, multi-currency aware. Maestro `e2e/06-spend-summary-anthropic.yaml` PASSED in 2026-05-08 full-suite run. Holding-list "approved 2026-04-30, not built" was stale. |
 | 14 | Demo line "remind me" time-extraction loop | Symptom impossible by architecture — demo line is now fully canned (5 hard-coded scenarios via DTMF + speech routing); no real reminder path exists on demo. Underlying bug (time-extraction loop) may still affect authenticated users on production line — log if it surfaces. |
 | B1a | Voice live-calendar fetch (voice still on stale snapshot) | **Validated by user test 2026-05-08 (first item under CLAUDE.md Rule 17).** Wael created a fresh Google Calendar event, asked voice (PC) — correct answer. Changed time + location, asked voice and mobile — both correct. Bug as classified does NOT reproduce in real use. The architectural read (voice reads from Supabase snapshot table populated every 6h) was correct about the code path but did not predict user-visible behavior; some sync mechanism (frequent cron, app-trigger, or push notification) keeps the snapshot fresh enough that staleness is not perceived. Reopen only if surfaces. |
+| B1c | Naavi misses brand-new emails for up to an hour | **Closed 2026-05-09 — fully verified on both surfaces.** When the user asks an email-shaped question, Naavi now reaches Gmail directly so brand-new emails show up even before the hourly cron sync picks them up. Mobile half verified 2026-05-08 (Bob Invitation email found 3 min after arrival). Voice half initially appeared inconsistent on 2026-05-08; root cause traced 2026-05-09 to missing Railway env vars (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) — without them the voice OAuth refresh failed silently and the live-overlay never reached Gmail. After adding the env vars, both surfaces verified working with fresh emails (Football Game and Birthday Cake tests). Companion enhancement same session: live-overlay now states arrival time as clock time (e.g. "arrived at 10:59 AM") instead of relative minutes, on both surfaces. |
+| B2b | You can't interrupt Naavi mid-sentence on the phone | **Closed 2026-05-09 — improved by music-queue drain fix.** Root cause was Twilio's outbound audio queue holding 5+ seconds of thinking music ahead of Naavi's reply; `stopMusic()` only cancelled the music interval but didn't drain the queue. Fix: `stopMusic()` now sends Twilio `event: 'clear'` to drain the outbound buffer. After the fix, "Naavi stop" successfully interrupts; first attempt sometimes missed (likely phone-side echo cancellation in speakerphone mode), second attempt always works. Was "broken" → now "works on second attempt 100%, first attempt sometimes missed." Real usability gain. Reopen if first-interrupt miss becomes a recurring complaint. |
+| B2c | You can't talk over Naavi on the phone | **Closed 2026-05-09 — same root cause and fix as B2b.** Both interrupts share the `stopMusic()` code path; the queue drain that fixed B2b also fixes B2c. Same first-interrupt-miss limitation in speakerphone mode. |
 | B2d | Voice name-search mistranscription ("Hussein") | **Pivoted to Feature 2026-05-08.** User-facing test surfaced that name mistranscription is one symptom of a deeper architectural issue: voice (PC) uses an always-on noisy channel where Naavi has to guess turn boundaries; mobile (MV) uses clean push-to-talk. The right fix is structural (walkie-talkie style turn-taking) rather than name-by-name STT tuning. Tracked as **F2c**. |
+
+---
+
+## Shipped this session (2026-05-09)
+
+Items not in the original 26-item holding list but addressed during the session:
+
+- **PC outbound latency** — user-perceived gap from "you finish speaking" to "Naavi starts replying" on phone calls reduced from ~14 s to ~4 s on trivial questions. Wave-test ground truth showed ~7 s of stale thinking-music tail blocking Naavi's reply (Twilio's outbound audio queue held up to 5 s of music ahead of every reply). Fix: `stopMusic()` now drains Twilio's outbound buffer immediately via `event: 'clear'`. Companion change: chunk size aligned to Twilio's documented 20 ms expectation (was 1 s). Reverses the 2026-04 "do NOT drain queue" memory directive — the original cost was assumed to be 1.3–1.5 s but was actually 5–7 s. Memory file `project_naavi_music_queue_latency.md` updated. **Bonus:** the same fix also closes B2b and B2c (interrupts now work) since they shared the `stopMusic()` code path.
 
 ---
 
@@ -102,18 +110,18 @@ Items walked but not added to any table. Reopen if symptom recurs.
 
 | List | Count | IDs |
 |---|---|---|
-| Bugs (B) | 10 | B1b, B1c, B2a, B2b, B2c, B3a, B3b, B3c, B3d, B3e |
+| Bugs (B) | 7 | B1b, B2a, B3a, B3b, B3c, B3d, B3e |
 | Features (F) | 7 | F1a, F1b, F1c, F2a, F2b, F2c, F3a |
 | Tooling (T) | 3 | T1a, T2a, T2b |
 | Ideas (I) | 3 | I2a, I2b, I3a |
-| Closed without entry | 5 | Items 4, 12, 14, B1a, B2d |
+| Closed without entry | 8 | Items 4, 12, 14, B1a, B1c, B2b, B2c, B2d |
 | **Total** | **28** | (26 holding-list + 1 missed item B1c added 2026-05-08 + 1 new feature F2c added 2026-05-08) |
 
 ### Tally by Server/AAB
 
 | Scope | Count | Implication |
 |---|---|---|
-| Server-only | 13 | Ship without AAB cycle |
+| Server-only | 10 | Ship without AAB cycle |
 | AAB-only | 4 | Mobile build required (B1b, B3b, B3c) — bundle into next AAB |
 | Both | 6 | Cross-surface coordination |
 
@@ -121,9 +129,9 @@ Items walked but not added to any table. Reopen if symptom recurs.
 
 | Surface | Count | IDs |
 |---|---|---|
-| voice | 5 | B2a, B2b, B2c, F2b, F2c |
+| voice | 3 | B2a, F2b, F2c |
 | mobile | 6 | B1b, B3b, B3c, F1a, F2a, T2a |
-| both | 6 | B1c, B3a, B3d, F1c, F3a, T1a |
+| both | 5 | B3a, B3d, F1c, F3a, T1a |
 | backend | 5 | F1b, T2b, I2a, I2b, I3a |
 | website | 1 | B3e |
 
@@ -133,12 +141,12 @@ Items tagged `both` are the ones where Voice Completion Roadmap discipline matte
 
 | Severity | B | F | T | I | Total |
 |---|---|---|---|---|---|
-| 1 (top) | 2 | 3 | 1 | 0 | 6 |
-| 2 (medium) | 3 | 3 | 2 | 2 | 10 |
+| 1 (top) | 1 | 3 | 1 | 0 | 5 |
+| 2 (medium) | 1 | 3 | 2 | 2 | 8 |
 | 3 (low) | 5 | 1 | 0 | 1 | 7 |
-| **Total** | 10 | 7 | 3 | 3 | **23** |
+| **Total** | 7 | 7 | 3 | 3 | **20** |
 
-(Total active = 23. Add 5 closed-without-entry to reach the 28-item total.)
+(Total active = 20. Add 8 closed-without-entry to reach the 28-item total.)
 
 ---
 
