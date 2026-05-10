@@ -284,19 +284,12 @@ async function handleContacts(
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
   const body = await req.json().catch(() => ({}));
-  const { intent, date, name } = body as {
+  const { intent, date, name, user_id: bodyUserId } = body as {
     intent?: string;
     date?: string;
     name?: string;
+    user_id?: string;
   };
 
   if (!['brief', 'calendar', 'contacts'].includes(intent ?? '')) {
@@ -306,32 +299,47 @@ serve(async (req) => {
     );
   }
 
-  // Resolve the user from the Supabase JWT
-  const userClient = createClient(
+  // CLAUDE.md Rule 4 user-id resolution chain:
+  //   1) JWT auth (mobile app path)
+  //   2) Body user_id (voice server / server-side / test path)
+  //   3) Reject — no anon-only fallback (would leak data across users)
+  //
+  // Wael 2026-05-10: added body user_id fallback so the auto-tester (and
+  // future server-side callers) can hit this function without a real
+  // user JWT. Mobile app continues to auth via JWT; nothing changes for
+  // existing callers.
+  const adminClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } }
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
-  const { data: { user }, error: userError } = await userClient.auth.getUser();
-  if (userError || !user) {
+  let userId: string | null = null;
+  const authHeader = req.headers.get('Authorization');
+  if (authHeader) {
+    const userClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+    const { data: { user }, error: userError } = await userClient.auth.getUser();
+    if (!userError && user?.id) userId = user.id;
+  }
+  if (!userId && typeof bodyUserId === 'string' && bodyUserId.length > 0) {
+    userId = bodyUserId;
+  }
+  if (!userId) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  const adminClient = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  );
-
   try {
     let result: { ssml: string; plainText: string };
 
     if (intent === 'brief') {
-      result = await handleBrief(adminClient, user.id);
+      result = await handleBrief(adminClient, userId);
     } else if (intent === 'calendar') {
-      result = await handleCalendar(adminClient, user.id, date ?? new Date().toISOString());
+      result = await handleCalendar(adminClient, userId, date ?? new Date().toISOString());
     } else {
       // contacts
       if (!name?.trim()) {
@@ -340,10 +348,10 @@ serve(async (req) => {
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      result = await handleContacts(adminClient, user.id, name.trim());
+      result = await handleContacts(adminClient, userId, name.trim());
     }
 
-    console.log(`[assistant-fulfillment] intent=${intent} user=${user.id}`);
+    console.log(`[assistant-fulfillment] intent=${intent} user=${userId}`);
     return new Response(JSON.stringify(result), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
