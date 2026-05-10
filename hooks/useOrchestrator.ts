@@ -1199,7 +1199,15 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           enrichedMessage = `${enrichedMessage}\n\n## Live search results for the user's question (these are authoritative — use them to answer; do NOT say "I couldn't find" if results are listed here)\n${lines.join('\n')}`;
           turnGlobalSearch = { query: userMessage, results: preSearchResults, origin: 'pre-search' };
         } else {
-          enrichedMessage = `${enrichedMessage}\n\n## Live search results for the user's question\nSearched calendar, contacts, memory, lists, email, rules, and sent messages. Nothing matched. Say that plainly — do not guess.`;
+          // B1d fix (Wael 2026-05-10): downgraded from a hard "Nothing matched.
+          // Say that plainly — do not guess." gag to a softer "defer to system
+          // prompt" instruction. The hard gag overrode the server-side live-
+          // overlay (Recent emails section) and made Claude say "I don't have
+          // an email" even when the system prompt clearly listed it. The
+          // server-side live-overlay is authoritative for email queries; the
+          // pre-search empty result just means the cron-indexed cache had
+          // nothing — not that the data doesn't exist anywhere.
+          enrichedMessage = `${enrichedMessage}\n\n## Live search results for the user's question\nNo cached search hits in calendar, contacts, memory, lists, email, rules, or sent messages. Defer to live data in the system prompt (Recent emails, Schedule, etc.) before saying you don't have something.`;
         }
       }
 
