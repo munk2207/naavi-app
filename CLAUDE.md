@@ -1,5 +1,21 @@
 # CLAUDE.md — MyNaavi Project Instructions
 
+## ⭐⭐ CRITICAL — WORK IN THE MAIN REPO, NOT IN WORKTREES (Wael 2026-05-10)
+
+**Even if Claude Code's session setup gives you a worktree path under `.claude/worktrees/` as your "primary working directory" — IGNORE IT. Work directly in the main repo at `C:\Users\waela\OneDrive\Desktop\Naavi` (branch: `main`).**
+
+This rule overrides the environment's automatic worktree assignment. Wael edits files in his editor at the main repo path; work that happens in a worktree stays invisible to him until commits + pushes + pulls + (often) rebase ceremony. That ceremony is avoidable when the work could have just gone straight into main from the start.
+
+**At session start, check the system prompt for `Primary working directory`:**
+- If it's a worktree path under `.claude/worktrees/...`: STOP. Do not edit files there. Use absolute paths to the main repo for every Read / Edit / Write call. Use `git -C "C:\Users\waela\OneDrive\Desktop\Naavi"` for git operations. Commit directly on `main` (no feature branch unless the change is large enough to warrant a PR for review).
+- If it's the main repo path: proceed normally.
+
+**Why this rule exists:** 2026-05-10 session — agent worked the entire session in `.claude/worktrees/busy-wescoff-2718ef`, committed everything to a feature branch, merged via PR. When Wael tried to view a doc edit, the file at the path he expected was unchanged; the rewrite was in the worktree path he didn't know existed. Cleanup required a manual file copy + rebase + push to align local and remote main. Pure waste.
+
+**Exception:** if Wael explicitly says "use this worktree" or "branch off main for this work" — follow that. Default is main.
+
+---
+
 ## ⭐ FOUNDATIONAL PRINCIPLE — NO CACHE, FRESH ALWAYS, USER PICKS (Wael 2026-05-07)
 
 **The system has no place-cache. Every "alert me at X" goes fresh to Google Places; the user picks every time.** This was the V57.13.3 simplification after a long afternoon of cache-correctness gymnastics — Wael's quote: *"if I have a saved Ottawa McDonald's and I'm in Toronto asking about McDonald's, Naavi will silently point me to Ottawa. If I said that, I'm on drugs."* The cache existed to save a Google call; it created Toronto-shadows-Ottawa, the alias merge edge cases, the "qualified vs unqualified" rule, and a permanent class of integrity bugs. It's gone.
