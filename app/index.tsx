@@ -52,6 +52,8 @@ import { ConversationActionCard } from '@/components/ConversationActionCard';
 import { TopBarMenu } from '@/components/TopBarMenu';
 import { IconButton } from '@/components/IconButton';
 import { LocationRuleCard } from '@/components/LocationRuleCard';
+import { BatteryOptimizationCard } from '@/components/BatteryOptimizationCard';
+import { useBatteryOptPrompt } from '@/hooks/useBatteryOptPrompt';
 import { getBriefWindow, filterByWindow, pickRandomTip } from '@/lib/brief-logic';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
@@ -632,6 +634,10 @@ export default function HomeScreen() {
   const [memoTranscript, setMemoTranscript] = useState<string | null>(null);
   const [brief, setBrief] = useState<BriefItem[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // AAB queue item 23 (Wael 2026-05-11) — automate the Android Battery
+  // Optimization opt-out for users with location alerts. Hook checks on
+  // mount, sets visible=true only when all three gating conditions pass.
+  const batteryOptPrompt = useBatteryOptPrompt(currentUserId);
   const [navAlert, setNavAlert] = useState<{ title: string; location: string; startMs: number } | null>(null);
   const [showIntegrations, setShowIntegrations] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState(false);
@@ -2260,6 +2266,16 @@ export default function HomeScreen() {
           <Text style={styles.peekText} numberOfLines={3}>{peekText}</Text>
         </View>
       )}
+
+      {/* AAB queue item 23 (Wael 2026-05-11) — Battery Optimization prompt.
+          Modal rendered as a SafeAreaView sibling so it sits above all other
+          UI when visible. Shown only when useBatteryOptPrompt's conditions
+          pass; dismissed by either button via the hook's callbacks. */}
+      <BatteryOptimizationCard
+        visible={batteryOptPrompt.visible}
+        onAccept={batteryOptPrompt.onAccept}
+        onDecline={batteryOptPrompt.onDecline}
+      />
     </SafeAreaView>
   );
 }
