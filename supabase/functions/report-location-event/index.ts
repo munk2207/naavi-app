@@ -44,6 +44,12 @@ interface LocationEvent {
   event:     'enter' | 'exit' | 'dwell';
   timestamp: string;
   event_id?: string; // V57.10.1 — diagnostic correlation id from client
+  // 2026-05-11: set true when fire-pending-dwells cron POSTs back here to
+  // run the fan-out after a dwell timer completes. Skips the direction-
+  // match block (we're already past that — the original ENTER already
+  // matched) and the defer block (no point re-deferring), goes straight
+  // to dedup + fire.
+  from_pending_dwell?: boolean;
 }
 
 // V57.10.1 — direct insert into client_diagnostics so the Doze-delay
@@ -82,6 +88,7 @@ serve(async (req) => {
   try {
     const body = (await req.json()) as LocationEvent;
     const { user_id, rule_id, event, event_id } = body;
+    const fromPendingDwell = body.from_pending_dwell === true;
 
     if (!user_id || !rule_id || !event) {
       return json({ error: 'Missing user_id, rule_id, or event' }, 400);
@@ -107,16 +114,85 @@ serve(async (req) => {
     if (rule.trigger_type !== 'location') return json({ error: 'Not a location rule' }, 400);
     if (!rule.enabled) return json({ ok: true, skipped: 'rule disabled' });
 
-    // 2. Check direction — only fire if the event matches the rule's direction
+    // 2pre. Pending-dwell cron bypass — we already crossed direction matching
+    // when the original ENTER landed. Jump to dedup + fire so the fan-out
+    // runs after the dwell timer completed.
+    if (fromPendingDwell) {
+      const direction = String(rule.trigger_config?.direction ?? 'arrive');
+      const normalizedEvent = direction === 'leave' ? 'exit' : 'enter';
+      const today = new Date().toISOString().slice(0, 10);
+      const triggerRef = `loc-${rule_id}-${today}-${normalizedEvent}`;
+
+      const { data: existing } = await admin
+        .from('action_rule_log')
+        .select('id')
+        .eq('rule_id', rule_id)
+        .eq('trigger_ref', triggerRef)
+        .maybeSingle();
+
+      if (existing) {
+        return json({ ok: true, skipped: 'already fired today' });
+      }
+
+      const success = await fireLocationAction(rule, admin, supabaseUrl, interFnKey);
+      if (success) {
+        await admin.from('action_rule_log').insert({ rule_id, trigger_ref: triggerRef });
+        await admin.from('action_rules').update({ last_fired_at: new Date().toISOString() }).eq('id', rule_id);
+        if (rule.one_shot) {
+          await admin.from('action_rules').update({ enabled: false }).eq('id', rule_id);
+        }
+        console.log(`[report-location-event] Fired (from pending dwell) rule ${rule_id} for user ${user_id}`);
+        return json({ ok: true, fired: true, from_pending_dwell: true });
+      }
+      console.error(`[report-location-event] Fan-out failed for pending-dwell rule ${rule_id}`);
+      return json({ ok: false, fired: false, from_pending_dwell: true }, 500);
+    }
+
+    // 2. Direction + dwell-cancellation routing.
+    // Three cases:
+    //   a. Event matches direction (arrive/inside → enter/dwell; leave → exit)
+    //      → continue with dedup + defer/fire below
+    //   b. Event is the OPPOSITE direction (user reversed mid-dwell)
+    //      → cancel any active pending_dwell_fires row and return
+    //   c. Anything else (no geofence direction at all) → skip
     const direction = String(rule.trigger_config?.direction ?? 'arrive');
-    const acceptable = direction === 'leave' ? ['exit'] : ['dwell', 'enter'];
-    if (!acceptable.includes(event)) {
+    const matchesDirection = direction === 'leave'
+      ? event === 'exit'
+      : (event === 'enter' || event === 'dwell');
+    const oppositeOfDirection = direction === 'leave'
+      ? (event === 'enter' || event === 'dwell')
+      : event === 'exit';
+
+    if (oppositeOfDirection) {
+      // User reversed before dwell completed. Cancel any active pending row
+      // for this rule so the deferred fire never lands. Idempotent — no-op
+      // if no row exists. Cancelling a stale row from yesterday is harmless
+      // (we filter on active state, not date).
+      const { error: cancelErr } = await admin
+        .from('pending_dwell_fires')
+        .update({ cancelled_at: new Date().toISOString() })
+        .eq('rule_id', rule_id)
+        .is('cancelled_at', null)
+        .is('fired_at', null);
+      if (cancelErr) {
+        console.error('[report-location-event] cancel pending dwell error:', cancelErr.message);
+      } else {
+        console.log(`[report-location-event] Cancelled pending dwell for rule ${rule_id} (user reversed via ${event})`);
+      }
+      return json({ ok: true, cancelled: true });
+    }
+
+    if (!matchesDirection) {
       return json({ ok: true, skipped: `event ${event} does not match direction ${direction}` });
     }
 
-    // 3. Dedup via action_rule_log
+    // 3. Dedup via action_rule_log. Normalize event to direction so an
+    // Android ENTER followed later in the day by a defensive DWELL still
+    // dedups to the same row. (Today notifyOnDwell is off — DWELL shouldn't
+    // arrive — but the normalization is cheap insurance.)
     const today = new Date().toISOString().slice(0, 10);
-    const triggerRef = `loc-${rule_id}-${today}-${event}`;
+    const normalizedEvent = direction === 'leave' ? 'exit' : 'enter';
+    const triggerRef = `loc-${rule_id}-${today}-${normalizedEvent}`;
 
     const { data: existing } = await admin
       .from('action_rule_log')
@@ -127,6 +203,56 @@ serve(async (req) => {
 
     if (existing) {
       return json({ ok: true, skipped: 'already fired today' });
+    }
+
+    // 3b. Server-side dwell. If trigger_config.dwell_seconds > 0, defer the
+    // fire instead of running fan-out now. The fire-pending-dwells cron picks
+    // it up after the dwell completes — UNLESS the user reverses direction
+    // (handled in step 2's oppositeOfDirection branch above). Lets us widen
+    // geofence radius (e.g. 500 m) without false-firing on drive-through
+    // traffic. Default = 120 s. Set to 0 in trigger_config for legacy
+    // immediate-fire behavior (no AAB rule edit needed — server reads it
+    // per fire).
+    const dwellSeconds = typeof rule.trigger_config?.dwell_seconds === 'number'
+      ? Math.max(0, Math.floor(rule.trigger_config.dwell_seconds))
+      : 120;
+
+    if (dwellSeconds > 0) {
+      // Defense in depth: clear any stale active row before insert so the
+      // partial unique index can't reject the new row. (Should be no-op
+      // because oppositeOfDirection cancels en-route exits, but a duplicate
+      // ENTER without an intervening EXIT — phantom geofence event — would
+      // otherwise collide with the partial UNIQUE.)
+      await admin
+        .from('pending_dwell_fires')
+        .update({ cancelled_at: new Date().toISOString() })
+        .eq('rule_id', rule_id)
+        .is('cancelled_at', null)
+        .is('fired_at', null);
+
+      const now = new Date();
+      const fireAt = new Date(now.getTime() + dwellSeconds * 1000);
+      const { error: insertErr } = await admin
+        .from('pending_dwell_fires')
+        .insert({
+          rule_id,
+          user_id,
+          entered_at: now.toISOString(),
+          fire_at: fireAt.toISOString(),
+        });
+
+      if (insertErr) {
+        console.error('[report-location-event] failed to schedule dwell fire:', insertErr.message);
+        return json({ error: 'failed to schedule dwell fire' }, 500);
+      }
+
+      console.log(`[report-location-event] Deferred rule ${rule_id} for ${dwellSeconds}s dwell — fires at ${fireAt.toISOString()}`);
+      await diag(admin, event_id, user_id, 'geofence-T4-deferred', {
+        rule_id,
+        dwell_seconds: dwellSeconds,
+        fire_at: fireAt.toISOString(),
+      });
+      return json({ ok: true, deferred: true, fire_at: fireAt.toISOString() });
     }
 
     // 4. Fire the action (replicates evaluate-rules/fireAction fan-out)

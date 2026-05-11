@@ -43,6 +43,7 @@ import { truthAtUserLayerTests } from './catalogue/truth-at-user-layer';
 import { sourceIntentTests } from './catalogue/source-intent';
 import { briefUnreadTests } from './catalogue/brief-unread';
 import { hostedRepliesTests } from './catalogue/hosted-replies';
+import { pendingDwellTests } from './catalogue/pending-dwell';
 
 // ────────────────────────────────────────────────────────────────────────────
 // .env loader (avoids adding dotenv as a dependency).
@@ -107,6 +108,7 @@ const ALL_TESTS: TestCase[] = [
   ...sourceIntentTests,
   ...briefUnreadTests,
   ...hostedRepliesTests,
+  ...pendingDwellTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
