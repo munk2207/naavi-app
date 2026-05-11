@@ -31,12 +31,28 @@ import { useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 import { remoteLog, newDiagSession } from '@/lib/remoteLog';
 import { getLifecycleSession } from '@/lib/appLifecycle';
 
 const GEOFENCE_TASK = 'naavi-geofence-v1';
+// V57.14.3 — foreground-service task. Wael 2026-05-11 — Costco-arrival
+// geofence never fired (Doze parked the app on a fresh-install AAB 168).
+// startLocationUpdatesAsync with a foregroundService config keeps Naavi's
+// process alive 24/7, which is the only reliable way to deliver geofence
+// events on Android. Tradeoff: persistent notification + ~1-2%/day battery.
+// Worth it for "Geofencing is very important for us" (Wael's words).
+const FOREGROUND_LOCATION_TASK = 'naavi-foreground-service-v1';
+
+// V57.14.3 — persistent registry of per-rule last-registration time.
+// Replaces the V57.10.3 in-memory Map. The Map was reset to empty on every
+// app restart (including AAB-install relaunch), which broke phantom
+// suppression for the first event after restart — Terra Nova false-fired
+// at 12:09 EDT 2026-05-11 because the empty Map let an initial-state
+// ENTER slip through. AsyncStorage persists across restarts.
+const REGISTRY_KEY = 'naavi.geofence.lastReg.v1';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -62,7 +78,42 @@ const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 // ever re-enabled, narrow EXIT to 5s as well.
 const PHANTOM_SUPPRESS_ENTER_MS = 5_000;     // 5s — preserves real arrivals
 const PHANTOM_SUPPRESS_EXIT_MS  = 300_000;   // 5min — covers Android's slow phantom emission
-const lastRegisteredAtByRule = new Map<string, number>();
+
+// V57.14.3 — async AsyncStorage-backed registry. Each helper reads/writes
+// the entire small JSON object — registry is bounded by user's rule count
+// (currently ~8 rules; well under 1 KB). No debouncing needed at this scale.
+async function getLastRegisteredAt(ruleId: string): Promise<number | undefined> {
+  try {
+    const raw = await AsyncStorage.getItem(REGISTRY_KEY);
+    if (!raw) return undefined;
+    const map = JSON.parse(raw) as Record<string, number>;
+    const v = map[ruleId];
+    return typeof v === 'number' ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function setLastRegisteredAt(updates: Record<string, number>): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(REGISTRY_KEY);
+    const map = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+    for (const k of Object.keys(updates)) {
+      map[k] = updates[k];
+    }
+    await AsyncStorage.setItem(REGISTRY_KEY, JSON.stringify(map));
+  } catch (err) {
+    console.error('[geofence-registry] write failed:', err);
+  }
+}
+
+async function clearLastRegistered(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(REGISTRY_KEY);
+  } catch (err) {
+    console.error('[geofence-registry] clear failed:', err);
+  }
+}
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -82,6 +133,62 @@ interface ResolvedRegion {
   radius: number;
   notifyOnEnter: boolean;
   notifyOnExit: boolean;
+}
+
+// ── Module-level foreground-service location task (V57.14.3) ───────────────
+// This task does NOTHING with the location data — it exists ONLY so that
+// Location.startLocationUpdatesAsync can attach a foregroundService config
+// to it, which keeps Naavi's process alive 24/7. With the process alive,
+// Android's geofencing API delivers ENTER/EXIT events reliably without
+// being parked by Doze. Wael's Costco-arrival miss 2026-05-11 was the
+// canonical failure this fixes.
+
+TaskManager.defineTask(FOREGROUND_LOCATION_TASK, ({ error }: any) => {
+  if (error) {
+    console.error('[fg-location-task] error:', error);
+    return;
+  }
+  // Intentionally a no-op. Receiving updates is the side-effect that keeps
+  // the FG service alive; we discard the data.
+});
+
+async function startForegroundLocationService(): Promise<void> {
+  try {
+    const isRunning = await Location.hasStartedLocationUpdatesAsync(FOREGROUND_LOCATION_TASK);
+    if (isRunning) return; // already up
+    await Location.startLocationUpdatesAsync(FOREGROUND_LOCATION_TASK, {
+      // Battery-conscious settings — we don't actually use the locations,
+      // we just need Android to keep the FG service alive.
+      accuracy: Location.Accuracy.Balanced,
+      timeInterval: 10 * 60 * 1000,   // 10 min
+      distanceInterval: 5000,          // or every 5 km — whichever first
+      showsBackgroundLocationIndicator: false, // iOS only
+      pausesUpdatesAutomatically: false,
+      foregroundService: {
+        notificationTitle: 'MyNaavi is keeping your alerts ready',
+        notificationBody:  'Tap to open Naavi',
+        notificationColor: '#5DCAA5',
+        killServiceOnDestroy: false,
+      },
+    });
+    remoteLog(getLifecycleSession(), 'fg-location-service-started', {});
+  } catch (err) {
+    console.error('[fg-location-service] start failed:', err);
+    remoteLog(getLifecycleSession(), 'fg-location-service-start-failed', {
+      error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+    });
+  }
+}
+
+async function stopForegroundLocationService(): Promise<void> {
+  try {
+    const isRunning = await Location.hasStartedLocationUpdatesAsync(FOREGROUND_LOCATION_TASK);
+    if (!isRunning) return;
+    await Location.stopLocationUpdatesAsync(FOREGROUND_LOCATION_TASK);
+    remoteLog(getLifecycleSession(), 'fg-location-service-stopped', {});
+  } catch (err) {
+    console.error('[fg-location-service] stop failed:', err);
+  }
 }
 
 // ── Module-level background task ────────────────────────────────────────────
@@ -125,8 +232,12 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: any) => {
   // membership state. We drop these at the task boundary.
   // V57.10.5 — asymmetric windows: 5s for ENTER/DWELL, 5min for EXIT
   // (see PHANTOM_SUPPRESS_*_MS constants for rationale).
+  // V57.14.3 — registry is now AsyncStorage-backed (was in-memory Map).
+  // Survives app restarts so the first event after a fresh-install AAB
+  // launch no longer slips through with an empty registry. Terra Nova
+  // false-fired 2026-05-11 12:09 EDT because of this bug.
   if (eventName === 'enter' || eventName === 'dwell' || eventName === 'exit') {
-    const lastReg = lastRegisteredAtByRule.get(ruleId);
+    const lastReg = await getLastRegisteredAt(ruleId);
     const suppressMs = eventName === 'exit' ? PHANTOM_SUPPRESS_EXIT_MS : PHANTOM_SUPPRESS_ENTER_MS;
     if (lastReg !== undefined && Date.now() - lastReg < suppressMs) {
       remoteLog(eventId, 'geofence-T1-suppressed-phantom', {
@@ -327,12 +438,24 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
       await Location.startGeofencingAsync(GEOFENCE_TASK, regions);
       // V57.10.3 — record per-rule registration time so the geofence task
       // can suppress phantom initial-state events.
+      // V57.14.3 — persist registry to AsyncStorage so the suppression
+      // survives app restarts (previously in-memory Map reset every relaunch).
       const now = Date.now();
+      const updates: Record<string, number> = {};
       for (const r of regions) {
-        lastRegisteredAtByRule.set(r.identifier, now);
+        updates[r.identifier] = now;
       }
+      await setLastRegisteredAt(updates);
+
+      // V57.14.3 — start the foreground location service alongside
+      // geofencing. This is what defeats Android Doze for the geofence
+      // pipeline. Has no effect on iOS (foregroundService config is ignored).
+      await startForegroundLocationService();
     } else {
-      lastRegisteredAtByRule.clear();
+      await clearLastRegistered();
+      // No active rules → stop the foreground service (no point keeping
+      // the notification + battery cost when no alerts are active).
+      await stopForegroundLocationService();
     }
 
     console.log(`[geofence-sync] user ${userId}: registered ${regions.length} geofences`);
@@ -364,6 +487,10 @@ async function stopAllGeofences(): Promise<void> {
     // Not an error if the task was never started
     console.log('[geofence-sync] stop skipped:', err instanceof Error ? err.message : err);
   }
+  // V57.14.3 — also stop the foreground service. Caller (e.g. user-sign-out
+  // path) shouldn't keep the persistent notification + battery cost running
+  // when no geofences remain.
+  await stopForegroundLocationService();
 }
 
 interface ResolvedPlace {
