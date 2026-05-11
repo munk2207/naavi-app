@@ -302,8 +302,9 @@ async function fireLocationAction(
   const toName  = String(config.to_name ?? '');
 
   // Build the final body from base + inline tasks + linked list items.
-  // Shared merge logic in _shared/alert_body.ts.
-  const body = await buildAlertBody(config, rule.user_id, supabaseUrl, interFnKey);
+  // Shared merge logic in _shared/alert_body.ts. Pass rule.id so F1a's
+  // list_connections path can surface a connected list in the fan-out.
+  const body = await buildAlertBody(config, rule.user_id, supabaseUrl, interFnKey, rule.id);
 
   if (!body) {
     console.error(`[report-location-event] Rule ${rule.id}: empty body after buildAlertBody`);

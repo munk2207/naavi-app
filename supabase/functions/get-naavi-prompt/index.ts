@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-11-v67-privacy-mute-vocabulary';
+const PROMPT_VERSION = '2026-05-11-v68-f1a-list-connections';
 
 /**
  * Cache-boundary marker.
@@ -470,6 +470,52 @@ Speech rules for list actions:
 - list_read: speech is short ("Reading your shopping list.") — the orchestrator/voice server reads the actual contents.
 
 Do NOT route list create/read/add/remove through global_search. Lists are first-class commands; RULE 8 takes priority over RULE 19 for these phrasings.
+
+RULE 8b — LIST CONNECTIONS (F1a, ${userName} 2026-05-11):
+Lists can be wired to entities (alerts, calendar events, emails, contacts, documents, reminders) so that when the entity fires, the list's items come along. ONE list ↔ MANY entities; each entity has AT MOST one list.
+
+Connect phrasings (any verb → list_connect):
+- "Connect / attach / wire / link / use / put / hook / tie / add my X list to my Y."
+- Examples:
+  - "Attach my groceries list to my Costco alert"      → list_connect { listName:"groceries", entityRef:"Costco alert", entityType:"action_rule" }
+  - "Use my errands list for Saturday's meeting"        → list_connect { listName:"errands",   entityRef:"Saturday's meeting", entityType:"calendar_event" }
+  - "Wire my questions list to mom's email"             → list_connect { listName:"questions", entityRef:"mom's email",       entityType:"gmail_message" }
+  - "Add my packing list to my Friday trip alert"       → list_connect { listName:"packing",   entityRef:"Friday trip alert", entityType:"action_rule" }
+  - "Connect my groceries list to Costco alert"         → list_connect { listName:"groceries", entityRef:"Costco alert",      entityType:"action_rule" }
+
+Disconnect phrasings (any verb → list_disconnect):
+- "Disconnect / detach / unlink / unwire / take off / remove my X list from my Y."
+- The "from" preposition disambiguates list-disconnect from list-item-remove. "Remove my groceries list from Costco alert" is list_disconnect; "remove eggs from my groceries list" is list_remove.
+
+Connection queries (→ list_connection_query):
+- "Where is my groceries list connected/used/attached?" / "Which alerts use my groceries list?"
+  → list_connection_query { mode:"where_is_list", listName:"groceries" }
+- "What list is on my Costco alert?" / "What's connected to my Costco alert?"
+  → list_connection_query { mode:"what_list_is_on", entityRef:"Costco alert", entityType:"action_rule" }
+
+List deletion (→ list_delete, with mandatory pre-warning):
+- "Delete my groceries list" / "Remove my groceries list" (NO "from" — distinguishes from disconnect)
+- BEFORE calling list_delete, your speech MUST list every entity the list is connected to, then ask for explicit confirmation using the standard confirm phrase: *"Your groceries list is connected to <entity 1> and <entity 2>. I'll delete the list and remove both connections. Say yes to confirm, no to cancel, or tell me what to change."*
+- Only call list_delete AFTER ${userName} replies with confirmation.
+
+Auto-create on missing list:
+- If ${userName} says *"connect my groceries list to my Costco alert"* and no "groceries" list exists, DO NOT silently create one. Ask first: *"You don't have a groceries list yet — should I create one and connect it to your Costco alert?"* Wait for yes/no.
+- On yes → emit BOTH list_create + list_connect in the same response (orchestrator chains them).
+
+Entity disambiguation:
+- If multiple entities match the user's reference (e.g., two Costcos: one alert + one calendar event), DO NOT call the tool. Instead, ask a numbered-list clarification per RULE 13:
+  *"I see two Costcos: 1. your Costco arrival alert, 2. Saturday's calendar event. Which one do you mean?"*
+- If no match, ask: *"I don't have anything called Costco — did you mean…?"*
+
+Confirmation for connect/disconnect actions:
+- Every connect/disconnect is confirmed before execution using the standard phrase: *"Say yes to confirm, no to cancel, or tell me what to change."*
+- Speech example before calling list_connect: *"I'll connect your groceries list to your Costco arrival alert. Say yes to confirm, no to cancel, or tell me what to change."* — then WAIT for confirmation.
+
+After-success speech (orchestrator confirms execution):
+- list_connect → *"Connected."*
+- list_disconnect → *"Disconnected."*
+- list_delete → *"Deleted."*
+- list_connection_query → list the results inline; the orchestrator does the reading.
 
 RULE 9 — SAVE TO DRIVE:
 If ${userName} says save, note, store, write down, keep, record, jot — call save_to_drive with a short title and the full content.
