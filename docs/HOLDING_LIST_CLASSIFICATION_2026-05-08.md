@@ -39,7 +39,6 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 | B1d | Pre-search "Nothing matched" gag overrides server-side live-overlay | mobile | After app reopen, the first email question answers correctly but a similar follow-up answers *"I don't have an email"* even when the email exists. Server-side fixes shipped 2026-05-10: search now finds naturally-phrased queries; recent-emails window covers up to 30 emails over 24 h; a TRUTH AT USER LAYER prompt rule makes Naavi answer the source the user named; deleted/trashed emails are excluded. Mobile-side soft-gag wording change is in `main` — queued for next AAB to fully close. | AAB |
 | B2a | Voice promises to schedule medication but doesn't create the events | voice | Voice says *"I'll set up your aspirin schedule"* but nothing lands in Google Calendar. Mobile already does this correctly. Server-side fix copies the mobile path. While there, verify voice memory-deletion (*"forget about X"*) matches mobile. | Server |
 | B2e | Naavi misses recent emails (1+ hours old) until the hourly sync runs | both | Naavi missed emails between 1 hour old and the next hourly sync. Shipped 2026-05-09 (window widened to 24 h on both surfaces) + 2026-05-10 (capacity raised from 10 to 30 emails on both surfaces). Effectively closed; move to Closed at next session. | Server |
-| B3a | User hears two voices on mobile: Naavi's voice + the phone's built-in voice | both | On long replies, the user hears Naavi's cloud voice mid-sentence and the phone's built-in voice on other parts. The fallback to the phone voice is intentional (so a reply is never silent) but fires too often. Real fix: make the cloud voice reliable enough that fallback rarely fires. Server-side diagnosis pending. Phone-call fragmentation reported separately uses a different audio path and may be a distinct phenomenon. | Server |
 | B3d | Verified-address rejection doesn't name the address | both | When Naavi rejects an unverified destination, she says *"I can't confirm that address"* without naming the address. Add the destination to the rejection on both surfaces (e.g., *"I can't confirm '<destination>' for your meeting today"*). Mobile change requires AAB; voice prompt is server-only. | Both |
 | B3e | Two blog articles still on age framing (banned-terms violation) | website | Two blog articles still use age framing (banned per 2026-05-05). Three options: delete both; rewrite in time-scarcity tone; or rewrite cards only and delete posts (avoid — broken links). Pick before next content session. Mynaavi-website repo only. | Server |
 
@@ -98,6 +97,7 @@ Items walked but not added to any table. Reopen if symptom recurs.
 | F2c | Walkie-talkie style turn-taking on voice — explicit end-of-message signal | **Closed 2026-05-10 — decided not to implement.** Marker-word ambiguity remained unresolved (*"over"* appears in everyday speech; alternatives like *"go ahead"* / sentence-ending *"Naavi"* each had their own issues). Today's voice-call latency work (Polly gate prompt, pre-fetch on call connect, Haiku for brief, Twilio AMD removal) brought the answer-to-brief gap from ~13s to ~6s — the turn-boundary pain F2c targeted is less acute now. Existing silence-detection improvements (echo cancellation, smarter timing) remain the right ongoing path. Reopen only if a concrete marker-word design plus a real recurring turn-boundary symptom both surface. |
 | B3c | Haptic vibration feels too subtle on Samsung long-press | **Parked 2026-05-10 — duration bump did NOT solve the bug.** Build 166 shipped `Vibration.vibrate(80)` → `Vibration.vibrate(150)`. On Wael's Samsung One UI / Android 14 device: long-press triggers the recording UI (function fires correctly) but produces NO perceptible buzz — both `Vibration.vibrate` and `Haptics.impactAsync(Heavy)` silently fail despite OS-level vibration intensity ~80% and all System vibration toggles ON. Suggests an Android 14 / Samsung-specific API issue, not a code-logic issue. Reopen with a new approach (vibration pattern instead of single shot, runtime VIBRATE permission re-check, or a different library like `react-native-haptic-feedback`) when haptic UX becomes a priority again. |
 | B3b | Cosmetic ruler leak on long-wrap user bubbles | **Parked 2026-05-10 — cosmetic, low priority.** Build 166 shipped the one-line fix (`color: 'transparent'` → `opacity: 0` on the chat-bubble ruler style). Not retested by Wael (haptic distraction took precedence). The fix is shipped and ready to verify in a future session; until then it's parked because it's a cosmetic-only issue (faint dots behind a long user bubble on Samsung) with no functional impact. Reopen if the dots are visibly annoying when next viewed on a long bubble. |
+| B3a | User hears two voices on mobile: Naavi's voice + the phone's built-in voice | **Parked 2026-05-10 — Path 1 only partially solved the bug.** Build 166 shipped Path 1 (`staysActiveInBackground: true` + `FOREGROUND_SERVICE_MEDIA_PLAYBACK` permission). Wael's test result: background-during-reply keeps the cloud voice cleanly (Path 1 working), but resume-to-foreground mid-reply still triggers fallback to phone's native voice (Path 1 doesn't cover the resume case). Path 2 (custom Expo plugin declaring an Android foreground service for media playback) is the next step but parked until cloud-voice consistency becomes a recurring complaint. Reopen with Path 2 when the foreground-resume audio fragmentation becomes annoying. |
 
 ---
 
@@ -113,19 +113,19 @@ Items not in the original 26-item holding list but addressed during the session:
 
 | List | Count | IDs |
 |---|---|---|
-| Bugs (B) | 7 | B1b, B1d, B2a, B2e, B3a, B3d, B3e |
+| Bugs (B) | 6 | B1b, B1d, B2a, B2e, B3d, B3e |
 | Features (F) | 5 | F1a, F1d, F2a, F2b, F3a |
 | Tooling (T) | 3 | T1a, T2a, T2b |
 | Ideas (I) | 3 | I2a, I2b, I3a |
-| Closed without entry | 13 | Items 4, 12, 14, B1a, B1c, B2b, B2c, B2d, F1b, F1c, F2c, B3c, B3b |
+| Closed without entry | 14 | Items 4, 12, 14, B1a, B1c, B2b, B2c, B2d, F1b, F1c, F2c, B3c, B3b, B3a |
 | **Total** | **31** | (26 holding-list + 1 missed item B1c added 2026-05-08 + 1 new feature F2c added 2026-05-08 — closed 2026-05-10 + 1 new feature F1d added 2026-05-09 superseding F1c + 1 new bug B2e added 2026-05-09 + 1 new bug B1d added 2026-05-10) |
 
 ### Tally by Server/AAB
 
 | Scope | Count | Implication |
 |---|---|---|
-| Server-only | 9 | Ship without AAB cycle |
-| AAB-only | 3 | Mobile build required (B1b, B1d) — bundle into next AAB |
+| Server-only | 8 | Ship without AAB cycle |
+| AAB-only | 2 | Mobile build required (B1b, B1d already shipped in build 166 — verified) — bundle into next AAB |
 | Both | 6 | Cross-surface coordination |
 
 ### Tally by Surface (cross-surface drift discipline)
@@ -134,7 +134,7 @@ Items not in the original 26-item holding list but addressed during the session:
 |---|---|---|
 | voice | 2 | B2a, F2b |
 | mobile | 5 | B1b, B1d, F1a, F2a, T2a |
-| both | 6 | B2e, B3a, B3d, F1d, F3a, T1a |
+| both | 5 | B2e, B3d, F1d, F3a, T1a |
 | backend | 4 | T2b, I2a, I2b, I3a |
 | website | 1 | B3e |
 
@@ -145,11 +145,11 @@ Items tagged `both` are the ones where Voice Completion Roadmap discipline matte
 | Severity | B | F | T | I | Total |
 |---|---|---|---|---|---|
 | 1 (top) | 2 | 2 | 1 | 0 | 5 |
-| 2 (medium) | 2 | 2 | 2 | 2 | 8 |
+| 2 (medium) | 1 | 2 | 2 | 2 | 7 |
 | 3 (low) | 3 | 1 | 0 | 1 | 5 |
-| **Total** | 7 | 5 | 3 | 3 | **18** |
+| **Total** | 6 | 5 | 3 | 3 | **17** |
 
-(Total active = 18. Add 13 closed-without-entry to reach the 31-item total.)
+(Total active = 17. Add 14 closed-without-entry to reach the 31-item total.)
 
 ---
 
