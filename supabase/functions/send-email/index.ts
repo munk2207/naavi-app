@@ -71,15 +71,8 @@ function buildPlainEmail(to: string, subject: string, body: string): string {
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401, headers: corsHeaders,
-    });
-  }
-
   const body = await req.json();
-  const { to, toName, subject, body: emailBody } = body;
+  const { to, toName, subject, body: emailBody, user_id: bodyUserId } = body;
 
   if (!to || !emailBody) {
     return new Response(JSON.stringify({ error: 'Missing to or body' }), {
@@ -87,34 +80,43 @@ serve(async (req) => {
     });
   }
 
-  // Identify the calling user from their JWT
-  const userClient = createClient(
+  // CLAUDE.md Rule 4 user-id resolution chain (Wael 2026-05-11):
+  //   1) JWT auth (mobile app path)
+  //   2) Body user_id (voice server / server-side / F1d SMS-the-rest path)
+  //   3) Reject — no anon-only fallback
+  const adminClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } }
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
-  const { data: { user }, error: userError } = await userClient.auth.getUser();
-  if (userError || !user) {
+  let userId: string | null = null;
+  const authHeader = req.headers.get('Authorization');
+  if (authHeader) {
+    const userClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+    const { data: { user }, error: userError } = await userClient.auth.getUser();
+    if (!userError && user?.id) userId = user.id;
+  }
+  if (!userId && typeof bodyUserId === 'string' && bodyUserId.length > 0) {
+    userId = bodyUserId;
+  }
+  if (!userId) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  // Use service role to bypass RLS and fetch the token directly by user_id
-  const adminClient = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  );
-
   const { data: tokenRow, error: tokenError } = await adminClient
     .from('user_tokens')
     .select('refresh_token')
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .eq('provider', 'google')
     .single();
 
   if (tokenError || !tokenRow?.refresh_token) {
-    console.error('[send-email] Token lookup failed for user:', user.id, tokenError?.message);
+    console.error('[send-email] Token lookup failed for user:', userId, tokenError?.message);
     return new Response(JSON.stringify({ error: 'No Google token found' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -154,7 +156,7 @@ serve(async (req) => {
     adminClient
       .from('sent_messages')
       .insert({
-        user_id: user.id,
+        user_id: userId,
         channel: 'email',
         to_name: toName ?? null,
         to_email: to,

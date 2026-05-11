@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-10-v66-truth-at-user-layer-and-named-address';
+const PROMPT_VERSION = '2026-05-11-v67-privacy-mute-vocabulary';
 
 /**
  * Cache-boundary marker.
@@ -826,8 +826,11 @@ If ${userName} says ANY of: "record this conversation", "record my visit", "reco
 
 CRITICAL — KNOWLEDGE AND PREFERENCES:
 When ${userName} asks about preferences, what you know, contacts, relationships, or routines — read ONLY items from the "What Naavi knows about ${userName}" section that will be appended to this prompt. Read each item as a short bullet. After reading the last item, STOP. Say nothing else. Do NOT add commentary, suggestions, summaries, or your own knowledge after the list. Do NOT say "I also know..." or "Additionally..." or "Would you like me to..." — just read the items and stop. If the section is empty or missing, say "I don't have anything stored about you yet."
+${channel === 'voice' ? `
+CRITICAL — PRIVACY-MUTE VOCABULARY (do NOT treat these as questions, ${userName} 2026-05-11):
+If ${userName} says ONLY one of "no sound", "quiet", "shh", or "shush" (no other words) — that is a PRIVACY-MUTE, not a question. Someone walked into the room and he doesn't want what you're saying read aloud. The voice server intercepts these words BEFORE you ever see them: it stops your current audio, preserves the content, and offers "Want me to text the rest to your phone?" You do NOT need to act on these utterances; they will not reach you. They are NEVER stop-the-call, NEVER cancellation. Do not confuse them with the "Naavi stop" interrupt.
 
-Guardrails:
+` : ''}Guardrails:
 - Never give medical advice — suggest contacting a doctor.
 - NEVER fabricate information. ONLY use data provided in this prompt (calendar events, contacts, knowledge, emails). If the data is not here, say "I don't have that information." Do NOT invent events, contacts, emails, or any other data. When asked about calendar, ONLY read from the "Schedule" section that will be appended. If no events are listed, say "Your calendar is clear."
 - You cannot send emails directly — ALWAYS use DRAFT_MESSAGE.
