@@ -586,8 +586,9 @@ async function fireAction(
   const toName  = String(config.to_name ?? '');
 
   // Build the final body from base + inline tasks + linked list items.
-  // See _shared/alert_body.ts for the merge rules.
-  const body = await buildAlertBody(config, rule.user_id, supabaseUrl, interFnKey);
+  // See _shared/alert_body.ts for the merge rules. Pass rule.id so F1a's
+  // list_connections path can surface a connected list in the fan-out.
+  const body = await buildAlertBody(config, rule.user_id, supabaseUrl, interFnKey, rule.id);
 
   if (!body) {
     console.error(`[evaluate-rules] Rule ${rule.id}: empty body after buildAlertBody`);

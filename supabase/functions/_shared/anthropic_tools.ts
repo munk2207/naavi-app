@@ -530,7 +530,83 @@ export const NAAVI_TOOLS: NaaviTool[] = [
     },
   },
 
-  // 16. SAVE_TO_DRIVE
+  // 16-19. F1a — Lists wired to events (Wael 2026-05-11). Tools for the
+  // connection-CRUD layer on top of the existing list_create/add/remove/read.
+  // The orchestrator translates these tool calls into manage-list-connections
+  // Edge Function POSTs. Spec: docs/F1A_LISTS_AND_CONNECTIONS_SPEC.md.
+  {
+    name: 'list_connect',
+    description:
+      'Wire a list to an entity (alert, calendar event, email, contact, document, reminder, sent message, knowledge fragment, or other list). Each entity can have at MOST one list at a time — calling this on an entity that already has a list REPLACES the prior connection. Use when the user says "connect/attach/wire/link/use/put/hook/tie/add my X list to my Y."',
+    input_schema: {
+      type: 'object',
+      properties: {
+        listName: { type: 'string', description: 'The list name as the user refers to it (e.g., "groceries", "errands").' },
+        entityRef: { type: 'string', description: 'The user\'s natural-language reference to the entity (e.g., "Costco alert", "Tuesday meeting", "Bob\'s email"). Orchestrator resolves it.' },
+        entityType: {
+          type: 'string',
+          enum: ['action_rule', 'calendar_event', 'gmail_message', 'contact', 'document', 'reminder', 'sent_message', 'knowledge_fragment', 'list'],
+          description: 'Optional explicit type if the user named it (e.g., "my Costco ALERT" → action_rule). Narrows entity resolution.',
+        },
+      },
+      required: ['listName', 'entityRef'],
+      additionalProperties: false,
+    },
+  },
+
+  {
+    name: 'list_disconnect',
+    description:
+      'Remove the list connection from an entity. The list itself stays intact; only the wiring is severed. Use when the user says "disconnect/detach/unlink/unwire/take off/remove my X list from my Y."',
+    input_schema: {
+      type: 'object',
+      properties: {
+        entityRef: { type: 'string', description: 'The user\'s reference to the entity.' },
+        entityType: {
+          type: 'string',
+          enum: ['action_rule', 'calendar_event', 'gmail_message', 'contact', 'document', 'reminder', 'sent_message', 'knowledge_fragment', 'list'],
+        },
+      },
+      required: ['entityRef'],
+      additionalProperties: false,
+    },
+  },
+
+  {
+    name: 'list_connection_query',
+    description:
+      'Answer a connection question. Two modes: "where_is_list" answers "where is my X list connected?" / "which alerts use my X list?" — list every entity wired to a given list. "what_list_is_on" answers "what list is on my Y?" / "what\'s connected to my Y?" — return the single list (if any) wired to a given entity.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['where_is_list', 'what_list_is_on'] },
+        listName: { type: 'string', description: 'Required when mode=where_is_list.' },
+        entityRef: { type: 'string', description: 'Required when mode=what_list_is_on.' },
+        entityType: {
+          type: 'string',
+          enum: ['action_rule', 'calendar_event', 'gmail_message', 'contact', 'document', 'reminder', 'sent_message', 'knowledge_fragment', 'list'],
+        },
+      },
+      required: ['mode'],
+      additionalProperties: false,
+    },
+  },
+
+  {
+    name: 'list_delete',
+    description:
+      'Delete a list entirely. Per spec, the user is warned FIRST (in the assistant turn before this tool call) listing every entity the list is connected to. After explicit user confirmation, this tool call drops the list row and all its connections cascade. Use when the user says "delete/remove my X list" AND has confirmed after the warning.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        listName: { type: 'string' },
+      },
+      required: ['listName'],
+      additionalProperties: false,
+    },
+  },
+
+  // 20. SAVE_TO_DRIVE
   {
     name: 'save_to_drive',
     description: 'Save a text note to MyNaavi/Notes/. Do NOT use for "record this conversation" phrasings.',
@@ -673,6 +749,11 @@ export const TOOL_NAME_TO_ACTION_TYPE: Record<string, string> = {
   list_add: 'LIST_ADD',
   list_remove: 'LIST_REMOVE',
   list_read: 'LIST_READ',
+  // F1a (Wael 2026-05-11) — connection-CRUD on top of the list-item CRUD above.
+  list_connect: 'LIST_CONNECT',
+  list_disconnect: 'LIST_DISCONNECT',
+  list_connection_query: 'LIST_CONNECTION_QUERY',
+  list_delete: 'LIST_DELETE',
   save_to_drive: 'SAVE_TO_DRIVE',
   drive_search: 'DRIVE_SEARCH',
   global_search: 'GLOBAL_SEARCH',

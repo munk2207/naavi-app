@@ -76,6 +76,11 @@ export function classifyConfirmation(
 
 // ─── Summary builders ───────────────────────────────────────────────────────
 
+// Standardized confirmation phrase used across every confirmable action
+// (F1a spec — Wael 2026-05-11). Three options: confirm, cancel, edit.
+// Imported by callers that need to append the phrase to custom speech.
+export const CONFIRM_PHRASE = 'Say yes to confirm, no to cancel, or tell me what to change.';
+
 /**
  * Build a spoken summary for a pending action.
  * Used as a fallback if Claude's speech doesn't include a confirmation prompt.
@@ -87,22 +92,32 @@ export function buildActionSummary(action: NaaviAction): string {
       const channel = String(action.channel ?? 'email').toLowerCase();
       const subject = String(action.subject ?? '');
 
+      // F1a (Wael 2026-05-11) — standardized 3-option phrase across ALL
+      // confirmable actions. Voice spec: "Say yes to confirm, no to cancel,
+      // or tell me what to change." Replaces the older 2-option phrasing
+      // ("Say yes to send, or tell me what to change") for consistency
+      // across DRAFT_MESSAGE, list ops, and any future confirmable action.
       if (channel === 'email') {
         return subject
-          ? `I've drafted an email to ${to} about ${subject}. Say yes to send, or tell me what to change.`
-          : `I've drafted an email to ${to}. Say yes to send, or tell me what to change.`;
+          ? `I've drafted an email to ${to} about ${subject}. ${CONFIRM_PHRASE}`
+          : `I've drafted an email to ${to}. ${CONFIRM_PHRASE}`;
       }
       const label = channel === 'whatsapp' ? 'WhatsApp' : 'text message';
-      return `I've drafted a ${label} to ${to}. Say yes to send, or tell me what to change.`;
+      return `I've drafted a ${label} to ${to}. ${CONFIRM_PHRASE}`;
     }
 
     // Phase B+ — add cases here:
     // case 'CREATE_EVENT': { ... }
     // case 'REMEMBER': { ... }
     // case 'DELETE_EVENT': { ... }
+    // case 'LIST_CONNECT' / 'LIST_DISCONNECT' / 'LIST_DELETE' — F1a tools
+    //   are handled prompt-side: get-naavi-prompt RULE 8b instructs Claude
+    //   to emit the confirmation speech directly inline, so summary
+    //   fallback here is rarely hit. The default branch returns the
+    //   standard phrase as the safety net.
 
     default:
-      return 'Should I go ahead? Say yes or no.';
+      return `Should I go ahead? ${CONFIRM_PHRASE}`;
   }
 }
 
