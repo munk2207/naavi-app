@@ -1101,6 +1101,18 @@ export default function HomeScreen() {
   // senior user — they don't have to keep their finger down while
   // composing what to say. Wael 2026-05-05.
   const onChatLongPress = useCallback(() => {
+    // F1d (Wael 2026-05-11): if Naavi is currently speaking, long-press
+    // acts as a MUTE — silence the audio without clearing the chat bubble.
+    // The bubble remains visible so the user can read what was being said.
+    // Mobile half of F1d doesn't include the SMS-the-rest offer (that's
+    // phone-call-only per the spec) — the on-screen bubble already shows
+    // the text. The two gestures (mute when speaking, talk-entry when
+    // idle) are mutually exclusive, so the same long-press serves both
+    // without ambiguity.
+    if (isAudioPlaying) {
+      stopSpeaking();
+      return;
+    }
     if (isInputLocked(status)) return;
     if (memoState !== 'idle') return;
     // V57.11.7 — switch to RN Vibration API. expo-haptics' Heavy impact
@@ -1115,7 +1127,7 @@ export default function HomeScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
     memoStartedAtRef.current = Date.now();
     startRecording();
-  }, [status, memoState, startRecording]);
+  }, [status, memoState, startRecording, isAudioPlaying, stopSpeaking]);
 
   const { startLive, stopLive, clearSegments: clearLive } = useLiveTranscript();
 
