@@ -42,6 +42,7 @@ import { gmailFreshnessTests } from './catalogue/gmail-freshness';
 import { truthAtUserLayerTests } from './catalogue/truth-at-user-layer';
 import { sourceIntentTests } from './catalogue/source-intent';
 import { briefUnreadTests } from './catalogue/brief-unread';
+import { hostedRepliesTests } from './catalogue/hosted-replies';
 
 // ────────────────────────────────────────────────────────────────────────────
 // .env loader (avoids adding dotenv as a dependency).
@@ -105,6 +106,7 @@ const ALL_TESTS: TestCase[] = [
   ...truthAtUserLayerTests,
   ...sourceIntentTests,
   ...briefUnreadTests,
+  ...hostedRepliesTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
