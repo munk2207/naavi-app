@@ -279,6 +279,7 @@ Canonical list of pending work, organized by what's blocking each. Mirror in `do
 20. Verified-address rejection — name the address ("I can't confirm '<destination>' for your meeting today")
 21. Voice privacy UX (4-piece feature, not started)
 22. Blog age reframe (2 articles still on age framing)
+23. **In-app Battery Optimization prompt** — at first location-alert creation, detect `PowerManager.isIgnoringBatteryOptimizations`, show in-app dialog, fire `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` intent. Removes the 6-step manual Settings dance. Wael 2026-05-11 — manual fix done on his phone today; needed for every future user. Design in `project_naavi_battery_opt_inapp_prompt.md`.
 
 **Deferred by design (open questions before code):**
 23. `list_change` trigger (7 design questions — see `project_naavi_list_change_trigger_deferred.md`)
