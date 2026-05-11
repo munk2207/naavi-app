@@ -253,7 +253,7 @@ Roadmap source: `docs/VOICE_COMPLETION_ROADMAP_2026-05-04.docx` (original 6-sess
 Canonical list of pending work, organized by what's blocking each. Mirror in `docs/SESSION_HANDOFF_2026-05-07_V57.13.7_BUILD_165.md`. Add to / remove from this list as work moves.
 
 **Blocked on external approvals:**
-1. Picovoice Eagle (voice biometric) — waiting on account approval
+1. Picovoice Eagle (voice biometric) — application sat ">1 week in review" with no acknowledgement. **Plan B (2026-05-11):** Hugging Face Inference API on `microsoft/wavlm-base-plus-sv` (same Microsoft model lineage as the retired Azure Speaker Recognition — confirmed retired late-2025/early-2026 via doc redirect). HF has no approval queue; ~$0.001-0.01/call. Memory: `project_naavi_voice_biometric_huggingface_pivot.md`.
 2. AWS Polly (voice unification mobile→Polly Joanna) — needs AWS account setup
 3. Maestro full-suite — needs emulator Internal Testing install
 4. ~~Geofence reliability — pending phone reboot~~ — **CLOSED 2026-05-11.** Shipped server-side dwell timer (default 120 s) + 500 m default radius + Battery Optimization OFF for Naavi on Wael's phone. Memory: `project_naavi_geofence_dwell_shipped.md`. Commit: bea76e2.
@@ -279,7 +279,7 @@ Canonical list of pending work, organized by what's blocking each. Mirror in `do
 20. Verified-address rejection — name the address ("I can't confirm '<destination>' for your meeting today")
 21. Voice privacy UX (4-piece feature, not started)
 22. Blog age reframe (2 articles still on age framing)
-23. **In-app Battery Optimization prompt** — at first location-alert creation, detect `PowerManager.isIgnoringBatteryOptimizations`, show in-app dialog, fire `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` intent. Removes the 6-step manual Settings dance. Wael 2026-05-11 — manual fix done on his phone today; needed for every future user. Design in `project_naavi_battery_opt_inapp_prompt.md`.
+23. ~~In-app Battery Optimization prompt~~ — **CLOSED 2026-05-11.** Shipped V57.14.2 build 168 (commit ccf53f8). Modal on app launch when user has location rules and terminal flag is false; Q1=2 / Q2=2 / Q3=1 design honored. Tested green on Wael's phone same day. Memory: `project_naavi_battery_opt_inapp_prompt.md`.
 
 **Deferred by design (open questions before code):**
 23. `list_change` trigger (7 design questions — see `project_naavi_list_change_trigger_deferred.md`)
