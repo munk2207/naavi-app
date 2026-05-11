@@ -256,7 +256,7 @@ Canonical list of pending work, organized by what's blocking each. Mirror in `do
 1. Picovoice Eagle (voice biometric) — waiting on account approval
 2. AWS Polly (voice unification mobile→Polly Joanna) — needs AWS account setup
 3. Maestro full-suite — needs emulator Internal Testing install
-4. Geofence reliability — pending phone reboot
+4. ~~Geofence reliability — pending phone reboot~~ — **CLOSED 2026-05-11.** Shipped server-side dwell timer (default 120 s) + 500 m default radius + Battery Optimization OFF for Naavi on Wael's phone. Memory: `project_naavi_geofence_dwell_shipped.md`. Commit: bea76e2.
 
 **Server-side queue (no AAB needed):**
 5. Voice live-calendar fetch (mobile shipped V57.11.6, voice still on stale snapshot)
