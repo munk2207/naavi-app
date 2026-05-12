@@ -143,13 +143,42 @@ interface ResolvedRegion {
 // being parked by Doze. Wael's Costco-arrival miss 2026-05-11 was the
 // canonical failure this fixes.
 
-TaskManager.defineTask(FOREGROUND_LOCATION_TASK, ({ error }: any) => {
+TaskManager.defineTask(FOREGROUND_LOCATION_TASK, ({ data, error }: any) => {
+  // V57.14.4 — Heartbeat log. Was a no-op (V57.14.3). Without this we couldn't
+  // tell whether Samsung was killing the FG service after the app backgrounded
+  // vs Android failing to deliver geofence events to a live process. The
+  // `geofence-T1-task-fired` step records geofence transitions; this records
+  // the FG service liveness independently. If `fg-location-tick` rows are
+  // present in the diagnostic window of an expected geofence event but no
+  // `geofence-T1-task-fired` rows are, the FG service was alive but the OS
+  // didn't deliver the geofence — directs the next fix to a different
+  // mechanism instead of manual polling on dead infrastructure.
   if (error) {
     console.error('[fg-location-task] error:', error);
+    try {
+      remoteLog(newDiagSession(), 'fg-location-tick-error', {
+        error: (error?.message ?? String(error)).slice(0, 200),
+      });
+    } catch { /* never let logging affect the service */ }
     return;
   }
-  // Intentionally a no-op. Receiving updates is the side-effect that keeps
-  // the FG service alive; we discard the data.
+  try {
+    const locs = data?.locations;
+    if (Array.isArray(locs) && locs.length > 0) {
+      const last = locs[locs.length - 1];
+      remoteLog(newDiagSession(), 'fg-location-tick', {
+        n: locs.length,
+        lat: last?.coords?.latitude,
+        lng: last?.coords?.longitude,
+        accuracy: last?.coords?.accuracy,
+        ts: last?.timestamp,
+      });
+    } else {
+      remoteLog(newDiagSession(), 'fg-location-tick-empty', {});
+    }
+  } catch (err) {
+    console.error('[fg-location-task] heartbeat log failed:', err);
+  }
 });
 
 async function startForegroundLocationService(): Promise<void> {
