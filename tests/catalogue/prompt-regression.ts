@@ -238,4 +238,151 @@ export const promptRegressionTests: TestCase[] = [
       expectTruthy(action, 'REMEMBER action');
     },
   },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // F1a Session 2 — LIST_CONNECT / LIST_DISCONNECT / LIST_CONNECTION_QUERY
+  // / LIST_DELETE prompt regressions (prompt v68 RULE 8b).
+  // Spec: docs/F1A_LISTS_AND_CONNECTIONS_SPEC.md.
+  //
+  // Locks in:
+  //   - Connect phrasings emit LIST_CONNECT with listName + entityRef + entityType
+  //   - "Add my X list to Y" disambiguates as LIST_CONNECT, not LIST_ADD
+  //   - Disconnect phrasings emit LIST_DISCONNECT
+  //   - "Remove eggs from groceries" stays as LIST_REMOVE (item op, not
+  //     connection op) — disambiguation regression baseline
+  //   - "Where is my X list" emits LIST_CONNECTION_QUERY mode=where_is_list
+  //   - "What list is on my Y" emits LIST_CONNECTION_QUERY mode=what_list_is_on
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'prompt-regression.list-connect-basic',
+    category: 'prompt-regression',
+    description: 'F1a — "Connect my groceries list to my Costco alert" → LIST_CONNECT with listName=groceries entityRef containing Costco entityType=action_rule',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'Connect my groceries list to my Costco alert' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
+
+      const action = findActionInRawText(data?.rawText ?? '', 'LIST_CONNECT');
+      expectTruthy(action, 'LIST_CONNECT action');
+      expectTruthy(/groceries/i.test(String(action.listName ?? '')),
+        `expected listName containing "groceries", got: ${JSON.stringify(action.listName)}`);
+      expectTruthy(/costco/i.test(String(action.entityRef ?? '')),
+        `expected entityRef containing "Costco", got: ${JSON.stringify(action.entityRef)}`);
+      expectTruthy(/action_rule/i.test(String(action.entityType ?? '')),
+        `expected entityType=action_rule, got: ${JSON.stringify(action.entityType)}`);
+    },
+  },
+
+  {
+    id: 'prompt-regression.list-connect-add-variant',
+    category: 'prompt-regression',
+    description: 'F1a — "Add my errands list to my Costco alert" must emit LIST_CONNECT (not LIST_ADD — "list to entity" pattern disambiguates from item-add)',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'Add my errands list to my Costco alert' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
+
+      // Must emit LIST_CONNECT (the connection), not LIST_ADD (an item add).
+      const connectAction = findActionInRawText(data?.rawText ?? '', 'LIST_CONNECT');
+      const addAction     = findActionInRawText(data?.rawText ?? '', 'LIST_ADD');
+      expectTruthy(connectAction, 'LIST_CONNECT action — "add my X list to Y" is a connection');
+      if (addAction) {
+        throw new Error('LIST_ADD also emitted — disambiguation failed; should be LIST_CONNECT only');
+      }
+    },
+  },
+
+  {
+    id: 'prompt-regression.list-disconnect-basic',
+    category: 'prompt-regression',
+    description: 'F1a — "Disconnect my groceries list from my Costco alert" → LIST_DISCONNECT',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'Disconnect my groceries list from my Costco alert' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
+
+      const action = findActionInRawText(data?.rawText ?? '', 'LIST_DISCONNECT');
+      expectTruthy(action, 'LIST_DISCONNECT action');
+      expectTruthy(/costco/i.test(String(action.entityRef ?? '')),
+        `expected entityRef containing "Costco", got: ${JSON.stringify(action.entityRef)}`);
+    },
+  },
+
+  {
+    id: 'prompt-regression.list-remove-item-not-disconnect',
+    category: 'prompt-regression',
+    description: 'F1a disambiguation — "remove eggs from my groceries list" must emit LIST_REMOVE (item op), NOT LIST_DISCONNECT (connection op)',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'remove eggs from my groceries list' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
+
+      const removeAction     = findActionInRawText(data?.rawText ?? '', 'LIST_REMOVE');
+      const disconnectAction = findActionInRawText(data?.rawText ?? '', 'LIST_DISCONNECT');
+      expectTruthy(removeAction, 'LIST_REMOVE action — item op');
+      if (disconnectAction) {
+        throw new Error('LIST_DISCONNECT also emitted — should be LIST_REMOVE only (item op, not connection op)');
+      }
+    },
+  },
+
+  {
+    id: 'prompt-regression.list-connection-query-where',
+    category: 'prompt-regression',
+    description: 'F1a — "Where is my groceries list connected?" → LIST_CONNECTION_QUERY mode=where_is_list',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'Where is my groceries list connected?' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
+
+      const action = findActionInRawText(data?.rawText ?? '', 'LIST_CONNECTION_QUERY');
+      expectTruthy(action, 'LIST_CONNECTION_QUERY action');
+      expectTruthy(String(action.mode ?? '').toLowerCase() === 'where_is_list',
+        `expected mode=where_is_list, got: ${JSON.stringify(action.mode)}`);
+      expectTruthy(/groceries/i.test(String(action.listName ?? '')),
+        `expected listName containing "groceries", got: ${JSON.stringify(action.listName)}`);
+    },
+  },
+
+  {
+    id: 'prompt-regression.list-connection-query-what',
+    category: 'prompt-regression',
+    description: 'F1a — "What list is on my Costco alert?" → LIST_CONNECTION_QUERY mode=what_list_is_on',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'What list is on my Costco alert?' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
+
+      const action = findActionInRawText(data?.rawText ?? '', 'LIST_CONNECTION_QUERY');
+      expectTruthy(action, 'LIST_CONNECTION_QUERY action');
+      expectTruthy(String(action.mode ?? '').toLowerCase() === 'what_list_is_on',
+        `expected mode=what_list_is_on, got: ${JSON.stringify(action.mode)}`);
+      expectTruthy(/costco/i.test(String(action.entityRef ?? '')),
+        `expected entityRef containing "Costco", got: ${JSON.stringify(action.entityRef)}`);
+    },
+  },
 ];
