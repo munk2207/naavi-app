@@ -295,7 +295,11 @@ async function resolveActionRule(
     const labelStem = stem(label);
     const placeStem = stem(place);
     let score = 0;
-    if (label === refLc || place === refLc || labelStem === refStem || placeStem === refStem) score = 1.0;
+    // Exact match strictly beats stem-equal match so "grocery" doesn't tie
+    // with "groceries" — caller treats top-tied scores as ambiguous, so this
+    // separation matters for picking a single winner when both exist.
+    if (label === refLc || place === refLc) score = 1.0;
+    else if (labelStem === refStem || placeStem === refStem) score = 0.9;
     else if (label.includes(refLc) || place.includes(refLc) ||
              label.includes(refStem) || place.includes(refStem)) score = 0.7;
     else if (refTokens.length > 0) {
@@ -342,7 +346,8 @@ async function resolveList(
     const name     = String(r.name ?? '').toLowerCase();
     const nameStem = stem(name);
     let score = 0;
-    if (name === refLc || nameStem === refStem) score = 1.0;
+    if (name === refLc) score = 1.0;
+    else if (nameStem === refStem) score = 0.9;
     else if (name.includes(refLc) || name.includes(refStem)) score = 0.7;
     else if (refTokens.length > 0) {
       const matched = refTokens.filter(t => name.includes(t));
@@ -393,8 +398,11 @@ async function resolveGmailMessage(
     const sndrEmail = String(r.sender_email  ?? '').toLowerCase();
     const sndrName  = String(r.sender_name   ?? '').toLowerCase();
     const snip      = String(r.snippet       ?? '').toLowerCase();
+    const subjStem = stem(subj);
+    const sndrNameStem = stem(sndrName);
     let score = 0;
     if (subj === refLc || sndrEmail === refLc || sndrName === refLc) score = 1.0;
+    else if (subjStem === refStem || sndrNameStem === refStem) score = 0.9;
     else if (subj.includes(refLc) || sndrEmail.includes(refLc) || sndrName.includes(refLc) ||
              subj.includes(refStem) || sndrName.includes(refStem)) score = 0.7;
     else if (snip.includes(refLc)) score = 0.4;
