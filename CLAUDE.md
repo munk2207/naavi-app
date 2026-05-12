@@ -220,29 +220,24 @@ If in doubt, ASK before creating parallel config.
 
 ### WHERE TO START
 
-**Most recent handoff:** `docs/SESSION_HANDOFF_2026-05-07_V57.13.7_BUILD_165.md` — **READ THIS FIRST**. Session 2026-05-07 shipped V57.13 series (159 → 165). Two structural wins: (1) **No-cache architecture** (V57.13.3) — `user_places` cache dropped entirely; `resolve-place` v5 hits Google fresh every time; `action_rules` absorbs "saved places" via partial UNIQUE on rounded coords. ~806 net lines deleted. (2) **Bubble truncation fix** (V57.13.7) — option #3 two-layer overlay (ruler Text + absolute-positioned user content) lands user content correctly on Samsung One UI after six prior layout attempts failed. Cosmetic ruler-leak deferred to next AAB. Auto-tester: **55/0/0/0 pre-build**. Demo line productized: `1-888-91-NAAVI` runs 5 cross-domain scenarios + name capture + personalized SMS from `+14313006228` + `mynaavi.com/start` landing page. Prior handoff (V57.12.6 build 158 sweep): `docs/SESSION_HANDOFF_2026-05-07_V57.12.6_BUILD_158.md`.
+**Most recent handoff:** `docs/SESSION_HANDOFF_2026-05-11_V57.14.3_BUILD_169.md` — **READ THIS FIRST**. Session 2026-05-11 shipped: (1) **F1d** end-to-end (voice privacy mute → SMS-the-rest with `mynaavi.com/r/<token>` web page) — primary flow verified, 3 edge-case tests open. (2) **F1a Session 1 (server foundation)** — `list_connections` table + Edge Function + Anthropic tools + prompt v68. NOT user-facing until Session 2 wires orchestrators + mobile UI. (3) **Geofence reliability attempts** — server dwell + 500m radius + Battery Opt + FG service + persistent registry. Despite all this, two real-world tests (Costco morning + 1026 Terranova afternoon, 5+ min stop, V57.14.3) BOTH failed — Android's `GeofencingClient` did not deliver ENTER events even with every Naavi-side prerequisite correct. Decision parked: NEXT SESSION switches to manual location-polling geofencing instead of Android-native API. Prior handoff: `docs/SESSION_HANDOFF_2026-05-07_V57.13.7_BUILD_165.md` (V57.13 series).
 
-**Top of next session — TOP PRIORITY (Wael 2026-05-07):**
+**Top of next session — PRIORITY ORDER (Wael 2026-05-11):**
 
-The Voice Completion Roadmap is the headline plan for the coming sessions. Goal: bring the phone (Twilio voice) surface to the same level of completeness as mobile so it becomes the daily driver, not the configuration surface. Updated 8-session structure (originally 6 in 2026-05-04 doc, expanded after V57.13 work):
+1. **Manual geofencing switch (V57.14.4)** — Android's native `GeofencingClient` did not deliver ENTER events in today's tests despite every Naavi-side prerequisite being correct (permissions ✓, Battery Opt Unrestricted ✓, FG service alive ✓, 12 regions registered ✓, coords correct ✓, 5+ min stop ✓, zero `geofence-T1-*` events). Decision: stop relying on the OS API. Build manual polling on the existing foreground location service — on each location update, compute distance to each enabled rule's center, track in-region state per rule in AsyncStorage, POST ENTER/EXIT to existing `report-location-event`. ~80-100 lines in `useGeofencing.ts`, AAB-required. **This is the gating issue for promoting any V57.x to Robert.**
 
-- **S1** Voice Quality Foundation (+ picker robustness + self-cleansing memory bullets) — server-only
-- **S2** Voice Action Parity (DELETE_EVENT, LIST_RULES, DELETE_MEMORY, SCHEDULE_MEDICATION) — server-only
-- **S3** Demo Line Maturity *(NEW)* — richer scenarios, conversion path back to a real account, telemetry — AAB
-- **S4** Voice Identity — Multi-Phone (`additional_phones[]`) — AAB *(was S3)*
-- **S5** Voice Identity — Biometric (Picovoice Eagle) — server-only — **blocked on Picovoice approval** *(was S4)*
-- **S6** Voice Unification — Polly Joanna (mobile→Polly so phone+app sound identical) — AAB — **blocked on AWS Polly setup** *(was S5)*
-- **S7** Voice Structured Outputs Migration *(NEW)* — voice still on JSON-in-prompt; mobile shipped V57.12; ~200 lines drift — server-only
-- **S8** Voice Polish + Final Verification — bundles address read-back / postal phonetics / suffix expansion / ordinals as one trust bar; voice call recording end-to-end; soft-tick audit; 30-min regression call *(was S6)*
+2. **F1a Session 2 — orchestrator wiring + mobile UI (V57.15.0)** — server foundation shipped today (commit `1ca1dee`); user-facing parts left: voice-server `executeAction` handlers + entity resolver for `LIST_CONNECT` / `LIST_DISCONNECT` / `LIST_CONNECTION_QUERY` / `LIST_DELETE`; mobile orchestrator handlers; new Lists screen in 3-dots menu; list-detail with connections; alert-detail connection card; voice-flow regression tests. AAB-required.
 
-Roadmap source: `docs/VOICE_COMPLETION_ROADMAP_2026-05-04.docx` (original 6-session) — superseded but kept for history. Updated 2026-05-07 docx to be drafted; until then, the 8-session list above is canonical.
+3. **F1d edge-case live tests** — Test 3 (recursive mute during offer) + Test 4 (30-sec timeout). Voice call only, no AAB.
 
-**Last AAB on Wael's phone:** V57.13.7 build 165, installed 2026-05-07.
-**Last AAB on Robert's phone:** V56.6 (build 115), installed 2026-04-28. **Do NOT promote V57.x to Robert until geofence reliability is proven on Wael's phone.**
+The previous Voice Completion Roadmap (S1–S8 from 2026-05-04 / 2026-05-07) remains the broader plan after the three items above land. Roadmap source: `docs/VOICE_COMPLETION_ROADMAP_2026-05-04.docx` (superseded but kept for history).
 
-**Auto-tester (latest):** 55 ✓ / 0 ✗ / 0 errored / 0 skipped. Run with `npm run test:auto`. Includes `tests/catalogue/prompt-regression.ts` (8 tests) and `tests/catalogue/data-integrity.ts` (3 action_rules dedup tests). Multi-user matrix in `tests/catalogue/multiuser.ts`.
+**Last AAB on Wael's phone:** V57.14.3 build 169, installed 2026-05-11 ~17:25 EDT. Foreground service notification visible; geofencing still unreliable (see priority #1).
+**Last AAB on Robert's phone:** V56.6 (build 115), installed 2026-04-28. **Do NOT promote V57.x to Robert until geofence reliability is proven on Wael's phone — the manual-polling switch is the gate.**
 
-**Current Claude prompt version:** `2026-05-07-v64-no-minimum-reminder-delay` (via `get-naavi-prompt` Edge Function).
+**Auto-tester (latest):** 85 ✓ / 0 ✗ / 0 errored / 0 skipped. Run with `npm run test:auto`. Includes `prompt-regression` (8), `truth-at-user-layer` (1, retry-on-flake), `list-connections` (7, new today), `hosted-replies` (5), `pending-dwell` (5), `data-integrity` (3), `source-intent` (5), `brief-unread` (2), `search-normalization` (4), `gmail-freshness` (1). Multi-user matrix in `tests/catalogue/multiuser.ts`. Retry-on-flake covers `chat`, `smoke`, `prompt-regression`, `truth-at-user-layer` (all Haiku-driven categories).
+
+**Current Claude prompt version:** `2026-05-11-v68-f1a-list-connections` (via `get-naavi-prompt` Edge Function). Today shipped v66 → v67 → v68 in sequence.
 
 **Prompt-regression test suite:** `tests/catalogue/prompt-regression.ts` locks in known-good Claude action emissions. **Future prompt edits MUST keep this suite green.** Don't add a prompt rule without a corresponding regression test — that's how the v57→v58→v59 cycle started.
 
@@ -256,7 +251,7 @@ Canonical list of pending work, organized by what's blocking each. Mirror in `do
 1. Picovoice Eagle (voice biometric) — application sat ">1 week in review" with no acknowledgement. **Plan B (2026-05-11):** Hugging Face Inference API on `microsoft/wavlm-base-plus-sv` (same Microsoft model lineage as the retired Azure Speaker Recognition — confirmed retired late-2025/early-2026 via doc redirect). HF has no approval queue; ~$0.001-0.01/call. Memory: `project_naavi_voice_biometric_huggingface_pivot.md`.
 2. AWS Polly (voice unification mobile→Polly Joanna) — needs AWS account setup
 3. Maestro full-suite — needs emulator Internal Testing install
-4. ~~Geofence reliability — pending phone reboot~~ — **CLOSED 2026-05-11.** Shipped server-side dwell timer (default 120 s) + 500 m default radius + Battery Optimization OFF for Naavi on Wael's phone. Memory: `project_naavi_geofence_dwell_shipped.md`. Commit: bea76e2.
+4. **Geofence reliability — RE-OPENED 2026-05-11.** First fix attempt (server dwell + 500m + Battery Opt) shipped but DID NOT resolve. Second fix (V57.14.3 build 169 foreground service + persistent registry) ALSO did not resolve — Costco morning + 1026 Terranova afternoon both failed: Android `GeofencingClient` delivered zero `geofence-T1-*` events despite every Naavi-side prerequisite being correct. **Next step:** switch to manual polling on the FG service's location updates (see "Top of next session" priority #1). Memory: `project_naavi_geofence_reliability_open.md` (to be written) + earlier `project_naavi_geofence_dwell_shipped.md` (server work).
 
 **Server-side queue (no AAB needed):**
 5. Voice live-calendar fetch (mobile shipped V57.11.6, voice still on stale snapshot)
@@ -269,23 +264,27 @@ Canonical list of pending work, organized by what's blocking each. Mirror in `do
 12. Spend summary Edge Function (approved 2026-04-30, not built — `naavi-spend-summary`)
 13. LIST_RULES synthesize-action backstop in orchestrator
 14. Demo line "remind me" time-extraction loop fix
+15. **F1d live tests 3 + 4** — Test 3 recursive mute during offer; Test 4 30-sec timeout silence. Voice call only. Code shipped, just need verification.
+16. **`resolve-place` default radius 100 → 500** + **address-vs-business routing fix** (use Google geocode API for queries that start with a number; textsearch for business names). Today's 1026/1200 test exposed both: new rules created via voice still default to 100m, and 1200 Terranova mis-resolved to the same coords as 1038 because textsearch fell back to a Terranova centroid.
 
 **AAB-required queue:**
-15. Multi-phone identity (`additional_phones[]` schema + Settings UI)
-16. Demo line maturity (richer scenarios + conversion path + telemetry)
-17. **Cosmetic ruler leak fix** (`color:'transparent'` → `opacity:0` on inline Text in `components/ConversationBubble.tsx`)
-18. Haptic VIBRATE permission + duration
-19. Mobile-side todo-list-per-alert (each alert has attached list; lazy-create on first add; cascade-delete on alert removal). **NOT implemented — design only.**
-20. Verified-address rejection — name the address ("I can't confirm '<destination>' for your meeting today")
-21. Voice privacy UX (4-piece feature, not started)
-22. Blog age reframe (2 articles still on age framing)
-23. ~~In-app Battery Optimization prompt~~ — **CLOSED 2026-05-11.** Shipped V57.14.2 build 168 (commit ccf53f8). Modal on app launch when user has location rules and terminal flag is false; Q1=2 / Q2=2 / Q3=1 design honored. Tested green on Wael's phone same day. Memory: `project_naavi_battery_opt_inapp_prompt.md`.
+17. **Manual geofencing switch (V57.14.4)** — TOP PRIORITY. Stop using Android's `GeofencingClient`. Use the FG service's location updates: compute distance per rule, track in-region state in AsyncStorage, fire ENTER/EXIT manually. ~80-100 lines in `useGeofencing.ts`. Gates Robert's V57.x promotion.
+18. **F1a Session 2 (V57.15.0)** — voice-server `executeAction` handlers + entity resolver for `LIST_CONNECT` / `LIST_DISCONNECT` / `LIST_CONNECTION_QUERY` / `LIST_DELETE`; mobile orchestrator handlers; new Lists screen in 3-dots menu; list-detail with connections; alert-detail connection card; voice-flow regression tests in `prompt-regression.ts`. ~1 focused session.
+19. Multi-phone identity (`additional_phones[]` schema + Settings UI)
+20. Demo line maturity (richer scenarios + conversion path + telemetry)
+21. **Cosmetic ruler leak fix** (`color:'transparent'` → `opacity:0` on inline Text in `components/ConversationBubble.tsx`)
+22. Haptic VIBRATE permission + duration
+23. ~~Mobile-side todo-list-per-alert~~ — **SUPERSEDED BY F1a** (item 18). F1a's list_connections IS the todo-list-per-alert pattern, generalised across all entity types.
+24. Verified-address rejection — name the address ("I can't confirm '<destination>' for your meeting today")
+25. Voice privacy UX (4-piece feature, not started)
+26. Blog age reframe (2 articles still on age framing)
+27. ~~In-app Battery Optimization prompt~~ — **CLOSED 2026-05-11.** Shipped V57.14.2 build 168 (commit ccf53f8). Memory: `project_naavi_battery_opt_inapp_prompt.md`.
 
 **Deferred by design (open questions before code):**
-23. `list_change` trigger (7 design questions — see `project_naavi_list_change_trigger_deferred.md`)
-24. Health trigger (Epic integration required)
-25. Price trigger (scraping complexity)
-26. Phase 2 demo data
+28. `list_change` trigger (7 design questions — see `project_naavi_list_change_trigger_deferred.md`)
+29. Health trigger (Epic integration required)
+30. Price trigger (scraping complexity)
+31. Phase 2 demo data
 
 Prior handoffs for context: `docs/SESSION_HANDOFF_2026-05-06_STRUCTURED_OUTPUTS_V57.12.md`, `docs/SESSION_HANDOFF_2026-05-06_FIX_AAB.md`, `docs/SESSION_HANDOFF_CONTINUOUS_FIX_V57.8.md`.
 
