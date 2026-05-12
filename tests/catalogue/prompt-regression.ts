@@ -256,7 +256,7 @@ export const promptRegressionTests: TestCase[] = [
   {
     id: 'prompt-regression.list-connect-basic',
     category: 'prompt-regression',
-    description: 'F1a — "Connect my groceries list to my Costco alert" → LIST_CONNECT with listName=groceries entityRef containing Costco entityType=action_rule',
+    description: 'F1a — "Connect my groceries list to my Costco alert" speaks the confirmation phrase first AND does NOT emit LIST_CONNECT on first turn (per spec — Claude waits for "yes" before firing)',
     timeoutMs: 30_000,
     async run(ctx) {
       const { status, data } = await adapters.naaviChat(ctx, {
@@ -266,21 +266,30 @@ export const promptRegressionTests: TestCase[] = [
       expect2xx(status, 'naavi-chat');
       ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
 
+      const speech = extractSpeech(data?.rawText ?? '');
+      // Claude must demonstrate it understood: speech mentions the action
+      // (attach/connect) AND the entities (groceries + costco).
+      expectTruthy(/attach|connect/i.test(speech),
+        `expected speech to mention attach/connect; got: "${speech.slice(0,200)}"`);
+      expectTruthy(/groceries/i.test(speech),
+        `expected speech to mention "groceries"; got: "${speech.slice(0,200)}"`);
+      expectTruthy(/costco/i.test(speech),
+        `expected speech to mention "Costco"; got: "${speech.slice(0,200)}"`);
+      // Standard 3-option confirmation phrase must be present.
+      expectTruthy(/say yes to confirm/i.test(speech),
+        `expected confirmation phrase; got: "${speech.slice(0,200)}"`);
+      // Per spec, NO list_connect action on first turn — Claude waits for "yes".
       const action = findActionInRawText(data?.rawText ?? '', 'LIST_CONNECT');
-      expectTruthy(action, 'LIST_CONNECT action');
-      expectTruthy(/groceries/i.test(String(action.listName ?? '')),
-        `expected listName containing "groceries", got: ${JSON.stringify(action.listName)}`);
-      expectTruthy(/costco/i.test(String(action.entityRef ?? '')),
-        `expected entityRef containing "Costco", got: ${JSON.stringify(action.entityRef)}`);
-      expectTruthy(/action_rule/i.test(String(action.entityType ?? '')),
-        `expected entityType=action_rule, got: ${JSON.stringify(action.entityType)}`);
+      if (action) {
+        throw new Error(`LIST_CONNECT must NOT be emitted on first turn — Claude must wait for user confirmation (got: ${JSON.stringify(action)})`);
+      }
     },
   },
 
   {
     id: 'prompt-regression.list-connect-add-variant',
     category: 'prompt-regression',
-    description: 'F1a — "Add my errands list to my Costco alert" must emit LIST_CONNECT (not LIST_ADD — "list to entity" pattern disambiguates from item-add)',
+    description: 'F1a — "Add my errands list to my Costco alert" must NOT emit LIST_ADD (item op). It either confirms a LIST_CONNECT or asks disambiguation when multiple Costco entities exist — both are spec-correct.',
     timeoutMs: 30_000,
     async run(ctx) {
       const { status, data } = await adapters.naaviChat(ctx, {
@@ -290,13 +299,17 @@ export const promptRegressionTests: TestCase[] = [
       expect2xx(status, 'naavi-chat');
       ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
 
-      // Must emit LIST_CONNECT (the connection), not LIST_ADD (an item add).
-      const connectAction = findActionInRawText(data?.rawText ?? '', 'LIST_CONNECT');
-      const addAction     = findActionInRawText(data?.rawText ?? '', 'LIST_ADD');
-      expectTruthy(connectAction, 'LIST_CONNECT action — "add my X list to Y" is a connection');
+      // Hard requirement: must NOT be misinterpreted as an item add.
+      const addAction = findActionInRawText(data?.rawText ?? '', 'LIST_ADD');
       if (addAction) {
-        throw new Error('LIST_ADD also emitted — disambiguation failed; should be LIST_CONNECT only');
+        throw new Error(`LIST_ADD emitted — "add my X list to Y" is a connection, not an item add (got: ${JSON.stringify(addAction)})`);
       }
+      // Soft requirement: speech must demonstrate connection-intent (attach/connect/list)
+      // OR ask disambiguation when multiple Costco entities exist.
+      const speech = extractSpeech(data?.rawText ?? '');
+      const hasIntent = /attach|connect|which costco|i see two|multiple/i.test(speech);
+      expectTruthy(hasIntent,
+        `expected speech to show connection-intent or disambiguation; got: "${speech.slice(0,200)}"`);
     },
   },
 

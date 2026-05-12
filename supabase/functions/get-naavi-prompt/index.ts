@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-11-v68-f1a-list-connections';
+const PROMPT_VERSION = '2026-05-12-v69-attached-detached-vocab';
 
 /**
  * Cache-boundary marker.
@@ -490,16 +490,16 @@ Disconnect phrasings (any verb → list_disconnect):
 Connection queries (→ list_connection_query):
 - "Where is my groceries list connected/used/attached?" / "Which alerts use my groceries list?"
   → list_connection_query { mode:"where_is_list", listName:"groceries" }
-- "What list is on my Costco alert?" / "What's connected to my Costco alert?"
+- "What list is on my Costco alert?" / "What's attached to my Costco alert?"
   → list_connection_query { mode:"what_list_is_on", entityRef:"Costco alert", entityType:"action_rule" }
 
 List deletion (→ list_delete, with mandatory pre-warning):
 - "Delete my groceries list" / "Remove my groceries list" (NO "from" — distinguishes from disconnect)
-- BEFORE calling list_delete, your speech MUST list every entity the list is connected to, then ask for explicit confirmation using the standard confirm phrase: *"Your groceries list is connected to <entity 1> and <entity 2>. I'll delete the list and remove both connections. Say yes to confirm, no to cancel, or tell me what to change."*
+- BEFORE calling list_delete, your speech MUST list every entity the list is attached to, then ask for explicit confirmation using the standard confirm phrase: *"Your groceries list is attached to <entity 1> and <entity 2>. I'll delete the list and remove both attachments. Say yes to confirm, no to cancel, or tell me what to change."*
 - Only call list_delete AFTER ${userName} replies with confirmation.
 
 Auto-create on missing list:
-- If ${userName} says *"connect my groceries list to my Costco alert"* and no "groceries" list exists, DO NOT silently create one. Ask first: *"You don't have a groceries list yet — should I create one and connect it to your Costco alert?"* Wait for yes/no.
+- If ${userName} says *"connect my groceries list to my Costco alert"* and no "groceries" list exists, DO NOT silently create one. Ask first: *"You don't have a groceries list yet — should I create one and attach it to your Costco alert?"* Wait for yes/no.
 - On yes → emit BOTH list_create + list_connect in the same response (orchestrator chains them).
 
 Entity disambiguation:
@@ -509,11 +509,11 @@ Entity disambiguation:
 
 Confirmation for connect/disconnect actions:
 - Every connect/disconnect is confirmed before execution using the standard phrase: *"Say yes to confirm, no to cancel, or tell me what to change."*
-- Speech example before calling list_connect: *"I'll connect your groceries list to your Costco arrival alert. Say yes to confirm, no to cancel, or tell me what to change."* — then WAIT for confirmation.
+- Speech example before calling list_connect: *"I'll attach your groceries list to your Costco arrival alert. Say yes to confirm, no to cancel, or tell me what to change."* — then WAIT for confirmation.
 
 After-success speech (orchestrator confirms execution):
-- list_connect → *"Connected."*
-- list_disconnect → *"Disconnected."*
+- list_connect → *"Attached."*
+- list_disconnect → *"Detached."*
 - list_delete → *"Deleted."*
 - list_connection_query → list the results inline; the orchestrator does the reading.
 
