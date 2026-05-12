@@ -45,6 +45,43 @@ const ALLOWED_ENTITY_TYPES = new Set([
 
 const V1_SUPPORTED = new Set(['action_rule', 'list', 'gmail_message']);
 
+// ── Stemming + stopword filter (Wael 2026-05-12, post-voice-test) ───────────
+// Real-user phrasings exposed two scoring bugs in v1:
+//   - "groceries" failed to resolve the user's "grocery" list (no stemming)
+//   - "Movati alert" matched every action_rule because every label literally
+//     starts with "Alert when arriving at..." → noise-floor 0.4 across the
+//     board. Add a stopword filter to the token-overlap pass so common
+//     domain words ("alert", "list", "the", "my", "to", "from", etc.) don't
+//     score on their own.
+
+function stem(s: string): string {
+  // Tiny English plural stripper. Not Porter — just enough to fold
+  // groceries→grocery, items→item, alerts→alert without false-stripping
+  // single-syllable words (bus stays as bus).
+  if (s.endsWith('ies') && s.length > 3) return s.slice(0, -3) + 'y';
+  if (s.endsWith('es')  && s.length > 3) return s.slice(0, -2);
+  if (s.endsWith('s')   && s.length > 2 && !s.endsWith('ss')) return s.slice(0, -1);
+  return s;
+}
+
+const STOPWORDS = new Set([
+  // Articles / pronouns / prepositions
+  'a', 'an', 'the', 'my', 'your', 'our', 'his', 'her', 'their',
+  'to', 'from', 'at', 'on', 'in', 'with', 'of', 'for', 'by', 'and', 'or',
+  // Domain noise — every entity is "an alert/list/email/etc.", so on its
+  // own these words shouldn't add signal.
+  'alert', 'alerts', 'list', 'lists', 'message', 'messages',
+  'email', 'emails', 'meeting', 'meetings', 'event', 'events',
+  'reminder', 'reminders', 'item', 'items', 'note', 'notes',
+  'thing', 'things', 'one',
+]);
+
+function tokenize(s: string): string[] {
+  return s.split(/\s+/)
+    .filter(t => t.length > 2 && !STOPWORDS.has(t))
+    .map(stem);
+}
+
 interface Match {
   entity_type: string;
   entity_id:   string;
@@ -248,17 +285,25 @@ async function resolveActionRule(
     return [];
   }
 
+  const refStem = stem(refLc);
+  const refTokens = tokenize(refLc);
+
   const out: Match[] = [];
   for (const r of (data ?? []) as any[]) {
-    const label  = String(r.label ?? '').toLowerCase();
-    const place  = String(r.trigger_config?.place_name ?? '').toLowerCase();
+    const label     = String(r.label ?? '').toLowerCase();
+    const place     = String(r.trigger_config?.place_name ?? '').toLowerCase();
+    const labelStem = stem(label);
+    const placeStem = stem(place);
     let score = 0;
-    if (label === refLc || place === refLc) score = 1.0;
-    else if (label.includes(refLc) || place.includes(refLc)) score = 0.7;
-    else {
-      // Token overlap — at least one >2-char token of refLc appears in label/place.
-      const tokens = refLc.split(/\s+/).filter(t => t.length > 2);
-      if (tokens.some(t => label.includes(t) || place.includes(t))) score = 0.4;
+    if (label === refLc || place === refLc || labelStem === refStem || placeStem === refStem) score = 1.0;
+    else if (label.includes(refLc) || place.includes(refLc) ||
+             label.includes(refStem) || place.includes(refStem)) score = 0.7;
+    else if (refTokens.length > 0) {
+      // Stop-word-filtered token overlap — domain noise like "alert" / "list"
+      // / "the" / "my" no longer scores by itself.
+      const matched = refTokens.filter(t => label.includes(t) || place.includes(t));
+      if (matched.length === refTokens.length && matched.length > 0) score = 0.6;
+      else if (matched.length > 0) score = 0.4;
     }
     if (score === 0) continue;
 
@@ -289,15 +334,20 @@ async function resolveList(
     return [];
   }
 
+  const refStem = stem(refLc);
+  const refTokens = tokenize(refLc);
+
   const out: Match[] = [];
   for (const r of (data ?? []) as any[]) {
-    const name = String(r.name ?? '').toLowerCase();
+    const name     = String(r.name ?? '').toLowerCase();
+    const nameStem = stem(name);
     let score = 0;
-    if (name === refLc) score = 1.0;
-    else if (name.includes(refLc)) score = 0.7;
-    else {
-      const tokens = refLc.split(/\s+/).filter(t => t.length > 2);
-      if (tokens.some(t => name.includes(t))) score = 0.4;
+    if (name === refLc || nameStem === refStem) score = 1.0;
+    else if (name.includes(refLc) || name.includes(refStem)) score = 0.7;
+    else if (refTokens.length > 0) {
+      const matched = refTokens.filter(t => name.includes(t));
+      if (matched.length === refTokens.length && matched.length > 0) score = 0.6;
+      else if (matched.length > 0) score = 0.4;
     }
     if (score === 0) continue;
 
@@ -334,6 +384,9 @@ async function resolveGmailMessage(
     return [];
   }
 
+  const refStem = stem(refLc);
+  const refTokens = tokenize(refLc);
+
   const out: Match[] = [];
   for (const r of (data ?? []) as any[]) {
     const subj      = String(r.subject       ?? '').toLowerCase();
@@ -342,11 +395,15 @@ async function resolveGmailMessage(
     const snip      = String(r.snippet       ?? '').toLowerCase();
     let score = 0;
     if (subj === refLc || sndrEmail === refLc || sndrName === refLc) score = 1.0;
-    else if (subj.includes(refLc) || sndrEmail.includes(refLc) || sndrName.includes(refLc)) score = 0.7;
+    else if (subj.includes(refLc) || sndrEmail.includes(refLc) || sndrName.includes(refLc) ||
+             subj.includes(refStem) || sndrName.includes(refStem)) score = 0.7;
     else if (snip.includes(refLc)) score = 0.4;
-    else {
-      const tokens = refLc.split(/\s+/).filter(t => t.length > 2);
-      if (tokens.some(t => subj.includes(t) || sndrEmail.includes(t) || sndrName.includes(t))) score = 0.3;
+    else if (refTokens.length > 0) {
+      const matched = refTokens.filter(t =>
+        subj.includes(t) || sndrEmail.includes(t) || sndrName.includes(t)
+      );
+      if (matched.length === refTokens.length && matched.length > 0) score = 0.4;
+      else if (matched.length > 0) score = 0.3;
     }
     if (score === 0) continue;
 
