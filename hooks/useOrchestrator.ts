@@ -1064,7 +1064,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       entityType?:    string;
       cascadedCount?: number;
       connections?:   ConnectionRow[];
-      list?:          { id: string; name: string } | null;
+      // Wave 2.5 M:N — `lists` is the canonical array shape for
+      // what_list_is_on; `list` kept as back-compat alias = lists[0].
+      lists?:         Array<{ id: string; name: string; category?: string }>;
+      list?:          { id: string; name: string; category?: string } | null;
       mode?:          'where_is_list' | 'what_list_is_on';
       errorKind?:     string;
     }[] = [];
@@ -1788,25 +1791,28 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
 
         if (action.type === 'LIST_DISCONNECT') {
+          // Wave 2.5 M:N — listName is now part of the action (required
+          // per prompt v73) so we can target the specific list to detach.
+          const listName   = String((action as any).listName   ?? '').trim();
           const entityRef  = String((action as any).entityRef  ?? '').trim();
           const entityType = String((action as any).entityType ?? '').trim();
           try {
-            const result = await disconnectEntity(entityRef, entityType);
+            const result = await disconnectEntity(listName, entityRef, entityType);
             if (result.success) {
               turnLists.push({
                 action: 'disconnected',
-                listName: '',
+                listName: result.listLabel ?? listName,
                 entityLabel: result.entityLabel,
                 entityType,
                 cascadedCount: result.removed,
               });
-              console.log(`[Orchestrator] LIST_DISCONNECT ${entityType}/${result.entityLabel}: removed=${result.removed}`);
+              console.log(`[Orchestrator] LIST_DISCONNECT list="${result.listLabel || listName}" ${entityType}/${result.entityLabel}: removed=${result.removed}`);
             } else {
-              turnLists.push({ action: 'error', listName: '', entityType, errorKind: result.error });
+              turnLists.push({ action: 'error', listName, entityType, errorKind: result.error });
               console.error(`[Orchestrator] LIST_DISCONNECT failed: ${result.error}`);
             }
           } catch (err: any) {
-            turnLists.push({ action: 'error', listName: '', entityType, errorKind: err?.message || 'exception' });
+            turnLists.push({ action: 'error', listName, entityType, errorKind: err?.message || 'exception' });
             console.error('[Orchestrator] LIST_DISCONNECT exception:', err);
           }
           continue;
@@ -1836,9 +1842,15 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                   listName: '',
                   mode: 'what_list_is_on',
                   entityLabel: result.entity_label,
-                  list: result.list,
+                  lists: result.lists,
+                  list:  result.list,
                 });
-                console.log(`[Orchestrator] LIST_CONNECTION_QUERY what_list_is_on ${result.entity_label}: ${result.list ? result.list.name : 'no list'}`);
+                const summary = result.lists.length === 0
+                  ? 'no lists'
+                  : result.lists.length === 1
+                    ? result.lists[0].name
+                    : `${result.lists.length} lists`;
+                console.log(`[Orchestrator] LIST_CONNECTION_QUERY what_list_is_on ${result.entity_label}: ${summary}`);
               }
             } else {
               turnLists.push({ action: 'error', listName: '', mode, errorKind: result.error });

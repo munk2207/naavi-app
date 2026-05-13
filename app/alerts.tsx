@@ -270,13 +270,15 @@ export default function AlertsScreen() {
   const [pendingDelete, setPendingDelete] = useState<ActionRule | null>(null);
   const [deleting, setDeleting]     = useState(false);
   const [error, setError]           = useState<string | null>(null);
-  // F1a Wave 2 Phase C — connected list per rule. Mapped by rule.id;
-  // each rule has AT MOST one list (UNIQUE(entity_type, entity_id) on
-  // list_connections). Rendered as an "Attached list" card in the
-  // expanded row with a detach X.
+  // Wave 2.5 M:N — each rule can have MULTIPLE attached lists.
+  // Mapped by rule.id → array of attached lists (id + name). Rendered
+  // as one card per list in the expanded row, each with its own X.
   const [connectedLists, setConnectedLists] =
-    useState<Record<string, { listId: string; listName: string } | null>>({});
-  const [detachingRuleId, setDetachingRuleId] = useState<string | null>(null);
+    useState<Record<string, Array<{ listId: string; listName: string }>>>({});
+  // detachingKey holds `${ruleId}:${listId}` while a per-row detach is
+  // in flight, so multiple rows in the same expanded alert can detach
+  // independently and show their own spinner.
+  const [detachingKey, setDetachingKey] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     // V57.10.5 — UI freeze instrumentation. Wael 2026-05-03 saw the app
@@ -313,9 +315,10 @@ export default function AlertsScreen() {
       const loadedRules: ActionRule[] = Array.isArray((data as any)?.rules) ? (data as any).rules : [];
       setRules(loadedRules);
 
-      // F1a Wave 2 Phase C — fetch attached list (if any) for each rule.
-      // Embedded select via the FK list_connections.list_id → lists.id.
-      // RLS lets the user SELECT their own connections + lists.
+      // Wave 2.5 M:N — fetch ALL attached lists for each rule. Embedded
+      // select via FK list_connections.list_id → lists.id. RLS lets the
+      // user SELECT their own connections + lists. An alert can now
+      // carry multiple lists, so we group rows by rule_id into arrays.
       if (loadedRules.length > 0 && supabase) {
         try {
           const ruleIds = loadedRules.map(r => r.id);
@@ -332,12 +335,14 @@ export default function AlertsScreen() {
           if (connErr) {
             console.warn('[alerts] connections fetch failed:', connErr.message);
           } else if (Array.isArray(connRows)) {
-            const map: Record<string, { listId: string; listName: string }> = {};
+            const map: Record<string, Array<{ listId: string; listName: string }>> = {};
             for (const row of connRows as any[]) {
               const ruleId  = String(row.entity_id);
               const list    = row.lists ?? null;   // embedded row from FK
               if (list && list.id) {
-                map[ruleId] = { listId: String(list.id), listName: String(list.name ?? '') };
+                const entry = { listId: String(list.id), listName: String(list.name ?? '') };
+                if (!map[ruleId]) map[ruleId] = [];
+                map[ruleId].push(entry);
               }
             }
             setConnectedLists(map);
@@ -389,16 +394,20 @@ export default function AlertsScreen() {
     load();
   }, [load]);
 
-  // F1a Wave 2 Phase C — detach the list from this alert. The list itself
-  // stays; only the row in list_connections is removed.
-  const onDetachList = async (ruleId: string) => {
-    setDetachingRuleId(ruleId);
+  // Wave 2.5 M:N — detach ONE specific list from this alert. Other
+  // attached lists on the same alert stay. The list itself stays;
+  // only the row in list_connections is removed.
+  const onDetachList = async (ruleId: string, listId: string) => {
+    const key = `${ruleId}:${listId}`;
+    setDetachingKey(key);
     try {
-      const result = await disconnectEntityById('action_rule', ruleId);
+      const result = await disconnectEntityById(listId, 'action_rule', ruleId);
       if (result.success) {
         setConnectedLists(prev => {
           const next = { ...prev };
-          delete next[ruleId];
+          const remaining = (next[ruleId] || []).filter(l => l.listId !== listId);
+          if (remaining.length === 0) delete next[ruleId];
+          else next[ruleId] = remaining;
           return next;
         });
       } else {
@@ -407,7 +416,7 @@ export default function AlertsScreen() {
     } catch (e: unknown) {
       setError(formatErrorForUser(e));
     } finally {
-      setDetachingRuleId(null);
+      setDetachingKey(null);
     }
   };
 
@@ -500,7 +509,7 @@ export default function AlertsScreen() {
 
                   {isOpen && (() => {
                     const { channelsLine, bodyLine, extraLines } = formatWhatHappens(rule);
-                    const conn = connectedLists[rule.id];
+                    const attached = connectedLists[rule.id] ?? [];
                     return (
                       <View style={styles.detailBox}>
                         <Text style={styles.detailHeader}>When</Text>
@@ -511,23 +520,30 @@ export default function AlertsScreen() {
                         {extraLines.map((line, i) => (
                           <Text key={i} style={styles.detailProse}>{line}</Text>
                         ))}
-                        {conn && (
+                        {attached.length > 0 && (
                           <>
-                            <Text style={[styles.detailHeader, { marginTop: 14 }]}>Attached list</Text>
-                            <View style={styles.attachCard}>
-                              <Ionicons name="list" size={20} color={Colors.accent} style={{ marginRight: 10 }} />
-                              <Text style={styles.attachCardName} numberOfLines={1}>{conn.listName}</Text>
-                              <TouchableOpacity
-                                onPress={() => onDetachList(rule.id)}
-                                disabled={detachingRuleId === rule.id}
-                                style={styles.attachDetachBtn}
-                                accessibilityLabel={`Detach ${conn.listName} from this alert`}
-                              >
-                                {detachingRuleId === rule.id
-                                  ? <ActivityIndicator size="small" color={Colors.textMuted} />
-                                  : <Ionicons name="close" size={20} color={Colors.textMuted} />}
-                              </TouchableOpacity>
-                            </View>
+                            <Text style={[styles.detailHeader, { marginTop: 14 }]}>
+                              {attached.length === 1 ? 'Attached list' : `Attached lists (${attached.length})`}
+                            </Text>
+                            {attached.map(conn => {
+                              const key = `${rule.id}:${conn.listId}`;
+                              return (
+                                <View key={conn.listId} style={styles.attachCard}>
+                                  <Ionicons name="list" size={20} color={Colors.accent} style={{ marginRight: 10 }} />
+                                  <Text style={styles.attachCardName} numberOfLines={1}>{conn.listName}</Text>
+                                  <TouchableOpacity
+                                    onPress={() => onDetachList(rule.id, conn.listId)}
+                                    disabled={detachingKey === key}
+                                    style={styles.attachDetachBtn}
+                                    accessibilityLabel={`Detach ${conn.listName} from this alert`}
+                                  >
+                                    {detachingKey === key
+                                      ? <ActivityIndicator size="small" color={Colors.textMuted} />
+                                      : <Ionicons name="close" size={20} color={Colors.textMuted} />}
+                                  </TouchableOpacity>
+                                </View>
+                              );
+                            })}
                           </>
                         )}
                         <Text style={styles.detailMeta}>
