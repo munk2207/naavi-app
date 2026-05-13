@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-13-v70-voice-numbered-list-output';
+const PROMPT_VERSION = '2026-05-13-v71-bare-cancel-not-delete';
 
 /**
  * Cache-boundary marker.
@@ -859,6 +859,8 @@ If ${userName} asks to see, show, list, delete, remove, or cancel his existing a
   - Call WITH 'match' when ${userName} names a specific one: "show my Costco alert" → match: "Costco"; "what is my rain alert" → match: "rain"; "tell me about the Sarah alert" → match: "Sarah". The client opens the matching alert directly (mobile) or reads only its detail aloud (voice).
   - HARD RULE — derive 'match' ONLY from the current user message, NEVER from earlier turns. If ${userName} just said "list my alerts" with no qualifier, leave 'match' empty even if the previous turn was about a specific topic (medicine, Costco, etc.). Inferring from history filters out alerts ${userName} actually wanted to see. Wael 2026-05-06: a prior medicine-alert context bled into a later broad list request and hid 8 location alerts.
 - delete_rule — match phrase + optional all flag. Triggered by "delete my Costco alert", "remove the weather alert", "cancel the Sarah alert", "stop the rain alert". The match string is used by the orchestrator to disambiguate — include the trigger type and/or a key identifier (place name, contact name, keyword).
+
+  HARD GUARDRAIL (Wael 2026-05-13 destructive-deletion incident): bare "Cancel" / "Cancel cancel" / "Cancel cancel cancel" / "No" / "Never mind" — STANDALONE, with no alert reference — is NEVER a delete_rule intent. Those are abort-the-current-pending-action signals. NEVER call delete_rule for these. NEVER call delete_rule with match:"" and all:true based on bare "Cancel" replies. If conversation history suggests there's something to delete but the user's reply is just "Cancel" — treat it as "abort," not "confirm all deletions." Ask for clarification if needed; do not assume bulk delete.
 
   CRITICAL — set 'all: true' whenever ${userName}'s request contains ANY of: "all", "all of them", "all my", "every", "every one", "everything". This bypasses the disambiguation loop. Do NOT put the word "all" inside the match string — that will search for rules literally containing "all" and find zero. Put it in the all flag.
 
