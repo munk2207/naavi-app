@@ -208,19 +208,19 @@ sequenceDiagram
 
   C->>T: Dial +1 249 523 5394
   T->>V: POST /voice (CallSid, From)
-  V->>SB: getUserIdByPhone(From) — phone OR phone_numbers[]
+  V->>SB: getUserIdByPhone — phone OR phone_numbers array
   alt Registered
-    V->>T: TwiML <Play> greeting <Connect><Stream>
+    V->>T: TwiML Play greeting + Connect Stream
   else Unregistered
-    V->>T: TwiML <Play> "Say or enter your PIN" <Gather>
+    V->>T: TwiML Play "Say or enter your PIN" + Gather
     C->>T: 4-digit PIN
     T->>V: POST /voice/pin-result
     V->>SB: manage-voice-pin op=verify
-    SB-->>V: { match: true/false }
+    SB-->>V: match true or false
     alt Match
-      V->>T: TwiML <Play> "Welcome NAME" <Connect><Stream>
-    else No match (3 tries)
-      V->>T: TwiML <Play> lockout <Hangup>
+      V->>T: TwiML Play "Welcome NAME" + Connect Stream
+    else No match after 3 tries
+      V->>T: TwiML Play lockout + Hangup
     end
   end
 
@@ -232,7 +232,7 @@ sequenceDiagram
     SB-->>V: speech + actions
     V->>DG: speak(text) — Aura Hera
     DG-->>V: MP3
-    V->>T: stream audio (twilio µ-law)
+    V->>T: stream audio (mu-law)
   end
 ```
 
@@ -502,19 +502,19 @@ sequenceDiagram
   V->>SB: load name + first_call_completed_at
   V->>DG: speak(greeting)
   DG-->>V: MP3
-  V-->>T: TwiML <Play> + <Connect><Stream>
+  V-->>T: TwiML Play + Connect Stream
   T->>V: WS /media-stream
   loop
     C->>T: audio
-    T->>V: µ-law
+    T->>V: mu-law
     V->>DG: STT
     DG-->>V: transcript
-    V->>SB: naavi-chat({history, user_id})
-    SB-->>V: { speech, actions[] }
+    V->>SB: naavi-chat (history + user_id)
+    SB-->>V: speech + actions
     V->>SB: executeAction per action
     V->>DG: speak(reply)
     DG-->>V: MP3
-    V-->>T: µ-law audio
+    V-->>T: mu-law audio
     T-->>C: hear reply
   end
 ```
@@ -530,20 +530,20 @@ sequenceDiagram
 
   C->>T: Dial number
   T->>V: POST /voice (From unknown)
-  V-->>T: TwiML <Play> "PIN prompt" <Gather>
+  V-->>T: TwiML Play "PIN prompt" + Gather
   C->>T: 4 digits (DTMF or speech)
-  T->>V: POST /voice/pin-result (Digits, SpeechResult)
+  T->>V: POST /voice/pin-result (Digits + SpeechResult)
   V->>V: extractPinFromTwilioGather
   loop For each user with PIN set
-    V->>MP: op=verify {user_id, pin}
-    MP-->>V: { match }
+    V->>MP: op=verify (user_id + pin)
+    MP-->>V: match true or false
   end
   alt 1 match
-    V-->>T: TwiML <Play> "Welcome NAME" <Connect><Stream>
-  else 0 matches, attempts < 3
-    V-->>T: TwiML <Redirect> /voice/pin?attempt=N+1
-  else 0 matches, attempts >= 3
-    V-->>T: TwiML <Play> lockout <Hangup>
+    V-->>T: TwiML Play "Welcome NAME" + Connect Stream
+  else 0 matches, attempts less than 3
+    V-->>T: TwiML Redirect to /voice/pin attempt N+1
+  else 0 matches, attempts at limit
+    V-->>T: TwiML Play lockout + Hangup
   end
 ```
 
@@ -560,7 +560,7 @@ sequenceDiagram
   participant Out as SMS+WA+Email+Push
 
   Geo->>App: ENTER event
-  App->>RL: POST {user_id, rule_id, event=ENTER, lat, lng}
+  App->>RL: POST user_id + rule_id + ENTER + coords
   RL->>RL: insert pending_dwell_fires (defer 2 min)
   Note over RL: 2 minutes pass…
   FP->>FP: dwelled long enough → promote
@@ -582,22 +582,22 @@ sequenceDiagram
   participant MLC as manage-list-connections
   participant DB as Supabase
 
-  U->>CL: "Attach groceries to Costco alert"
-  CL-->>O: LIST_CONNECT {listName, entityRef, entityType}
-  O->>RE: RESOLVE list "groceries"
-  RE-->>O: { matches: [list_id] }
-  O->>RE: RESOLVE action_rule "Costco alert"
-  RE-->>O: { matches: [rule_id] }
-  O->>MLC: CONNECT {list_id, entity_type, entity_id}
+  U->>CL: Attach groceries to Costco alert
+  CL-->>O: LIST_CONNECT (listName entityRef entityType)
+  O->>RE: RESOLVE list groceries
+  RE-->>O: matches array with list_id
+  O->>RE: RESOLVE action_rule Costco alert
+  RE-->>O: matches array with rule_id
+  O->>MLC: CONNECT (list_id entity_type entity_id)
   MLC->>DB: INSERT list_connections
-  alt UNIQUE(list_id,entity_type,entity_id) hit
+  alt UNIQUE pair already exists
     DB-->>MLC: 23505 unique_violation
     MLC-->>O: 409 already_attached
   else OK
     DB-->>MLC: row
-    MLC-->>O: { success, connection }
+    MLC-->>O: success + connection
   end
-  O-->>U: "Attached."
+  O-->>U: Attached.
 ```
 
 ### 9.6 List delete (Wave 2.6 forward Drive↔DB sync)
@@ -610,15 +610,15 @@ sequenceDiagram
   participant GD as Google Drive
   participant DB as Supabase
 
-  U->>MLC: DELETE_LIST_AND_CONNECTIONS {list_id}
-  MLC->>DB: SELECT lists row (id, drive_file_id)
+  U->>MLC: DELETE_LIST_AND_CONNECTIONS (list_id)
+  MLC->>DB: SELECT lists row (id drive_file_id)
   alt no row
     MLC-->>U: 404
   else found
     MLC->>UT: SELECT refresh_token
     MLC->>GD: POST oauth2/token (refresh)
     GD-->>MLC: access_token
-    MLC->>GD: PATCH files/<id> {trashed: true}
+    MLC->>GD: PATCH files trashed=true
     alt Drive 404 (file already gone)
       MLC->>DB: DELETE lists row (FK cascades list_connections)
       MLC-->>U: success
@@ -641,18 +641,18 @@ sequenceDiagram
   participant GD as Google Drive
 
   M->>LR: invoke (on load)
-  LR->>DB: SELECT lists WHERE user_id=...
+  LR->>DB: SELECT lists for user_id
   LR->>DB: SELECT user_tokens
   LR->>GD: refresh access token
   par For each list
-    LR->>GD: GET files/<id>?fields=id,trashed
-    GD-->>LR: 200 ok | 200 trashed | 404
+    LR->>GD: GET file fields id trashed
+    GD-->>LR: 200 ok or 200 trashed or 404
   end
-  LR->>DB: DELETE lists WHERE id IN (orphans) — FK cascades
-  LR->>DB: SELECT list_connections WHERE entity_type='action_rule'
-  LR->>DB: SELECT action_rules WHERE id IN (...)
-  LR->>DB: DELETE list_connections WHERE entity_id not in live rules
-  LR-->>M: { checked, orphaned[], stale_connections[] }
+  LR->>DB: DELETE orphan lists (FK cascades)
+  LR->>DB: SELECT action_rule connections
+  LR->>DB: SELECT live action_rules
+  LR->>DB: DELETE connections pointing to deleted rules
+  LR-->>M: checked + orphaned + stale_connections
   M->>M: re-fetch lists (post-reconcile)
 ```
 
@@ -673,7 +673,7 @@ sequenceDiagram
     SG->>EE: classify actions (bills, appts, renewals)
     EE-->>EE: insert email_actions rows
   and
-    SG->>HA: download attachments → MyNaavi/Documents/<type>/
+    SG->>HA: download attachments → MyNaavi/Documents/by-type/
     HA-->>HA: insert documents row
     HA->>ED: extract text (PDF via Haiku, scans via Vision)
     ED-->>ED: update documents.extracted_*
