@@ -52,18 +52,25 @@ export function ConversationBubble({ role, content, timestamp }: Props) {
       <View style={styles.column}>
         {isNaavi && <Text style={styles.label}>MyNaavi</Text>}
         {isNaavi ? (
+          // V57.15.2 — apply the V57.13.7 ruler+overlay pattern that
+          // already fixed the user (Robert) bubble's Samsung-Yoga
+          // intrinsic-width truncation. Naavi's bubble had the same
+          // class of bug (Wael 2026-05-13: long LIST_CONNECTION_QUERY
+          // answer "…1. grocery. 2. cottage." clipped at "2."). Same
+          // mechanism: outer Text contains the invisible content + an
+          // invisible dot-ruler so Yoga measures the wider width; the
+          // overlay Text on top displays the actual content with the
+          // correct wrap because the parent's measured width is right.
+          //
+          // Difference from Robert's bubble: dots are opacity:0 (not
+          // 0.35) because Naavi has no bubble background to fill —
+          // any visible dot would be a leak.
           <View style={styles.naaviPlain}>
-            {/* V57.11.8 — textBreakStrategy="simple" fixes the chronic
-                Samsung S22 / Android Yoga Text-intrinsic-width measurement
-                bug. Five layout attempts in V57.10.3..V57.11.7 fought
-                container width; the actual cause is Android's default
-                "highQuality" break strategy reporting a wrong intrinsic
-                width on Samsung's One UI Roboto. "simple" uses greedy
-                line-break, no width-balancing pass, intrinsic measurement
-                reports correctly. Android-only; ignored on iOS.
-                Evidence: react-native-paper #3472, #4395; react-native
-                #35039. Investigated 2026-05-06. */}
-            <Text style={styles.naaviText} textBreakStrategy="simple">{content}</Text>
+            <Text style={styles.naaviRuler} textBreakStrategy="simple">
+              <Text style={styles.naaviRulerInvisible}>{content}</Text>
+              <Text style={styles.naaviRulerDots}>{DOT_RULER}</Text>
+            </Text>
+            <Text style={styles.naaviOverlay} textBreakStrategy="simple">{content}</Text>
           </View>
         ) : (
           <View style={[styles.bubble, styles.robertBubble]}>
@@ -135,12 +142,35 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 4,
   },
   naaviText: {
+    // Retained for any other site that imports this style directly;
+    // ConversationBubble itself now uses naaviRuler + naaviOverlay
+    // (V57.15.2 ruler+overlay pattern, see comment in component above).
     fontSize: Typography.body,
-    // V57.12.2 — drop bubble lineHeight from 24 (1.6 × 15) to 20 (1.33 × 15)
-    // to escape react-native#35039's bubble-truncation regime. Six prior
-    // layout tweaks at the 1.6 ratio failed; 1.33 is the documented
-    // resolution. Bubble-specific override so other text sites keep their
-    // current spacing.
+    lineHeight: 20,
+    color: Colors.textPrimary,
+  },
+  // V57.15.2 — Naavi ruler+overlay. Same pattern as the user bubble's
+  // bubbleRuler / bubbleRulerInvisible / bubbleRulerDots / bubbleOverlay,
+  // tuned for naaviPlain's smaller padding (paddingHorizontal/Vertical: 4).
+  naaviRuler: {
+    fontSize: Typography.body,
+    lineHeight: 20,
+  },
+  naaviRulerInvisible: {
+    opacity: 0,
+  },
+  naaviRulerDots: {
+    // opacity:0 (not 0.35) — Naavi has no bubble background, so any
+    // visible dot would be a UI leak. We only need Yoga to measure
+    // the wider intrinsic width; the dots themselves stay hidden.
+    opacity: 0,
+  },
+  naaviOverlay: {
+    position: 'absolute',
+    top:    4,   // matches naaviPlain.paddingVertical
+    left:   4,   // matches naaviPlain.paddingHorizontal
+    right:  4,
+    fontSize: Typography.body,
     lineHeight: 20,
     color: Colors.textPrimary,
   },
