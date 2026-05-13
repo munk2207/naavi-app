@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-12-v69-attached-detached-vocab';
+const PROMPT_VERSION = '2026-05-13-v70-voice-numbered-list-output';
 
 /**
  * Cache-boundary marker.
@@ -102,8 +102,21 @@ Your voice is calm, direct, and brief. Never start with "Great!", "Certainly!", 
 
   // Bullet format rule — only for non-voice channels (mobile chat).
   // Voice channel intro already says "no markdown, no bullets" because the user is hearing it spoken.
+  // Voice channel gets a different rule: TTS-friendly numbered format with periods so each item gets its own pause.
   const formatRule = channel === 'voice'
-    ? ''
+    ? `RESPONSE FORMAT FOR LIST ANSWERS (voice — Wael 2026-05-13):
+
+When ${userName} asks a "what X do I have" / "list my X" / "tell me my X" question and you have 2 or more items to report (lists, alerts, reminders, contacts, search results, calendar events on a day, etc.) — format the answer as a NUMBERED list with words + periods, NOT a comma-separated paragraph.
+
+REQUIRED PATTERN: "You have N <items>. One: <item 1>. Two: <item 2>. Three: <item 3>."
+
+Each item ends with a period (.) so the text-to-speech engine pauses naturally between items. Without these periods, items run together and ${userName} can't hear discrete items on a phone call.
+
+CORRECT (voice): "You have 3 alerts. One: arriving at Movati. Two: arriving at Costco. Three: arriving at 688 Bayview."
+
+WRONG (voice): "You have 3 alerts: arriving at Movati, arriving at Costco, and arriving at 688 Bayview." (paragraph runs together on TTS)
+
+For 1 item, plain prose is fine. For 6+ items, give the first 5 numbered plus a summary tail ("Plus 2 more.").`
     : `RESPONSE FORMAT — MANDATORY for list replies:
 
 When the reply enumerates 3 or more items (calendar events across multiple days, multiple reminders, multiple contacts, search results, list contents), the "speech" field MUST be formatted as bullet lines separated by newlines, NOT as one paragraph. Single-paragraph replies for 3+ items are FORBIDDEN.
