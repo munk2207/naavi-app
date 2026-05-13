@@ -36,6 +36,16 @@ interface Props {
 // fill only the trailing space.
 const DOT_RULER = '. '.repeat(20);
 
+// V57.15.3 — Naavi-side ruler uses plain spaces, not dots. Samsung One
+// UI's compositor leaks faint visible glyphs through `opacity: 0` on
+// dot-character Text nodes (see screenshot 2026-05-13: cottage answer
+// rendered correctly but trailing "..........." dots bled through).
+// Spaces have zero glyph regardless of opacity, so they can't leak.
+// They still produce the same width measurement Yoga needs to size
+// the parent correctly. User bubble keeps DOT_RULER (intentionally
+// faded-visible there because its background hides the bleed).
+const NAAVI_INVISIBLE_RULER = ' '.repeat(50);
+
 export function ConversationBubble({ role, content, timestamp }: Props) {
   const isNaavi = role === 'assistant';
 
@@ -68,7 +78,7 @@ export function ConversationBubble({ role, content, timestamp }: Props) {
           <View style={styles.naaviPlain}>
             <Text style={styles.naaviRuler} textBreakStrategy="simple">
               <Text style={styles.naaviRulerInvisible}>{content}</Text>
-              <Text style={styles.naaviRulerDots}>{DOT_RULER}</Text>
+              <Text style={styles.naaviRulerDots}>{NAAVI_INVISIBLE_RULER}</Text>
             </Text>
             <Text style={styles.naaviOverlay} textBreakStrategy="simple">{content}</Text>
           </View>
