@@ -159,24 +159,24 @@
 <p>The visual app and the phone line share the same data and the same brain. You can attach a list to an alert by voice and see it in the app a second later; you can set an alert in the app and have MyNaavi remind you of it by voice call. There is no &quot;app mode&quot; and &quot;voice mode&quot; — there is only MyNaavi, with two ways to talk to it.</p>
 <p>The brain is Claude (Anthropic&#39;s AI). Claude is wrapped in a strict system prompt that tells it which tools to use, when to confirm, when to refuse. The prompt lives in <strong>one</strong> place — the <code>get-naavi-prompt</code> Edge Function — so the app and the phone line always speak the same MyNaavi.</p>
 <h2>2. The three surfaces</h2>
-<pre><code>graph LR
-  user((User)) -.taps/types.-&gt; mobile[📱 Mobile app&lt;br/&gt;Android, expo]
-  user -.calls.-&gt; twilio[📞 Twilio&lt;br/&gt;+1 249 523 5394]
-  user -.browses.-&gt; web[🌐 mynaavi.com&lt;br/&gt;static]
+<pre class="mermaid">graph LR
+  user((User)) -.taps/types.-> mobile[📱 Mobile app<br/>Android, expo]
+  user -.calls.-> twilio[📞 Twilio<br/>+1 249 523 5394]
+  user -.browses.-> web[🌐 mynaavi.com<br/>static]
 
-  twilio --&gt; railway[🚂 Railway&lt;br/&gt;naavi-voice-server]
-  mobile --&gt; supa[(🗄️ Supabase&lt;br/&gt;hhgyppbxgmjrwdpdubcx)]
-  railway --&gt; supa
+  twilio --> railway[🚂 Railway<br/>naavi-voice-server]
+  mobile --> supa[(🗄️ Supabase<br/>hhgyppbxgmjrwdpdubcx)]
+  railway --> supa
 
-  supa --&gt; claude[🧠 Anthropic Claude]
-  supa --&gt; google[Google APIs]
-  supa --&gt; fcm[FCM push]
+  supa --> claude[🧠 Anthropic Claude]
+  supa --> google[Google APIs]
+  supa --> fcm[FCM push]
 
   classDef surface fill:#5DCAA5,stroke:#333,color:#000
   classDef backend fill:#88C0D0,stroke:#333,color:#000
   class mobile,twilio,web surface
   class railway,supa,claude,google,fcm backend
-</code></pre>
+</pre>
 <p><strong>Mobile (Android only today):</strong> Built with Expo + React Native. Distributed exclusively through Google Play Internal Testing. No iOS yet. No web app (the website is a static marketing site, not an app).</p>
 <p><strong>Voice:</strong> Inbound calls to the Twilio number connect to a Node.js server hosted on Railway. The server streams audio to Deepgram (speech-to-text), feeds the transcript to Claude, then sends Claude&#39;s reply through Deepgram Aura (text-to-speech) back to the caller.</p>
 <p><strong>Web:</strong> A static HTML site on Vercel. Marketing only — no Supabase, no auth, no API. Don&#39;t confuse it with the app.</p>
@@ -489,7 +489,7 @@
 <h2>6. Voice server</h2>
 <p>Single Node.js Express file at <a href="../naavi-voice-server/src/index.js">naavi-voice-server/src/index.js</a> — ~8000 lines, deployed to Railway on every push to <code>naavi-voice-server/main</code>. There are no other files in the runtime (apart from <code>list_confirm_gate.js</code> which holds the F1a confirmation gate logic + unit tests).</p>
 <h3>6.1 Inbound call flow</h3>
-<pre><code>sequenceDiagram
+<pre class="mermaid">sequenceDiagram
   participant C as Caller
   participant T as Twilio
   participant V as Voice server
@@ -497,35 +497,35 @@
   participant DG as Deepgram
   participant CL as Claude
 
-  C-&gt;&gt;T: Dial +1 249 523 5394
-  T-&gt;&gt;V: POST /voice (CallSid, From)
-  V-&gt;&gt;SB: getUserIdByPhone(From) — phone OR phone_numbers[]
+  C->>T: Dial +1 249 523 5394
+  T->>V: POST /voice (CallSid, From)
+  V->>SB: getUserIdByPhone(From) — phone OR phone_numbers[]
   alt Registered
-    V-&gt;&gt;T: TwiML &lt;Play&gt; greeting &lt;Connect&gt;&lt;Stream&gt;
+    V->>T: TwiML <Play> greeting <Connect><Stream>
   else Unregistered
-    V-&gt;&gt;T: TwiML &lt;Play&gt; &quot;Say or enter your PIN&quot; &lt;Gather&gt;
-    C-&gt;&gt;T: 4-digit PIN
-    T-&gt;&gt;V: POST /voice/pin-result
-    V-&gt;&gt;SB: manage-voice-pin op=verify
-    SB--&gt;&gt;V: { match: true/false }
+    V->>T: TwiML <Play> "Say or enter your PIN" <Gather>
+    C->>T: 4-digit PIN
+    T->>V: POST /voice/pin-result
+    V->>SB: manage-voice-pin op=verify
+    SB-->>V: { match: true/false }
     alt Match
-      V-&gt;&gt;T: TwiML &lt;Play&gt; &quot;Welcome NAME&quot; &lt;Connect&gt;&lt;Stream&gt;
+      V->>T: TwiML <Play> "Welcome NAME" <Connect><Stream>
     else No match (3 tries)
-      V-&gt;&gt;T: TwiML &lt;Play&gt; lockout &lt;Hangup&gt;
+      V->>T: TwiML <Play> lockout <Hangup>
     end
   end
 
-  T-&gt;&gt;V: WebSocket /media-stream (audio)
-  V-&gt;&gt;DG: stream audio for STT
+  T->>V: WebSocket /media-stream (audio)
+  V->>DG: stream audio for STT
   loop Conversation
-    DG--&gt;&gt;V: transcript
-    V-&gt;&gt;SB: get-naavi-prompt + naavi-chat (Claude)
-    SB--&gt;&gt;V: speech + actions
-    V-&gt;&gt;DG: speak(text) — Aura Hera
-    DG--&gt;&gt;V: MP3
-    V-&gt;&gt;T: stream audio (twilio µ-law)
+    DG-->>V: transcript
+    V->>SB: get-naavi-prompt + naavi-chat (Claude)
+    SB-->>V: speech + actions
+    V->>DG: speak(text) — Aura Hera
+    DG-->>V: MP3
+    V->>T: stream audio (twilio µ-law)
   end
-</code></pre>
+</pre>
 <h3>6.2 Identity resolution (<code>getUserIdByPhone</code>)</h3>
 <p>Wave 2.5 Phase E (multi-phone identity). PostgREST OR query:</p>
 <pre><code>?select=user_id&amp;or=(phone.eq.X,phone_numbers.cs.{X})&amp;limit=1
@@ -942,7 +942,7 @@
 </tbody></table>
 <h2>9. Major flows (sequence diagrams)</h2>
 <h3>9.1 Mobile chat turn</h3>
-<pre><code>sequenceDiagram
+<pre class="mermaid">sequenceDiagram
   participant U as User (mobile)
   participant A as ChatScreen
   participant O as useOrchestrator
@@ -951,24 +951,24 @@
   participant EF as Edge Functions
   participant DB as Supabase
 
-  U-&gt;&gt;A: type message + send
-  A-&gt;&gt;O: appendUserMessage()
-  O-&gt;&gt;NC: invoke(naavi-chat, {history})
-  NC-&gt;&gt;EF: get-naavi-prompt (cached)
-  EF--&gt;&gt;NC: system prompt v73
-  NC-&gt;&gt;CL: messages.create
-  CL--&gt;&gt;NC: structured reply (text + actions)
-  NC--&gt;&gt;O: { speech, actions[] }
+  U->>A: type message + send
+  A->>O: appendUserMessage()
+  O->>NC: invoke(naavi-chat, {history})
+  NC->>EF: get-naavi-prompt (cached)
+  EF-->>NC: system prompt v73
+  NC->>CL: messages.create
+  CL-->>NC: structured reply (text + actions)
+  NC-->>O: { speech, actions[] }
   loop For each action
-    O-&gt;&gt;EF: lib helper → Edge Function
-    EF-&gt;&gt;DB: read/write
-    EF--&gt;&gt;O: result
+    O->>EF: lib helper → Edge Function
+    EF->>DB: read/write
+    EF-->>O: result
   end
-  O--&gt;&gt;A: append assistant message + side-effects
-  A--&gt;&gt;U: render bubble + cards
-</code></pre>
+  O-->>A: append assistant message + side-effects
+  A-->>U: render bubble + cards
+</pre>
 <h3>9.2 Voice call (registered caller)</h3>
-<pre><code>sequenceDiagram
+<pre class="mermaid">sequenceDiagram
   participant C as Caller
   participant T as Twilio
   participant V as Voice server
@@ -976,56 +976,56 @@
   participant DG as Deepgram
   participant CL as Claude
 
-  C-&gt;&gt;T: Dial number
-  T-&gt;&gt;V: POST /voice
-  V-&gt;&gt;SB: getUserIdByPhone
-  SB--&gt;&gt;V: user_id
-  V-&gt;&gt;SB: load name + first_call_completed_at
-  V-&gt;&gt;DG: speak(greeting)
-  DG--&gt;&gt;V: MP3
-  V--&gt;&gt;T: TwiML &lt;Play&gt; + &lt;Connect&gt;&lt;Stream&gt;
-  T-&gt;&gt;V: WS /media-stream
+  C->>T: Dial number
+  T->>V: POST /voice
+  V->>SB: getUserIdByPhone
+  SB-->>V: user_id
+  V->>SB: load name + first_call_completed_at
+  V->>DG: speak(greeting)
+  DG-->>V: MP3
+  V-->>T: TwiML <Play> + <Connect><Stream>
+  T->>V: WS /media-stream
   loop
-    C-&gt;&gt;T: audio
-    T-&gt;&gt;V: µ-law
-    V-&gt;&gt;DG: STT
-    DG--&gt;&gt;V: transcript
-    V-&gt;&gt;SB: naavi-chat({history, user_id})
-    SB--&gt;&gt;V: { speech, actions[] }
-    V-&gt;&gt;SB: executeAction per action
-    V-&gt;&gt;DG: speak(reply)
-    DG--&gt;&gt;V: MP3
-    V--&gt;&gt;T: µ-law audio
-    T--&gt;&gt;C: hear reply
+    C->>T: audio
+    T->>V: µ-law
+    V->>DG: STT
+    DG-->>V: transcript
+    V->>SB: naavi-chat({history, user_id})
+    SB-->>V: { speech, actions[] }
+    V->>SB: executeAction per action
+    V->>DG: speak(reply)
+    DG-->>V: MP3
+    V-->>T: µ-law audio
+    T-->>C: hear reply
   end
-</code></pre>
+</pre>
 <h3>9.3 PIN flow (unregistered caller)</h3>
-<pre><code>sequenceDiagram
+<pre class="mermaid">sequenceDiagram
   participant C as Caller
   participant T as Twilio
   participant V as Voice server
   participant MP as manage-voice-pin
 
-  C-&gt;&gt;T: Dial number
-  T-&gt;&gt;V: POST /voice (From unknown)
-  V--&gt;&gt;T: TwiML &lt;Play&gt; &quot;PIN prompt&quot; &lt;Gather&gt;
-  C-&gt;&gt;T: 4 digits (DTMF or speech)
-  T-&gt;&gt;V: POST /voice/pin-result (Digits, SpeechResult)
-  V-&gt;&gt;V: extractPinFromTwilioGather
+  C->>T: Dial number
+  T->>V: POST /voice (From unknown)
+  V-->>T: TwiML <Play> "PIN prompt" <Gather>
+  C->>T: 4 digits (DTMF or speech)
+  T->>V: POST /voice/pin-result (Digits, SpeechResult)
+  V->>V: extractPinFromTwilioGather
   loop For each user with PIN set
-    V-&gt;&gt;MP: op=verify {user_id, pin}
-    MP--&gt;&gt;V: { match }
+    V->>MP: op=verify {user_id, pin}
+    MP-->>V: { match }
   end
   alt 1 match
-    V--&gt;&gt;T: TwiML &lt;Play&gt; &quot;Welcome NAME&quot; &lt;Connect&gt;&lt;Stream&gt;
-  else 0 matches, attempts &lt; 3
-    V--&gt;&gt;T: TwiML &lt;Redirect&gt; /voice/pin?attempt=N+1
-  else 0 matches, attempts &gt;= 3
-    V--&gt;&gt;T: TwiML &lt;Play&gt; lockout &lt;Hangup&gt;
+    V-->>T: TwiML <Play> "Welcome NAME" <Connect><Stream>
+  else 0 matches, attempts < 3
+    V-->>T: TwiML <Redirect> /voice/pin?attempt=N+1
+  else 0 matches, attempts >= 3
+    V-->>T: TwiML <Play> lockout <Hangup>
   end
-</code></pre>
+</pre>
 <h3>9.4 Location-alert fire (geofence ENTER)</h3>
-<pre><code>sequenceDiagram
+<pre class="mermaid">sequenceDiagram
   participant Geo as OS geofence
   participant App as Mobile app
   participant RL as report-location-event
@@ -1034,18 +1034,18 @@
   participant FA as fireAction (fan-out)
   participant Out as SMS+WA+Email+Push
 
-  Geo-&gt;&gt;App: ENTER event
-  App-&gt;&gt;RL: POST {user_id, rule_id, event=ENTER, lat, lng}
-  RL-&gt;&gt;RL: insert pending_dwell_fires (defer 2 min)
+  Geo->>App: ENTER event
+  App->>RL: POST {user_id, rule_id, event=ENTER, lat, lng}
+  RL->>RL: insert pending_dwell_fires (defer 2 min)
   Note over RL: 2 minutes pass…
-  FP-&gt;&gt;FP: dwelled long enough → promote
-  FP-&gt;&gt;FA: fireAction(rule)
-  FA-&gt;&gt;Out: send to all 4 channels (self-alert)
-  FA-&gt;&gt;FA: log to action_rule_log
-</code></pre>
+  FP->>FP: dwelled long enough → promote
+  FP->>FA: fireAction(rule)
+  FA->>Out: send to all 4 channels (self-alert)
+  FA->>FA: log to action_rule_log
+</pre>
 <p>Self-alerts (destination = user themselves) fan out across SMS + WhatsApp + Email + Push — guarantee of delivery is the spec, not channel choice. See <code>_shared/alert_body.ts</code> for the body assembly.</p>
 <h3>9.5 List attach (M:N, Wave 2.5)</h3>
-<pre><code>sequenceDiagram
+<pre class="mermaid">sequenceDiagram
   participant U as User
   participant CL as Claude (prompt v73)
   participant O as Orchestrator
@@ -1053,94 +1053,94 @@
   participant MLC as manage-list-connections
   participant DB as Supabase
 
-  U-&gt;&gt;CL: &quot;Attach groceries to Costco alert&quot;
-  CL--&gt;&gt;O: LIST_CONNECT {listName, entityRef, entityType}
-  O-&gt;&gt;RE: RESOLVE list &quot;groceries&quot;
-  RE--&gt;&gt;O: { matches: [list_id] }
-  O-&gt;&gt;RE: RESOLVE action_rule &quot;Costco alert&quot;
-  RE--&gt;&gt;O: { matches: [rule_id] }
-  O-&gt;&gt;MLC: CONNECT {list_id, entity_type, entity_id}
-  MLC-&gt;&gt;DB: INSERT list_connections
+  U->>CL: "Attach groceries to Costco alert"
+  CL-->>O: LIST_CONNECT {listName, entityRef, entityType}
+  O->>RE: RESOLVE list "groceries"
+  RE-->>O: { matches: [list_id] }
+  O->>RE: RESOLVE action_rule "Costco alert"
+  RE-->>O: { matches: [rule_id] }
+  O->>MLC: CONNECT {list_id, entity_type, entity_id}
+  MLC->>DB: INSERT list_connections
   alt UNIQUE(list_id,entity_type,entity_id) hit
-    DB--&gt;&gt;MLC: 23505 unique_violation
-    MLC--&gt;&gt;O: 409 already_attached
+    DB-->>MLC: 23505 unique_violation
+    MLC-->>O: 409 already_attached
   else OK
-    DB--&gt;&gt;MLC: row
-    MLC--&gt;&gt;O: { success, connection }
+    DB-->>MLC: row
+    MLC-->>O: { success, connection }
   end
-  O--&gt;&gt;U: &quot;Attached.&quot;
-</code></pre>
+  O-->>U: "Attached."
+</pre>
 <h3>9.6 List delete (Wave 2.6 forward Drive↔DB sync)</h3>
-<pre><code>sequenceDiagram
+<pre class="mermaid">sequenceDiagram
   participant U as User
   participant MLC as manage-list-connections
   participant UT as user_tokens
   participant GD as Google Drive
   participant DB as Supabase
 
-  U-&gt;&gt;MLC: DELETE_LIST_AND_CONNECTIONS {list_id}
-  MLC-&gt;&gt;DB: SELECT lists row (id, drive_file_id)
+  U->>MLC: DELETE_LIST_AND_CONNECTIONS {list_id}
+  MLC->>DB: SELECT lists row (id, drive_file_id)
   alt no row
-    MLC--&gt;&gt;U: 404
+    MLC-->>U: 404
   else found
-    MLC-&gt;&gt;UT: SELECT refresh_token
-    MLC-&gt;&gt;GD: POST oauth2/token (refresh)
-    GD--&gt;&gt;MLC: access_token
-    MLC-&gt;&gt;GD: PATCH files/&lt;id&gt; {trashed: true}
+    MLC->>UT: SELECT refresh_token
+    MLC->>GD: POST oauth2/token (refresh)
+    GD-->>MLC: access_token
+    MLC->>GD: PATCH files/<id> {trashed: true}
     alt Drive 404 (file already gone)
-      MLC-&gt;&gt;DB: DELETE lists row (FK cascades list_connections)
-      MLC--&gt;&gt;U: success
+      MLC->>DB: DELETE lists row (FK cascades list_connections)
+      MLC-->>U: success
     else Drive ok
-      MLC-&gt;&gt;DB: DELETE lists row
-      MLC--&gt;&gt;U: success
+      MLC->>DB: DELETE lists row
+      MLC-->>U: success
     else Drive failure
-      MLC--&gt;&gt;U: 500 drive_trash_failed (DB NOT touched)
+      MLC-->>U: 500 drive_trash_failed (DB NOT touched)
     end
   end
-</code></pre>
+</pre>
 <h3>9.7 Lists reconcile (Wave 2.6 reverse Drive↔DB sync)</h3>
-<pre><code>sequenceDiagram
+<pre class="mermaid">sequenceDiagram
   participant M as Mobile Lists screen
   participant LR as lists-reconcile
   participant DB as Supabase
   participant GD as Google Drive
 
-  M-&gt;&gt;LR: invoke (on load)
-  LR-&gt;&gt;DB: SELECT lists WHERE user_id=...
-  LR-&gt;&gt;DB: SELECT user_tokens
-  LR-&gt;&gt;GD: refresh access token
+  M->>LR: invoke (on load)
+  LR->>DB: SELECT lists WHERE user_id=...
+  LR->>DB: SELECT user_tokens
+  LR->>GD: refresh access token
   par For each list
-    LR-&gt;&gt;GD: GET files/&lt;id&gt;?fields=id,trashed
-    GD--&gt;&gt;LR: 200 ok | 200 trashed | 404
+    LR->>GD: GET files/<id>?fields=id,trashed
+    GD-->>LR: 200 ok | 200 trashed | 404
   end
-  LR-&gt;&gt;DB: DELETE lists WHERE id IN (orphans) — FK cascades
-  LR-&gt;&gt;DB: SELECT list_connections WHERE entity_type=&#39;action_rule&#39;
-  LR-&gt;&gt;DB: SELECT action_rules WHERE id IN (...)
-  LR-&gt;&gt;DB: DELETE list_connections WHERE entity_id not in live rules
-  LR--&gt;&gt;M: { checked, orphaned[], stale_connections[] }
-  M-&gt;&gt;M: re-fetch lists (post-reconcile)
-</code></pre>
+  LR->>DB: DELETE lists WHERE id IN (orphans) — FK cascades
+  LR->>DB: SELECT list_connections WHERE entity_type='action_rule'
+  LR->>DB: SELECT action_rules WHERE id IN (...)
+  LR->>DB: DELETE list_connections WHERE entity_id not in live rules
+  LR-->>M: { checked, orphaned[], stale_connections[] }
+  M->>M: re-fetch lists (post-reconcile)
+</pre>
 <h3>9.8 Email harvest (asynchronous pipeline)</h3>
-<pre><code>sequenceDiagram
+<pre class="mermaid">sequenceDiagram
   participant Cr as Cron (60min)
   participant SG as sync-gmail
   participant EE as extract-email-actions
   participant HA as harvest-attachment
   participant ED as extract-document-text
 
-  Cr-&gt;&gt;SG: trigger
-  SG-&gt;&gt;SG: pull tier-1 Gmail (7d, 100msg, 3000-char body)
-  SG--&gt;&gt;SG: insert gmail_messages rows
+  Cr->>SG: trigger
+  SG->>SG: pull tier-1 Gmail (7d, 100msg, 3000-char body)
+  SG-->>SG: insert gmail_messages rows
   par fire-and-forget
-    SG-&gt;&gt;EE: classify actions (bills, appts, renewals)
-    EE--&gt;&gt;EE: insert email_actions rows
+    SG->>EE: classify actions (bills, appts, renewals)
+    EE-->>EE: insert email_actions rows
   and
-    SG-&gt;&gt;HA: download attachments → MyNaavi/Documents/&lt;type&gt;/
-    HA--&gt;&gt;HA: insert documents row
-    HA-&gt;&gt;ED: extract text (PDF via Haiku, scans via Vision)
-    ED--&gt;&gt;ED: update documents.extracted_*
+    SG->>HA: download attachments → MyNaavi/Documents/<type>/
+    HA-->>HA: insert documents row
+    HA->>ED: extract text (PDF via Haiku, scans via Vision)
+    ED-->>ED: update documents.extracted_*
   end
-</code></pre>
+</pre>
 <h2>10. Configuration discipline</h2>
 <p>Hard rules from CLAUDE.md, repeated here so this doc stands alone.</p>
 <ol>
@@ -1366,16 +1366,38 @@ Or <code>--to docx</code> for Word. Mermaid filter requires <code>npm install -g
 </ol>
 <p>The file is checked in to <code>docs/</code> and will move forward as commits land — treat it as a living map, not a snapshot.</p>
 
-<div class="build-info">Generated locally from ARCHITECTURE_2026-05-13.md · 2026-05-13T17:34:06.708Z</div>
+<div class="build-info">Generated locally from ARCHITECTURE_2026-05-13.md · 2026-05-13T17:41:06.060Z</div>
 </main>
-<script type="module">
-  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-  mermaid.initialize({
-    startOnLoad: true,
-    theme: 'default',
-    securityLevel: 'loose',
-    flowchart: { useMaxWidth: true, htmlLabels: true },
-    sequence: { useMaxWidth: true, mirrorActors: false },
+<!--
+  IIFE bundle (NOT the ES module variant) so the page works when opened
+  from a file:// URL. Browsers block ES-module imports from cross-origin
+  CDNs over file:// (the .mjs path), but a regular <script src> works
+  the same in all origins.
+-->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  // Wait for full page load (so all <pre class="mermaid"> elements are
+  // present) before running mermaid.
+  document.addEventListener('DOMContentLoaded', function () {
+    if (window.mermaid) {
+      window.mermaid.initialize({
+        startOnLoad: true,
+        theme: 'default',
+        securityLevel: 'loose',
+        flowchart: { useMaxWidth: true, htmlLabels: true },
+        sequence:  { useMaxWidth: true, mirrorActors: false },
+      });
+    } else {
+      // CDN failed — show a clear note instead of silent failure so the
+      // user knows to check network access.
+      var notes = document.querySelectorAll('pre.mermaid');
+      notes.forEach(function (el) {
+        var msg = document.createElement('div');
+        msg.style.cssText = 'color:#a00;font-size:0.85em;margin-bottom:0.4em;';
+        msg.textContent = 'Mermaid CDN failed to load — diagram source shown below as raw text.';
+        el.parentNode.insertBefore(msg, el);
+      });
+    }
   });
 </script>
 </body>
