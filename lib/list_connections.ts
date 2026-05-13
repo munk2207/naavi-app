@@ -273,6 +273,43 @@ export interface DeleteListResult {
   candidates?:       ResolverMatch[];
 }
 
+// formatConnectionQueryResult — mobile mirror of the voice server's
+// _f1aFormatConnectionQuery. Turns a LIST_CONNECTION_QUERY result into
+// the assistant chat-bubble text. V57.15.0 shipped the orchestrator
+// handler but never injected the answer into chat — Claude said "I'll
+// check..." and then went silent. V57.15.1 fix: orchestrator calls this
+// and sets turnSpeechOverride to the returned string. Same numbered-
+// list shape as the voice surface (Wave 2.5 / 2.6).
+export function formatConnectionQueryResult(
+  result: ConnectionQueryResult,
+  fallback: { listName?: string; entityRef?: string } = {},
+): string {
+  if (!result.success) {
+    if (result.error === 'list_not_found')   return `I don't see a ${fallback.listName || 'matching'} list.`;
+    if (result.error === 'entity_not_found') return `I don't see ${fallback.entityRef || 'that'}.`;
+    if (result.error === 'list_ambiguous')   return `You have more than one list called ${fallback.listName || 'that'}. Which one do you mean?`;
+    if (result.error === 'entity_ambiguous') return `You have more than one match for ${fallback.entityRef || 'that'}. Which one do you mean?`;
+    return `I couldn't check that.`;
+  }
+
+  if (result.mode === 'where_is_list') {
+    const listLabel = result.list_label || fallback.listName || 'that list';
+    const conns = result.connections || [];
+    if (conns.length === 0) return `Your ${listLabel} list isn't attached to anything.`;
+    if (conns.length === 1) return `Your ${listLabel} list is attached to ${conns[0].label}.`;
+    const numbered = conns.map((c, i) => `${i + 1}. ${c.label}.`).join(' ');
+    return `Your ${listLabel} list is attached to ${conns.length} items. ${numbered}`;
+  }
+
+  // mode === 'what_list_is_on'
+  const entityLabel = result.entity_label || fallback.entityRef || 'that';
+  const lists = result.lists || [];
+  if (lists.length === 0) return `There's no list on ${entityLabel}.`;
+  if (lists.length === 1) return `${entityLabel} has your ${lists[0].name} list on it.`;
+  const numbered = lists.map((l, i) => `${i + 1}. ${l.name}.`).join(' ');
+  return `${entityLabel} has ${lists.length} lists attached. ${numbered}`;
+}
+
 export async function deleteListWithConnections(listName: string): Promise<DeleteListResult> {
   if (!listName) return { success: false, error: 'listName required' };
 

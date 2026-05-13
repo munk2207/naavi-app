@@ -34,6 +34,7 @@ import {
   disconnectEntity,
   queryListConnections,
   deleteListWithConnections,
+  formatConnectionQueryResult,
   type ConnectionRow,
 } from '@/lib/list_connections';
 import type { StorageFile, NavigationResult } from '@/lib/types';
@@ -1819,14 +1820,19 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
 
         if (action.type === 'LIST_CONNECTION_QUERY') {
-          const mode = String((action as any).mode ?? '').trim() as 'where_is_list' | 'what_list_is_on';
+          const mode       = String((action as any).mode       ?? '').trim() as 'where_is_list' | 'what_list_is_on';
+          const listName   = String((action as any).listName   ?? '').trim() || undefined;
+          const entityRef  = String((action as any).entityRef  ?? '').trim() || undefined;
+          const entityType = String((action as any).entityType ?? '').trim() || undefined;
           try {
-            const result = await queryListConnections({
-              mode,
-              listName:   String((action as any).listName   ?? '').trim() || undefined,
-              entityRef:  String((action as any).entityRef  ?? '').trim() || undefined,
-              entityType: String((action as any).entityType ?? '').trim() || undefined,
-            });
+            const result = await queryListConnections({ mode, listName, entityRef, entityType });
+            // V57.15.1 — formatConnectionQueryResult mirrors the voice
+            // surface's _f1aFormatConnectionQuery and produces the
+            // numbered-list answer text. Override Claude's speech so
+            // the chat bubble shows the actual answer instead of just
+            // "I'll check…" followed by silence.
+            turnSpeechOverride = formatConnectionQueryResult(result, { listName, entityRef });
+
             if (result.success) {
               if (result.mode === 'where_is_list') {
                 turnLists.push({
