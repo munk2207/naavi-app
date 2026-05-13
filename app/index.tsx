@@ -1317,6 +1317,7 @@ export default function HomeScreen() {
           headerRight: () => (
             <TopBarMenu items={[
               { label: 'Alerts',   onPress: () => router.push('/alerts') },
+              { label: 'Lists',    onPress: () => router.push('/lists') },
               { label: 'Notes',    onPress: () => router.push('/notes') },
               { label: 'Info',     onPress: () => setShowIntegrations(true) },
               { label: 'Help',     onPress: () => router.push('/help') },

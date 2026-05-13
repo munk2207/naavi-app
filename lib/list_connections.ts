@@ -128,6 +128,24 @@ export interface DisconnectResult {
   candidates?:  ResolverMatch[];
 }
 
+// disconnectEntityById — UI-side detach when we already know the
+// entity_id (e.g. row in list-detail screen). Skips the resolver
+// (which expects a natural-language ref) and calls manage-list-
+// connections directly. Use this for clickable detach buttons,
+// not for orchestrator paths where Claude emits a text ref.
+export async function disconnectEntityById(
+  entityType: string, entityId: string,
+): Promise<DisconnectResult> {
+  if (!entityType || !entityId) return { success: false, error: 'entityType and entityId required' };
+  const data = await manageConnections({
+    type:        'DISCONNECT',
+    entity_type: entityType,
+    entity_id:   entityId,
+  });
+  if (!data?.success) return { success: false, error: data?.error || 'manage_connections_failed' };
+  return { success: true, removed: Number(data.removed ?? 0) };
+}
+
 export async function disconnectEntity(
   entityRef: string, entityType: string,
 ): Promise<DisconnectResult> {
