@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserNameAsync, syncUserNameToSupabase } from '@/lib/naavi-client';
 import { isVoiceEnabledSync, refreshVoicePref, setVoicePref } from '@/lib/voicePref';
 import { signOut, supabase } from '@/lib/supabase';
@@ -111,6 +112,12 @@ export default function SettingsScreen() {
   const [phone, setPhone]                           = useState('');
   const [phoneSaved, setPhoneSaved]                 = useState(false);
   const [phoneLoading, setPhoneLoading]             = useState(false);
+  // F1a Wave 2 Phase E — multi-phone identity (Wael 2026-05-13).
+  // phoneNumbers[0] is the primary (used for morning call); subsequent
+  // entries are backup recognitions (spouse, family) so the voice server
+  // identifies the same user from any of them. At least one is required.
+  const [phoneNumbers, setPhoneNumbers]             = useState<string[]>([]);
+  const [newPhoneInput, setNewPhoneInput]           = useState('');
   const [homeAddress, setHomeAddress]               = useState('');
   const [homeAddressLoading, setHomeAddressLoading] = useState(false);
   const [workAddress, setWorkAddress]               = useState('');
@@ -173,7 +180,7 @@ export default function SettingsScreen() {
         const { data } = await queryWithTimeout(
           supabase
             .from('user_settings')
-            .select('name, morning_call_enabled, morning_call_time, phone, home_address, work_address')
+            .select('name, morning_call_enabled, morning_call_time, phone, phone_numbers, home_address, work_address')
             .eq('user_id', user.id)
             .maybeSingle(),
           15_000,
@@ -195,6 +202,14 @@ export default function SettingsScreen() {
           if (data.phone) {
             setPhone(data.phone);
             setPhoneSaved(true);
+          }
+          // Prefer phone_numbers[] (canonical post-migration). Fall back
+          // to the single `phone` column for users whose row predates
+          // the multi-phone migration and hasn't been resaved yet.
+          if (Array.isArray(data.phone_numbers) && data.phone_numbers.length > 0) {
+            setPhoneNumbers(data.phone_numbers.map(String));
+          } else if (data.phone) {
+            setPhoneNumbers([String(data.phone)]);
           }
           if (data.home_address) setHomeAddress(String(data.home_address));
           if (data.work_address) setWorkAddress(String(data.work_address));
@@ -254,17 +269,58 @@ export default function SettingsScreen() {
     setMorningCallLoading(false);
   }
 
-  async function handleSavePhone() {
-    const raw = phone.trim().replace(/[\s\-\(\)]/g, '');
-    // E.164 — plus sign, country code, up to 15 digits total (per ITU spec).
-    // We require at least 10 digits after the plus.
-    if (!/^\+\d{10,15}$/.test(raw)) {
+  // E.164 validator — plus, country code, 10-15 digits total.
+  function normalizePhone(s: string): string {
+    return s.trim().replace(/[\s\-\(\)]/g, '');
+  }
+  function isValidE164(s: string): boolean {
+    return /^\+\d{10,15}$/.test(s);
+  }
+
+  // F1a Wave 2 Phase E — add a backup phone number locally. Persists on Save.
+  function handleAddPhone() {
+    const raw = normalizePhone(newPhoneInput);
+    if (!isValidE164(raw)) {
       Alert.alert(
         'Invalid phone',
         'Use international format starting with +, then country code and number.\nExample: +16135551234'
       );
       return;
     }
+    if (phoneNumbers.includes(raw)) {
+      Alert.alert('Already added', 'That number is already on your list.');
+      return;
+    }
+    setPhoneNumbers(prev => [...prev, raw]);
+    setNewPhoneInput('');
+  }
+
+  // Remove a non-primary phone. Primary (index 0) cannot be removed via
+  // this path — user changes primary by editing the legacy single-phone
+  // input above and re-saving (which will also rewrite phone_numbers[0]).
+  function handleRemovePhone(idx: number) {
+    if (idx === 0) return;   // primary protected
+    if (phoneNumbers.length <= 1) return;
+    setPhoneNumbers(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  // Save the WHOLE phone_numbers list. Dual-writes `phone` (= primary) so
+  // legacy code that reads the single column keeps working through the
+  // dual-write release.
+  async function handleSavePhone() {
+    const primary = normalizePhone(phone);
+    if (!isValidE164(primary)) {
+      Alert.alert(
+        'Invalid phone',
+        'Use international format starting with +, then country code and number.\nExample: +16135551234'
+      );
+      return;
+    }
+    // Compose the final phone_numbers list — primary first, then the
+    // rest of the current list with any duplicate of the primary stripped.
+    const tail = phoneNumbers.filter(n => n !== primary);
+    const finalNumbers = [primary, ...tail];
+
     if (!supabase) return;
     setPhoneLoading(true);
     try {
@@ -272,19 +328,37 @@ export default function SettingsScreen() {
       if (!user) { setPhoneLoading(false); return; }
       const { error } = await queryWithTimeout(
         supabase.from('user_settings').upsert({
-          user_id: user.id,
-          phone: raw,
-          updated_at: new Date().toISOString(),
+          user_id:       user.id,
+          phone:         primary,
+          phone_numbers: finalNumbers,
+          updated_at:    new Date().toISOString(),
         }, { onConflict: 'user_id' }),
         15_000,
         'upsert-user-phone',
       );
-      if (error) throw error;
-      setPhone(raw);
+      if (error) {
+        // Trigger raises 23505 with a "phone_number_already_registered:
+        // <conflict_phone>" message when another user has the same number.
+        const msg = String(error.message || '');
+        if (msg.includes('phone_number_already_registered')) {
+          const conflict = msg.split(':').slice(1).join(':').trim();
+          Alert.alert(
+            'Phone already in use',
+            `${conflict} is already registered to another MyNaavi account. Each number can only belong to one user.`
+          );
+        } else {
+          throw error;
+        }
+        return;
+      }
+      setPhone(primary);
+      setPhoneNumbers(finalNumbers);
       setPhoneSaved(true);
       Alert.alert(
         'Saved',
-        'Phone number saved. Naavi will call this number for your morning brief, and will recognize you when you call back.'
+        finalNumbers.length === 1
+          ? 'Phone number saved. Naavi will call this number for your morning brief, and will recognize you when you call back.'
+          : `Saved ${finalNumbers.length} numbers. Naavi will call the primary for your morning brief and will recognize you when you call from any of them.`
       );
     } catch (err) {
       Alert.alert('Error', 'Could not save phone number. Please try again.');
@@ -439,14 +513,15 @@ export default function SettingsScreen() {
 
         <View style={styles.divider} />
 
-        {/* Your Phone Number */}
+        {/* Your Phone Number — primary + backup numbers */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your Phone Number</Text>
+          <Text style={styles.sectionTitle}>Your Phone Numbers</Text>
           <Text style={styles.sectionNote}>
             {phoneSaved
-              ? `Saved as ${phone}. Naavi will call this number for your morning brief and will recognize you when you call back.`
-              : 'Enter your phone in international format, starting with + and your country code (e.g. +16135551234). Required for morning calls.'}
+              ? `Primary: ${phone}. Used for the morning brief. Backup numbers below let Naavi recognize you when you call from a spouse or family phone.`
+              : 'Enter your primary phone in international format (e.g. +16135551234). Required for morning calls. You can add backup numbers below after saving.'}
           </Text>
+          <Text style={styles.fieldLabel}>Primary</Text>
           <TextInput
             style={styles.keyInput}
             value={phone}
@@ -456,8 +531,54 @@ export default function SettingsScreen() {
             keyboardType="phone-pad"
             autoCapitalize="none"
             autoCorrect={false}
-            accessibilityLabel="Your phone number"
+            accessibilityLabel="Your primary phone number"
           />
+
+          {/* Backup phones list — only shows entries 1..N (primary is the
+              TextInput above). Each row has an X to remove. */}
+          {phoneNumbers.length > 1 && (
+            <>
+              <Text style={[styles.fieldLabel, { marginTop: 14 }]}>Backup phones</Text>
+              {phoneNumbers.slice(1).map((num, i) => (
+                <View key={`${num}:${i}`} style={styles.phoneBackupRow}>
+                  <Text style={styles.phoneBackupText}>{num}</Text>
+                  <TouchableOpacity
+                    onPress={() => handleRemovePhone(i + 1)}
+                    style={styles.phoneRemoveBtn}
+                    accessibilityLabel={`Remove ${num}`}
+                  >
+                    <Ionicons name="close" size={18} color={Colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </>
+          )}
+
+          {/* Add-backup input row */}
+          <Text style={[styles.fieldLabel, { marginTop: 14 }]}>Add a backup phone</Text>
+          <View style={styles.phoneAddRow}>
+            <TextInput
+              style={[styles.keyInput, styles.phoneAddInput]}
+              value={newPhoneInput}
+              onChangeText={setNewPhoneInput}
+              placeholder="+16135551234"
+              placeholderTextColor={Colors.textMuted}
+              keyboardType="phone-pad"
+              autoCapitalize="none"
+              autoCorrect={false}
+              accessibilityLabel="Add a backup phone number"
+            />
+            <TouchableOpacity
+              style={[styles.phoneAddBtn, !newPhoneInput.trim() && styles.saveBtnDisabled]}
+              onPress={handleAddPhone}
+              disabled={!newPhoneInput.trim()}
+              accessibilityRole="button"
+              accessibilityLabel="Add backup phone"
+            >
+              <Ionicons name="add" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+
           <TouchableOpacity
             style={[styles.saveBtn, (!phone.trim() || phoneLoading) && styles.saveBtnDisabled]}
             onPress={handleSavePhone}
@@ -465,7 +586,7 @@ export default function SettingsScreen() {
             accessibilityRole="button"
           >
             <Text style={styles.saveBtnText}>
-              {phoneLoading ? 'Saving...' : 'Save phone'}
+              {phoneLoading ? 'Saving...' : phoneNumbers.length > 1 ? 'Save phones' : 'Save phone'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -773,6 +894,51 @@ const styles = StyleSheet.create({
     color: Colors.accentDark,
     fontSize: Typography.body,
     fontWeight: Typography.semibold,
+  },
+  // F1a Wave 2 Phase E — multi-phone identity UI.
+  fieldLabel: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+    marginTop: 8,
+  },
+  phoneBackupRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.bgElevated,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 6,
+  },
+  phoneBackupText: {
+    flex: 1,
+    color: Colors.textPrimary,
+    fontSize: 15,
+  },
+  phoneRemoveBtn: {
+    padding: 6,
+  },
+  phoneAddRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  phoneAddInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  phoneAddBtn: {
+    width: 44,
+    height: 44,
+    backgroundColor: Colors.accent,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   divider: {
     height: 1,
