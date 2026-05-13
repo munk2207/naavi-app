@@ -29,6 +29,13 @@ import { lookupContact, lookupContactByPhone } from '@/lib/contacts';
 import { ingestNote, deleteKnowledge, fetchAllKnowledge, searchKnowledge } from '@/lib/knowledge';
 import { registry } from '@/lib/adapters/registry';
 import { createList, addToList, removeFromList, readList } from '@/lib/lists';
+import {
+  connectList,
+  disconnectEntity,
+  queryListConnections,
+  deleteListWithConnections,
+  type ConnectionRow,
+} from '@/lib/list_connections';
 import type { StorageFile, NavigationResult } from '@/lib/types';
 
 import { isConfirmable, buildActionSummary, SPEECH, type PendingAction } from '@/lib/voice-confirm';
@@ -1043,7 +1050,24 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     const turnDeleted: { count: number; titles: string[] }[] = [];
     const turnDocs: { title: string; webViewLink?: string }[] = [];
     const turnMemory: { text: string; count: number }[] = [];
-    const turnLists: { action: string; listName: string; items?: string[]; webViewLink?: string }[] = [];
+    // F1a Wave 2 widen — adds connection-related fields (entityLabel,
+    // entityType, cascadedCount, connections) and an error variant so the
+    // 4 new LIST_CONNECT / LIST_DISCONNECT / LIST_CONNECTION_QUERY /
+    // LIST_DELETE handlers can record outcomes alongside the existing
+    // create/add/remove/read entries.
+    const turnLists: {
+      action:         string;                 // 'created' | 'added' | 'removed' | 'read' | 'connected' | 'disconnected' | 'deleted' | 'query' | 'error'
+      listName:       string;
+      items?:         string[];
+      webViewLink?:   string;
+      entityLabel?:   string;
+      entityType?:    string;
+      cascadedCount?: number;
+      connections?:   ConnectionRow[];
+      list?:          { id: string; name: string } | null;
+      mode?:          'where_is_list' | 'what_list_is_on';
+      errorKind?:     string;
+    }[] = [];
     // V57.4 Part B — location rules created in this turn. Filled by the
     // SET_ACTION_RULE intercept after a successful insert; rendered as an
     // inline card with a "Make it recurring / Make it one-time" toggle.
@@ -1721,6 +1745,130 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           } catch (err) {
             console.error('[Orchestrator] LIST_RULES read failed:', err);
             turnSpeechOverride = "I couldn't pull up your alerts. Try again in a moment.";
+          }
+          continue;
+        }
+
+        // ─── F1a Wave 2 — list-connection actions ─────────────────────────
+        // Mobile mirror of the voice-server's executeAction cases for
+        // LIST_CONNECT / LIST_DISCONNECT / LIST_CONNECTION_QUERY /
+        // LIST_DELETE. All four follow the same shape: resolve names →
+        // call manage-list-connections → push outcome onto turnLists.
+        //
+        // No extra confirmation gate here: typing the message + send IS
+        // the user confirmation (per F1a Wave 2 design — Wael 2026-05-13).
+        // Claude's prompt (RULE 8b) is responsible for showing the
+        // cascade-warning text BEFORE emitting LIST_DELETE. Matches the
+        // existing pattern for SET_ACTION_RULE / SCHEDULE_MEDICATION /
+        // DELETE_RULE / DELETE_MEMORY etc., which all fire on send.
+
+        if (action.type === 'LIST_CONNECT') {
+          const listName   = String((action as any).listName   ?? '').trim();
+          const entityRef  = String((action as any).entityRef  ?? '').trim();
+          const entityType = String((action as any).entityType ?? '').trim();
+          try {
+            const result = await connectList(listName, entityRef, entityType);
+            if (result.success) {
+              turnLists.push({
+                action: 'connected',
+                listName: result.listLabel ?? listName,
+                entityLabel: result.entityLabel,
+                entityType,
+              });
+              console.log(`[Orchestrator] LIST_CONNECT "${result.listLabel}" → ${entityType}/${result.entityLabel}: OK`);
+            } else {
+              turnLists.push({ action: 'error', listName, entityType, errorKind: result.error });
+              console.error(`[Orchestrator] LIST_CONNECT failed: ${result.error}`);
+            }
+          } catch (err: any) {
+            turnLists.push({ action: 'error', listName, entityType, errorKind: err?.message || 'exception' });
+            console.error('[Orchestrator] LIST_CONNECT exception:', err);
+          }
+          continue;
+        }
+
+        if (action.type === 'LIST_DISCONNECT') {
+          const entityRef  = String((action as any).entityRef  ?? '').trim();
+          const entityType = String((action as any).entityType ?? '').trim();
+          try {
+            const result = await disconnectEntity(entityRef, entityType);
+            if (result.success) {
+              turnLists.push({
+                action: 'disconnected',
+                listName: '',
+                entityLabel: result.entityLabel,
+                entityType,
+                cascadedCount: result.removed,
+              });
+              console.log(`[Orchestrator] LIST_DISCONNECT ${entityType}/${result.entityLabel}: removed=${result.removed}`);
+            } else {
+              turnLists.push({ action: 'error', listName: '', entityType, errorKind: result.error });
+              console.error(`[Orchestrator] LIST_DISCONNECT failed: ${result.error}`);
+            }
+          } catch (err: any) {
+            turnLists.push({ action: 'error', listName: '', entityType, errorKind: err?.message || 'exception' });
+            console.error('[Orchestrator] LIST_DISCONNECT exception:', err);
+          }
+          continue;
+        }
+
+        if (action.type === 'LIST_CONNECTION_QUERY') {
+          const mode = String((action as any).mode ?? '').trim() as 'where_is_list' | 'what_list_is_on';
+          try {
+            const result = await queryListConnections({
+              mode,
+              listName:   String((action as any).listName   ?? '').trim() || undefined,
+              entityRef:  String((action as any).entityRef  ?? '').trim() || undefined,
+              entityType: String((action as any).entityType ?? '').trim() || undefined,
+            });
+            if (result.success) {
+              if (result.mode === 'where_is_list') {
+                turnLists.push({
+                  action: 'query',
+                  listName: result.list_label,
+                  mode: 'where_is_list',
+                  connections: result.connections,
+                });
+                console.log(`[Orchestrator] LIST_CONNECTION_QUERY where_is_list "${result.list_label}": ${result.connections.length} connections`);
+              } else {
+                turnLists.push({
+                  action: 'query',
+                  listName: '',
+                  mode: 'what_list_is_on',
+                  entityLabel: result.entity_label,
+                  list: result.list,
+                });
+                console.log(`[Orchestrator] LIST_CONNECTION_QUERY what_list_is_on ${result.entity_label}: ${result.list ? result.list.name : 'no list'}`);
+              }
+            } else {
+              turnLists.push({ action: 'error', listName: '', mode, errorKind: result.error });
+              console.error(`[Orchestrator] LIST_CONNECTION_QUERY failed: ${result.error}`);
+            }
+          } catch (err: any) {
+            turnLists.push({ action: 'error', listName: '', mode, errorKind: err?.message || 'exception' });
+            console.error('[Orchestrator] LIST_CONNECTION_QUERY exception:', err);
+          }
+          continue;
+        }
+
+        if (action.type === 'LIST_DELETE') {
+          const listName = String((action as any).listName ?? '').trim();
+          try {
+            const result = await deleteListWithConnections(listName);
+            if (result.success) {
+              turnLists.push({
+                action: 'deleted',
+                listName: result.listLabel ?? listName,
+                cascadedCount: result.cascadedCount ?? 0,
+              });
+              console.log(`[Orchestrator] LIST_DELETE "${result.listLabel}": cascaded ${result.cascadedCount} connections`);
+            } else {
+              turnLists.push({ action: 'error', listName, errorKind: result.error });
+              console.error(`[Orchestrator] LIST_DELETE failed: ${result.error}`);
+            }
+          } catch (err: any) {
+            turnLists.push({ action: 'error', listName, errorKind: err?.message || 'exception' });
+            console.error('[Orchestrator] LIST_DELETE exception:', err);
           }
           continue;
         }
