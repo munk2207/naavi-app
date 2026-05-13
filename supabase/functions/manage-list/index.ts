@@ -125,6 +125,31 @@ async function updateDriveDoc(accessToken: string, fileId: string, content: stri
   return res.ok;
 }
 
+// Check whether the Drive file backing a list row is alive AND not trashed.
+// Returns true only if the file exists in the user's Drive and is not in
+// trash. Does NOT un-trash. Trashing IS the user's delete gesture — Naavi
+// must never resurrect data the user removed.
+//
+// Why this exists (Wael 2026-05-12, post-shopping-list incident):
+// Drive API accepts reads/writes against trashed files silently. Without
+// this check, manage-list would (a) return success on LIST_CREATE while the
+// user sees nothing in MyNaavi/Lists, or (b) silently append to a trashed
+// file. The earlier version of this helper un-trashed on miss — that
+// resurrected items the user had cleared, surfacing as "Naavi fabricated
+// items in my list." Trust violation. Now: strict check; LIST_CREATE on a
+// trashed file falls through to create a fresh Doc; LIST_ADD/REMOVE/READ
+// on a trashed file returns a clear "Drive file is missing" error.
+async function isDriveDocAlive(accessToken: string, fileId: string): Promise<boolean> {
+  const getRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,trashed`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  if (getRes.status === 404) return false;
+  if (!getRes.ok) return false;
+  const meta = await getRes.json();
+  return meta.trashed === false;
+}
+
 // Ensure the MyNaavi → Lists folder path exists under the user's Drive root
 // and return the Lists folder ID. Idempotent: reuses existing folders when
 // present, creates lazily on first call. Lists created before this function
@@ -216,7 +241,24 @@ Deno.serve(async (req) => {
 
       // Check if already exists
       const existing = await findList(supabase, userId, name);
-      if (existing) return jsonResponse({ success: true, list: existing });
+      if (existing) {
+        const alive = await isDriveDocAlive(accessToken, existing.drive_file_id);
+        if (alive) return jsonResponse({ success: true, list: existing });
+
+        // Existing row points to a Drive file that's trashed or 404 — treat
+        // as deleted by the user, create a fresh Doc, update the existing
+        // row in place so list_connections stay valid. The old trashed Doc
+        // stays in trash and auto-deletes in 30 days (recoverable in that
+        // window if the user changes their mind).
+        const doc = await createDriveDoc(accessToken, name);
+        if (!doc) return jsonResponse({ success: false, error: 'Failed to create Drive doc' }, 500);
+        await supabase.from('lists').update({
+          drive_file_id: doc.fileId,
+          web_view_link: doc.webViewLink,
+        }).eq('id', existing.id);
+        console.log(`[manage-list] Re-created Drive doc for "${name}" — old ${existing.drive_file_id} gone, new ${doc.fileId}`);
+        return jsonResponse({ success: true, list: { ...existing, drive_file_id: doc.fileId, web_view_link: doc.webViewLink } });
+      }
 
       // Create Google Doc
       const doc = await createDriveDoc(accessToken, name);
@@ -243,6 +285,9 @@ Deno.serve(async (req) => {
       const list = await findList(supabase, userId, listName);
       if (!list) return jsonResponse({ success: false, error: `List "${listName}" not found` });
 
+      const alive = await isDriveDocAlive(accessToken, list.drive_file_id);
+      if (!alive) return jsonResponse({ success: false, error: `List "${listName}" Drive file is missing` });
+
       const current = await readDriveDoc(accessToken, list.drive_file_id);
       const lines = current.split('\n').filter((l: string) => l.trim());
       for (const item of items) {
@@ -264,16 +309,30 @@ Deno.serve(async (req) => {
       const list = await findList(supabase, userId, listName);
       if (!list) return jsonResponse({ success: false, error: `List "${listName}" not found` });
 
-      const current = await readDriveDoc(accessToken, list.drive_file_id);
-      let lines = current.split('\n').filter((l: string) => l.trim());
-      const removeSet = new Set(items.map((i: string) => i.trim().toLowerCase()));
-      lines = lines.filter((l: string) => !removeSet.has(l.trim().toLowerCase()));
+      const alive = await isDriveDocAlive(accessToken, list.drive_file_id);
+      if (!alive) return jsonResponse({ success: false, error: `List "${listName}" Drive file is missing` });
 
-      const ok = await updateDriveDoc(accessToken, list.drive_file_id, lines.join('\n') + '\n');
+      const current = await readDriveDoc(accessToken, list.drive_file_id);
+      const lines = current.split('\n').filter((l: string) => l.trim());
+      const removeSet = new Set(items.map((i: string) => i.trim().toLowerCase()));
+      const beforeCount = lines.length;
+      const afterLines = lines.filter((l: string) => !removeSet.has(l.trim().toLowerCase()));
+      const removedCount = beforeCount - afterLines.length;
+
+      // Wael 2026-05-13: previously returned success: true even when zero
+      // items matched (e.g. "remove flour" when no "flour" line existed).
+      // That violated the truth-at-user-layer principle — Naavi said
+      // "Removed." when nothing was actually removed.
+      if (removedCount === 0) {
+        console.log(`[manage-list] LIST_REMOVE "${listName}" — none of [${items.join(', ')}] matched any line`);
+        return jsonResponse({ success: false, error: 'no_items_matched', requested: items, removed: 0 });
+      }
+
+      const ok = await updateDriveDoc(accessToken, list.drive_file_id, afterLines.join('\n') + '\n');
       if (!ok) return jsonResponse({ success: false, error: 'Failed to update Drive doc' });
 
-      console.log(`[manage-list] Removed ${items.length} items from "${listName}"`);
-      return jsonResponse({ success: true });
+      console.log(`[manage-list] LIST_REMOVE "${listName}" — removed ${removedCount} of ${items.length} requested`);
+      return jsonResponse({ success: true, removed: removedCount, requested: items.length });
     }
 
     // ── LIST_READ ────────────────────────────────────────────────────────────
@@ -282,6 +341,9 @@ Deno.serve(async (req) => {
 
       const list = await findList(supabase, userId, listName);
       if (!list) return jsonResponse({ success: false, error: `List "${listName}" not found` });
+
+      const alive = await isDriveDocAlive(accessToken, list.drive_file_id);
+      if (!alive) return jsonResponse({ success: false, error: `List "${listName}" Drive file is missing` });
 
       const content = await readDriveDoc(accessToken, list.drive_file_id);
       const allLines = content.split('\n').filter((l: string) => l.trim());
