@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-13-v72-voice-pin-instructions';
+const PROMPT_VERSION = '2026-05-13-v73-list-mn-cardinality';
 
 /**
  * Cache-boundary marker.
@@ -484,8 +484,8 @@ Speech rules for list actions:
 
 Do NOT route list create/read/add/remove through global_search. Lists are first-class commands; RULE 8 takes priority over RULE 19 for these phrasings.
 
-RULE 8b — LIST CONNECTIONS (F1a, ${userName} 2026-05-11):
-Lists can be wired to entities (alerts, calendar events, emails, contacts, documents, reminders) so that when the entity fires, the list's items come along. ONE list ↔ MANY entities; each entity has AT MOST one list.
+RULE 8b — LIST CONNECTIONS (F1a, ${userName} 2026-05-11; M:N pivot 2026-05-13):
+Lists can be wired to entities (alerts, calendar events, emails, contacts, documents, reminders) so that when the entity fires, the list's items come along. M:N — a list can attach to many entities AND an entity can carry many lists. Example: ${userName}'s "Costco arrival" alert can carry both a "groceries" list AND an "errands" list at the same time; both come along when the alert fires.
 
 Connect phrasings (any verb → list_connect):
 - "Connect / attach / wire / link / use / put / hook / tie / add my X list to my Y."
@@ -499,12 +499,18 @@ Connect phrasings (any verb → list_connect):
 Disconnect phrasings (any verb → list_disconnect):
 - "Disconnect / detach / unlink / unwire / take off / remove my X list from my Y."
 - The "from" preposition disambiguates list-disconnect from list-item-remove. "Remove my groceries list from Costco alert" is list_disconnect; "remove eggs from my groceries list" is list_remove.
+- list_disconnect REQUIRES the listName field — name the specific list, not just the entity. An entity can carry multiple lists, so "detach the list from my Costco alert" without naming which is ambiguous.
+- Examples:
+  - "Detach my groceries list from my Costco alert"     → list_disconnect { listName:"groceries", entityRef:"Costco alert", entityType:"action_rule" }
+  - "Remove my errands list from Saturday's meeting"    → list_disconnect { listName:"errands",   entityRef:"Saturday's meeting", entityType:"calendar_event" }
+- If ${userName} says *"remove the list from my Costco alert"* without naming the list, and the alert has 2+ lists attached, ask which one: *"Your Costco alert has 'groceries' and 'errands' attached — which one should I detach?"* Wait for the answer, then emit list_disconnect with that listName.
 
 Connection queries (→ list_connection_query):
 - "Where is my groceries list connected/used/attached?" / "Which alerts use my groceries list?"
   → list_connection_query { mode:"where_is_list", listName:"groceries" }
-- "What list is on my Costco alert?" / "What's attached to my Costco alert?"
+- "What list is on my Costco alert?" / "What's attached to my Costco alert?" / "What lists are on my Costco alert?"
   → list_connection_query { mode:"what_list_is_on", entityRef:"Costco alert", entityType:"action_rule" }
+- The result for what_list_is_on can be 0, 1, or many lists. When the result is many, list them: *"Your Costco alert has 'groceries' and 'errands' attached."* When the result is 0: *"Nothing's attached to your Costco alert."*
 
 List deletion (→ list_delete, with mandatory pre-warning):
 - "Delete my groceries list" / "Remove my groceries list" (NO "from" — distinguishes from disconnect)

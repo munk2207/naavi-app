@@ -1,17 +1,32 @@
 /**
  * manage-list-connections Edge Function — F1a (Wael 2026-05-11).
  *
- * CRUD over the list_connections table. Single write entry for the
- * cardinality rule "one list per entity, many entities per list."
+ * CRUD over the list_connections table.
+ *
+ * Cardinality (Wave 2.5, Wael 2026-05-13): M:N. Each entity can carry
+ * multiple lists (an alert can have both a "groceries" list AND an
+ * "errands" list). Same (list_id, entity_type, entity_id) pair can't
+ * duplicate — enforced by UNIQUE(list_id, entity_type, entity_id) in
+ * 20260513_list_connections_mn.sql.
  *
  * Operations:
- *   CONNECT — wire list_id ↔ entity. If the entity already has a connection,
- *             the prior row is replaced. Returns the new connection row.
- *   DISCONNECT — remove the connection by (entity_type, entity_id).
- *   LIST_CONNECTIONS_FOR_LIST — "where is my X list connected?" Returns the
- *             list of entity_type+entity_id rows (caller resolves names).
- *   LIST_CONNECTIONS_FOR_ENTITY — "what list is on my Y?" Returns the list
- *             (id+name+category) wired to a specific entity, or null.
+ *   CONNECT — wire list_id ↔ entity. Additive: pre-existing connections
+ *             on the same entity for OTHER lists stay. Returns 409
+ *             ("already attached") if the same (list, entity) pair is
+ *             attempted twice.
+ *   DISCONNECT — remove ONE connection. `list_id` is required to identify
+ *             which list to detach. Back-compat: if `list_id` is absent
+ *             and the entity has exactly one connection, remove it (1:1
+ *             mode). If absent and the entity has 2+ connections, return
+ *             400 ("ambiguous, specify list_id"). New callers should
+ *             always pass list_id.
+ *   LIST_CONNECTIONS_FOR_LIST — "where is my X list connected?" Returns
+ *             the list of entity_type+entity_id rows (caller resolves
+ *             names).
+ *   LIST_CONNECTIONS_FOR_ENTITY — "what lists are on my Y?" Returns
+ *             `lists: [{id, name, category}, ...]` (array, possibly empty).
+ *             Back-compat: also returns `list: lists[0] ?? null` so old
+ *             callers that read `list` keep working through the transition.
  *   DELETE_LIST_AND_CONNECTIONS — atomic: delete the lists row; the FK
  *             ON DELETE CASCADE on list_connections cleans up all wirings.
  *             Returns the list of entities that WERE connected so the
@@ -123,21 +138,10 @@ async function handleConnect(
     return jsonResponse({ error: 'list not found or not owned by user' }, 404);
   }
 
-  // Replace any existing connection on this entity (one-list-per-entity rule).
-  // Same pattern as the pending-dwell-fires cancel-before-insert: cancels the
-  // prior row, then inserts the new one. The DB UNIQUE index is the
-  // final-line defense; the cancel-before-insert prevents user-visible
-  // 409 errors when the orchestrator legitimately wants to swap.
-  const { error: deleteErr } = await supabase
-    .from('list_connections')
-    .delete()
-    .eq('entity_type', entityType)
-    .eq('entity_id',   entityId);
-  if (deleteErr) {
-    console.error('[manage-list-connections] CONNECT delete-prior error:', deleteErr.message);
-    return jsonResponse({ error: deleteErr.message }, 500);
-  }
-
+  // Wave 2.5 M:N — no delete-prior. Multiple lists can attach to the
+  // same entity. UNIQUE(list_id, entity_type, entity_id) blocks the
+  // accidental same-list-twice case; we catch the 23505 and return a
+  // friendly "already attached" response instead of a 500.
   const { data: inserted, error: insertErr } = await supabase
     .from('list_connections')
     .insert({
@@ -149,6 +153,10 @@ async function handleConnect(
     .select('id, list_id, entity_type, entity_id, created_at')
     .single();
   if (insertErr) {
+    // 23505 = unique_violation. The (list, entity) pair is already wired.
+    if ((insertErr as any).code === '23505') {
+      return jsonResponse({ success: false, error: 'already_attached', list_id: listId, entity_type: entityType, entity_id: entityId }, 409);
+    }
     console.error('[manage-list-connections] CONNECT insert error:', insertErr.message);
     return jsonResponse({ error: insertErr.message }, 500);
   }
@@ -161,26 +169,73 @@ async function handleDisconnect(
   userId: string,
   body: any,
 ) {
+  const listId     = String(body?.list_id     ?? '').trim();
   const entityType = String(body?.entity_type ?? '').trim();
   const entityId   = String(body?.entity_id   ?? '').trim();
 
   if (!entityType) return jsonResponse({ error: 'entity_type required' }, 400);
   if (!entityId)   return jsonResponse({ error: 'entity_id required' }, 400);
 
-  const { data: deleted, error } = await supabase
+  // Wave 2.5 M:N — when list_id is provided, target exactly that
+  // connection. Otherwise, back-compat: if the entity has exactly
+  // one connection, remove it (matches old 1:1 behavior). If 2+
+  // connections exist and list_id is absent, refuse and return
+  // 400 with `attached_list_ids` so the caller can disambiguate
+  // (re-prompt the user / pass the right list_id).
+  if (listId) {
+    const { data: deleted, error } = await supabase
+      .from('list_connections')
+      .delete()
+      .eq('user_id',     userId)
+      .eq('list_id',     listId)
+      .eq('entity_type', entityType)
+      .eq('entity_id',   entityId)
+      .select('id, list_id');
+    if (error) {
+      console.error('[manage-list-connections] DISCONNECT (with list_id) error:', error.message);
+      return jsonResponse({ error: error.message }, 500);
+    }
+    return jsonResponse({ success: true, removed: Array.isArray(deleted) ? deleted.length : 0 });
+  }
+
+  // No list_id given — count first.
+  const { data: existing, error: countErr } = await supabase
+    .from('list_connections')
+    .select('id, list_id')
+    .eq('user_id',     userId)
+    .eq('entity_type', entityType)
+    .eq('entity_id',   entityId);
+  if (countErr) {
+    console.error('[manage-list-connections] DISCONNECT count error:', countErr.message);
+    return jsonResponse({ error: countErr.message }, 500);
+  }
+  const rows = Array.isArray(existing) ? existing : [];
+
+  if (rows.length === 0) {
+    // Nothing to remove — idempotent success.
+    return jsonResponse({ success: true, removed: 0 });
+  }
+  if (rows.length > 1) {
+    return jsonResponse({
+      success:           false,
+      error:             'ambiguous_disconnect_needs_list_id',
+      attached_list_ids: rows.map(r => (r as any).list_id),
+    }, 400);
+  }
+
+  // Exactly one connection — remove it (1:1 back-compat path).
+  const { data: deleted, error: delErr } = await supabase
     .from('list_connections')
     .delete()
     .eq('user_id',     userId)
     .eq('entity_type', entityType)
     .eq('entity_id',   entityId)
     .select('id, list_id');
-  if (error) {
-    console.error('[manage-list-connections] DISCONNECT error:', error.message);
-    return jsonResponse({ error: error.message }, 500);
+  if (delErr) {
+    console.error('[manage-list-connections] DISCONNECT (back-compat) error:', delErr.message);
+    return jsonResponse({ error: delErr.message }, 500);
   }
-
-  const removed = Array.isArray(deleted) ? deleted.length : 0;
-  return jsonResponse({ success: true, removed });
+  return jsonResponse({ success: true, removed: Array.isArray(deleted) ? deleted.length : 0 });
 }
 
 async function handleListForList(
@@ -214,27 +269,31 @@ async function handleListForEntity(
   if (!entityType) return jsonResponse({ error: 'entity_type required' }, 400);
   if (!entityId)   return jsonResponse({ error: 'entity_id required' }, 400);
 
-  const { data: conn, error: connErr } = await supabase
+  // Wave 2.5 M:N — return ALL lists attached to the entity (array,
+  // not maybeSingle). Embedded select pulls each list's id/name/
+  // category via the FK list_connections.list_id → lists.id in one
+  // round-trip.
+  const { data: rows, error: rowsErr } = await supabase
     .from('list_connections')
-    .select('id, list_id, created_at')
-    .eq('user_id', userId)
+    .select('id, list_id, created_at, lists(id, name, category)')
+    .eq('user_id',     userId)
     .eq('entity_type', entityType)
     .eq('entity_id',   entityId)
-    .maybeSingle();
-  if (connErr) return jsonResponse({ error: connErr.message }, 500);
-  if (!conn)   return jsonResponse({ success: true, list: null });
+    .order('created_at', { ascending: true });
+  if (rowsErr) return jsonResponse({ error: rowsErr.message }, 500);
 
-  const { data: list, error: listErr } = await supabase
-    .from('lists')
-    .select('id, name, category')
-    .eq('id', (conn as any).list_id)
-    .maybeSingle();
-  if (listErr) return jsonResponse({ error: listErr.message }, 500);
+  const lists = (Array.isArray(rows) ? rows : [])
+    .map((r: any) => r?.lists ? { id: String(r.lists.id), name: String(r.lists.name ?? ''), category: String(r.lists.category ?? '') } : null)
+    .filter((l: any) => l !== null);
 
+  // Back-compat: also expose `list: lists[0] ?? null` so callers from
+  // before Wave 2.5 keep working through the transition window. New
+  // callers (mobile orchestrator + voice server post-2.5) read `lists`.
   return jsonResponse({
     success: true,
-    list: list ?? null,
-    connection_id: (conn as any).id,
+    lists,
+    list:           lists[0] ?? null,
+    connection_id: (Array.isArray(rows) && rows[0]) ? (rows[0] as any).id : null,
   });
 }
 

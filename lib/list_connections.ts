@@ -38,9 +38,13 @@ export interface ConnectionRow {
   hint?:       string | null;
 }
 
+// Wave 2.5 M:N — what_list_is_on returns an array (can be 0, 1, or many).
+// `list` (singular) kept as a back-compat alias = lists[0] when present.
+export interface AttachedList { id: string; name: string; category?: string }
+
 export type ConnectionQueryResult =
   | { success: true;  mode: 'where_is_list';     list_label: string;     connections: ConnectionRow[] }
-  | { success: true;  mode: 'what_list_is_on';   entity_label: string;   list: { id: string; name: string } | null }
+  | { success: true;  mode: 'what_list_is_on';   entity_label: string;   lists: AttachedList[]; list: AttachedList | null }
   | { success: false; error: string };
 
 // ─── Low-level wrappers (mirror voice `_f1a*`) ─────────────────────────────
@@ -129,16 +133,19 @@ export interface DisconnectResult {
 }
 
 // disconnectEntityById — UI-side detach when we already know the
-// entity_id (e.g. row in list-detail screen). Skips the resolver
-// (which expects a natural-language ref) and calls manage-list-
-// connections directly. Use this for clickable detach buttons,
-// not for orchestrator paths where Claude emits a text ref.
+// entity_id (e.g. row in list-detail screen, or X button in alert-
+// detail). Wave 2.5 M:N: `listId` is now REQUIRED (entity can have
+// multiple lists, so we must name which one to remove). UI code
+// always knows the listId — it rendered the row that's being X'd.
 export async function disconnectEntityById(
-  entityType: string, entityId: string,
+  listId: string, entityType: string, entityId: string,
 ): Promise<DisconnectResult> {
-  if (!entityType || !entityId) return { success: false, error: 'entityType and entityId required' };
+  if (!listId)     return { success: false, error: 'listId required' };
+  if (!entityType) return { success: false, error: 'entityType required' };
+  if (!entityId)   return { success: false, error: 'entityId required' };
   const data = await manageConnections({
     type:        'DISCONNECT',
+    list_id:     listId,
     entity_type: entityType,
     entity_id:   entityId,
   });
@@ -146,9 +153,15 @@ export async function disconnectEntityById(
   return { success: true, removed: Number(data.removed ?? 0) };
 }
 
+// disconnectEntity — orchestrator path. Claude emits natural-language
+// listName + entityRef; we resolve both and call manage-list-connections
+// with the resolved list_id (Wave 2.5 — entity can carry multiple lists,
+// so list_id is now part of the disambiguation key). listName is
+// REQUIRED per prompt v73; the Edge Function still has a back-compat
+// path for entity-with-single-connection callers.
 export async function disconnectEntity(
-  entityRef: string, entityType: string,
-): Promise<DisconnectResult> {
+  listName: string, entityRef: string, entityType: string,
+): Promise<DisconnectResult & { listLabel?: string }> {
   if (!entityRef || !entityType) {
     return { success: false, error: 'entityRef and entityType required' };
   }
@@ -159,13 +172,33 @@ export async function disconnectEntity(
   if (entPick.kind === 'none')      return { success: false, error: 'entity_not_found' };
   if (entPick.kind === 'ambiguous') return { success: false, error: 'entity_ambiguous', candidates: entPick.tied };
 
-  const data = await manageConnections({
+  let listId: string | null = null;
+  let listLabel: string | undefined;
+  if (listName) {
+    const listRes  = await resolveEntityRef('list', listName);
+    if (listRes?.error) return { success: false, error: `list_resolve_failed: ${listRes.error}` };
+    const listPick = pickResolverMatch(listRes?.matches);
+    if (listPick.kind === 'none')      return { success: false, error: 'list_not_found' };
+    if (listPick.kind === 'ambiguous') return { success: false, error: 'list_ambiguous', candidates: listPick.tied };
+    listId    = listPick.match.entity_id;
+    listLabel = listPick.match.label;
+  }
+
+  const payload: any = {
     type:        'DISCONNECT',
     entity_type: entityType,
     entity_id:   entPick.match.entity_id,
-  });
+  };
+  if (listId) payload.list_id = listId;
+
+  const data = await manageConnections(payload);
   if (!data?.success) return { success: false, error: data?.error || 'manage_connections_failed' };
-  return { success: true, entityLabel: entPick.match.label, removed: Number(data.removed ?? 0) };
+  return {
+    success:     true,
+    entityLabel: entPick.match.label,
+    listLabel,
+    removed:     Number(data.removed ?? 0),
+  };
 }
 
 export async function queryListConnections(args: {
@@ -216,7 +249,17 @@ export async function queryListConnections(args: {
       entity_type: args.entityType,
       entity_id:   entPick.match.entity_id,
     });
-    return { success: true, mode: 'what_list_is_on', entity_label: entPick.match.label, list: data?.list ?? null };
+    // Wave 2.5 M:N — `lists: [...]` is canonical; `list` back-compat field.
+    const lists: AttachedList[] = Array.isArray(data?.lists)
+      ? data.lists.map((l: any) => ({ id: String(l.id), name: String(l.name ?? ''), category: l.category ? String(l.category) : undefined }))
+      : (data?.list ? [{ id: String(data.list.id), name: String(data.list.name ?? ''), category: data.list.category ? String(data.list.category) : undefined }] : []);
+    return {
+      success:      true,
+      mode:         'what_list_is_on',
+      entity_label: entPick.match.label,
+      lists,
+      list:         lists[0] ?? null,
+    };
   }
 
   return { success: false, error: `unknown mode: ${(args as any).mode}` };

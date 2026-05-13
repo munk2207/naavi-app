@@ -153,13 +153,16 @@ export default function ListDetailScreen() {
 
   const onRefresh = useCallback(() => { setRefreshing(true); load(); }, [load]);
 
-  // Detach one entity — calls disconnectEntityById (UI-side detach,
-  // skips the natural-language resolver since we already have the
-  // entity_id from list_connections).
+  // Detach one entity from THIS list — calls disconnectEntityById
+  // (Wave 2.5 M:N: takes listId + entityType + entityId, removes the
+  // single (list, entity) row). Other lists attached to the same
+  // entity (if any) stay; this row is the connection between THIS
+  // list and that entity.
   const onDetach = async (att: Attachment) => {
+    if (!list) return;
     setBusyKey(att.entity_id);
     try {
-      const result = await disconnectEntityById(att.entity_type, att.entity_id);
+      const result = await disconnectEntityById(list.id, att.entity_type, att.entity_id);
       if (result.success) {
         setAttachments(prev => prev.filter(a => a.entity_id !== att.entity_id));
       } else {
