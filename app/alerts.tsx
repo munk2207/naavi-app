@@ -28,9 +28,10 @@ import { useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
-import { invokeWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
+import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 import { remoteLog } from '@/lib/remoteLog';
 import { getLifecycleSession } from '@/lib/appLifecycle';
+import { disconnectEntityById } from '@/lib/list_connections';
 
 // V57.10.2 — Wael 2026-05-01 saw "[object Object]" in the orange error
 // banner. Root cause: Supabase / Edge Function error responses are plain
@@ -269,6 +270,13 @@ export default function AlertsScreen() {
   const [pendingDelete, setPendingDelete] = useState<ActionRule | null>(null);
   const [deleting, setDeleting]     = useState(false);
   const [error, setError]           = useState<string | null>(null);
+  // F1a Wave 2 Phase C — connected list per rule. Mapped by rule.id;
+  // each rule has AT MOST one list (UNIQUE(entity_type, entity_id) on
+  // list_connections). Rendered as an "Attached list" card in the
+  // expanded row with a detach X.
+  const [connectedLists, setConnectedLists] =
+    useState<Record<string, { listId: string; listName: string } | null>>({});
+  const [detachingRuleId, setDetachingRuleId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     // V57.10.5 — UI freeze instrumentation. Wael 2026-05-03 saw the app
@@ -302,7 +310,44 @@ export default function AlertsScreen() {
         ms: Date.now() - t0,
       });
       if (err) throw err;
-      setRules(Array.isArray((data as any)?.rules) ? (data as any).rules : []);
+      const loadedRules: ActionRule[] = Array.isArray((data as any)?.rules) ? (data as any).rules : [];
+      setRules(loadedRules);
+
+      // F1a Wave 2 Phase C — fetch attached list (if any) for each rule.
+      // Embedded select via the FK list_connections.list_id → lists.id.
+      // RLS lets the user SELECT their own connections + lists.
+      if (loadedRules.length > 0 && supabase) {
+        try {
+          const ruleIds = loadedRules.map(r => r.id);
+          const { data: connRows, error: connErr } = await queryWithTimeout(
+            supabase
+              .from('list_connections')
+              .select('entity_id, list_id, lists(id, name)')
+              .eq('user_id', session.user.id)
+              .eq('entity_type', 'action_rule')
+              .in('entity_id', ruleIds),
+            10_000,
+            'alerts-load-connections',
+          );
+          if (connErr) {
+            console.warn('[alerts] connections fetch failed:', connErr.message);
+          } else if (Array.isArray(connRows)) {
+            const map: Record<string, { listId: string; listName: string }> = {};
+            for (const row of connRows as any[]) {
+              const ruleId  = String(row.entity_id);
+              const list    = row.lists ?? null;   // embedded row from FK
+              if (list && list.id) {
+                map[ruleId] = { listId: String(list.id), listName: String(list.name ?? '') };
+              }
+            }
+            setConnectedLists(map);
+          }
+        } catch (e: any) {
+          console.warn('[alerts] connections load threw:', e?.message ?? e);
+        }
+      } else {
+        setConnectedLists({});
+      }
       remoteLog(getLifecycleSession(), 'alerts-load-end', { reason: 'ok', ms: Date.now() - t0 });
     } catch (e: unknown) {
       const errMsg = formatErrorForUser(e);
@@ -343,6 +388,28 @@ export default function AlertsScreen() {
     setRefreshing(true);
     load();
   }, [load]);
+
+  // F1a Wave 2 Phase C — detach the list from this alert. The list itself
+  // stays; only the row in list_connections is removed.
+  const onDetachList = async (ruleId: string) => {
+    setDetachingRuleId(ruleId);
+    try {
+      const result = await disconnectEntityById('action_rule', ruleId);
+      if (result.success) {
+        setConnectedLists(prev => {
+          const next = { ...prev };
+          delete next[ruleId];
+          return next;
+        });
+      } else {
+        setError(`Couldn't detach list: ${result.error}`);
+      }
+    } catch (e: unknown) {
+      setError(formatErrorForUser(e));
+    } finally {
+      setDetachingRuleId(null);
+    }
+  };
 
   const confirmDelete = async () => {
     if (!pendingDelete) return;
@@ -433,6 +500,7 @@ export default function AlertsScreen() {
 
                   {isOpen && (() => {
                     const { channelsLine, bodyLine, extraLines } = formatWhatHappens(rule);
+                    const conn = connectedLists[rule.id];
                     return (
                       <View style={styles.detailBox}>
                         <Text style={styles.detailHeader}>When</Text>
@@ -443,6 +511,25 @@ export default function AlertsScreen() {
                         {extraLines.map((line, i) => (
                           <Text key={i} style={styles.detailProse}>{line}</Text>
                         ))}
+                        {conn && (
+                          <>
+                            <Text style={[styles.detailHeader, { marginTop: 14 }]}>Attached list</Text>
+                            <View style={styles.attachCard}>
+                              <Ionicons name="list" size={20} color={Colors.accent} style={{ marginRight: 10 }} />
+                              <Text style={styles.attachCardName} numberOfLines={1}>{conn.listName}</Text>
+                              <TouchableOpacity
+                                onPress={() => onDetachList(rule.id)}
+                                disabled={detachingRuleId === rule.id}
+                                style={styles.attachDetachBtn}
+                                accessibilityLabel={`Detach ${conn.listName} from this alert`}
+                              >
+                                {detachingRuleId === rule.id
+                                  ? <ActivityIndicator size="small" color={Colors.textMuted} />
+                                  : <Ionicons name="close" size={20} color={Colors.textMuted} />}
+                              </TouchableOpacity>
+                            </View>
+                          </>
+                        )}
                         <Text style={styles.detailMeta}>
                           {rule.one_shot ? 'Fires once, then stops.' : 'Repeats until you delete it.'}
                         </Text>
@@ -625,6 +712,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontStyle: 'italic',
     marginTop: 8,
+  },
+  // F1a Wave 2 Phase C — attached-list card inside expanded alert row.
+  attachCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.bgCard,
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    marginBottom: 8,
+  },
+  attachCardName: {
+    flex: 1,
+    color: Colors.textPrimary,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  attachDetachBtn: {
+    padding: 6,
   },
   deleteBtn: {
     marginTop: 14,
