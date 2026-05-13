@@ -21,30 +21,41 @@
 
 const fs   = require('fs');
 const path = require('path');
-const { marked, Renderer } = require('marked');
+const { marked } = require('marked');
 
 const MD_PATH  = path.join(__dirname, '..', 'docs', 'ARCHITECTURE_2026-05-13.md');
 const OUT_PATH = path.join(__dirname, '..', 'docs', 'ARCHITECTURE_2026-05-13.html');
 
-// Custom code-block renderer — preserve mermaid blocks for client-side
-// rendering by mermaid.js, escape everything else as <pre><code>.
-const renderer = new Renderer();
-const originalCode = renderer.code.bind(renderer);
-renderer.code = (codeArg) => {
-  // marked v12 passes { text, lang, escaped } object; older versions
-  // pass (text, lang, escaped) — handle both.
-  const text = typeof codeArg === 'object' ? codeArg.text : codeArg;
-  const lang = typeof codeArg === 'object' ? codeArg.lang : arguments[1];
-  if (lang === 'mermaid') {
-    return `<pre class="mermaid">${text}</pre>\n`;
-  }
-  return originalCode(codeArg);
-};
+// marked v12 — the custom `code` renderer override wasn't firing
+// reliably in 12.0.2 (markdown emitted as <pre><code
+// class="language-mermaid">…</code></pre> even with marked.use({
+// renderer: { code(token) { … } } })). Drop the override and
+// post-process the rendered HTML instead: regex-swap mermaid code
+// blocks to <pre class="mermaid">…</pre> and decode the HTML entities
+// marked introduced (mermaid wants the raw &/<>/" characters, not
+// HTML entities).
+function decodeHtmlEntities(s) {
+  return String(s)
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');   // last — restore literal & after the others
+}
 
-marked.use({ renderer });
+function postProcessMermaid(html) {
+  // Match marked's default code-block output for a mermaid fence.
+  // Anchored on the language-mermaid class so we don't touch other
+  // code blocks.
+  const re = /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g;
+  return html.replace(re, (_, inner) => {
+    return `<pre class="mermaid">${decodeHtmlEntities(inner)}</pre>`;
+  });
+}
 
 const md         = fs.readFileSync(MD_PATH, 'utf8');
-const bodyHtml   = marked.parse(md);
+const rawHtml    = marked.parse(md);
+const bodyHtml   = postProcessMermaid(rawHtml);
 const buildTime  = new Date().toISOString();
 
 const html = `<!DOCTYPE html>
@@ -169,14 +180,36 @@ const html = `<!DOCTYPE html>
 ${bodyHtml}
 <div class="build-info">Generated locally from ARCHITECTURE_2026-05-13.md · ${buildTime}</div>
 </main>
-<script type="module">
-  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-  mermaid.initialize({
-    startOnLoad: true,
-    theme: 'default',
-    securityLevel: 'loose',
-    flowchart: { useMaxWidth: true, htmlLabels: true },
-    sequence: { useMaxWidth: true, mirrorActors: false },
+<!--
+  IIFE bundle (NOT the ES module variant) so the page works when opened
+  from a file:// URL. Browsers block ES-module imports from cross-origin
+  CDNs over file:// (the .mjs path), but a regular <script src> works
+  the same in all origins.
+-->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+  // Wait for full page load (so all <pre class="mermaid"> elements are
+  // present) before running mermaid.
+  document.addEventListener('DOMContentLoaded', function () {
+    if (window.mermaid) {
+      window.mermaid.initialize({
+        startOnLoad: true,
+        theme: 'default',
+        securityLevel: 'loose',
+        flowchart: { useMaxWidth: true, htmlLabels: true },
+        sequence:  { useMaxWidth: true, mirrorActors: false },
+      });
+    } else {
+      // CDN failed — show a clear note instead of silent failure so the
+      // user knows to check network access.
+      var notes = document.querySelectorAll('pre.mermaid');
+      notes.forEach(function (el) {
+        var msg = document.createElement('div');
+        msg.style.cssText = 'color:#a00;font-size:0.85em;margin-bottom:0.4em;';
+        msg.textContent = 'Mermaid CDN failed to load — diagram source shown below as raw text.';
+        el.parentNode.insertBefore(msg, el);
+      });
+    }
   });
 </script>
 </body>
