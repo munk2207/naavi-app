@@ -52,6 +52,75 @@ const ALLOWED_ENTITY_TYPES = new Set([
   'document', 'reminder', 'sent_message', 'knowledge_fragment', 'list',
 ]);
 
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
+// Wave 2.6 — Drive↔DB hard sync. Trash the Drive Doc for a list
+// BEFORE the DB row is deleted, so they never diverge. Pattern
+// mirrors update-drive-file's auth + token-refresh flow.
+//
+// Returns { ok: true } if the file was trashed OR already gone
+// (404 — treated as graceful no-op so orphan-cleanup deletes
+// succeed). Returns { ok: false, reason } otherwise.
+async function trashDriveFile(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  fileId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!fileId) return { ok: true };  // nothing to trash
+
+  // Fetch Google refresh token for this user (service-role read).
+  const { data: tokenRow, error: tokenErr } = await supabase
+    .from('user_tokens')
+    .select('refresh_token')
+    .eq('user_id', userId)
+    .eq('provider', 'google')
+    .maybeSingle();
+  if (tokenErr) return { ok: false, reason: `token_lookup_failed: ${tokenErr.message}` };
+  if (!tokenRow || !(tokenRow as any).refresh_token) {
+    return { ok: false, reason: 'google_not_connected' };
+  }
+
+  // Exchange refresh token for an access token.
+  const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id:     Deno.env.get('GOOGLE_CLIENT_ID')!,
+      client_secret: Deno.env.get('GOOGLE_CLIENT_SECRET')!,
+      refresh_token: (tokenRow as any).refresh_token,
+      grant_type:    'refresh_token',
+    }),
+  });
+  const tokenJson = await tokenRes.json();
+  if (!tokenJson.access_token) {
+    return { ok: false, reason: `token_refresh_failed: ${JSON.stringify(tokenJson).slice(0, 200)}` };
+  }
+
+  // Drive API — files.update with trashed=true. Reversible from Drive
+  // UI within 30 days. We deliberately don't hard-delete; user picked
+  // trash for safety (Wave 2.6, Wael 2026-05-13).
+  const driveRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,trashed`,
+    {
+      method:  'PATCH',
+      headers: {
+        'Authorization': `Bearer ${tokenJson.access_token}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({ trashed: true }),
+    },
+  );
+
+  if (driveRes.ok) return { ok: true };
+
+  // 404 — file already gone. Treat as success so the orphaned DB row
+  // can still be cleaned up (the divergence is healing itself).
+  if (driveRes.status === 404) return { ok: true };
+
+  const errText = await driveRes.text();
+  return { ok: false, reason: `drive_${driveRes.status}: ${errText.slice(0, 200)}` };
+}
+
 function jsonResponse(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -305,14 +374,44 @@ async function handleDeleteList(
   const listId = String(body?.list_id ?? '').trim();
   if (!listId) return jsonResponse({ error: 'list_id required' }, 400);
 
+  // Fetch the row first — we need drive_file_id for the Drive-side
+  // trash. Same query also verifies ownership so we don't trash a
+  // Drive file the user doesn't own.
+  const { data: listRow, error: lookupErr } = await supabase
+    .from('lists')
+    .select('id, name, drive_file_id')
+    .eq('id',      listId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (lookupErr) return jsonResponse({ error: lookupErr.message }, 500);
+  if (!listRow)  return jsonResponse({ error: 'list not found or not owned by user' }, 404);
+
   // Capture connected entities BEFORE the cascade — return them so the
-  // orchestrator's confirmation message can have listed them to the user
-  // even though the cascade DELETE removes them at the DB layer.
+  // orchestrator's confirmation message can list them to the user even
+  // though the cascade DELETE removes them at the DB layer.
   const { data: connections } = await supabase
     .from('list_connections')
     .select('entity_type, entity_id')
     .eq('user_id', userId)
     .eq('list_id', listId);
+
+  // Wave 2.6 — trash the Drive Doc FIRST. If this fails, we abort the
+  // whole operation so DB and Drive stay aligned. (drive_file_id of "",
+  // null, or pointing to an already-deleted file all return ok: true.)
+  const driveResult = await trashDriveFile(
+    supabase,
+    userId,
+    String((listRow as any).drive_file_id ?? ''),
+  );
+  if (!driveResult.ok) {
+    console.error(`[manage-list-connections] DELETE_LIST aborted — drive trash failed: ${driveResult.reason}`);
+    return jsonResponse({
+      success: false,
+      error:   'drive_trash_failed',
+      reason:  driveResult.reason,
+      hint:    'Drive doc could not be trashed; list NOT deleted. Reconnect Google in Settings and retry.',
+    }, 500);
+  }
 
   // Delete the list. FK ON DELETE CASCADE on list_connections drops every
   // wiring for this list_id automatically.
@@ -322,7 +421,19 @@ async function handleDeleteList(
     .eq('id',      listId)
     .eq('user_id', userId)
     .select('id, name');
-  if (deleteErr) return jsonResponse({ error: deleteErr.message }, 500);
+  if (deleteErr) {
+    // Drive is already trashed but the DB delete failed — we now have
+    // an orphan in the opposite direction. The user-facing message
+    // names this so support can recover. The reverse-sync sweep (Wave
+    // 2.6 Phase G) will normally heal it on the next Lists-screen load
+    // by removing the orphan list_connections rows pointing here.
+    console.error(`[manage-list-connections] DELETE_LIST DB error after Drive trash: ${deleteErr.message}`);
+    return jsonResponse({
+      success: false,
+      error:   'db_delete_failed_after_drive_trash',
+      reason:  deleteErr.message,
+    }, 500);
+  }
   if (!Array.isArray(deleted) || deleted.length === 0) {
     return jsonResponse({ error: 'list not found or not owned by user' }, 404);
   }
