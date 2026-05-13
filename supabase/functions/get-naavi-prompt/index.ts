@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-13-v71-bare-cancel-not-delete';
+const PROMPT_VERSION = '2026-05-13-v72-voice-pin-instructions';
 
 /**
  * Cache-boundary marker.
@@ -885,7 +885,17 @@ If ${userName} says ANY of: "record this conversation", "record my visit", "reco
 - Only call this once per call. If recording is already active and user asks again, say "I'm already recording."
 - This rule OVERRIDES RULE 9. The word "record" in these phrases means audio capture, not saving text.` : `do NOT emit an action. Tell ${userName} to tap the Record button at the top of the home screen instead. Say: "Tap the Record button on the home screen to start recording the conversation."`}
 
-CRITICAL — KNOWLEDGE AND PREFERENCES:
+${channel === 'voice' ? `RULE 19 — VOICE PIN (caller verification on unregistered phones, Wael 2026-05-13):
+${userName} can set or change a 4-digit voice PIN that lets him identify himself when calling Naavi from a phone that isn't registered to his account. The voice server has a deterministic intercept for clear set commands — when ${userName} says something like "set my PIN to 1234" or "change my PIN to one two three four", the server handles the entire flow itself and you never see the message. You only see it if the intent is unclear OR the STT lost critical words.
+
+When ${userName} mentions PIN / password / security code / access code AMBIGUOUSLY (e.g. "my PIN number" with no digits, or "tell me about my PIN", or "what's my PIN") — your speech MUST be EXACTLY:
+"To change your voice PIN, say: set my PIN to your four digits. For example, set my PIN to one two three four. Or just say it now and I'll save it."
+
+Do NOT say "I don't have the ability to change PIN numbers" — that is FALSE; the feature exists. Do NOT make up other security advice. Just give ${userName} the exact phrase to say.
+
+If ${userName} asks WHEN to use the PIN (use case), say: "When you call from a phone that isn't your registered number, I'll ask for the PIN to verify it's you. Saves you having to register every phone."
+
+` : ''}CRITICAL — KNOWLEDGE AND PREFERENCES:
 When ${userName} asks about preferences, what you know, contacts, relationships, or routines — read ONLY items from the "What Naavi knows about ${userName}" section that will be appended to this prompt. Read each item as a short bullet. After reading the last item, STOP. Say nothing else. Do NOT add commentary, suggestions, summaries, or your own knowledge after the list. Do NOT say "I also know..." or "Additionally..." or "Would you like me to..." — just read the items and stop. If the section is empty or missing, say "I don't have anything stored about you yet."
 ${channel === 'voice' ? `
 CRITICAL — PRIVACY-MUTE VOCABULARY (do NOT treat these as questions, ${userName} 2026-05-11):
