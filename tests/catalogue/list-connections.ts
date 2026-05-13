@@ -174,12 +174,14 @@ export const listConnectionsTests: TestCase[] = [
   },
 
   // ──────────────────────────────────────────────────────────────────────
-  // CONNECT on same entity replaces prior connection (no 409 surfaced).
+  // Wave 2.5 M:N (Wael 2026-05-13) — two different lists CAN attach to the
+  // same entity; second CONNECT does NOT replace, it adds. Same (list,
+  // entity) pair attempted twice returns 409 already_attached.
   // ──────────────────────────────────────────────────────────────────────
   {
-    id: 'list-connections.connect-replaces-prior',
+    id: 'list-connections.connect-adds-not-replaces',
     category: 'list-connections',
-    description: 'F1a — second CONNECT on same entity replaces the prior list (cancel-before-insert)',
+    description: 'M:N — second CONNECT on same entity adds (both lists attached after); same pair twice → 409',
     timeoutMs: 15_000,
     async run(ctx) {
       const marker = uniqueTag();
@@ -192,11 +194,23 @@ export const listConnectionsTests: TestCase[] = [
         expect2xx(r1.status, 'CONNECT A');
 
         const r2 = await callConnect(ctx, { list_id: listB, entity_type: 'action_rule', entity_id: entityId });
-        expect2xx(r2.status, 'CONNECT B replaces A');
+        expect2xx(r2.status, 'CONNECT B adds (M:N)');
 
+        // LIST_CONNECTIONS_FOR_ENTITY returns lists[] (canonical) and
+        // list (back-compat = lists[0]). Both A and B should be present.
         const readRes = await callListForEntity(ctx, { entity_type: 'action_rule', entity_id: entityId });
-        expect2xx(readRes.status, 'read after swap');
-        expectEqual((readRes.data as any)?.list?.id, listB, 'connection now points to listB');
+        expect2xx(readRes.status, 'read after second connect');
+        const lists = (readRes.data as any)?.lists;
+        expectTruthy(Array.isArray(lists), 'lists[] array returned');
+        expectEqual(lists.length, 2, `expected 2 attached lists, got ${lists.length}`);
+        const ids = new Set(lists.map((l: any) => l.id));
+        expectTruthy(ids.has(listA), 'listA still attached');
+        expectTruthy(ids.has(listB), 'listB attached too');
+
+        // Same (list, entity) pair twice → 409 already_attached.
+        const r3 = await callConnect(ctx, { list_id: listA, entity_type: 'action_rule', entity_id: entityId });
+        expectEqual(r3.status, 409, 'duplicate (list, entity) pair returns 409');
+        expectEqual((r3.data as any)?.error, 'already_attached', 'error=already_attached');
       } finally {
         await deleteTestLists(ctx, marker);
       }
