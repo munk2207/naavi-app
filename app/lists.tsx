@@ -28,7 +28,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
-import { getSessionWithTimeout, queryWithTimeout } from '@/lib/invokeWithTimeout';
+import { getSessionWithTimeout, queryWithTimeout, invokeWithTimeout } from '@/lib/invokeWithTimeout';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -64,6 +64,20 @@ export default function ListsScreen() {
       if (!supabase) { setLoading(false); return; }
       const session = await getSessionWithTimeout();
       if (!session?.user) { setLoading(false); return; }
+
+      // Wave 2.6 Phase G — reverse Drive↔DB sync. Call lists-reconcile
+      // BEFORE the lists query so any orphan rows (DB row whose Drive
+      // doc was manually trashed, or connection to a deleted alert)
+      // are swept before we render. Silent: per Wael's pick, we don't
+      // surface "removed N stale rows" — divergence healing is a
+      // background invariant, not a user-facing event. Errors here
+      // (e.g. google_not_connected) are non-fatal; we still render
+      // whatever is in the DB.
+      try {
+        await invokeWithTimeout('lists-reconcile', { body: {} }, 15_000);
+      } catch (e: any) {
+        console.warn('[lists] reconcile non-fatal:', e?.message ?? e);
+      }
 
       // Fetch lists + connections in parallel — RLS lets the user read
       // both tables filtered to their own user_id.
