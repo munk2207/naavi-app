@@ -54,20 +54,34 @@ Deno.serve(async (req) => {
   const op = String(body?.op ?? '').toLowerCase();
 
   // ── SET ─────────────────────────────────────────────────────────────────
-  // Mobile-only. JWT auth required. user_id MUST come from the JWT, never
-  // from the request body — otherwise a JWT-holder could overwrite another
-  // user's PIN by spoofing user_id.
+  // Two auth paths:
+  //   1) JWT auth (mobile app) — user_id comes from the JWT, never trusted
+  //      from the request body. A JWT-holder cannot overwrite another
+  //      user's PIN by spoofing user_id.
+  //   2) Service-role auth (voice server in-call PIN-set flow) — request
+  //      body must include explicit user_id. Voice server already knows
+  //      the caller's user_id via caller-phone lookup and only sets PINs
+  //      for that user.
   if (op === 'set') {
     const authHeader = req.headers.get('Authorization') ?? '';
     const token = authHeader.replace(/^Bearer\s+/i, '');
-    if (!token) return jsonResponse({ success: false, error: 'jwt_required' }, 401);
+    if (!token) return jsonResponse({ success: false, error: 'auth_required' }, 401);
 
     let userId: string | null = null;
-    try {
-      const { data: { user } } = await supabase.auth.getUser(token);
-      userId = user?.id ?? null;
-    } catch (_) { /* fall through to 401 */ }
-    if (!userId) return jsonResponse({ success: false, error: 'jwt_invalid' }, 401);
+    if (token === serviceKey) {
+      // Service-role path — voice server sets PIN for a user it already
+      // resolved via caller-phone lookup. user_id required in body.
+      const bodyUserId = String(body?.user_id ?? '').trim();
+      if (!bodyUserId) return jsonResponse({ success: false, error: 'user_id_required_for_service_role_set' }, 400);
+      userId = bodyUserId;
+    } else {
+      // JWT path — user_id from the JWT, never from request body.
+      try {
+        const { data: { user } } = await supabase.auth.getUser(token);
+        userId = user?.id ?? null;
+      } catch (_) { /* fall through to 401 */ }
+      if (!userId) return jsonResponse({ success: false, error: 'jwt_invalid' }, 401);
+    }
 
     const pin = String(body?.pin ?? '').trim();
     if (!PIN_RE.test(pin)) {
