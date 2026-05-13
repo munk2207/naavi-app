@@ -1,0 +1,237 @@
+/**
+ * Mobile mirror of the voice-server's F1a list-connection helpers.
+ *
+ * Voice surface uses thin raw-fetch wrappers (`_f1aResolve`,
+ * `_f1aPickMatch`, `_f1aManageConnections`, `_f1aDescribe`) in
+ * `naavi-voice-server/src/index.js`. This module re-expresses the
+ * same logic for the mobile orchestrator, using `invokeWithTimeout`
+ * so it follows the established mobile pattern (JWT auth, timeouts,
+ * error shapes) instead of raw fetch + service-role.
+ *
+ * Single source of truth on the mobile side — `useOrchestrator.ts`
+ * imports these for LIST_CONNECT / LIST_DISCONNECT /
+ * LIST_CONNECTION_QUERY / LIST_DELETE. Keeps the resolver scoring +
+ * ambiguity rule in one place so it can't drift between calls.
+ */
+
+import { invokeWithTimeout } from './invokeWithTimeout';
+
+// ─── Types ─────────────────────────────────────────────────────────────────
+
+export interface ResolverMatch {
+  entity_type: string;
+  entity_id:   string;
+  label:       string;
+  hint?:       string | null;
+  score:       number;
+}
+
+export interface PickResultNone      { kind: 'none' }
+export interface PickResultOne       { kind: 'one'; match: ResolverMatch }
+export interface PickResultAmbiguous { kind: 'ambiguous'; tied: ResolverMatch[] }
+export type   PickResult = PickResultNone | PickResultOne | PickResultAmbiguous;
+
+export interface ConnectionRow {
+  entity_type: string;
+  entity_id:   string;
+  label?:      string;
+  hint?:       string | null;
+}
+
+export type ConnectionQueryResult =
+  | { success: true;  mode: 'where_is_list';     list_label: string;     connections: ConnectionRow[] }
+  | { success: true;  mode: 'what_list_is_on';   entity_label: string;   list: { id: string; name: string } | null }
+  | { success: false; error: string };
+
+// ─── Low-level wrappers (mirror voice `_f1a*`) ─────────────────────────────
+
+async function resolveEntityRef(entityType: string, entityRef: string): Promise<any> {
+  const { data, error } = await invokeWithTimeout('resolve-entity-ref', {
+    body: { type: 'RESOLVE', entity_type: entityType, entity_ref: entityRef },
+  }, 15_000);
+  if (error) return { error: error.message };
+  return data ?? {};
+}
+
+async function describeEntity(entityType: string, entityId: string): Promise<any> {
+  const { data, error } = await invokeWithTimeout('resolve-entity-ref', {
+    body: { type: 'DESCRIBE', entity_type: entityType, entity_id: entityId },
+  }, 15_000);
+  if (error) return { error: error.message };
+  return data ?? {};
+}
+
+async function manageConnections(payload: any): Promise<any> {
+  const { data, error } = await invokeWithTimeout('manage-list-connections', {
+    body: payload,
+  }, 20_000);
+  if (error) return { success: false, error: error.message };
+  return data ?? { success: false, error: 'empty response' };
+}
+
+// pickResolverResult — mirror of voice `_f1aPickMatch`. The resolver
+// returns matches ranked by score (desc). Top-score TIE = ambiguous;
+// otherwise the top match wins even if lower-scored ones exist.
+export function pickResolverMatch(matches: ResolverMatch[] | undefined | null): PickResult {
+  if (!matches || matches.length === 0) return { kind: 'none' };
+  const topScore = matches[0].score;
+  const tied = matches.filter(m => m.score === topScore);
+  if (tied.length > 1) return { kind: 'ambiguous', tied };
+  return { kind: 'one', match: matches[0] };
+}
+
+// ─── High-level action helpers (one per LIST_* mobile action) ──────────────
+
+export interface ConnectResult {
+  success:        boolean;
+  error?:         string;
+  listLabel?:     string;
+  entityLabel?:   string;
+  candidates?:    ResolverMatch[];
+}
+
+export async function connectList(
+  listName: string, entityRef: string, entityType: string,
+): Promise<ConnectResult> {
+  if (!listName || !entityRef || !entityType) {
+    return { success: false, error: 'listName, entityRef, and entityType all required' };
+  }
+
+  const listRes  = await resolveEntityRef('list', listName);
+  if (listRes?.error) return { success: false, error: `list_resolve_failed: ${listRes.error}` };
+  const listPick = pickResolverMatch(listRes?.matches);
+  if (listPick.kind === 'none')      return { success: false, error: 'list_not_found' };
+  if (listPick.kind === 'ambiguous') return { success: false, error: 'list_ambiguous', candidates: listPick.tied };
+
+  const entRes  = await resolveEntityRef(entityType, entityRef);
+  if (entRes?.unsupported_in_v1) return { success: false, error: 'entity_type_unsupported_in_v1' };
+  if (entRes?.error)             return { success: false, error: `entity_resolve_failed: ${entRes.error}` };
+  const entPick = pickResolverMatch(entRes?.matches);
+  if (entPick.kind === 'none')      return { success: false, error: 'entity_not_found' };
+  if (entPick.kind === 'ambiguous') return { success: false, error: 'entity_ambiguous', candidates: entPick.tied };
+
+  const data = await manageConnections({
+    type:        'CONNECT',
+    list_id:     listPick.match.entity_id,
+    entity_type: entityType,
+    entity_id:   entPick.match.entity_id,
+  });
+  if (!data?.success) return { success: false, error: data?.error || 'manage_connections_failed' };
+  return { success: true, listLabel: listPick.match.label, entityLabel: entPick.match.label };
+}
+
+export interface DisconnectResult {
+  success:      boolean;
+  error?:       string;
+  entityLabel?: string;
+  removed?:     number;
+  candidates?:  ResolverMatch[];
+}
+
+export async function disconnectEntity(
+  entityRef: string, entityType: string,
+): Promise<DisconnectResult> {
+  if (!entityRef || !entityType) {
+    return { success: false, error: 'entityRef and entityType required' };
+  }
+  const entRes  = await resolveEntityRef(entityType, entityRef);
+  if (entRes?.unsupported_in_v1) return { success: false, error: 'entity_type_unsupported_in_v1' };
+  if (entRes?.error)             return { success: false, error: `entity_resolve_failed: ${entRes.error}` };
+  const entPick = pickResolverMatch(entRes?.matches);
+  if (entPick.kind === 'none')      return { success: false, error: 'entity_not_found' };
+  if (entPick.kind === 'ambiguous') return { success: false, error: 'entity_ambiguous', candidates: entPick.tied };
+
+  const data = await manageConnections({
+    type:        'DISCONNECT',
+    entity_type: entityType,
+    entity_id:   entPick.match.entity_id,
+  });
+  if (!data?.success) return { success: false, error: data?.error || 'manage_connections_failed' };
+  return { success: true, entityLabel: entPick.match.label, removed: Number(data.removed ?? 0) };
+}
+
+export async function queryListConnections(args: {
+  mode: 'where_is_list' | 'what_list_is_on';
+  listName?:   string;
+  entityRef?:  string;
+  entityType?: string;
+}): Promise<ConnectionQueryResult> {
+  if (args.mode === 'where_is_list') {
+    if (!args.listName) return { success: false, error: 'listName required for where_is_list' };
+    const listRes  = await resolveEntityRef('list', args.listName);
+    if (listRes?.error) return { success: false, error: `list_resolve_failed: ${listRes.error}` };
+    const listPick = pickResolverMatch(listRes?.matches);
+    if (listPick.kind === 'none')      return { success: false, error: 'list_not_found' };
+    if (listPick.kind === 'ambiguous') return { success: false, error: 'list_ambiguous' };
+
+    const data = await manageConnections({
+      type:    'LIST_CONNECTIONS_FOR_LIST',
+      list_id: listPick.match.entity_id,
+    });
+    const rows: ConnectionRow[] = data?.connections ?? [];
+    // Resolve human labels in parallel — mirrors voice `_f1aDescribe` loop.
+    const described = await Promise.all(rows.map(async (c) => {
+      const d = await describeEntity(c.entity_type, c.entity_id);
+      return {
+        entity_type: c.entity_type,
+        entity_id:   c.entity_id,
+        label:       d?.label || `(${c.entity_type})`,
+        hint:        d?.hint || null,
+      };
+    }));
+    return { success: true, mode: 'where_is_list', list_label: listPick.match.label, connections: described };
+  }
+
+  if (args.mode === 'what_list_is_on') {
+    if (!args.entityRef || !args.entityType) {
+      return { success: false, error: 'entityRef and entityType required for what_list_is_on' };
+    }
+    const entRes  = await resolveEntityRef(args.entityType, args.entityRef);
+    if (entRes?.unsupported_in_v1) return { success: false, error: 'entity_type_unsupported_in_v1' };
+    if (entRes?.error)             return { success: false, error: `entity_resolve_failed: ${entRes.error}` };
+    const entPick = pickResolverMatch(entRes?.matches);
+    if (entPick.kind === 'none')      return { success: false, error: 'entity_not_found' };
+    if (entPick.kind === 'ambiguous') return { success: false, error: 'entity_ambiguous' };
+
+    const data = await manageConnections({
+      type:        'LIST_CONNECTIONS_FOR_ENTITY',
+      entity_type: args.entityType,
+      entity_id:   entPick.match.entity_id,
+    });
+    return { success: true, mode: 'what_list_is_on', entity_label: entPick.match.label, list: data?.list ?? null };
+  }
+
+  return { success: false, error: `unknown mode: ${(args as any).mode}` };
+}
+
+export interface DeleteListResult {
+  success:           boolean;
+  error?:            string;
+  listLabel?:        string;
+  cascadedCount?:    number;
+  candidates?:       ResolverMatch[];
+}
+
+export async function deleteListWithConnections(listName: string): Promise<DeleteListResult> {
+  if (!listName) return { success: false, error: 'listName required' };
+
+  const listRes  = await resolveEntityRef('list', listName);
+  if (listRes?.error) return { success: false, error: `list_resolve_failed: ${listRes.error}` };
+  const listPick = pickResolverMatch(listRes?.matches);
+  if (listPick.kind === 'none')      return { success: false, error: 'list_not_found' };
+  if (listPick.kind === 'ambiguous') return { success: false, error: 'list_ambiguous', candidates: listPick.tied };
+
+  // Per F1a spec: Claude has ALREADY shown the cascade-warning and got
+  // user confirmation before emitting this action. The mobile send-button
+  // press IS the confirmation gate. We just execute.
+  const data = await manageConnections({
+    type:    'DELETE_LIST_AND_CONNECTIONS',
+    list_id: listPick.match.entity_id,
+  });
+  if (!data?.success) return { success: false, error: data?.error || 'manage_connections_failed' };
+  return {
+    success:       true,
+    listLabel:     listPick.match.label,
+    cascadedCount: Array.isArray(data.cascaded_connections) ? data.cascaded_connections.length : 0,
+  };
+}
