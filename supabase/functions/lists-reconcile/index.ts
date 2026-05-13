@@ -93,14 +93,58 @@ Deno.serve(async (req) => {
     .select('id, name, drive_file_id')
     .eq('user_id', userId);
   if (listsErr) return jsonResponse({ error: listsErr.message }, 500);
-  if (!Array.isArray(lists) || lists.length === 0) {
-    return jsonResponse({ success: true, checked: 0, orphaned: [] });
+
+  // ── Pure-DB sweep first (action_rule orphan connections) ──────────
+  // Runs regardless of Google connectivity. The Drive-existence sweep
+  // below short-circuits when Google isn't connected, but this sweep
+  // is the safety net that catches orphans introduced by ungated DB
+  // operations (manual SQL cleanups, deleted action_rules, etc.) and
+  // shouldn't be gated on an unrelated OAuth state. Order matters.
+  let staleConnections: Array<{ id: string; entity_type: string; entity_id: string }> = [];
+  try {
+    const { data: arConns } = await supabase
+      .from('list_connections')
+      .select('id, entity_id')
+      .eq('user_id',     userId)
+      .eq('entity_type', 'action_rule');
+
+    if (Array.isArray(arConns) && arConns.length > 0) {
+      const arEntityIds = (arConns as any[]).map(r => String(r.entity_id));
+      const { data: liveRules } = await supabase
+        .from('action_rules')
+        .select('id')
+        .in('id', arEntityIds);
+      const liveIds = new Set((Array.isArray(liveRules) ? liveRules : []).map((r: any) => String(r.id)));
+      const stale = (arConns as any[]).filter(r => !liveIds.has(String(r.entity_id)));
+      if (stale.length > 0) {
+        const staleIds = stale.map(r => String(r.id));
+        const { error: delConnErr } = await supabase
+          .from('list_connections')
+          .delete()
+          .eq('user_id', userId)
+          .in('id', staleIds);
+        if (delConnErr) {
+          console.error(`[lists-reconcile] action_rule orphan-connection delete failed: ${delConnErr.message}`);
+        } else {
+          staleConnections = stale.map(r => ({ id: String(r.id), entity_type: 'action_rule', entity_id: String(r.entity_id) }));
+          console.log(`[lists-reconcile] user=${userId.slice(0,8)}… removed ${stale.length} stale action_rule connections`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[lists-reconcile] action_rule sweep threw: ${(err as Error).message}`);
   }
 
-  // Need a Drive access token. If Google isn't connected, we can't
-  // verify — return without sweeping (caller will retry once Google
-  // is reconnected). Surface a clear `reason` so the UI doesn't
-  // silently fail.
+  // No lists at all? Nothing to Drive-check; return early with just
+  // the action_rule sweep results.
+  if (!Array.isArray(lists) || lists.length === 0) {
+    return jsonResponse({ success: true, checked: 0, orphaned: [], stale_connections: staleConnections });
+  }
+
+  // Need a Drive access token for the Drive-existence sweep. If Google
+  // isn't connected, skip Drive but still return the action_rule sweep
+  // results above (success: true, drive_sweep_skipped). Surface a clear
+  // `reason` so the UI doesn't silently fail.
   const { data: tokenRow } = await supabase
     .from('user_tokens')
     .select('refresh_token')
@@ -108,11 +152,23 @@ Deno.serve(async (req) => {
     .eq('provider', 'google')
     .maybeSingle();
   if (!tokenRow || !(tokenRow as any).refresh_token) {
-    return jsonResponse({ success: false, error: 'google_not_connected', checked: 0, orphaned: [] }, 200);
+    return jsonResponse({
+      success:            true,
+      drive_sweep_skipped: 'google_not_connected',
+      checked:            0,
+      orphaned:           [],
+      stale_connections:  staleConnections,
+    }, 200);
   }
   const accessToken = await getAccessToken((tokenRow as any).refresh_token);
   if (!accessToken) {
-    return jsonResponse({ success: false, error: 'token_refresh_failed', checked: 0, orphaned: [] }, 200);
+    return jsonResponse({
+      success:            true,
+      drive_sweep_skipped: 'token_refresh_failed',
+      checked:            0,
+      orphaned:           [],
+      stale_connections:  staleConnections,
+    }, 200);
   }
 
   // Check each list's Drive file in parallel. One HEAD per file — small.
@@ -163,50 +219,6 @@ Deno.serve(async (req) => {
       return jsonResponse({ success: false, error: deleteErr.message, checked: lists.length, orphaned: orphans }, 500);
     }
     console.log(`[lists-reconcile] user=${userId.slice(0,8)}… checked=${lists.length} removed=${orphans.length}`);
-  }
-
-  // ── Second sweep — list_connections rows pointing to deleted
-  // DB-backed entities (the schema has `entity_id text` so the FK
-  // can't cascade for non-list entity types). For action_rule, the
-  // most common entity type today, we check that every entity_id
-  // referenced still exists in action_rules. Same pattern can be
-  // extended to other DB-backed types (contact, reminder, document,
-  // etc.) — left as a follow-up; today's data only has action_rule
-  // orphans observed. External types (gmail_message, calendar_event)
-  // need API calls and are out of scope for this sweep.
-  let staleConnections: Array<{ id: string; entity_type: string; entity_id: string }> = [];
-  try {
-    const { data: arConns } = await supabase
-      .from('list_connections')
-      .select('id, entity_id')
-      .eq('user_id',     userId)
-      .eq('entity_type', 'action_rule');
-
-    if (Array.isArray(arConns) && arConns.length > 0) {
-      const arEntityIds = (arConns as any[]).map(r => String(r.entity_id));
-      const { data: liveRules } = await supabase
-        .from('action_rules')
-        .select('id')
-        .in('id', arEntityIds);
-      const liveIds = new Set((Array.isArray(liveRules) ? liveRules : []).map((r: any) => String(r.id)));
-      const stale = (arConns as any[]).filter(r => !liveIds.has(String(r.entity_id)));
-      if (stale.length > 0) {
-        const staleIds = stale.map(r => String(r.id));
-        const { error: delConnErr } = await supabase
-          .from('list_connections')
-          .delete()
-          .eq('user_id', userId)
-          .in('id', staleIds);
-        if (delConnErr) {
-          console.error(`[lists-reconcile] action_rule orphan-connection delete failed: ${delConnErr.message}`);
-        } else {
-          staleConnections = stale.map(r => ({ id: String(r.id), entity_type: 'action_rule', entity_id: String(r.entity_id) }));
-          console.log(`[lists-reconcile] user=${userId.slice(0,8)}… removed ${stale.length} stale action_rule connections`);
-        }
-      }
-    }
-  } catch (err) {
-    console.error(`[lists-reconcile] action_rule sweep threw: ${(err as Error).message}`);
   }
 
   return jsonResponse({

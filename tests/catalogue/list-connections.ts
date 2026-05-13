@@ -218,6 +218,112 @@ export const listConnectionsTests: TestCase[] = [
   },
 
   // ──────────────────────────────────────────────────────────────────────
+  // Wave 2.5 (Wael 2026-05-13) — DISCONNECT with explicit list_id
+  // removes ONLY that specific (list, entity) row; other lists on the
+  // same entity remain attached.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'list-connections.disconnect-by-list-id-targets-one',
+    category: 'list-connections',
+    description: 'M:N — DISCONNECT with list_id removes only that pair; other attached lists stay',
+    timeoutMs: 15_000,
+    async run(ctx) {
+      const marker = uniqueTag();
+      try {
+        const listA = await createTestList(ctx, `${marker}-A`);
+        const listB = await createTestList(ctx, `${marker}-B`);
+        const entityId = `fake-rule-${marker}`;
+
+        await callConnect(ctx, { list_id: listA, entity_type: 'action_rule', entity_id: entityId });
+        await callConnect(ctx, { list_id: listB, entity_type: 'action_rule', entity_id: entityId });
+
+        // DISCONNECT with list_id targeting only A.
+        const dropA = await adapters.call(ctx, 'manage-list-connections', {
+          type:        'DISCONNECT',
+          user_id:     ctx.testUserId,
+          list_id:     listA,
+          entity_type: 'action_rule',
+          entity_id:   entityId,
+        }, { asService: true });
+        expect2xx(dropA.status, 'DISCONNECT with list_id=A');
+        expectEqual((dropA.data as any)?.removed, 1, 'removed=1');
+
+        // Read back — only B should remain.
+        const readRes = await callListForEntity(ctx, { entity_type: 'action_rule', entity_id: entityId });
+        expect2xx(readRes.status, 'read after partial disconnect');
+        const lists = (readRes.data as any)?.lists;
+        expectEqual(lists?.length, 1, `expected 1 attached list, got ${lists?.length}`);
+        expectEqual(lists?.[0]?.id, listB, 'remaining list is B');
+      } finally {
+        await deleteTestLists(ctx, marker);
+      }
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Wave 2.5 — DISCONNECT without list_id when entity has 2+ connections
+  // is ambiguous; Edge Function returns 400 with attached_list_ids so the
+  // caller can disambiguate.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'list-connections.disconnect-without-list-id-ambiguous',
+    category: 'list-connections',
+    description: 'M:N — DISCONNECT without list_id on multi-attached entity returns 400 ambiguous_disconnect_needs_list_id',
+    timeoutMs: 15_000,
+    async run(ctx) {
+      const marker = uniqueTag();
+      try {
+        const listA = await createTestList(ctx, `${marker}-A`);
+        const listB = await createTestList(ctx, `${marker}-B`);
+        const entityId = `fake-rule-${marker}`;
+        await callConnect(ctx, { list_id: listA, entity_type: 'action_rule', entity_id: entityId });
+        await callConnect(ctx, { list_id: listB, entity_type: 'action_rule', entity_id: entityId });
+
+        // DISCONNECT with NO list_id — should be ambiguous.
+        const res = await callDisconnect(ctx, { entity_type: 'action_rule', entity_id: entityId });
+        expectEqual(res.status, 400, `expected 400, got ${res.status}`);
+        expectEqual((res.data as any)?.error, 'ambiguous_disconnect_needs_list_id', 'specific error code');
+        const ids = (res.data as any)?.attached_list_ids;
+        expectTruthy(Array.isArray(ids) && ids.length === 2, 'attached_list_ids returns both list ids');
+        expectTruthy(ids.includes(listA) && ids.includes(listB), 'both list ids present');
+      } finally {
+        await deleteTestLists(ctx, marker);
+      }
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Wave 2.5 — DISCONNECT without list_id when entity has EXACTLY one
+  // connection still works (back-compat path for callers from before
+  // the M:N pivot).
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'list-connections.disconnect-without-list-id-single-works',
+    category: 'list-connections',
+    description: 'M:N back-compat — DISCONNECT without list_id removes the connection when only one exists',
+    timeoutMs: 15_000,
+    async run(ctx) {
+      const marker = uniqueTag();
+      try {
+        const listId = await createTestList(ctx, marker);
+        const entityId = `fake-rule-${marker}`;
+        await callConnect(ctx, { list_id: listId, entity_type: 'action_rule', entity_id: entityId });
+
+        const res = await callDisconnect(ctx, { entity_type: 'action_rule', entity_id: entityId });
+        expect2xx(res.status, 'DISCONNECT (single-connection back-compat)');
+        expectEqual((res.data as any)?.removed, 1, 'removed=1');
+
+        const readRes = await callListForEntity(ctx, { entity_type: 'action_rule', entity_id: entityId });
+        expect2xx(readRes.status, 'read after disconnect');
+        const lists = (readRes.data as any)?.lists;
+        expectEqual(lists?.length, 0, 'no lists remain');
+      } finally {
+        await deleteTestLists(ctx, marker);
+      }
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
   // One list → many entities allowed.
   // ──────────────────────────────────────────────────────────────────────
   {

@@ -1,0 +1,75 @@
+appId: ca.naavi.app
+name: 15 — List-detail Attached-to section + items + delete button (Wave 2 Phase B)
+tags:
+  - lists
+  - wave-2
+---
+# Wave 2 Phase B (Wael 2026-05-13) — Tapping a list row in the Lists
+# screen opens app/lists/[id].tsx with three sections:
+#   - Header (list name + open-in-Drive icon)
+#   - "Attached to" — every connection rendered as a row with a
+#     detach X (or "Not attached to anything. Standalone list.")
+#   - "Items" — body lines from the Drive Doc
+# Plus a "Delete list" button at the bottom.
+#
+# This flow assumes there is at least ONE list in the account when it
+# runs (typical for Wael's account post-Wave-2 testing). If the Lists
+# screen is empty, the flow falls through gracefully.
+
+- launchApp:
+    clearState: false
+
+# Navigate to Lists.
+- runFlow:
+    when:
+      visible:
+        id: "topbar-menu"
+    commands:
+      - tapOn:
+          id: "topbar-menu"
+- runFlow:
+    when:
+      notVisible:
+        id: "topbar-menu"
+    commands:
+      - tapOn:
+          point: "95%,9%"
+
+- extendedWaitUntil:
+    visible:
+      text: "Lists"
+    timeout: 5000
+- tapOn:
+    text: "Lists"
+
+- extendedWaitUntil:
+    visible:
+      text: "Your Lists"
+    timeout: 5000
+
+# Pick the first row by tapping the chevron-forward icon area (right
+# side of the row). Maestro doesn't have a great "tap first list row"
+# primitive without index-based selectors, so we use a position tap
+# below the tab strip — works on a populated account, no-ops on empty.
+- runFlow:
+    when:
+      notVisible:
+        text: "No lists yet."
+    commands:
+      # Tap somewhere in the first list row area (below the tabs).
+      - tapOn:
+          point: "50%,30%"
+
+      # List-detail screen — at least ONE of these sections is visible.
+      # "Items" header always renders; "Attached to" always renders;
+      # the back chevron is also there.
+      - extendedWaitUntil:
+          visible:
+            text: "Items"
+          timeout: 8000
+      - assertVisible:
+          text: "Attached to"
+      - assertVisible:
+          text: "Delete list"
+
+      - takeScreenshot: 15-list-detail
