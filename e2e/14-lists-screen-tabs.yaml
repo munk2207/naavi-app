@@ -1,0 +1,68 @@
+appId: ca.naavi.app
+name: 14 — Lists screen + All/Attached/Standalone tabs (Wave 2 Phase B)
+tags:
+  - lists
+  - wave-2
+  - smoke
+---
+# Wave 2 Phase B (Wael 2026-05-13) — Lists is a new top-level screen
+# accessible from the 3-dot menu between Alerts and Notes. The screen
+# has three subcategory tabs.
+#
+# This flow:
+#   1. Opens the 3-dot menu
+#   2. Taps Lists
+#   3. Verifies all three tabs are visible
+#   4. Taps each tab in sequence
+#   5. Screenshots the All tab
+
+- launchApp:
+    clearState: false
+
+# Open the 3-dot menu — same dual-strategy as flow 10.
+- runFlow:
+    when:
+      visible:
+        id: "topbar-menu"
+    commands:
+      - tapOn:
+          id: "topbar-menu"
+- runFlow:
+    when:
+      notVisible:
+        id: "topbar-menu"
+    commands:
+      - tapOn:
+          point: "95%,9%"
+
+# Lists entry sits between Alerts and Notes per app/index.tsx:1318-1324.
+- extendedWaitUntil:
+    visible:
+      text: "Lists"
+    timeout: 5000
+- tapOn:
+    text: "Lists"
+
+# Header — Stack screen options say title: 'Your Lists'.
+- extendedWaitUntil:
+    visible:
+      text: "Your Lists"
+    timeout: 5000
+
+# Three tabs, in the order defined in app/lists.tsx::TABS.
+- assertVisible:
+    text: "All"
+- assertVisible:
+    text: "Attached"
+- assertVisible:
+    text: "Standalone"
+
+# Tap each tab — proves they're touch-responsive, not just rendered.
+- tapOn:
+    text: "Attached"
+- tapOn:
+    text: "Standalone"
+- tapOn:
+    text: "All"
+
+- takeScreenshot: 14-lists-screen-tabs

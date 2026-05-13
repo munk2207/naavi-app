@@ -35,6 +35,13 @@ maestro test e2e/ --format junit
 | `08-create-list.yaml` | LIST_CREATE prompt routing (caught by prompt v47 too) |
 | `09-clear-chat.yaml` | Clear-chat action lock state |
 | `10-settings-version-line.yaml` | Settings page renders + version string correct |
+| `11-draftcard-send-regression.yaml` | DRAFT card send button regression |
+| `12-multi-location-picker.yaml` | Multi-candidate location picker UI |
+| `13-bubble-no-truncation.yaml` | Chat bubble text-truncation cosmetic |
+| `14-lists-screen-tabs.yaml` | **Wave 2 Phase B** — Lists screen + All/Attached/Standalone tabs render & respond to taps |
+| `15-list-detail-attached-section.yaml` | **Wave 2 Phase B** — list-detail Items + Attached to + Delete sections |
+| `16-alerts-attached-card.yaml` | **Wave 2 Phase C** — alert-detail "Attached list(s)" card in expanded row |
+| `17-settings-multi-phone.yaml` | **Wave 2 Phase E** — Settings shows pluralised "Your Phone Numbers" + Primary + Add a backup phone |
 
 Bugs that **Maestro still cannot catch** (need real-device manual testing):
 - OS-level Doze / battery optimization (geofence delay)

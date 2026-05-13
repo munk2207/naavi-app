@@ -1,0 +1,67 @@
+appId: ca.naavi.app
+name: 17 — Settings multi-phone primary + backup list (Wave 2 Phase E)
+tags:
+  - settings
+  - multi-phone
+  - wave-2
+---
+# Wave 2 Phase E (Wael 2026-05-13) — The Settings page's "Your Phone
+# Numbers" section now manages an array: primary (the existing single
+# field, mapped to phone_numbers[0]) plus a list of backup phones with
+# add/remove controls.
+#
+# Section header text changed from "Your Phone Number" → "Your Phone
+# Numbers". The "Add a backup phone" sub-label and add (+) button are
+# new in this build.
+#
+# This flow verifies the new section labels render. It does NOT add /
+# remove a phone (mutating live data in an e2e is fragile; that's the
+# auto-tester's job via the multi-phone catalogue).
+
+- launchApp:
+    clearState: false
+
+# Open the 3-dot menu, tap Settings.
+- runFlow:
+    when:
+      visible:
+        id: "topbar-menu"
+    commands:
+      - tapOn:
+          id: "topbar-menu"
+- runFlow:
+    when:
+      notVisible:
+        id: "topbar-menu"
+    commands:
+      - tapOn:
+          point: "95%,9%"
+
+- extendedWaitUntil:
+    visible:
+      text: "Settings"
+    timeout: 5000
+- tapOn:
+    text: "Settings"
+
+- extendedWaitUntil:
+    visible:
+      text: "Sign Out"
+    timeout: 8000
+
+# Scroll down so the Phone Numbers section is on-screen. The Settings
+# page is long; the section sits after the Morning Call section.
+- scroll
+- scroll
+
+# Section title (Wave 2 Phase E — pluralised).
+- assertVisible:
+    text: "Your Phone Numbers"
+
+# Inline sub-labels (fieldLabel style).
+- assertVisible:
+    text: "Primary"
+- assertVisible:
+    text: "Add a backup phone"
+
+- takeScreenshot: 17-settings-multi-phone

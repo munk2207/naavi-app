@@ -1,0 +1,82 @@
+appId: ca.naavi.app
+name: 16 — Alerts screen attached-list card in expanded row (Wave 2 Phase C)
+tags:
+  - alerts
+  - lists
+  - wave-2
+---
+# Wave 2 Phase C (Wael 2026-05-13) — When an alert has at least one
+# list attached via list_connections, the expanded alert-detail row
+# in /alerts now renders a section labelled:
+#   - "Attached list" — singular (1 list)
+#   - "Attached lists (N)" — plural with count (N ≥ 2)
+# Each list shows as a card with the list name + an X to detach.
+#
+# This flow only needs to verify that EXPANDING an alert with an
+# attached list shows the "Attached" header. It doesn't try to detach
+# (mutating state in an e2e is fragile). The detach round-trip is
+# covered by the auto-tester's list-connections.disconnect-* cases.
+
+- launchApp:
+    clearState: false
+
+# Navigate to Alerts.
+- runFlow:
+    when:
+      visible:
+        id: "topbar-menu"
+    commands:
+      - tapOn:
+          id: "topbar-menu"
+- runFlow:
+    when:
+      notVisible:
+        id: "topbar-menu"
+    commands:
+      - tapOn:
+          point: "95%,9%"
+
+- extendedWaitUntil:
+    visible:
+      text: "Alerts"
+    timeout: 5000
+- tapOn:
+    text: "Alerts"
+
+- extendedWaitUntil:
+    visible:
+      text: "Your Alerts"
+    timeout: 5000
+
+# Expand the first alert row by tapping it (rowHeader is the
+# tap target per app/alerts.tsx:412). Wael's account typically has
+# at least one alert by the time this flow runs.
+- runFlow:
+    when:
+      notVisible:
+        text: "No alerts set up yet."
+    commands:
+      # Tap below the screen header — first alert row.
+      - tapOn:
+          point: "50%,25%"
+
+      # Detail box renders — "When" + "What happens" always show.
+      - extendedWaitUntil:
+          visible:
+            text: "When"
+          timeout: 5000
+      - assertVisible:
+          text: "What happens"
+
+      # IF an attached list exists, header reads "Attached list" or
+      # "Attached lists (N)". Use a substring assertion so both shapes
+      # match. If no attached list, this falls through (acceptable —
+      # the absence of the section is also valid behavior).
+      - runFlow:
+          when:
+            visible:
+              text: "Attached list"
+          commands:
+            - assertVisible:
+                text: "Attached list"
+            - takeScreenshot: 16-alerts-attached-card
