@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyNaavi — Architecture &amp; Wiring (V57.15.0)</title>
+<style>
+  :root {
+    --fg:           #1f2328;
+    --fg-muted:     #57606a;
+    --bg:           #ffffff;
+    --bg-soft:      #f6f8fa;
+    --accent:       #1F3A68;
+    --accent-2:     #5DCAA5;
+    --border:       #d0d7de;
+    --code-bg:      #f4f4f4;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    font-size: 16px;
+  }
+  main {
+    max-width: 980px;
+    margin: 2.5rem auto;
+    padding: 0 2rem 4rem;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--accent);
+    margin-top: 1.8em;
+    margin-bottom: 0.6em;
+    line-height: 1.25;
+  }
+  h1 {
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 0.3em;
+    font-size: 2em;
+  }
+  h2 {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.3em;
+    font-size: 1.5em;
+  }
+  h3 { font-size: 1.25em; }
+  h4 { font-size: 1.05em; color: #4A6B96; }
+  p, ul, ol { margin: 0.6em 0; }
+  ul, ol { padding-left: 1.6em; }
+  li { margin: 0.2em 0; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    background: var(--code-bg);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: 0.88em;
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 1em 1.2em;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.85em;
+    line-height: 1.45;
+    margin: 1em 0;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  pre.mermaid {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    text-align: center;
+    padding: 1.4em;
+    overflow: visible;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1.2em 0;
+    font-size: 0.95em;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.5em 0.8em;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--bg-soft);
+    font-weight: 600;
+  }
+  tr:nth-child(2n) td { background: #fafbfc; }
+  blockquote {
+    border-left: 4px solid var(--accent-2);
+    padding: 0.4em 1em;
+    color: var(--fg-muted);
+    margin: 1em 0;
+    background: var(--bg-soft);
+  }
+  hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 2em 0;
+  }
+  .build-info {
+    color: var(--fg-muted);
+    font-size: 0.85em;
+    text-align: right;
+    margin-top: 3em;
+    border-top: 1px solid var(--border);
+    padding-top: 1em;
+  }
+  /* Mermaid SVG sizing */
+  pre.mermaid svg { max-width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<main>
+<h1>MyNaavi — Architecture &amp; Wiring</h1>
+<p><strong>Snapshot:</strong> V57.15.0 (build 171) · 2026-05-13
+<strong>Audience:</strong> Wael (plain-English sections), future Claude sessions (technical sections).
+<strong>Source of truth:</strong> the codebase. This doc summarises what is wired <em>today</em>; when it disagrees with the code, the code wins. Treat this file as a map, not a contract.</p>
+<blockquote>
+<p>Wave 2 (Lists UI) + Wave 2.5 (M:N cardinality) + Wave 2.6 (Drive↔DB hard sync) all landed in this session. Multi-phone identity and the off-phone caller PIN flow also went live the same day. See <a href="#13-recent-changes">§13 Recent Changes</a> for the day&#39;s commits.</p>
+</blockquote>
+<hr>
+<h2>Table of Contents</h2>
+<ul>
+<li><a href="#part-a--plain-english-for-wael">Part A — Plain English (for Wael)</a><ul>
+<li><a href="#1-what-mynaavi-is">1. What MyNaavi is</a></li>
+<li><a href="#2-the-three-surfaces">2. The three surfaces</a></li>
+<li><a href="#3-the-three-repos">3. The three repos</a></li>
+<li><a href="#4-a-typical-request-end-to-end">4. A typical request, end-to-end</a></li>
+</ul>
+</li>
+<li><a href="#part-b--technical-map">Part B — Technical map</a><ul>
+<li><a href="#5-mobile-app">5. Mobile app</a></li>
+<li><a href="#6-voice-server">6. Voice server</a></li>
+<li><a href="#7-backend-supabase">7. Backend (Supabase)</a></li>
+<li><a href="#8-external-services">8. External services</a></li>
+<li><a href="#9-major-flows-sequence-diagrams">9. Major flows (sequence diagrams)</a></li>
+<li><a href="#10-configuration-discipline">10. Configuration discipline</a></li>
+<li><a href="#11-quick-reference">11. Quick reference</a></li>
+<li><a href="#12-known-gaps--follow-ups">12. Known gaps &amp; follow-ups</a></li>
+<li><a href="#13-recent-changes">13. Recent changes (2026-05-13 session)</a></li>
+</ul>
+</li>
+</ul>
+<hr>
+<h1>Part A — Plain English (for Wael)</h1>
+<h2>1. What MyNaavi is</h2>
+<p>MyNaavi is a life-orchestration companion that runs across three places at once:</p>
+<ol>
+<li><strong>An Android app on your phone</strong> — the visual surface. Chat, screens, notifications.</li>
+<li><strong>A phone number you can call from anywhere</strong> — the voice surface. Talk to MyNaavi like a person.</li>
+<li><strong>A backend that quietly coordinates everything</strong> — your data, your calendar, your alerts, your lists, all in one place.</li>
+</ol>
+<p>The visual app and the phone line share the same data and the same brain. You can attach a list to an alert by voice and see it in the app a second later; you can set an alert in the app and have MyNaavi remind you of it by voice call. There is no &quot;app mode&quot; and &quot;voice mode&quot; — there is only MyNaavi, with two ways to talk to it.</p>
+<p>The brain is Claude (Anthropic&#39;s AI). Claude is wrapped in a strict system prompt that tells it which tools to use, when to confirm, when to refuse. The prompt lives in <strong>one</strong> place — the <code>get-naavi-prompt</code> Edge Function — so the app and the phone line always speak the same MyNaavi.</p>
+<h2>2. The three surfaces</h2>
+<pre><code>graph LR
+  user((User)) -.taps/types.-&gt; mobile[📱 Mobile app&lt;br/&gt;Android, expo]
+  user -.calls.-&gt; twilio[📞 Twilio&lt;br/&gt;+1 249 523 5394]
+  user -.browses.-&gt; web[🌐 mynaavi.com&lt;br/&gt;static]
+
+  twilio --&gt; railway[🚂 Railway&lt;br/&gt;naavi-voice-server]
+  mobile --&gt; supa[(🗄️ Supabase&lt;br/&gt;hhgyppbxgmjrwdpdubcx)]
+  railway --&gt; supa
+
+  supa --&gt; claude[🧠 Anthropic Claude]
+  supa --&gt; google[Google APIs]
+  supa --&gt; fcm[FCM push]
+
+  classDef surface fill:#5DCAA5,stroke:#333,color:#000
+  classDef backend fill:#88C0D0,stroke:#333,color:#000
+  class mobile,twilio,web surface
+  class railway,supa,claude,google,fcm backend
+</code></pre>
+<p><strong>Mobile (Android only today):</strong> Built with Expo + React Native. Distributed exclusively through Google Play Internal Testing. No iOS yet. No web app (the website is a static marketing site, not an app).</p>
+<p><strong>Voice:</strong> Inbound calls to the Twilio number connect to a Node.js server hosted on Railway. The server streams audio to Deepgram (speech-to-text), feeds the transcript to Claude, then sends Claude&#39;s reply through Deepgram Aura (text-to-speech) back to the caller.</p>
+<p><strong>Web:</strong> A static HTML site on Vercel. Marketing only — no Supabase, no auth, no API. Don&#39;t confuse it with the app.</p>
+<h2>3. The three repos</h2>
+<table>
+<thead>
+<tr>
+<th>Repo</th>
+<th>Purpose</th>
+<th>Deploy target</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>munk2207/naavi-app</code></td>
+<td>Mobile app source + Edge Function source + migrations</td>
+<td>EAS/Google Play (app) + Supabase (functions)</td>
+</tr>
+<tr>
+<td><code>munk2207/naavi-voice-server</code></td>
+<td>Twilio voice call server</td>
+<td>Railway (auto-deploy on push)</td>
+</tr>
+<tr>
+<td><code>munk2207/mynaavi-website</code></td>
+<td>Static marketing HTML</td>
+<td>Vercel (auto-deploy on push)</td>
+</tr>
+</tbody></table>
+<p>The mobile app and the voice server <strong>share the Supabase backend</strong>. Anything you save in the app shows up to the voice line, and vice versa. The website doesn&#39;t touch Supabase — it&#39;s brochure-ware.</p>
+<p>Working directory convention: edit on <code>main</code> in <code>C:\Users\waela\OneDrive\Desktop\Naavi</code> (the OneDrive copy). Build separately from <code>C:\Users\waela\naavi-mobile</code> (outside OneDrive, because EAS fails inside OneDrive). Never <code>cp -f</code> between them — <code>git merge</code> only.</p>
+<h2>4. A typical request, end-to-end</h2>
+<p>Example — user types <em>&quot;Attach my groceries list to my Costco alert&quot;</em> into the mobile chat.</p>
+<ol>
+<li><strong>Mobile app</strong> sends the text + conversation history to the <code>naavi-chat</code> Edge Function.</li>
+<li><strong><code>naavi-chat</code></strong> loads the shared system prompt from <code>get-naavi-prompt</code>, plus brief items / health / knowledge for context, then calls Claude.</li>
+<li><strong>Claude</strong> reads the rules (RULE 8b says &quot;list connections&quot; → <code>list_connect</code> action), and replies with structured text including <code>{ type: &quot;LIST_CONNECT&quot;, listName: &quot;groceries&quot;, entityRef: &quot;Costco alert&quot;, entityType: &quot;action_rule&quot; }</code>.</li>
+<li><strong>Mobile orchestrator</strong> (<code>hooks/useOrchestrator.ts</code>) sees the LIST_CONNECT, calls <code>connectList</code> from <code>lib/list_connections.ts</code>.</li>
+<li><strong><code>connectList</code></strong> calls the <code>resolve-entity-ref</code> Edge Function twice — once to turn &quot;groceries&quot; into a list ID, once to turn &quot;Costco alert&quot; into an action_rule ID.</li>
+<li><strong><code>manage-list-connections</code></strong> Edge Function writes the new <code>list_connections</code> row.</li>
+<li><strong>Database</strong> enforces uniqueness via <code>UNIQUE(list_id, entity_type, entity_id)</code>. The list is now attached to the alert.</li>
+<li><strong>Mobile UI</strong> refreshes from the DB; the alert-detail &quot;Attached lists&quot; card now includes &quot;groceries&quot;.</li>
+<li><strong>Voice surface</strong> would now also be aware of this attachment: if Wael calls and says <em>&quot;What lists are on my Costco alert?&quot;</em>, the voice server hits the same <code>manage-list-connections</code> Edge Function and reads back &quot;Your Costco alert has 1 list attached. 1. groceries.&quot;</li>
+</ol>
+<p>Same flow, same brain, two surfaces.</p>
+<hr>
+<h1>Part B — Technical map</h1>
+<h2>5. Mobile app</h2>
+<h3>5.1 Screens (entry points)</h3>
+<p>Routed by Expo Router; declared in <a href="../app/_layout.tsx">app/_layout.tsx</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>/</code></td>
+<td><a href="../app/index.tsx">app/index.tsx</a></td>
+<td>Home — chat with MyNaavi. Top bar 3-dots menu.</td>
+</tr>
+<tr>
+<td><code>/alerts</code></td>
+<td><a href="../app/alerts.tsx">app/alerts.tsx</a></td>
+<td>Action rules list, with expand → attached-lists card + delete.</td>
+</tr>
+<tr>
+<td><code>/lists</code></td>
+<td><a href="../app/lists.tsx">app/lists.tsx</a></td>
+<td>Lists with All / Attached / Standalone tabs. Reconciles Drive↔DB on load.</td>
+</tr>
+<tr>
+<td><code>/lists/[id]</code></td>
+<td><a href="../app/lists/%5Bid%5D.tsx">app/lists/[id].tsx</a></td>
+<td>List-detail: items + Attached-to: rows + Delete list.</td>
+</tr>
+<tr>
+<td><code>/notes</code></td>
+<td><a href="../app/notes.tsx">app/notes.tsx</a></td>
+<td>Drive Notes view.</td>
+</tr>
+<tr>
+<td><code>/settings</code></td>
+<td><a href="../app/settings.tsx">app/settings.tsx</a></td>
+<td>Profile, voice pref, phone list (primary + backups), connected services.</td>
+</tr>
+<tr>
+<td><code>/help</code></td>
+<td><a href="../app/help.tsx">app/help.tsx</a></td>
+<td>Help text + report a problem entry.</td>
+</tr>
+<tr>
+<td><code>/about</code></td>
+<td><a href="../app/about.tsx">app/about.tsx</a></td>
+<td>Version, legal.</td>
+</tr>
+<tr>
+<td><code>/report</code></td>
+<td><a href="../app/report.tsx">app/report.tsx</a></td>
+<td>Submit a bug.</td>
+</tr>
+<tr>
+<td><code>/contact</code></td>
+<td><a href="../app/contact.tsx">app/contact.tsx</a></td>
+<td>Reach support.</td>
+</tr>
+<tr>
+<td><code>/brief</code>, <code>/calendar</code>, <code>/contacts</code>, <code>/email</code></td>
+<td><a href="../app/brief.tsx">app/brief.tsx</a> etc.</td>
+<td>Deep-link landing screens from Google Assistant App Actions.</td>
+</tr>
+<tr>
+<td><code>/permission-location</code></td>
+<td><a href="../app/permission-location.tsx">app/permission-location.tsx</a></td>
+<td>Explainer + &quot;Allow all the time&quot; reminder for location alerts.</td>
+</tr>
+</tbody></table>
+<p>The 3-dots top-bar menu (defined in <code>app/index.tsx</code>) lists: <strong>Alerts → Lists → Notes → Info → Help → Settings</strong>.</p>
+<h3>5.2 The chat orchestrator (the central nervous system)</h3>
+<p><a href="../hooks/useOrchestrator.ts">hooks/useOrchestrator.ts</a> is the single mobile-side dispatcher. Every user message:</p>
+<ol>
+<li>Goes to the orchestrator.</li>
+<li>Orchestrator calls <code>naavi-chat</code> Edge Function (Claude path).</li>
+<li>Claude returns structured actions (<code>SAVE_TO_DRIVE</code>, <code>LIST_CONNECT</code>, <code>SET_ACTION_RULE</code>, etc., plus speech).</li>
+<li>Orchestrator iterates the action list, calls the relevant lib/helper for each.</li>
+<li>Side-effects (lists DB rows, Drive docs, calendar events, push notifications) are produced.</li>
+<li>Orchestrator returns assembled side-effects + speech to the chat UI.</li>
+</ol>
+<p>Action types currently dispatched (non-exhaustive):</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Handler (mobile)</th>
+<th>Backend</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>SAVE_TO_DRIVE</code></td>
+<td><code>save-to-drive</code> invoke</td>
+<td>Drive API</td>
+</tr>
+<tr>
+<td><code>REMEMBER</code></td>
+<td><code>lib/memory.ts</code></td>
+<td><code>knowledge_fragments</code> table</td>
+</tr>
+<tr>
+<td><code>CREATE_EVENT</code></td>
+<td><code>lib/calendar.ts</code></td>
+<td>Google Calendar</td>
+</tr>
+<tr>
+<td><code>FETCH_TRAVEL_TIME</code></td>
+<td><code>lib/maps.ts</code></td>
+<td>Google Maps</td>
+</tr>
+<tr>
+<td><code>DRIVE_SEARCH</code></td>
+<td><code>search-google-drive</code></td>
+<td>Drive API + <code>documents</code> table</td>
+</tr>
+<tr>
+<td><code>GLOBAL_SEARCH</code></td>
+<td><code>global-search</code></td>
+<td>10 adapters (see <a href="#74-edge-functions-grouped-by-purpose">§7.4</a>)</td>
+</tr>
+<tr>
+<td><code>SPEND_SUMMARY</code></td>
+<td>(planned, queued)</td>
+<td><code>naavi-spend-summary</code></td>
+</tr>
+<tr>
+<td><code>DELETE_EVENT</code></td>
+<td><code>delete-calendar-event</code></td>
+<td>Google Calendar</td>
+</tr>
+<tr>
+<td><code>SCHEDULE_MEDICATION</code></td>
+<td><code>lib/memory.ts</code> + recurring rules</td>
+<td><code>action_rules</code></td>
+</tr>
+<tr>
+<td><code>LIST_CREATE</code></td>
+<td><code>lib/lists.ts::createList</code></td>
+<td><code>lists</code> + Drive Doc</td>
+</tr>
+<tr>
+<td><code>LIST_ADD/REMOVE/READ</code></td>
+<td><code>lib/lists.ts</code></td>
+<td><code>lists</code> + Drive Doc body</td>
+</tr>
+<tr>
+<td><code>LIST_CONNECT</code></td>
+<td><code>lib/list_connections.ts::connectList</code></td>
+<td><code>list_connections</code></td>
+</tr>
+<tr>
+<td><code>LIST_DISCONNECT</code></td>
+<td><code>lib/list_connections.ts::disconnectEntity</code></td>
+<td><code>list_connections</code></td>
+</tr>
+<tr>
+<td><code>LIST_CONNECTION_QUERY</code></td>
+<td><code>lib/list_connections.ts::queryListConnections</code></td>
+<td><code>list_connections</code> + DESCRIBE</td>
+</tr>
+<tr>
+<td><code>LIST_DELETE</code></td>
+<td><code>lib/list_connections.ts::deleteListWithConnections</code></td>
+<td><code>lists</code> + Drive trash + cascade</td>
+</tr>
+<tr>
+<td><code>LIST_RULES</code></td>
+<td>inline SQL</td>
+<td><code>action_rules</code></td>
+</tr>
+<tr>
+<td><code>DELETE_RULE</code></td>
+<td><code>manage-rules</code></td>
+<td><code>action_rules</code></td>
+</tr>
+<tr>
+<td><code>DELETE_MEMORY</code></td>
+<td><code>lib/knowledge.ts</code></td>
+<td><code>knowledge_fragments</code></td>
+</tr>
+<tr>
+<td><code>DRAFT_MESSAGE</code> / <code>ADD_CONTACT</code></td>
+<td><code>lib/contacts.ts</code> + tap-to-send sheet</td>
+<td><code>contacts</code>, <code>sent_messages</code></td>
+</tr>
+<tr>
+<td><code>SET_REMINDER</code></td>
+<td><code>lib/memory.ts</code></td>
+<td><code>reminders</code></td>
+</tr>
+<tr>
+<td><code>LOG_CONCERN</code></td>
+<td>(logging only)</td>
+<td><code>knowledge_fragments</code></td>
+</tr>
+<tr>
+<td><code>UPDATE_PROFILE</code></td>
+<td>direct</td>
+<td><code>user_settings</code></td>
+</tr>
+<tr>
+<td><code>SET_EMAIL_ALERT</code></td>
+<td>(legacy alias of SET_ACTION_RULE)</td>
+<td><code>action_rules</code></td>
+</tr>
+<tr>
+<td><code>SET_ACTION_RULE</code></td>
+<td><code>lib/location.ts</code> + pending-confirmation flow</td>
+<td><code>action_rules</code></td>
+</tr>
+</tbody></table>
+<h3>5.3 Hooks (state machines)</h3>
+<table>
+<thead>
+<tr>
+<th>Hook</th>
+<th>Owns</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>useOrchestrator</code></td>
+<td>Conversation state, action dispatch, pending-confirmation flows (location, list, delete).</td>
+</tr>
+<tr>
+<td><code>useGeofencing</code></td>
+<td>OS geofence registration + sync with <code>action_rules</code> on auth change / foreground / dwell-fire.</td>
+</tr>
+<tr>
+<td><code>useVoice</code></td>
+<td>TTS playback queue. Calls <code>text-to-speech</code> for Aura Hera.</td>
+</tr>
+<tr>
+<td><code>useLiveTranscript</code></td>
+<td>(Hands-free Whisper path — deprecated by phone-line for off-device use.)</td>
+</tr>
+<tr>
+<td><code>useConversationRecorder</code></td>
+<td>Voice memo recording → AssemblyAI summary.</td>
+</tr>
+<tr>
+<td><code>useBatteryOptPrompt</code></td>
+<td>First-time Battery Optimization opt-out modal for location-alert users.</td>
+</tr>
+<tr>
+<td><code>useWhisperMemo</code></td>
+<td>(Whisper memo capture).</td>
+</tr>
+</tbody></table>
+<h3>5.4 lib/ helpers (thin wrappers)</h3>
+<p>Each <code>lib/*.ts</code> file is a thin wrapper around one or more Edge Functions, exposing a typed function for the orchestrator / screens to call. Notable:</p>
+<ul>
+<li><code>lib/supabase.ts</code> — Supabase client + auth listener (AsyncStorage persistence; required for V54.2+ Drift fix).</li>
+<li><code>lib/invokeWithTimeout.ts</code> — <code>invokeWithTimeout(fnName, opts, ms)</code> wraps <code>supabase.functions.invoke</code> with a deadline. <code>queryWithTimeout</code> does the same for <code>from(...).select()</code>.</li>
+<li><code>lib/list_connections.ts</code> — Wave 2.5 helpers (<code>connectList</code>, <code>disconnectEntity</code>, <code>disconnectEntityById</code>, <code>queryListConnections</code>, <code>deleteListWithConnections</code>).</li>
+<li><code>lib/lists.ts</code> — list CRUD against Drive Docs + <code>lists</code> table.</li>
+<li><code>lib/calendar.ts</code> / <code>lib/contacts.ts</code> / <code>lib/drive.ts</code> / <code>lib/gmail.ts</code> — Google integrations.</li>
+<li><code>lib/naavi-client.ts</code> — Anthropic API key handling + system-prompt fallback.</li>
+<li><code>lib/memory.ts</code> / <code>lib/knowledge.ts</code> — REMEMBER + DELETE_MEMORY against <code>knowledge_fragments</code>.</li>
+<li><code>lib/location.ts</code> / <code>lib/maps.ts</code> / <code>lib/weather.ts</code> — geo helpers.</li>
+<li><code>lib/push.ts</code> — FCM token registration via <code>save-push-subscription</code>.</li>
+</ul>
+<h2>6. Voice server</h2>
+<p>Single Node.js Express file at <a href="../naavi-voice-server/src/index.js">naavi-voice-server/src/index.js</a> — ~8000 lines, deployed to Railway on every push to <code>naavi-voice-server/main</code>. There are no other files in the runtime (apart from <code>list_confirm_gate.js</code> which holds the F1a confirmation gate logic + unit tests).</p>
+<h3>6.1 Inbound call flow</h3>
+<pre><code>sequenceDiagram
+  participant C as Caller
+  participant T as Twilio
+  participant V as Voice server
+  participant SB as Supabase
+  participant DG as Deepgram
+  participant CL as Claude
+
+  C-&gt;&gt;T: Dial +1 249 523 5394
+  T-&gt;&gt;V: POST /voice (CallSid, From)
+  V-&gt;&gt;SB: getUserIdByPhone(From) — phone OR phone_numbers[]
+  alt Registered
+    V-&gt;&gt;T: TwiML &lt;Play&gt; greeting &lt;Connect&gt;&lt;Stream&gt;
+  else Unregistered
+    V-&gt;&gt;T: TwiML &lt;Play&gt; &quot;Say or enter your PIN&quot; &lt;Gather&gt;
+    C-&gt;&gt;T: 4-digit PIN
+    T-&gt;&gt;V: POST /voice/pin-result
+    V-&gt;&gt;SB: manage-voice-pin op=verify
+    SB--&gt;&gt;V: { match: true/false }
+    alt Match
+      V-&gt;&gt;T: TwiML &lt;Play&gt; &quot;Welcome NAME&quot; &lt;Connect&gt;&lt;Stream&gt;
+    else No match (3 tries)
+      V-&gt;&gt;T: TwiML &lt;Play&gt; lockout &lt;Hangup&gt;
+    end
+  end
+
+  T-&gt;&gt;V: WebSocket /media-stream (audio)
+  V-&gt;&gt;DG: stream audio for STT
+  loop Conversation
+    DG--&gt;&gt;V: transcript
+    V-&gt;&gt;SB: get-naavi-prompt + naavi-chat (Claude)
+    SB--&gt;&gt;V: speech + actions
+    V-&gt;&gt;DG: speak(text) — Aura Hera
+    DG--&gt;&gt;V: MP3
+    V-&gt;&gt;T: stream audio (twilio µ-law)
+  end
+</code></pre>
+<h3>6.2 Identity resolution (<code>getUserIdByPhone</code>)</h3>
+<p>Wave 2.5 Phase E (multi-phone identity). PostgREST OR query:</p>
+<pre><code>?select=user_id&amp;or=(phone.eq.X,phone_numbers.cs.{X})&amp;limit=1
+</code></pre>
+<p>Checks BOTH the legacy single-<code>phone</code> column AND the new <code>phone_numbers text[]</code> array. Cross-user uniqueness on phone numbers is enforced by a BEFORE-trigger on <code>user_settings</code> (since a literal UNIQUE INDEX on <code>unnest()</code> isn&#39;t supported in Postgres). One phone = one user, always.</p>
+<h3>6.3 In-call actions</h3>
+<p>Voice server&#39;s <code>executeAction(action, userIdOverride)</code> is the voice-side equivalent of mobile&#39;s orchestrator. Handles the same action types. Identity is passed as <code>userIdOverride</code> (resolved from caller phone), never inferred.</p>
+<p>The current <code>executeAction</code> dispatches: <code>CREATE_EVENT</code>, <code>LIST_CREATE/ADD/REMOVE/READ</code>, <code>LIST_CONNECT/DISCONNECT/CONNECTION_QUERY/DELETE</code>, <code>LOOKUP_CONTACT</code>, <code>INGEST_NOTE</code>, <code>SET_ACTION_RULE</code> (subset — voice doesn&#39;t yet handle location verification flow; mobile orchestrator owns that), <code>REMEMBER</code>, <code>SAVE_TO_DRIVE</code>, <code>SEND_SMS</code>, plus internal call-management actions.</p>
+<h3>6.4 Confirmation gates</h3>
+<p><a href="../naavi-voice-server/src/list_confirm_gate.js">naavi-voice-server/src/list_confirm_gate.js</a> is a small pure module wrapping the F1a list-CRUD confirmation rule. Voice has the <code>pendingListAction</code> state machine because speech is continuous and slips are easy. The mobile chat has no equivalent — typing + send IS the confirmation.</p>
+<h3>6.5 PIN flow (Wave 2 of 2026-05-13)</h3>
+<p>Unregistered callers (whose number isn&#39;t in <code>phone</code> OR <code>phone_numbers[]</code>) get a 4-digit PIN prompt before being hung up. The Edge Function <code>manage-voice-pin</code> handles two operations:</p>
+<table>
+<thead>
+<tr>
+<th>Op</th>
+<th>Caller</th>
+<th>Auth</th>
+<th>Inputs</th>
+<th>Output</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>set</code></td>
+<td>Mobile app</td>
+<td>JWT — user_id from JWT</td>
+<td><code>pin</code> (4-digit)</td>
+<td><code>{ success }</code></td>
+</tr>
+<tr>
+<td><code>set</code></td>
+<td>Voice server (in-call SET-PIN intercept)</td>
+<td>Service role</td>
+<td><code>pin</code>, <code>user_id</code></td>
+<td><code>{ success }</code></td>
+</tr>
+<tr>
+<td><code>verify</code></td>
+<td>Voice server</td>
+<td>Service role</td>
+<td><code>pin</code>, <code>user_id</code></td>
+<td><code>{ match: bool }</code></td>
+</tr>
+</tbody></table>
+<p>PIN is bcrypt-hashed (10 rounds) before any DB write. Same <code>{ success, match: false }</code> shape for &quot;user not found&quot;, &quot;no PIN set&quot;, or &quot;wrong PIN&quot; so callers can&#39;t enumerate user_ids by error.</p>
+<p>Voice-side TwiML pattern matters: <code>&lt;Play&gt;</code> must sit <strong>outside</strong> <code>&lt;Gather&gt;</code> (top-level) to actually be heard on landline. Nesting <code>&lt;Play&gt;</code> inside <code>&lt;Gather&gt;</code> produced silent prompts in testing — same Edge Function, same audio, just different audibility depending on TwiML shape. Fixed 2026-05-13.</p>
+<h2>7. Backend (Supabase)</h2>
+<p>Project ref: <code>hhgyppbxgmjrwdpdubcx</code>. Region: <code>us-east-1</code>. Plan: PRO.</p>
+<h3>7.1 Auth model</h3>
+<ul>
+<li>Mobile uses Supabase JWT auth (Google OAuth via <code>signInWithIdToken</code>).</li>
+<li>Voice server uses the service-role key (server-to-server).</li>
+<li>Every Edge Function that may be called by either surface follows the <strong>CLAUDE.md Rule 4</strong> identity-resolution chain:<ol>
+<li>JWT auth — <code>auth.getUser(token)</code> (mobile path)</li>
+<li><code>user_id</code> from request body (voice / cron path)</li>
+<li>Reject with 401</li>
+</ol>
+</li>
+</ul>
+<p>This rule must be enforced; do NOT shortcut to <code>user_tokens.limit(1)</code> or <code>auth.admin.listUsers().sort</code>. Multi-user safety depends on it.</p>
+<h3>7.2 Tables (grouped by domain)</h3>
+<h4>Identity &amp; profile</h4>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>user_settings</code></td>
+<td>One row per user. Name, phone, <strong>phone_numbers text[]</strong> (Wave 2.5), morning-call settings, voice PIN hash, home/work addresses, voice pref.</td>
+</tr>
+<tr>
+<td><code>user_tokens</code></td>
+<td>Google OAuth refresh tokens per user (used by Edge Functions to access Drive/Calendar/Gmail/People).</td>
+</tr>
+<tr>
+<td><code>auth.users</code></td>
+<td>Standard Supabase auth table. Owned by Supabase.</td>
+</tr>
+</tbody></table>
+<h4>Rules &amp; actions</h4>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>action_rules</code></td>
+<td>Canonical store for all triggers + actions. trigger_type ∈ {location, weather, email, contact_silence, time, calendar}. action_type ∈ {sms, whatsapp, email, push}. Self-alerts fan out to all four channels per the ALERT FAN-OUT rule. Partial UNIQUE on coords for location rules.</td>
+</tr>
+<tr>
+<td><code>action_rule_log</code></td>
+<td>History of rule fires.</td>
+</tr>
+<tr>
+<td><code>pending_dwell_fires</code></td>
+<td>Active &quot;user inside geofence&quot; deferrals (V57.13: dwell-then-fire pattern).</td>
+</tr>
+<tr>
+<td><code>reminders</code></td>
+<td>One-off time-based reminders separate from <code>action_rules</code>.</td>
+</tr>
+</tbody></table>
+<h4>Lists &amp; connections</h4>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>lists</code></td>
+<td>One row per voice-managed list. Maps name → Drive file id.</td>
+</tr>
+<tr>
+<td><code>list_connections</code></td>
+<td>M:N wiring (Wave 2.5). <code>UNIQUE(list_id, entity_type, entity_id)</code>. FK ON DELETE CASCADE on list_id; entity_id is generic text (no FK — application sweep cleans orphans).</td>
+</tr>
+<tr>
+<td><code>naavi_notes</code></td>
+<td>Drive Notes index (legacy; lists also insert here for Notes-tab visibility).</td>
+</tr>
+</tbody></table>
+<h4>Knowledge &amp; messages</h4>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>knowledge_fragments</code></td>
+<td>REMEMBER store. pgvector embeddings.</td>
+</tr>
+<tr>
+<td><code>gmail_messages</code></td>
+<td>Tier-1 synced Gmail messages (7-day window, body cap).</td>
+</tr>
+<tr>
+<td><code>email_actions</code></td>
+<td>Structured Haiku-extracted actions per email (bills, appointments, renewals).</td>
+</tr>
+<tr>
+<td><code>documents</code></td>
+<td>Harvested attachments + extracted text.</td>
+</tr>
+<tr>
+<td><code>sent_messages</code></td>
+<td>All outbound SMS/WhatsApp/email (queryable via <code>global-search</code>).</td>
+</tr>
+<tr>
+<td><code>hosted_replies</code></td>
+<td>Stored AI-generated draft replies the user can edit/send.</td>
+</tr>
+</tbody></table>
+<h4>Calendar</h4>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>calendar_events</code></td>
+<td>Google Calendar cache (synced every 30 min).</td>
+</tr>
+</tbody></table>
+<h4>Diagnostics</h4>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>client_diagnostics</code></td>
+<td>Mobile + voice server diagnostic events (via <code>remote-log</code> and <code>_critLog</code>). RLS lets owner read; only service-role writes.</td>
+</tr>
+<tr>
+<td><code>pending_actions</code></td>
+<td>(Legacy — pending action tray; less used since chat became inline-confirm.)</td>
+</tr>
+</tbody></table>
+<h4>Legacy / archived (do not extend)</h4>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>email_watch_rules</code></td>
+<td>Retired — folded into <code>action_rules</code> with <code>trigger_type=&#39;email&#39;</code>.</td>
+</tr>
+<tr>
+<td><code>email_alert_log</code></td>
+<td>Retired — <code>action_rule_log</code> covers all rule types.</td>
+</tr>
+<tr>
+<td><code>user_places</code></td>
+<td>DROPPED V57.13.3. Place-cache produced more bugs than performance; replaced by per-rule resolved-coordinate dedup in <code>action_rules</code>.</td>
+</tr>
+</tbody></table>
+<h3>7.3 RLS posture</h3>
+<p>Default: <strong>owner SELECT + service-role ALL</strong>. Mobile uses JWT auth → RLS = <code>auth.uid() = user_id</code>. Voice + crons use service-role → bypasses RLS.</p>
+<p>Tables with extra-strict write lockdown (writes ONLY via dedicated Edge Function):</p>
+<ul>
+<li><code>list_connections</code> — writes via <code>manage-list-connections</code> only.</li>
+<li><code>action_rules</code> (location) — pre-INSERT duplicate check in <code>useOrchestrator.commitPending</code> before the DB constraint fires.</li>
+</ul>
+<h3>7.4 Edge Functions (grouped by purpose)</h3>
+<p><strong>Identity / OAuth</strong></p>
+<ul>
+<li><code>store-google-token</code>, <code>store-epic-token</code>, <code>exchange-epic-code</code>.</li>
+</ul>
+<p><strong>Brain (Claude)</strong></p>
+<ul>
+<li><code>naavi-chat</code> — main chat handler. Mobile + voice both call this. Loads shared prompt, dispatches Claude.</li>
+<li><code>get-naavi-prompt</code> — single source of truth for the system prompt. Versioned by <code>PROMPT_VERSION</code> constant (current: <code>2026-05-13-v73-list-mn-cardinality</code>).</li>
+<li><code>extract-actions</code> / <code>extract-email-actions</code> / <code>extract-document-text</code> — Haiku-powered classifiers for emails, attachments, conversations.</li>
+</ul>
+<p><strong>Lists</strong></p>
+<ul>
+<li><code>manage-list</code> — voice-managed list CRUD (create / add / remove / read).</li>
+<li><code>manage-list-connections</code> — list↔entity wiring (Wave 2.5 M:N, Wave 2.6 Drive trash on delete).</li>
+<li><code>lists-reconcile</code> — Wave 2.6 reverse Drive↔DB sync sweep. Called by mobile Lists screen on load.</li>
+<li><code>resolve-entity-ref</code> — name → entity_id resolver (lists, action_rules, gmail_messages in V1).</li>
+</ul>
+<p><strong>Rules / alerts</strong></p>
+<ul>
+<li><code>manage-rules</code> — action_rules CRUD (alerts screen + DELETE_RULE).</li>
+<li><code>evaluate-rules</code> — cron, every minute. Fires matching rules via send-sms / send-email / send-push-notification.</li>
+<li><code>report-location-event</code> — mobile geofence ENTER/EXIT reporter.</li>
+<li><code>fire-pending-dwells</code> — cron, every minute. Promotes dwelled-long-enough pending fires to actual alerts.</li>
+</ul>
+<p><strong>Calendar</strong></p>
+<ul>
+<li><code>sync-google-calendar</code> — cron every 30 min. Pulls all subscribed calendars.</li>
+<li><code>create-calendar-event</code> / <code>delete-calendar-event</code>.</li>
+<li><code>fetch-calendar-pdf</code> — extracts events from PDF schedules (school years etc.).</li>
+</ul>
+<p><strong>Drive &amp; documents</strong></p>
+<ul>
+<li><code>save-to-drive</code> — writes a new Drive Doc into <code>MyNaavi/&lt;category&gt;/</code>.</li>
+<li><code>read-drive-file</code> / <code>update-drive-file</code> — list body content I/O.</li>
+<li><code>init-drive-tree</code> / <code>migrate-drive-structure</code> — bootstraps the <code>MyNaavi/</code> folder tree.</li>
+<li><code>search-google-drive</code> — Drive live <code>fullText</code> search.</li>
+<li><code>harvest-attachment</code> — downloads email attachments → <code>MyNaavi/Documents/&lt;type&gt;/</code> + <code>documents</code> row.</li>
+<li><code>scan-drive-pdfs</code> — Vision OCR + Haiku classification for scanned PDFs in Drive.</li>
+<li><code>send-drive-file</code> — emails a Drive file as attachment.</li>
+</ul>
+<p><strong>Gmail</strong></p>
+<ul>
+<li><code>sync-gmail</code> — cron 60 min. Tier-1 messages into <code>gmail_messages</code>.</li>
+</ul>
+<p><strong>Voice / TTS</strong></p>
+<ul>
+<li><code>text-to-speech</code> — Deepgram Aura Hera audio for mobile.</li>
+<li><code>transcribe-google</code> / <code>transcribe-memo</code> — Whisper transcription.</li>
+<li><code>deepgram-token</code> / <code>get-realtime-token</code> — short-lived voice tokens for client SDKs.</li>
+<li><code>manage-voice-pin</code> — set/verify caller PIN (Wave 2 of 2026-05-13).</li>
+<li><code>trigger-morning-call</code> — outbound morning brief call via Twilio.</li>
+</ul>
+<p><strong>Search &amp; contacts</strong></p>
+<ul>
+<li><code>global-search</code> — 10-adapter unified search (knowledge, rules, sent_messages, contacts, lists, calendar, gmail, email_actions, drive, reminders).</li>
+<li><code>lookup-contact</code> — Google People API live lookup.</li>
+<li><code>create-contact</code> — write to <code>contacts</code> table.</li>
+</ul>
+<p><strong>Messaging</strong></p>
+<ul>
+<li><code>send-sms</code> / <code>send-email</code> / <code>send-user-email</code> / <code>send-push-notification</code>.</li>
+<li><code>save-push-subscription</code> — FCM token registration.</li>
+</ul>
+<p><strong>Hosted replies</strong></p>
+<ul>
+<li><code>save-hosted-reply</code> / <code>get-hosted-reply</code> — AI-drafted replies with short-lived tokens.</li>
+</ul>
+<p><strong>Diagnostics &amp; ops</strong></p>
+<ul>
+<li><code>remote-log</code> — client-side diagnostic event ingestion (<code>client_diagnostics</code>).</li>
+<li><code>poll-conversation</code> — chat-history poll for cross-device sync.</li>
+<li><code>assistant-fulfillment</code> — Google Assistant App Action handler.</li>
+<li><code>join-waitlist</code> — public marketing waitlist signup.</li>
+<li><code>seed-test-user</code> — provisions a test user (<code>__test__@...</code>) for the auto-tester.</li>
+<li><code>naavi-spend-summary</code> — (queued, not built) money totals over <code>documents.extracted_amount_cents</code>.</li>
+</ul>
+<p><strong>Cleanup / migration</strong></p>
+<ul>
+<li><code>cleanup-duplicate-documents</code> — post-incident dedupe for <code>documents</code>.</li>
+<li><code>backfill-email-actions</code> — backfill <code>email_actions</code> for historical emails.</li>
+</ul>
+<h3>7.5 Cron jobs</h3>
+<p>Every cron lives in <code>pg_cron</code> (<code>cron.job</code> table). Inspect with <code>SELECT jobname, schedule FROM cron.job</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Cron</th>
+<th>Schedule</th>
+<th>Function</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Gmail sync</td>
+<td>every 60 min</td>
+<td><code>sync-gmail</code></td>
+</tr>
+<tr>
+<td>Calendar sync</td>
+<td>every 30 min</td>
+<td><code>sync-google-calendar</code></td>
+</tr>
+<tr>
+<td>Reminders fire</td>
+<td>every minute</td>
+<td><code>check-reminders</code></td>
+</tr>
+<tr>
+<td>Evaluate rules</td>
+<td>every minute</td>
+<td><code>evaluate-rules</code></td>
+</tr>
+<tr>
+<td>Morning calls</td>
+<td>at user&#39;s preferred time</td>
+<td><code>trigger-morning-call</code></td>
+</tr>
+<tr>
+<td>Fire pending dwells</td>
+<td>every minute</td>
+<td><code>fire-pending-dwells</code></td>
+</tr>
+</tbody></table>
+<p>Adding a new cron: <strong>first</strong> check the table for an existing job with the same purpose (CLAUDE.md Configuration Discipline rule 1). Replace, don&#39;t add a parallel job.</p>
+<h2>8. External services</h2>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Used for</th>
+<th>Auth</th>
+<th>Env var(s)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Anthropic</td>
+<td>Claude — Haiku (extraction) + Sonnet (chat) + Opus (when needed)</td>
+<td>API key</td>
+<td><code>ANTHROPIC_API_KEY</code></td>
+</tr>
+<tr>
+<td>Deepgram</td>
+<td>STT (Nova-3) + TTS (Aura Hera)</td>
+<td>API key</td>
+<td><code>DEEPGRAM_API_KEY</code></td>
+</tr>
+<tr>
+<td>Twilio</td>
+<td>Voice calls + SMS + WhatsApp</td>
+<td>Account SID + Auth Token</td>
+<td><code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code></td>
+</tr>
+<tr>
+<td>Google</td>
+<td>OAuth + Drive + Calendar + Gmail + People + Places + Maps + Vision</td>
+<td>OAuth (per-user refresh token) + API keys</td>
+<td><code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code>, <code>GOOGLE_VISION_API_KEY</code>, <code>GOOGLE_MAPS_API_KEY</code></td>
+</tr>
+<tr>
+<td>FCM</td>
+<td>Mobile push</td>
+<td>Server key in <code>google-services.json</code></td>
+<td>(in app config)</td>
+</tr>
+<tr>
+<td>AssemblyAI</td>
+<td>Voice memo summarisation</td>
+<td>API key</td>
+<td><code>ASSEMBLYAI_API_KEY</code></td>
+</tr>
+<tr>
+<td>Railway</td>
+<td>Voice server host</td>
+<td>—</td>
+<td>dashboard auto-deploy</td>
+</tr>
+<tr>
+<td>Vercel</td>
+<td>Website host</td>
+<td>—</td>
+<td>dashboard auto-deploy</td>
+</tr>
+<tr>
+<td>EAS / Expo</td>
+<td>Mobile builds</td>
+<td>EAS account</td>
+<td>EAS CLI auth</td>
+</tr>
+<tr>
+<td>Supabase</td>
+<td>Database + Functions + Storage + Auth</td>
+<td>service-role key + JWT</td>
+<td><code>SUPABASE_URL</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code>, <code>SUPABASE_ANON_KEY</code>, <code>SUPABASE_PUBLISHABLE_KEY</code></td>
+</tr>
+</tbody></table>
+<h2>9. Major flows (sequence diagrams)</h2>
+<h3>9.1 Mobile chat turn</h3>
+<pre><code>sequenceDiagram
+  participant U as User (mobile)
+  participant A as ChatScreen
+  participant O as useOrchestrator
+  participant NC as naavi-chat
+  participant CL as Claude
+  participant EF as Edge Functions
+  participant DB as Supabase
+
+  U-&gt;&gt;A: type message + send
+  A-&gt;&gt;O: appendUserMessage()
+  O-&gt;&gt;NC: invoke(naavi-chat, {history})
+  NC-&gt;&gt;EF: get-naavi-prompt (cached)
+  EF--&gt;&gt;NC: system prompt v73
+  NC-&gt;&gt;CL: messages.create
+  CL--&gt;&gt;NC: structured reply (text + actions)
+  NC--&gt;&gt;O: { speech, actions[] }
+  loop For each action
+    O-&gt;&gt;EF: lib helper → Edge Function
+    EF-&gt;&gt;DB: read/write
+    EF--&gt;&gt;O: result
+  end
+  O--&gt;&gt;A: append assistant message + side-effects
+  A--&gt;&gt;U: render bubble + cards
+</code></pre>
+<h3>9.2 Voice call (registered caller)</h3>
+<pre><code>sequenceDiagram
+  participant C as Caller
+  participant T as Twilio
+  participant V as Voice server
+  participant SB as Supabase
+  participant DG as Deepgram
+  participant CL as Claude
+
+  C-&gt;&gt;T: Dial number
+  T-&gt;&gt;V: POST /voice
+  V-&gt;&gt;SB: getUserIdByPhone
+  SB--&gt;&gt;V: user_id
+  V-&gt;&gt;SB: load name + first_call_completed_at
+  V-&gt;&gt;DG: speak(greeting)
+  DG--&gt;&gt;V: MP3
+  V--&gt;&gt;T: TwiML &lt;Play&gt; + &lt;Connect&gt;&lt;Stream&gt;
+  T-&gt;&gt;V: WS /media-stream
+  loop
+    C-&gt;&gt;T: audio
+    T-&gt;&gt;V: µ-law
+    V-&gt;&gt;DG: STT
+    DG--&gt;&gt;V: transcript
+    V-&gt;&gt;SB: naavi-chat({history, user_id})
+    SB--&gt;&gt;V: { speech, actions[] }
+    V-&gt;&gt;SB: executeAction per action
+    V-&gt;&gt;DG: speak(reply)
+    DG--&gt;&gt;V: MP3
+    V--&gt;&gt;T: µ-law audio
+    T--&gt;&gt;C: hear reply
+  end
+</code></pre>
+<h3>9.3 PIN flow (unregistered caller)</h3>
+<pre><code>sequenceDiagram
+  participant C as Caller
+  participant T as Twilio
+  participant V as Voice server
+  participant MP as manage-voice-pin
+
+  C-&gt;&gt;T: Dial number
+  T-&gt;&gt;V: POST /voice (From unknown)
+  V--&gt;&gt;T: TwiML &lt;Play&gt; &quot;PIN prompt&quot; &lt;Gather&gt;
+  C-&gt;&gt;T: 4 digits (DTMF or speech)
+  T-&gt;&gt;V: POST /voice/pin-result (Digits, SpeechResult)
+  V-&gt;&gt;V: extractPinFromTwilioGather
+  loop For each user with PIN set
+    V-&gt;&gt;MP: op=verify {user_id, pin}
+    MP--&gt;&gt;V: { match }
+  end
+  alt 1 match
+    V--&gt;&gt;T: TwiML &lt;Play&gt; &quot;Welcome NAME&quot; &lt;Connect&gt;&lt;Stream&gt;
+  else 0 matches, attempts &lt; 3
+    V--&gt;&gt;T: TwiML &lt;Redirect&gt; /voice/pin?attempt=N+1
+  else 0 matches, attempts &gt;= 3
+    V--&gt;&gt;T: TwiML &lt;Play&gt; lockout &lt;Hangup&gt;
+  end
+</code></pre>
+<h3>9.4 Location-alert fire (geofence ENTER)</h3>
+<pre><code>sequenceDiagram
+  participant Geo as OS geofence
+  participant App as Mobile app
+  participant RL as report-location-event
+  participant ER as evaluate-rules (cron)
+  participant FP as fire-pending-dwells (cron)
+  participant FA as fireAction (fan-out)
+  participant Out as SMS+WA+Email+Push
+
+  Geo-&gt;&gt;App: ENTER event
+  App-&gt;&gt;RL: POST {user_id, rule_id, event=ENTER, lat, lng}
+  RL-&gt;&gt;RL: insert pending_dwell_fires (defer 2 min)
+  Note over RL: 2 minutes pass…
+  FP-&gt;&gt;FP: dwelled long enough → promote
+  FP-&gt;&gt;FA: fireAction(rule)
+  FA-&gt;&gt;Out: send to all 4 channels (self-alert)
+  FA-&gt;&gt;FA: log to action_rule_log
+</code></pre>
+<p>Self-alerts (destination = user themselves) fan out across SMS + WhatsApp + Email + Push — guarantee of delivery is the spec, not channel choice. See <code>_shared/alert_body.ts</code> for the body assembly.</p>
+<h3>9.5 List attach (M:N, Wave 2.5)</h3>
+<pre><code>sequenceDiagram
+  participant U as User
+  participant CL as Claude (prompt v73)
+  participant O as Orchestrator
+  participant RE as resolve-entity-ref
+  participant MLC as manage-list-connections
+  participant DB as Supabase
+
+  U-&gt;&gt;CL: &quot;Attach groceries to Costco alert&quot;
+  CL--&gt;&gt;O: LIST_CONNECT {listName, entityRef, entityType}
+  O-&gt;&gt;RE: RESOLVE list &quot;groceries&quot;
+  RE--&gt;&gt;O: { matches: [list_id] }
+  O-&gt;&gt;RE: RESOLVE action_rule &quot;Costco alert&quot;
+  RE--&gt;&gt;O: { matches: [rule_id] }
+  O-&gt;&gt;MLC: CONNECT {list_id, entity_type, entity_id}
+  MLC-&gt;&gt;DB: INSERT list_connections
+  alt UNIQUE(list_id,entity_type,entity_id) hit
+    DB--&gt;&gt;MLC: 23505 unique_violation
+    MLC--&gt;&gt;O: 409 already_attached
+  else OK
+    DB--&gt;&gt;MLC: row
+    MLC--&gt;&gt;O: { success, connection }
+  end
+  O--&gt;&gt;U: &quot;Attached.&quot;
+</code></pre>
+<h3>9.6 List delete (Wave 2.6 forward Drive↔DB sync)</h3>
+<pre><code>sequenceDiagram
+  participant U as User
+  participant MLC as manage-list-connections
+  participant UT as user_tokens
+  participant GD as Google Drive
+  participant DB as Supabase
+
+  U-&gt;&gt;MLC: DELETE_LIST_AND_CONNECTIONS {list_id}
+  MLC-&gt;&gt;DB: SELECT lists row (id, drive_file_id)
+  alt no row
+    MLC--&gt;&gt;U: 404
+  else found
+    MLC-&gt;&gt;UT: SELECT refresh_token
+    MLC-&gt;&gt;GD: POST oauth2/token (refresh)
+    GD--&gt;&gt;MLC: access_token
+    MLC-&gt;&gt;GD: PATCH files/&lt;id&gt; {trashed: true}
+    alt Drive 404 (file already gone)
+      MLC-&gt;&gt;DB: DELETE lists row (FK cascades list_connections)
+      MLC--&gt;&gt;U: success
+    else Drive ok
+      MLC-&gt;&gt;DB: DELETE lists row
+      MLC--&gt;&gt;U: success
+    else Drive failure
+      MLC--&gt;&gt;U: 500 drive_trash_failed (DB NOT touched)
+    end
+  end
+</code></pre>
+<h3>9.7 Lists reconcile (Wave 2.6 reverse Drive↔DB sync)</h3>
+<pre><code>sequenceDiagram
+  participant M as Mobile Lists screen
+  participant LR as lists-reconcile
+  participant DB as Supabase
+  participant GD as Google Drive
+
+  M-&gt;&gt;LR: invoke (on load)
+  LR-&gt;&gt;DB: SELECT lists WHERE user_id=...
+  LR-&gt;&gt;DB: SELECT user_tokens
+  LR-&gt;&gt;GD: refresh access token
+  par For each list
+    LR-&gt;&gt;GD: GET files/&lt;id&gt;?fields=id,trashed
+    GD--&gt;&gt;LR: 200 ok | 200 trashed | 404
+  end
+  LR-&gt;&gt;DB: DELETE lists WHERE id IN (orphans) — FK cascades
+  LR-&gt;&gt;DB: SELECT list_connections WHERE entity_type=&#39;action_rule&#39;
+  LR-&gt;&gt;DB: SELECT action_rules WHERE id IN (...)
+  LR-&gt;&gt;DB: DELETE list_connections WHERE entity_id not in live rules
+  LR--&gt;&gt;M: { checked, orphaned[], stale_connections[] }
+  M-&gt;&gt;M: re-fetch lists (post-reconcile)
+</code></pre>
+<h3>9.8 Email harvest (asynchronous pipeline)</h3>
+<pre><code>sequenceDiagram
+  participant Cr as Cron (60min)
+  participant SG as sync-gmail
+  participant EE as extract-email-actions
+  participant HA as harvest-attachment
+  participant ED as extract-document-text
+
+  Cr-&gt;&gt;SG: trigger
+  SG-&gt;&gt;SG: pull tier-1 Gmail (7d, 100msg, 3000-char body)
+  SG--&gt;&gt;SG: insert gmail_messages rows
+  par fire-and-forget
+    SG-&gt;&gt;EE: classify actions (bills, appts, renewals)
+    EE--&gt;&gt;EE: insert email_actions rows
+  and
+    SG-&gt;&gt;HA: download attachments → MyNaavi/Documents/&lt;type&gt;/
+    HA--&gt;&gt;HA: insert documents row
+    HA-&gt;&gt;ED: extract text (PDF via Haiku, scans via Vision)
+    ED--&gt;&gt;ED: update documents.extracted_*
+  end
+</code></pre>
+<h2>10. Configuration discipline</h2>
+<p>Hard rules from CLAUDE.md, repeated here so this doc stands alone.</p>
+<ol>
+<li><strong>One cron per purpose</strong> — check <code>SELECT * FROM cron.job</code> before adding.</li>
+<li><strong>One rule storage per domain</strong> — <code>action_rules</code> is canonical; don&#39;t reintroduce <code>email_watch_rules</code> etc.</li>
+<li><strong>One Edge Function per job</strong> — check <code>supabase functions list</code> before adding.</li>
+<li><strong>One user_id resolution pattern, everywhere</strong> — JWT → body user_id → reject. Never <code>auth.admin.listUsers().sort</code> or <code>.limit(1)</code> on multi-user tables.</li>
+<li><strong>Unique constraints on config tables</strong> — every config table has a UNIQUE on its logical key.</li>
+<li><strong>One TTS confirmation path</strong> — <code>SPEECH.SENT</code>, <code>SPEECH.CANCELLED</code> shared between voice + mobile.</li>
+<li><strong>One repo, many clones</strong> — never <code>cp -f</code> between clones. <code>git merge</code> only.</li>
+<li><strong>Three repos, separate scope</strong> — <code>naavi-app</code>, <code>naavi-voice-server</code>, <code>mynaavi-website</code>. Don&#39;t mix work.</li>
+</ol>
+<p>Data-integrity four layers (per CLAUDE.md):</p>
+<ul>
+<li>L1: DB UNIQUE / NOT NULL / CHECK on logical key.</li>
+<li>L2: Single Edge Function owns writes; checks before INSERT.</li>
+<li>L3: RLS blocks direct client writes; only service-role writes critical tables.</li>
+<li>L4: Schema redesign — collapse &quot;one row per X&quot; patterns to array columns when X is naturally multi-valued.</li>
+<li>L5: Tests in <code>tests/catalogue/data-integrity.ts</code> cover dupe-blocked / NULL-rejected / anon-blocked / merge-correctness.</li>
+</ul>
+<p>Tables that pass this checklist today: <code>action_rules</code> (location dedup), <code>list_connections</code> (M:N UNIQUE), <code>user_settings.phone_numbers</code> (cross-user trigger).</p>
+<p>Tables still to audit: <code>action_rules</code> (non-location triggers), <code>contacts</code>, <code>reminders</code>, <code>user_settings</code> (single-row), <code>gmail_messages</code>, <code>documents</code>.</p>
+<h2>11. Quick reference</h2>
+<h3>Project IDs</h3>
+<ul>
+<li>Supabase: <code>hhgyppbxgmjrwdpdubcx</code></li>
+<li>EAS project: <code>be293d9d-cab2-48ff-85a5-d27187ff4340</code></li>
+<li>Android package: <code>ca.naavi.app</code></li>
+<li>iOS bundle (reserved): <code>ca.naavi.app</code></li>
+</ul>
+<h3>Phone numbers</h3>
+<ul>
+<li>Production voice: <code>+1 249 523 5394</code></li>
+<li>Demo voice (public): set via <code>DEMO_TWILIO_NUMBER</code> env var on Railway</li>
+</ul>
+<h3>Build profiles (eas.json)</h3>
+<ul>
+<li><code>preview</code> — APK output, distribution=internal, for emulator + Maestro e2e.</li>
+<li><code>production</code> — AAB output, channel=production, auto-submits to Google Play Internal Testing via <code>submit.production.android</code>.</li>
+</ul>
+<h3>Build commands</h3>
+<ul>
+<li>AAB to Play Internal: <code>npx eas build --platform android --profile production --auto-submit --non-interactive</code></li>
+<li>APK for emulator: <code>npx eas build --platform android --profile preview --non-interactive</code></li>
+</ul>
+<h3>Test command</h3>
+<ul>
+<li><code>npm run test:auto</code> from main repo (must be fully green before any AAB per Rule 15).</li>
+</ul>
+<h3>Path map</h3>
+<ul>
+<li>Main repo (edit here): <code>C:\Users\waela\OneDrive\Desktop\Naavi</code></li>
+<li>Build clone (build only, never edit): <code>C:\Users\waela\naavi-mobile</code></li>
+<li>Voice server: <code>C:\Users\waela\OneDrive\Desktop\Naavi\naavi-voice-server</code></li>
+<li>Website: <code>C:\Users\waela\OneDrive\Desktop\Naavi\mynaavi-website</code></li>
+<li>Memory: <code>C:\Users\waela\.claude\projects\C--Users-waela-OneDrive-Desktop-Naavi\memory\</code></li>
+</ul>
+<h3>Dashboard URLs</h3>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>URL</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Supabase</td>
+<td><a href="https://supabase.com/dashboard/project/hhgyppbxgmjrwdpdubcx">https://supabase.com/dashboard/project/hhgyppbxgmjrwdpdubcx</a></td>
+</tr>
+<tr>
+<td>Railway</td>
+<td><a href="https://railway.app">https://railway.app</a></td>
+</tr>
+<tr>
+<td>Google Play</td>
+<td><a href="https://play.google.com/console">https://play.google.com/console</a></td>
+</tr>
+<tr>
+<td>EAS</td>
+<td><a href="https://expo.dev/accounts/waggan">https://expo.dev/accounts/waggan</a></td>
+</tr>
+<tr>
+<td>Anthropic</td>
+<td><a href="https://console.anthropic.com">https://console.anthropic.com</a></td>
+</tr>
+<tr>
+<td>Deepgram</td>
+<td><a href="https://console.deepgram.com">https://console.deepgram.com</a></td>
+</tr>
+<tr>
+<td>Twilio</td>
+<td><a href="https://console.twilio.com">https://console.twilio.com</a></td>
+</tr>
+<tr>
+<td>Google Cloud</td>
+<td><a href="https://console.cloud.google.com">https://console.cloud.google.com</a> (project: naavi-490516)</td>
+</tr>
+</tbody></table>
+<h2>12. Known gaps &amp; follow-ups</h2>
+<p>From the holding-list in CLAUDE.md, in priority order:</p>
+<ol>
+<li><strong>Geofence reliability</strong> — V57.14.4 build 170 confirmed Android stops delivering location updates to the foreground service after backgrounding on Samsung One UI. Manual-polling plan abandoned. Evaluating third-party SDKs (Transistorsoft, Radar); awaiting vendor replies on Samsung specifics. Blocks Robert&#39;s V57.x promotion.</li>
+<li><strong>F1d edge-case live tests</strong> — recursive mute during offer + 30-sec timeout. Voice call only, no AAB.</li>
+<li><strong>Voice live-calendar fetch</strong> — voice still on stale snapshot; mobile shipped V57.11.6.</li>
+<li><strong>Voice migration to Anthropic Structured Outputs</strong> — ~200 lines of drift vs mobile.</li>
+<li><strong>Inbound SMS/WhatsApp queryability</strong> — outbound covered (<code>sent_messages</code>); inbound has no capture path.</li>
+<li><strong><code>naavi-spend-summary</code> Edge Function</strong> — approved 2026-04-30, not built. Aggregates <code>documents.extracted_amount_cents</code>.</li>
+<li><strong><code>resolve-place</code> default radius 100 → 500</strong> + address-vs-business routing fix.</li>
+<li><strong>Voice action parity</strong> — DELETE_EVENT, LIST_RULES, DELETE_MEMORY, SCHEDULE_MEDICATION on voice surface.</li>
+<li><strong>Voice stop-word interrupt regression</strong> — &quot;Naavi stop&quot; no longer interrupts TTS.</li>
+<li><strong>Voice Deepgram first-word truncation on barge-in</strong>.</li>
+<li><strong>Voice name-search phonetic fallback</strong> (&quot;Hussein&quot; STT failure).</li>
+<li><strong>Multi-phone identity</strong> — DONE 2026-05-13. ⭐</li>
+<li><strong>PIN-flow voice biometric replacement</strong> — DONE 2026-05-13. ⭐</li>
+<li><strong>F1a Wave 2 (Lists UI)</strong> — DONE 2026-05-13. ⭐</li>
+<li><strong>F1a entityType inconsistency</strong> — server-side fix, deferred for post-Wave-2.</li>
+<li><strong>Wave 2.6 Phase I — daily reconciliation cron</strong> as safety net for users who never open the Lists screen.</li>
+<li><strong>Reconcile sweep for non-action_rule entity types</strong> — extend <code>lists-reconcile</code> to contact, reminder, document, sent_message, knowledge_fragment.</li>
+<li><strong>External-entity orphan sweep</strong> — <code>gmail_message</code> and <code>calendar_event</code> need API-call-based reconciliation.</li>
+<li><strong>Voice privacy UX</strong> — don&#39;t read medical/financial aloud in public (4-piece feature, design captured 2026-04-20).</li>
+<li><strong>AWS Polly migration (voice unification)</strong> — DECIDED 2026-05-04 (Polly Joanna across phone + mobile), not started.</li>
+</ol>
+<h2>13. Recent changes</h2>
+<p>Session of 2026-05-13 shipped (in chronological order on <code>main</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Commit</th>
+<th>Surface</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>f3f680e</code></td>
+<td>voice</td>
+<td>PIN-flow TwiML — Play outside Gather + [PIN-DIAG] timing logs</td>
+</tr>
+<tr>
+<td><code>29bc028</code></td>
+<td>mobile</td>
+<td>F1a Wave 2 Phase A — orchestrator LIST_* handlers</td>
+</tr>
+<tr>
+<td><code>a8fcc29</code></td>
+<td>mobile</td>
+<td>F1a Wave 2 Phase B — Lists screen + list-detail</td>
+</tr>
+<tr>
+<td><code>4147a61</code></td>
+<td>mobile</td>
+<td>F1a Wave 2 Phase C — alert-detail &quot;Attached list&quot; card</td>
+</tr>
+<tr>
+<td><code>1195b17</code></td>
+<td>mobile + DB</td>
+<td>F1a Wave 2 Phase E — multi-phone migration + Settings UI</td>
+</tr>
+<tr>
+<td><code>cbe9403</code></td>
+<td>voice</td>
+<td>Phase E — multi-phone identity lookup</td>
+</tr>
+<tr>
+<td><code>910561f</code></td>
+<td>mobile + EF + prompt</td>
+<td>Wave 2.5 — list↔entity M:N pivot</td>
+</tr>
+<tr>
+<td><code>24c8558</code></td>
+<td>voice</td>
+<td>Wave 2.5 — voice LIST_DISCONNECT + what_list_is_on for M:N</td>
+</tr>
+<tr>
+<td><code>411d345</code></td>
+<td>voice</td>
+<td>LIST_CONNECTION_QUERY — pass through full lists[] array</td>
+</tr>
+<tr>
+<td><code>799c83d</code></td>
+<td>voice</td>
+<td>numbered-list speech for multi-item connection-query answers</td>
+</tr>
+<tr>
+<td><code>1afe21b</code></td>
+<td>EF + mobile</td>
+<td>Wave 2.6 — Drive↔DB hard sync (forward + reverse)</td>
+</tr>
+<tr>
+<td><code>a705196</code></td>
+<td>mobile</td>
+<td>V57.15.0 build 171 — version bump + test:auto green</td>
+</tr>
+</tbody></table>
+<p>Live (server-side) on Supabase / Railway:</p>
+<ul>
+<li>All Edge Functions deployed (manage-list-connections, get-naavi-prompt v73, lists-reconcile, manage-voice-pin).</li>
+<li>Migrations applied: <code>20260513_user_settings_voice_pin.sql</code>, <code>20260513_user_settings_phone_numbers.sql</code>, <code>20260513_list_connections_mn.sql</code>.</li>
+<li>Voice server deployed on Railway (commit <code>799c83d</code>).</li>
+</ul>
+<p>Inert until V57.15.0 AAB lands on Wael&#39;s phone:</p>
+<ul>
+<li>Mobile Lists screen + list-detail + alert-detail card + multi-phone Settings UI + reconcile-on-load.</li>
+</ul>
+<p>Verified live this session:</p>
+<ul>
+<li>PIN call from unregistered phone (Aura Hera audio working).</li>
+<li>Backup phone recognized by name (multi-phone).</li>
+<li>M:N attach 2 lists / query reads both / detach one / query reads one.</li>
+<li>Numbered-list speech for multi-item answers.</li>
+</ul>
+<hr>
+<h2>How to export this doc</h2>
+<p>This is a markdown file with Mermaid diagrams. Three viewing options:</p>
+<ol>
+<li><strong>GitHub</strong> — push to the repo and view it at <code>https://github.com/munk2207/naavi-app/blob/main/docs/ARCHITECTURE_2026-05-13.md</code>. Mermaid renders natively.</li>
+<li><strong>VS Code</strong> — open the file + <code>Ctrl+Shift+V</code> for preview. Install the <em>Markdown Preview Mermaid Support</em> extension for diagrams.</li>
+<li><strong>PDF / docx export</strong> — using pandoc:<pre><code>pandoc docs/ARCHITECTURE_2026-05-13.md \
+  -o docs/ARCHITECTURE_2026-05-13.pdf \
+  --pdf-engine=xelatex \
+  --filter mermaid-filter
+</code></pre>
+Or <code>--to docx</code> for Word. Mermaid filter requires <code>npm install -g mermaid-filter</code>.</li>
+</ol>
+<p>The file is checked in to <code>docs/</code> and will move forward as commits land — treat it as a living map, not a snapshot.</p>
+
+<div class="build-info">Generated locally from ARCHITECTURE_2026-05-13.md · 2026-05-13T17:34:06.708Z</div>
+</main>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'default',
+    securityLevel: 'loose',
+    flowchart: { useMaxWidth: true, htmlLabels: true },
+    sequence: { useMaxWidth: true, mirrorActors: false },
+  });
+</script>
+</body>
+</html>
