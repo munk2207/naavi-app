@@ -504,7 +504,7 @@ sequenceDiagram
   DG-->>V: MP3
   V-->>T: TwiML Play + Connect Stream
   T->>V: WS /media-stream
-  loop
+  loop Each conversation turn
     C->>T: audio
     T->>V: mu-law
     V->>DG: STT
@@ -538,11 +538,11 @@ sequenceDiagram
     V->>MP: op=verify (user_id + pin)
     MP-->>V: match true or false
   end
-  alt 1 match
+  alt One match
     V-->>T: TwiML Play "Welcome NAME" + Connect Stream
-  else 0 matches, attempts less than 3
-    V-->>T: TwiML Redirect to /voice/pin attempt N+1
-  else 0 matches, attempts at limit
+  else No match and attempts remain
+    V-->>T: TwiML Redirect to /voice/pin next attempt
+  else No match and attempts exhausted
     V-->>T: TwiML Play lockout + Hangup
   end
 ```
