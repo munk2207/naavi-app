@@ -329,6 +329,14 @@ export default function RootLayout() {
           options={{ title: 'Your Alerts', headerShown: true }}
         />
         <Stack.Screen
+          name="lists"
+          options={{ title: 'Your Lists', headerShown: true }}
+        />
+        <Stack.Screen
+          name="lists/[id]"
+          options={{ title: 'List details', headerShown: true }}
+        />
+        <Stack.Screen
           name="help"
           options={{ title: 'Help', headerShown: true }}
         />
