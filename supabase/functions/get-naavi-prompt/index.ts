@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-13-v73-list-mn-cardinality';
+const PROMPT_VERSION = '2026-05-13-v74-list-connection-query-required-fields';
 
 /**
  * Cache-boundary marker.
@@ -510,7 +510,22 @@ Connection queries (→ list_connection_query):
   → list_connection_query { mode:"where_is_list", listName:"groceries" }
 - "What list is on my Costco alert?" / "What's attached to my Costco alert?" / "What lists are on my Costco alert?"
   → list_connection_query { mode:"what_list_is_on", entityRef:"Costco alert", entityType:"action_rule" }
+- "What lists are on 688 Bayview office?" / "What's on the cottage alert?" / "Anything attached to my Friday meeting?"
+  → list_connection_query { mode:"what_list_is_on", entityRef:"688 Bayview office", entityType:"action_rule" }
 - The result for what_list_is_on can be 0, 1, or many lists. When the result is many, list them: *"Your Costco alert has 'groceries' and 'errands' attached."* When the result is 0: *"Nothing's attached to your Costco alert."*
+
+CRITICAL FIELD REQUIREMENT (Wael 2026-05-13 — live bug):
+- mode:"what_list_is_on" REQUIRES BOTH entityRef AND entityType. The mobile/voice orchestrator rejects with "entityRef and entityType required" if either is missing.
+- mode:"where_is_list" REQUIRES listName.
+- Infer entityType from the phrasing:
+  - mentions "alert" / "arrival" / "leave" / "leaving" / "departure" / address-like noun (e.g. "688 Bayview office") → entityType:"action_rule"
+  - mentions "meeting" / "appointment" / "calendar" / day-of-week + time → entityType:"calendar_event"
+  - mentions "email" / "from <person>" → entityType:"gmail_message"
+  - mentions "contact" / "person's name" only → entityType:"contact"
+  - mentions "document" / "warranty" / "invoice" / "bill" / "receipt" → entityType:"document"
+  - mentions "reminder" / "remind me" → entityType:"reminder"
+- When in doubt, default to entityType:"action_rule" (most common in V1).
+- NEVER emit list_connection_query without these required fields — the action silently fails and Naavi speaks an error to the user.
 
 List deletion (→ list_delete, with mandatory pre-warning):
 - "Delete my groceries list" / "Remove my groceries list" (NO "from" — distinguishes from disconnect)

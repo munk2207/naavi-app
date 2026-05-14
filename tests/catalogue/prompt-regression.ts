@@ -380,7 +380,7 @@ export const promptRegressionTests: TestCase[] = [
   {
     id: 'prompt-regression.list-connection-query-what',
     category: 'prompt-regression',
-    description: 'F1a — "What list is on my Costco alert?" → LIST_CONNECTION_QUERY mode=what_list_is_on',
+    description: 'F1a — "What list is on my Costco alert?" → LIST_CONNECTION_QUERY mode=what_list_is_on with entityRef + entityType',
     timeoutMs: 30_000,
     async run(ctx) {
       const { status, data } = await adapters.naaviChat(ctx, {
@@ -396,6 +396,41 @@ export const promptRegressionTests: TestCase[] = [
         `expected mode=what_list_is_on, got: ${JSON.stringify(action.mode)}`);
       expectTruthy(/costco/i.test(String(action.entityRef ?? '')),
         `expected entityRef containing "Costco", got: ${JSON.stringify(action.entityRef)}`);
+      // V57.15.4 live bug (Wael 2026-05-13): Claude was emitting the
+      // action without entityType, mobile orchestrator rejects.
+      expectTruthy(String(action.entityType ?? '').length > 0,
+        `expected entityType to be present, got: ${JSON.stringify(action.entityType)}`);
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // V57.15.4 LIVE BUG (Wael 2026-05-13) — "What lists are on 688 Bayview
+  // office?" Claude emitted LIST_CONNECTION_QUERY without entityType,
+  // orchestrator rejected with "entityRef and entityType required". Prompt
+  // v74 added explicit entityType inference rules + mandatory-field call-
+  // out. This test locks in the fix.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'prompt-regression.list-connection-query-address-must-have-entitytype',
+    category: 'prompt-regression',
+    description: 'V57.15.4 regression — address-style entityRef must still carry entityType',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'What lists are on 688 Bayview office?' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
+
+      const action = findActionInRawText(data?.rawText ?? '', 'LIST_CONNECTION_QUERY');
+      expectTruthy(action, 'LIST_CONNECTION_QUERY action');
+      expectTruthy(String(action.mode ?? '').toLowerCase() === 'what_list_is_on',
+        `expected mode=what_list_is_on, got: ${JSON.stringify(action.mode)}`);
+      expectTruthy(/bayview/i.test(String(action.entityRef ?? '')),
+        `expected entityRef containing "Bayview", got: ${JSON.stringify(action.entityRef)}`);
+      expectTruthy(String(action.entityType ?? '').length > 0,
+        `expected entityType present (likely action_rule), got: ${JSON.stringify(action.entityType)}`);
     },
   },
 ];
