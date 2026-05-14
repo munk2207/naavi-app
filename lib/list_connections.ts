@@ -292,13 +292,22 @@ export function formatConnectionQueryResult(
     return `I couldn't check that.`;
   }
 
+  // Wael 2026-05-13: multi-item answers use newlines between items, not
+  // a single comma-paragraph. Two reasons:
+  //   1. Visually clearer (each list name on its own line — matches the
+  //      earlier voice-side feedback "should be a numbered list").
+  //   2. Forces the bubble out of the Yoga truncation zone — content
+  //      that's "longer than 1 line but doesn't fill line 2" was getting
+  //      its tail clipped. Newlines make multi-item answers ALWAYS span
+  //      3+ visible lines, escaping the truncation regime.
+  // TTS works the same — Aura Hera pauses on '\n' just like on '.'.
   if (result.mode === 'where_is_list') {
     const listLabel = result.list_label || fallback.listName || 'that list';
     const conns = result.connections || [];
     if (conns.length === 0) return `Your ${listLabel} list isn't attached to anything.`;
     if (conns.length === 1) return `Your ${listLabel} list is attached to ${conns[0].label}.`;
-    const numbered = conns.map((c, i) => `${i + 1}. ${c.label}.`).join(' ');
-    return `Your ${listLabel} list is attached to ${conns.length} items. ${numbered}`;
+    const numbered = conns.map((c, i) => `${i + 1}. ${c.label}`).join('\n');
+    return `Your ${listLabel} list is attached to ${conns.length} items.\n${numbered}`;
   }
 
   // mode === 'what_list_is_on'
@@ -306,8 +315,8 @@ export function formatConnectionQueryResult(
   const lists = result.lists || [];
   if (lists.length === 0) return `There's no list on ${entityLabel}.`;
   if (lists.length === 1) return `${entityLabel} has your ${lists[0].name} list on it.`;
-  const numbered = lists.map((l, i) => `${i + 1}. ${l.name}.`).join(' ');
-  return `${entityLabel} has ${lists.length} lists attached. ${numbered}`;
+  const numbered = lists.map((l, i) => `${i + 1}. ${l.name}`).join('\n');
+  return `${entityLabel} has ${lists.length} lists attached.\n${numbered}`;
 }
 
 export async function deleteListWithConnections(listName: string): Promise<DeleteListResult> {

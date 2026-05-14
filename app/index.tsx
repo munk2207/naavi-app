@@ -1885,19 +1885,110 @@ export default function HomeScreen() {
                 />
               ))}
 
-              {/* List results */}
-              {(turn.listResults ?? []).map((lr, i) => (
-                <TouchableOpacity key={i} style={styles.listCard} onPress={() => lr.webViewLink ? Linking.openURL(lr.webViewLink) : undefined} accessibilityLabel={`${lr.action} list ${lr.listName}`}>
-                  <Text style={styles.listLabel}>
-                    {lr.action === 'created' ? '📋 List created' : lr.action === 'added' ? '📋 Added to list' : lr.action === 'removed' ? '📋 Removed from list' : '📋 List items'}
-                  </Text>
-                  <Text style={styles.listTitle}>{lr.listName}</Text>
-                  {lr.items && lr.items.length > 0 && (
-                    <Text style={styles.listItems}>{lr.items.map(item => `• ${item}`).join('\n')}</Text>
-                  )}
-                  {lr.webViewLink ? <Text style={styles.eventLink}>Tap to open in Google Docs</Text> : null}
-                </TouchableOpacity>
-              ))}
+              {/* List results — V57.15.4 (Wael 2026-05-13) handles the
+                  Wave 2 / 2.5 action types (query / connected / disconnected /
+                  deleted / error) with tappable rows where appropriate.
+                  Legacy actions (created / added / removed / read) keep
+                  the existing single-card render unchanged. */}
+              {(turn.listResults ?? []).map((lr: any, i: number) => {
+                // LIST_CONNECTION_QUERY mode=what_list_is_on — render each
+                // attached list as its own tappable row that navigates to
+                // the list-detail screen.
+                if (lr.action === 'query' && lr.mode === 'what_list_is_on') {
+                  const lists = Array.isArray(lr.lists) ? lr.lists : [];
+                  return (
+                    <View key={i} style={styles.listCard}>
+                      <Text style={styles.listLabel}>📋 Attached lists</Text>
+                      {lr.entityLabel ? <Text style={styles.listTitle}>{lr.entityLabel}</Text> : null}
+                      {lists.length === 0 ? (
+                        <Text style={styles.listItems}>No lists attached.</Text>
+                      ) : (
+                        lists.map((l: any) => (
+                          <TouchableOpacity
+                            key={String(l.id)}
+                            onPress={() => router.push({ pathname: '/lists/[id]', params: { id: String(l.id) } })}
+                            style={styles.listTapRow}
+                            accessibilityLabel={`Open ${l.name} list`}
+                          >
+                            <Text style={styles.listTapRowText}>📋 {l.name}</Text>
+                            <Text style={styles.listTapRowHint}>›</Text>
+                          </TouchableOpacity>
+                        ))
+                      )}
+                      {lists.length > 0 ? <Text style={styles.eventLink}>Tap a list to open</Text> : null}
+                    </View>
+                  );
+                }
+
+                // LIST_CONNECTION_QUERY mode=where_is_list — show which
+                // entities this list is attached to. Each entity row is
+                // not tappable yet (entity-detail navigation is per-type
+                // and would need a switch on entity_type — TODO follow-up).
+                if (lr.action === 'query' && lr.mode === 'where_is_list') {
+                  const conns = Array.isArray(lr.connections) ? lr.connections : [];
+                  return (
+                    <View key={i} style={styles.listCard}>
+                      <Text style={styles.listLabel}>📋 {lr.listName || 'List'} attached to</Text>
+                      {conns.length === 0 ? (
+                        <Text style={styles.listItems}>Not attached to anything.</Text>
+                      ) : (
+                        conns.map((c: any) => (
+                          <Text key={`${c.entity_type}:${c.entity_id}`} style={styles.listItems}>• {c.label}</Text>
+                        ))
+                      )}
+                    </View>
+                  );
+                }
+
+                // LIST_CONNECT / LIST_DISCONNECT confirmation cards.
+                if (lr.action === 'connected') {
+                  return (
+                    <View key={i} style={styles.listCard}>
+                      <Text style={styles.listLabel}>📋 List attached</Text>
+                      <Text style={styles.listTitle}>{lr.listName}{lr.entityLabel ? ` → ${lr.entityLabel}` : ''}</Text>
+                    </View>
+                  );
+                }
+                if (lr.action === 'disconnected') {
+                  return (
+                    <View key={i} style={styles.listCard}>
+                      <Text style={styles.listLabel}>📋 List detached</Text>
+                      <Text style={styles.listTitle}>{lr.entityLabel ? `From ${lr.entityLabel}` : 'Connection removed'}</Text>
+                    </View>
+                  );
+                }
+                if (lr.action === 'deleted') {
+                  const tail = lr.cascadedCount > 0 ? ` · ${lr.cascadedCount} attachment${lr.cascadedCount === 1 ? '' : 's'} removed` : '';
+                  return (
+                    <View key={i} style={styles.listCard}>
+                      <Text style={styles.listLabel}>🗑️ List deleted</Text>
+                      <Text style={styles.listTitle}>{lr.listName}{tail}</Text>
+                    </View>
+                  );
+                }
+                if (lr.action === 'error') {
+                  return (
+                    <View key={i} style={[styles.listCard, { borderLeftColor: Colors.alert }]}>
+                      <Text style={[styles.listLabel, { color: Colors.alert }]}>⚠️ List action error</Text>
+                      <Text style={styles.listTitle}>{lr.errorKind || 'Something went wrong'}</Text>
+                    </View>
+                  );
+                }
+
+                // Legacy default — created / added / removed / read.
+                return (
+                  <TouchableOpacity key={i} style={styles.listCard} onPress={() => lr.webViewLink ? Linking.openURL(lr.webViewLink) : undefined} accessibilityLabel={`${lr.action} list ${lr.listName}`}>
+                    <Text style={styles.listLabel}>
+                      {lr.action === 'created' ? '📋 List created' : lr.action === 'added' ? '📋 Added to list' : lr.action === 'removed' ? '📋 Removed from list' : '📋 List items'}
+                    </Text>
+                    <Text style={styles.listTitle}>{lr.listName}</Text>
+                    {lr.items && lr.items.length > 0 && (
+                      <Text style={styles.listItems}>{lr.items.map((item: string) => `• ${item}`).join('\n')}</Text>
+                    )}
+                    {lr.webViewLink ? <Text style={styles.eventLink}>Tap to open in Google Docs</Text> : null}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
             );
           })}
@@ -2732,6 +2823,28 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     lineHeight: Typography.lineHeightBody,
     marginTop: 4,
+  },
+  // V57.15.4 — tappable rows inside the "Attached lists" card.
+  listTapRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.bgElevated,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginTop: 6,
+  },
+  listTapRowText: {
+    flex: 1,
+    fontSize: Typography.body,
+    color: Colors.textPrimary,
+    fontWeight: Typography.semibold,
+  },
+  listTapRowHint: {
+    fontSize: 18,
+    color: Colors.textMuted,
+    marginLeft: 8,
   },
   draftCard: {
     marginTop: 12,
