@@ -68,15 +68,15 @@ tags:
       - assertVisible:
           text: "What happens"
 
-      # IF an attached list exists, header reads "Attached list" or
-      # "Attached lists (N)". Use a substring assertion so both shapes
-      # match. If no attached list, this falls through (acceptable —
-      # the absence of the section is also valid behavior).
+      # IF an attached list exists, header reads "Attached list"
+      # (1 attachment) or "Attached lists (N)" (2+ attachments).
+      # Maestro text-matching is regex-anchored, so use `.*` to match
+      # both shapes. If no attached list, this falls through.
       - runFlow:
           when:
             visible:
-              text: "Attached list"
+              text: "Attached list.*"
           commands:
             - assertVisible:
-                text: "Attached list"
+                text: "Attached list.*"
             - takeScreenshot: 16-alerts-attached-card

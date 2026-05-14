@@ -47,26 +47,29 @@ tags:
       text: "Your Lists"
     timeout: 5000
 
-# Pick the first row by tapping the chevron-forward icon area (right
-# side of the row). Maestro doesn't have a great "tap first list row"
-# primitive without index-based selectors, so we use a position tap
-# below the tab strip — works on a populated account, no-ops on empty.
+# Wait for lists-reconcile + list query to complete. When data loads
+# the tabs render with counts like "All (4)". Until then the tabs read
+# bare "All" / "Attached" / "Standalone". Match the regex "All \(.+\)"
+# to assert the data layer settled (and there is at least 1 list).
+# If `lists.length === 0` the count never appears and the conditional
+# block below falls through — flow no-ops on an empty account.
 - runFlow:
     when:
-      notVisible:
-        text: "No lists yet."
+      visible:
+        text: "All \\(.+\\)"
     commands:
       # Tap somewhere in the first list row area (below the tabs).
+      # The first row sits around y=30% on a 1080x2400 screen.
       - tapOn:
           point: "50%,30%"
 
-      # List-detail screen — at least ONE of these sections is visible.
-      # "Items" header always renders; "Attached to" always renders;
-      # the back chevron is also there.
+      # List-detail screen — "Items" + "Attached to" + "Delete list"
+      # always render. Generous timeout because the Drive Doc fetch
+      # can take a few seconds on cold path.
       - extendedWaitUntil:
           visible:
             text: "Items"
-          timeout: 8000
+          timeout: 12000
       - assertVisible:
           text: "Attached to"
       - assertVisible:

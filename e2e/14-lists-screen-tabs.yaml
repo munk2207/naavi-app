@@ -50,19 +50,32 @@ tags:
     timeout: 5000
 
 # Three tabs, in the order defined in app/lists.tsx::TABS.
+#
+# The tab JSX puts the label in the outer <Text> and the count "(N)"
+# in a nested <Text style={styles.tabCount}> — different styles, so on
+# Android they render as separate TextViews inside a single tab. Maestro
+# substring-matches "All" reliably against the outer Text only when no
+# nested child sibling exists; when the user has lists the inner "(N)"
+# child appears and the matcher misses the outer "All " (trailing space).
+#
+# Workaround for V57.15.4 — match a regex that always lands on the outer
+# Text whether the count child is present or not. testIDs are the proper
+# fix and are queued for V57.15.5 in app/lists.tsx.
+- extendedWaitUntil:
+    visible:
+      text: "All.*"
+    timeout: 5000
 - assertVisible:
-    text: "All"
+    text: "Attached.*"
 - assertVisible:
-    text: "Attached"
-- assertVisible:
-    text: "Standalone"
+    text: "Standalone.*"
 
 # Tap each tab — proves they're touch-responsive, not just rendered.
 - tapOn:
-    text: "Attached"
+    text: "Attached.*"
 - tapOn:
-    text: "Standalone"
+    text: "Standalone.*"
 - tapOn:
-    text: "All"
+    text: "All.*"
 
 - takeScreenshot: 14-lists-screen-tabs
