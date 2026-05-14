@@ -44,15 +44,22 @@ tags:
 - tapOn:
     text: "Settings"
 
+# "Your Name" is the first section header on Settings (top of page).
+# "Sign Out" is at the bottom and only appears after scrolling, so it
+# was a wrong anchor for the initial page-loaded check.
 - extendedWaitUntil:
     visible:
-      text: "Sign Out"
+      text: "Your Name"
     timeout: 8000
 
-# Scroll down so the Phone Numbers section is on-screen. The Settings
-# page is long; the section sits after the Morning Call section.
-- scroll
-- scroll
+# Scroll until the Phone Numbers section is on-screen. Settings is a
+# long ScrollView; counted scrolls overshoot the section. scrollUntilVisible
+# stops exactly when the target is in view.
+- scrollUntilVisible:
+    element:
+      text: "Your Phone Numbers"
+    direction: DOWN
+    timeout: 20000
 
 # Section title (Wave 2 Phase E — pluralised).
 - assertVisible:
