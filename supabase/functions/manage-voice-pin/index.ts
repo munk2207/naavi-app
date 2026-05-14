@@ -3,9 +3,13 @@
  *
  * Caller PIN for off-phone voice verification (Wael 2026-05-13).
  *
- * Two operations:
+ * Three operations:
  *   SET    — mobile app sets/changes the user's 4-digit PIN. JWT auth only;
  *            user_id derived from the JWT, never trusted from request body.
+ *   REMOVE — clears the stored PIN. JWT auth (mobile Settings) or service-
+ *            role (voice server, future). After this, calls from any phone
+ *            not in the user's phone_numbers[] cannot be verified and are
+ *            hung up after the 3-attempt PIN-prompt lockout.
  *   VERIFY — voice server compares a spoken/DTMF PIN against the stored
  *            hash to identify a caller on an unregistered phone. Service-
  *            role auth only; user_id taken from request body.
@@ -118,6 +122,42 @@ Deno.serve(async (req) => {
     }
 
     console.log(`[manage-voice-pin] SET ok — user_id=${userId.slice(0, 8)}…`);
+    return jsonResponse({ success: true });
+  }
+
+  // ── REMOVE ──────────────────────────────────────────────────────────────
+  // Mirrors SET's auth pattern: JWT (mobile Settings) or service-role
+  // (voice server, future). Clears voice_pin_hash + voice_pin_set_at to
+  // NULL. Idempotent — removing when no PIN was set still returns success.
+  if (op === 'remove') {
+    const authHeader = req.headers.get('Authorization') ?? '';
+    const token = authHeader.replace(/^Bearer\s+/i, '');
+    if (!token) return jsonResponse({ success: false, error: 'auth_required' }, 401);
+
+    let userId: string | null = null;
+    if (token === serviceKey) {
+      const bodyUserId = String(body?.user_id ?? '').trim();
+      if (!bodyUserId) return jsonResponse({ success: false, error: 'user_id_required_for_service_role_remove' }, 400);
+      userId = bodyUserId;
+    } else {
+      try {
+        const { data: { user } } = await supabase.auth.getUser(token);
+        userId = user?.id ?? null;
+      } catch (_) { /* fall through to 401 */ }
+      if (!userId) return jsonResponse({ success: false, error: 'jwt_invalid' }, 401);
+    }
+
+    const { error: updErr } = await supabase
+      .from('user_settings')
+      .update({ voice_pin_hash: null, voice_pin_set_at: null })
+      .eq('user_id', userId);
+
+    if (updErr) {
+      console.error('[manage-voice-pin] REMOVE update error:', updErr.message);
+      return jsonResponse({ success: false, error: 'db_update_failed' }, 500);
+    }
+
+    console.log(`[manage-voice-pin] REMOVE ok — user_id=${userId.slice(0, 8)}…`);
     return jsonResponse({ success: true });
   }
 

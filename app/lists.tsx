@@ -155,6 +155,7 @@ export default function ListsScreen() {
           return (
             <TouchableOpacity
               key={key}
+              testID={`lists-tab-${key}`}
               style={[styles.tab, isActive && styles.tabActive]}
               onPress={() => setTab(key)}
               activeOpacity={0.7}
