@@ -8,7 +8,7 @@
  * - Connected services status
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,8 @@ import {
   Modal,
   Pressable,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -127,6 +129,12 @@ export default function SettingsScreen() {
   // text. Primary (index 0) is edited via the dedicated TextInput above.
   const [editingPhoneIdx, setEditingPhoneIdx]       = useState<number | null>(null);
   const [editingPhoneValue, setEditingPhoneValue]   = useState('');
+  // V57.15.5 build 177 — Primary phone is now also pretty-printed by default
+  // and switches to a TextInput only when the user taps it (matches the
+  // backup row pattern, fixes Test 5 inconsistency where Primary stayed raw
+  // while Backup was pretty).
+  const [editingPrimary, setEditingPrimary]         = useState(false);
+  const [editingPrimaryValue, setEditingPrimaryValue] = useState('');
   // V57.15.5 — Voice PIN UI (Wael 2026-05-14). Backed by manage-voice-pin
   // Edge Function. We only ever read voice_pin_set_at (timestamp) — never
   // the bcrypt hash itself. pinSetAt === null means "no PIN set"; non-null
@@ -138,6 +146,9 @@ export default function SettingsScreen() {
   const [newPin, setNewPin]                         = useState('');
   const [confirmPin, setConfirmPin]                 = useState('');
   const [pinError, setPinError]                     = useState<string | null>(null);
+  // Ref so the new-PIN field's keyboard "Done" can focus the confirm field
+  // without the user reaching back to tap it (V57.15.5 build 177 polish).
+  const confirmPinInputRef                          = useRef<TextInput>(null);
   const [homeAddress, setHomeAddress]               = useState('');
   const [homeAddressLoading, setHomeAddressLoading] = useState(false);
   const [workAddress, setWorkAddress]               = useState('');
@@ -373,6 +384,47 @@ export default function SettingsScreen() {
     setPhoneNumbers(prev => prev.map((n, i) => (i === editingPhoneIdx ? raw : n)));
     setEditingPhoneIdx(null);
     setEditingPhoneValue('');
+  }
+
+  // V57.15.5 build 177 — Primary phone tap-to-edit (parallel to the backup
+  // row pattern). Default display = pretty-printed text + edit pencil; tap
+  // either → swap to TextInput + ✓/× buttons. Saving updates the local
+  // `phone` state; the user still has to tap "Save phones" at the bottom to
+  // persist all changes to the server (same flow as backups).
+  function handleStartEditPrimary() {
+    setEditingPrimary(true);
+    setEditingPrimaryValue(phone);
+  }
+  function handleCancelEditPrimary() {
+    setEditingPrimary(false);
+    setEditingPrimaryValue('');
+  }
+  function handleSaveEditPrimary() {
+    const raw = normalizePhone(editingPrimaryValue);
+    if (!isValidE164(raw)) {
+      Alert.alert(
+        'Invalid phone',
+        'Use international format starting with +, then country code and number.\nExample: +16135551234'
+      );
+      return;
+    }
+    // If the new primary collides with an existing backup, demote/promote:
+    // remove that backup row so the primary takes its place. Same-as-current
+    // is a no-op exit.
+    if (raw === phone) {
+      setEditingPrimary(false);
+      setEditingPrimaryValue('');
+      return;
+    }
+    setPhone(raw);
+    setPhoneNumbers(prev => {
+      const filtered = prev.filter(n => n !== raw);  // drop dup if any
+      return filtered.length > 0
+        ? [raw, ...filtered.slice(1)]               // replace index 0
+        : [raw];
+    });
+    setEditingPrimary(false);
+    setEditingPrimaryValue('');
   }
 
   // Remove a non-primary phone. Primary (index 0) cannot be removed via
@@ -693,17 +745,60 @@ export default function SettingsScreen() {
               : 'Enter your primary phone in international format (e.g. +16135551234). Required for morning calls. You can add backup numbers below after saving.'}
           </Text>
           <Text style={styles.fieldLabel}>Primary</Text>
-          <TextInput
-            style={styles.keyInput}
-            value={phone}
-            onChangeText={setPhone}
-            placeholder="+16135551234"
-            placeholderTextColor={Colors.textMuted}
-            keyboardType="phone-pad"
-            autoCapitalize="none"
-            autoCorrect={false}
-            accessibilityLabel="Your primary phone number"
-          />
+          {/* V57.15.5 build 177 — Primary now follows the same tap-to-edit
+              pattern as the Backup rows. Display mode shows the pretty-
+              printed text + ✏ icon; tap either to enter edit mode (raw
+              TextInput + ✓/× buttons). Resolves Test 5 inconsistency where
+              Primary stayed raw while Backup was pretty. If no primary is
+              set yet, fall through directly to edit mode (so a new user
+              isn't stuck looking at an empty text row). */}
+          {editingPrimary || !phone.trim() ? (
+            <View style={styles.phoneBackupRow}>
+              <TextInput
+                style={[styles.keyInput, styles.phoneAddInput, { marginRight: 6 }]}
+                value={editingPrimary ? editingPrimaryValue : phone}
+                onChangeText={editingPrimary ? setEditingPrimaryValue : setPhone}
+                placeholder="+16135551234"
+                placeholderTextColor={Colors.textMuted}
+                keyboardType="phone-pad"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus={editingPrimary}
+                returnKeyType="done"
+                onSubmitEditing={editingPrimary ? handleSaveEditPrimary : undefined}
+                accessibilityLabel="Your primary phone number"
+              />
+              {editingPrimary && (
+                <>
+                  <TouchableOpacity
+                    onPress={handleSaveEditPrimary}
+                    style={[styles.phoneRemoveBtn, { marginRight: 4 }]}
+                    accessibilityLabel="Save primary edit"
+                  >
+                    <Ionicons name="checkmark" size={18} color={Colors.accent} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleCancelEditPrimary}
+                    style={styles.phoneRemoveBtn}
+                    accessibilityLabel="Cancel primary edit"
+                  >
+                    <Ionicons name="close" size={18} color={Colors.textMuted} />
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.phoneBackupRow}
+              onPress={handleStartEditPrimary}
+              accessibilityLabel={`Edit primary phone ${phone}`}
+            >
+              <Text style={[styles.phoneBackupText, { flex: 1 }]}>{prettyPhone(phone)}</Text>
+              <View style={styles.phoneRemoveBtn}>
+                <Ionicons name="pencil" size={16} color={Colors.textMuted} />
+              </View>
+            </TouchableOpacity>
+          )}
 
           {/* Backup phones list — only shows entries 1..N (primary is the
               TextInput above). Each row supports tap-to-edit + an X to
@@ -729,6 +824,8 @@ export default function SettingsScreen() {
                           autoCapitalize="none"
                           autoCorrect={false}
                           autoFocus
+                          returnKeyType="done"
+                          onSubmitEditing={handleSaveEditPhone}
                           accessibilityLabel={`Edit ${num}`}
                         />
                         <TouchableOpacity
@@ -788,6 +885,8 @@ export default function SettingsScreen() {
                   keyboardType="phone-pad"
                   autoCapitalize="none"
                   autoCorrect={false}
+                  returnKeyType="done"
+                  onSubmitEditing={handleAddPhone}
                   accessibilityLabel="Add a backup phone number"
                 />
                 <TouchableOpacity
@@ -1074,7 +1173,7 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V57.15.5 (build 176)</Text>
+        <Text style={styles.version}>MyNaavi — V57.15.5 (build 177)</Text>
 
       </ScrollView>
 
@@ -1086,6 +1185,17 @@ export default function SettingsScreen() {
         onRequestClose={() => !pinLoading && setPinModalVisible(false)}
       >
         <Pressable style={styles.pinModalBackdrop} onPress={() => !pinLoading && setPinModalVisible(false)}>
+          {/* V57.15.5 build 177 fix — KeyboardAvoidingView keeps the modal
+              card above the soft keyboard so the confirm field + Save button
+              stay visible. Without it, on Android the keyboard pushes
+              everything but the absolute-positioned modal stays put and the
+              confirm field hides under the keyboard. behavior='padding' is
+              the cross-platform default that works for both iOS + Android. */}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={{ width: '100%', maxWidth: 380, paddingHorizontal: 0 }}
+            pointerEvents="box-none"
+          >
           <Pressable style={styles.pinModalCard} onPress={e => e.stopPropagation()}>
             <Text style={styles.pinModalTitle}>
               {pinModalMode === 'change' ? 'Change your voice PIN' : 'Set your voice PIN'}
@@ -1101,10 +1211,13 @@ export default function SettingsScreen() {
               secureTextEntry
               maxLength={4}
               autoFocus
+              returnKeyType="next"
+              onSubmitEditing={() => confirmPinInputRef.current?.focus()}
               accessibilityLabel="New voice PIN"
             />
             <Text style={[styles.pinModalLabel, { marginTop: 14 }]}>Type it again to confirm</Text>
             <TextInput
+              ref={confirmPinInputRef}
               style={styles.pinModalInput}
               value={confirmPin}
               onChangeText={(t) => { setConfirmPin(t.replace(/\D/g, '').slice(0, 4)); if (pinError) setPinError(null); }}
@@ -1113,6 +1226,8 @@ export default function SettingsScreen() {
               keyboardType="number-pad"
               secureTextEntry
               maxLength={4}
+              returnKeyType="done"
+              onSubmitEditing={handleSavePin}
               accessibilityLabel="Confirm voice PIN"
             />
             {pinError && <Text style={styles.pinModalError}>{pinError}</Text>}
@@ -1135,6 +1250,7 @@ export default function SettingsScreen() {
               </TouchableOpacity>
             </View>
           </Pressable>
+          </KeyboardAvoidingView>
         </Pressable>
       </Modal>
     </SafeAreaView>

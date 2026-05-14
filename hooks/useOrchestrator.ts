@@ -827,7 +827,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           pending.attempts += 1;
           if (pending.attempts > 3) {
             pendingLocationRef.current = null;
-            emitPendingTurn("I couldn't tell which one you meant. Please call me back with the street name.");
+            emitPendingTurn(`I couldn't tell which '${pending.placeName}' you meant. Please call me back with the street name.`);
             return;
           }
           const lines = pending.candidates.map((c, i) => {
@@ -921,7 +921,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         pending.attempts += 1;
         if (pending.attempts > 3) {
           pendingLocationRef.current = null;
-          emitPendingTurn("I couldn't find that. Please check the exact location and call me back.");
+          emitPendingTurn(`I couldn't find '${pending.placeName}'. Please check the exact location and call me back.`);
           return;
         }
 
