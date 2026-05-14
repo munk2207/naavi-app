@@ -18,6 +18,9 @@ import {
   ScrollView,
   Alert,
   AppState,
+  Modal,
+  Pressable,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -118,6 +121,23 @@ export default function SettingsScreen() {
   // identifies the same user from any of them. At least one is required.
   const [phoneNumbers, setPhoneNumbers]             = useState<string[]>([]);
   const [newPhoneInput, setNewPhoneInput]           = useState('');
+  // F1a Wave 2 Phase E refinement #5 — inline edit-in-place for backup rows.
+  // editingPhoneIdx >=1 means the row at that index is in edit mode; null
+  // means no row is being edited. editingPhoneValue holds the in-progress
+  // text. Primary (index 0) is edited via the dedicated TextInput above.
+  const [editingPhoneIdx, setEditingPhoneIdx]       = useState<number | null>(null);
+  const [editingPhoneValue, setEditingPhoneValue]   = useState('');
+  // V57.15.5 — Voice PIN UI (Wael 2026-05-14). Backed by manage-voice-pin
+  // Edge Function. We only ever read voice_pin_set_at (timestamp) — never
+  // the bcrypt hash itself. pinSetAt === null means "no PIN set"; non-null
+  // ISO string means "PIN set on <date>".
+  const [pinSetAt, setPinSetAt]                     = useState<string | null>(null);
+  const [pinLoading, setPinLoading]                 = useState(false);
+  const [pinModalVisible, setPinModalVisible]       = useState(false);
+  const [pinModalMode, setPinModalMode]             = useState<'set' | 'change'>('set');
+  const [newPin, setNewPin]                         = useState('');
+  const [confirmPin, setConfirmPin]                 = useState('');
+  const [pinError, setPinError]                     = useState<string | null>(null);
   const [homeAddress, setHomeAddress]               = useState('');
   const [homeAddressLoading, setHomeAddressLoading] = useState(false);
   const [workAddress, setWorkAddress]               = useState('');
@@ -180,7 +200,7 @@ export default function SettingsScreen() {
         const { data } = await queryWithTimeout(
           supabase
             .from('user_settings')
-            .select('name, morning_call_enabled, morning_call_time, phone, phone_numbers, home_address, work_address')
+            .select('name, morning_call_enabled, morning_call_time, phone, phone_numbers, home_address, work_address, voice_pin_set_at')
             .eq('user_id', user.id)
             .maybeSingle(),
           15_000,
@@ -213,6 +233,8 @@ export default function SettingsScreen() {
           }
           if (data.home_address) setHomeAddress(String(data.home_address));
           if (data.work_address) setWorkAddress(String(data.work_address));
+          // Voice PIN — null when no PIN set, ISO string when set.
+          setPinSetAt(data.voice_pin_set_at ? String(data.voice_pin_set_at) : null);
         }
       })();
     }
@@ -277,6 +299,26 @@ export default function SettingsScreen() {
     return /^\+\d{10,15}$/.test(s);
   }
 
+  // V57.15.5 refinement #4 — pretty-print E.164 for DISPLAY only. Used in
+  // the backup row labels and the "Primary: ..." note line. Editable
+  // TextInputs continue to show the raw E.164 so editing keystrokes don't
+  // fight the formatter. North-American (+1) numbers get "+1 (XXX) XXX-XXXX";
+  // any other country code falls back to "+CC XXXXXXXXXX" with one space.
+  function prettyPhone(raw: string): string {
+    if (!isValidE164(raw)) return raw;
+    if (raw.startsWith('+1') && raw.length === 12) {
+      return `+1 (${raw.slice(2,5)}) ${raw.slice(5,8)}-${raw.slice(8,12)}`;
+    }
+    // Best-effort for non-NA: split off "+CC" then re-join.
+    const m = raw.match(/^(\+\d{1,3})(\d+)$/);
+    return m ? `${m[1]} ${m[2]}` : raw;
+  }
+
+  // V57.15.5 refinement #7 — cap the total phone count. Primary + 4 backups
+  // is plenty for the "borrowed family phone" use case; runaway lists are
+  // both a UX and a verification-cost concern.
+  const MAX_PHONES = 5;
+
   // F1a Wave 2 Phase E — add a backup phone number locally. Persists on Save.
   function handleAddPhone() {
     const raw = normalizePhone(newPhoneInput);
@@ -291,8 +333,46 @@ export default function SettingsScreen() {
       Alert.alert('Already added', 'That number is already on your list.');
       return;
     }
+    if (phoneNumbers.length >= MAX_PHONES) {
+      Alert.alert(
+        'Phone limit reached',
+        `You can have up to ${MAX_PHONES} phone numbers (1 primary + ${MAX_PHONES - 1} backups). Remove one before adding another.`
+      );
+      return;
+    }
     setPhoneNumbers(prev => [...prev, raw]);
     setNewPhoneInput('');
+  }
+
+  // V57.15.5 refinement #5 — start editing a backup row in place.
+  function handleStartEditPhone(idx: number) {
+    if (idx === 0) return;       // primary edited via the dedicated input
+    setEditingPhoneIdx(idx);
+    setEditingPhoneValue(phoneNumbers[idx] ?? '');
+  }
+  function handleCancelEditPhone() {
+    setEditingPhoneIdx(null);
+    setEditingPhoneValue('');
+  }
+  function handleSaveEditPhone() {
+    if (editingPhoneIdx == null) return;
+    const raw = normalizePhone(editingPhoneValue);
+    if (!isValidE164(raw)) {
+      Alert.alert(
+        'Invalid phone',
+        'Use international format starting with +, then country code and number.\nExample: +16135551234'
+      );
+      return;
+    }
+    // Reject if the new value collides with another row (allow no-op on the
+    // same row where the user just retyped the same number).
+    if (phoneNumbers.some((n, i) => n === raw && i !== editingPhoneIdx)) {
+      Alert.alert('Already added', 'That number is already on your list.');
+      return;
+    }
+    setPhoneNumbers(prev => prev.map((n, i) => (i === editingPhoneIdx ? raw : n)));
+    setEditingPhoneIdx(null);
+    setEditingPhoneValue('');
   }
 
   // Remove a non-primary phone. Primary (index 0) cannot be removed via
@@ -364,6 +444,97 @@ export default function SettingsScreen() {
       Alert.alert('Error', 'Could not save phone number. Please try again.');
     }
     setPhoneLoading(false);
+  }
+
+  // ── Voice PIN handlers (V57.15.5, Wael 2026-05-14) ─────────────────────
+  // Backed by manage-voice-pin Edge Function (op: 'set' | 'remove').
+  // Hash never leaves the server. Mobile only ever knows whether a PIN
+  // is set (via voice_pin_set_at) and when.
+
+  function openSetPinModal() {
+    setPinModalMode('set');
+    setNewPin('');
+    setConfirmPin('');
+    setPinError(null);
+    setPinModalVisible(true);
+  }
+
+  function openChangePinModal() {
+    setPinModalMode('change');
+    setNewPin('');
+    setConfirmPin('');
+    setPinError(null);
+    setPinModalVisible(true);
+  }
+
+  async function handleSavePin() {
+    setPinError(null);
+    if (!/^\d{4}$/.test(newPin)) {
+      setPinError('Must be exactly 4 digits.');
+      return;
+    }
+    if (newPin !== confirmPin) {
+      setPinError("Doesn't match. Try again.");
+      return;
+    }
+    if (!supabase) return;
+    setPinLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('manage-voice-pin', {
+        body: { op: 'set', pin: newPin },
+      });
+      if (error || !data?.success) {
+        setPinError("Couldn't save PIN. Check your connection and try again.");
+        setPinLoading(false);
+        return;
+      }
+      setPinSetAt(new Date().toISOString());
+      setPinModalVisible(false);
+      setNewPin('');
+      setConfirmPin('');
+      Alert.alert(
+        'Voice PIN saved',
+        pinModalMode === 'set'
+          ? "When you call from a phone that isn't on your account, Naavi will ask for this PIN."
+          : 'Your PIN has been changed.'
+      );
+    } catch (_) {
+      setPinError("Couldn't save PIN. Check your connection and try again.");
+    }
+    setPinLoading(false);
+  }
+
+  function handleRemovePin() {
+    Alert.alert(
+      'Remove voice PIN?',
+      "After this, calls from any phone not saved on your account won't be able to reach you.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            if (!supabase) return;
+            setPinLoading(true);
+            try {
+              const { data, error } = await supabase.functions.invoke('manage-voice-pin', {
+                body: { op: 'remove' },
+              });
+              if (error || !data?.success) {
+                Alert.alert('Error', "Couldn't remove PIN. Check your connection and try again.");
+                setPinLoading(false);
+                return;
+              }
+              setPinSetAt(null);
+              Alert.alert('Voice PIN removed', 'You can set a new one anytime.');
+            } catch (_) {
+              Alert.alert('Error', "Couldn't remove PIN. Check your connection and try again.");
+            }
+            setPinLoading(false);
+          },
+        },
+      ]
+    );
   }
 
   async function handleSaveNotionToken() {
@@ -518,7 +689,7 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>Your Phone Numbers</Text>
           <Text style={styles.sectionNote}>
             {phoneSaved
-              ? `Primary: ${phone}. Used for the morning brief. Backup numbers below let Naavi recognize you when you call from a spouse or family phone.`
+              ? `Primary: ${prettyPhone(phone)}. Used for the morning brief. Backup numbers below let Naavi recognize you when you call from a spouse or family phone.`
               : 'Enter your primary phone in international format (e.g. +16135551234). Required for morning calls. You can add backup numbers below after saving.'}
           </Text>
           <Text style={styles.fieldLabel}>Primary</Text>
@@ -535,49 +706,102 @@ export default function SettingsScreen() {
           />
 
           {/* Backup phones list — only shows entries 1..N (primary is the
-              TextInput above). Each row has an X to remove. */}
+              TextInput above). Each row supports tap-to-edit + an X to
+              remove. When editingPhoneIdx === this row, the row swaps to
+              an inline TextInput + ✓/× buttons. */}
           {phoneNumbers.length > 1 && (
             <>
               <Text style={[styles.fieldLabel, { marginTop: 14 }]}>Backup phones</Text>
-              {phoneNumbers.slice(1).map((num, i) => (
-                <View key={`${num}:${i}`} style={styles.phoneBackupRow}>
-                  <Text style={styles.phoneBackupText}>{num}</Text>
-                  <TouchableOpacity
-                    onPress={() => handleRemovePhone(i + 1)}
-                    style={styles.phoneRemoveBtn}
-                    accessibilityLabel={`Remove ${num}`}
-                  >
-                    <Ionicons name="close" size={18} color={Colors.textMuted} />
-                  </TouchableOpacity>
-                </View>
-              ))}
+              {phoneNumbers.slice(1).map((num, i) => {
+                const idx = i + 1;
+                const isEditing = editingPhoneIdx === idx;
+                return (
+                  <View key={`${num}:${i}`} style={styles.phoneBackupRow}>
+                    {isEditing ? (
+                      <>
+                        <TextInput
+                          style={[styles.keyInput, styles.phoneAddInput, { marginRight: 6 }]}
+                          value={editingPhoneValue}
+                          onChangeText={setEditingPhoneValue}
+                          placeholder="+16135551234"
+                          placeholderTextColor={Colors.textMuted}
+                          keyboardType="phone-pad"
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          autoFocus
+                          accessibilityLabel={`Edit ${num}`}
+                        />
+                        <TouchableOpacity
+                          onPress={handleSaveEditPhone}
+                          style={[styles.phoneRemoveBtn, { marginRight: 4 }]}
+                          accessibilityLabel="Save edit"
+                        >
+                          <Ionicons name="checkmark" size={18} color={Colors.accent} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={handleCancelEditPhone}
+                          style={styles.phoneRemoveBtn}
+                          accessibilityLabel="Cancel edit"
+                        >
+                          <Ionicons name="close" size={18} color={Colors.textMuted} />
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <>
+                        <TouchableOpacity
+                          style={{ flex: 1 }}
+                          onPress={() => handleStartEditPhone(idx)}
+                          accessibilityLabel={`Edit ${num}`}
+                        >
+                          <Text style={styles.phoneBackupText}>{prettyPhone(num)}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => handleRemovePhone(idx)}
+                          style={styles.phoneRemoveBtn}
+                          accessibilityLabel={`Remove ${num}`}
+                        >
+                          <Ionicons name="close" size={18} color={Colors.textMuted} />
+                        </TouchableOpacity>
+                      </>
+                    )}
+                  </View>
+                );
+              })}
             </>
           )}
 
-          {/* Add-backup input row */}
-          <Text style={[styles.fieldLabel, { marginTop: 14 }]}>Add a backup phone</Text>
-          <View style={styles.phoneAddRow}>
-            <TextInput
-              style={[styles.keyInput, styles.phoneAddInput]}
-              value={newPhoneInput}
-              onChangeText={setNewPhoneInput}
-              placeholder="+16135551234"
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="phone-pad"
-              autoCapitalize="none"
-              autoCorrect={false}
-              accessibilityLabel="Add a backup phone number"
-            />
-            <TouchableOpacity
-              style={[styles.phoneAddBtn, !newPhoneInput.trim() && styles.saveBtnDisabled]}
-              onPress={handleAddPhone}
-              disabled={!newPhoneInput.trim()}
-              accessibilityRole="button"
-              accessibilityLabel="Add backup phone"
-            >
-              <Ionicons name="add" size={20} color="#fff" />
-            </TouchableOpacity>
-          </View>
+          {/* Add-backup input row — disabled when at MAX_PHONES cap. */}
+          {phoneNumbers.length >= MAX_PHONES ? (
+            <Text style={[styles.sectionNote, { marginTop: 14, fontStyle: 'italic' }]}>
+              You've reached the limit of {MAX_PHONES} numbers. Remove one before adding another.
+            </Text>
+          ) : (
+            <>
+              <Text style={[styles.fieldLabel, { marginTop: 14 }]}>Add a backup phone</Text>
+              <View style={styles.phoneAddRow}>
+                <TextInput
+                  style={[styles.keyInput, styles.phoneAddInput]}
+                  value={newPhoneInput}
+                  onChangeText={setNewPhoneInput}
+                  placeholder="+16135551234"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="phone-pad"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  accessibilityLabel="Add a backup phone number"
+                />
+                <TouchableOpacity
+                  style={[styles.phoneAddBtn, !newPhoneInput.trim() && styles.saveBtnDisabled]}
+                  onPress={handleAddPhone}
+                  disabled={!newPhoneInput.trim()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add backup phone"
+                >
+                  <Ionicons name="add" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
 
           <TouchableOpacity
             style={[styles.saveBtn, (!phone.trim() || phoneLoading) && styles.saveBtnDisabled]}
@@ -589,6 +813,53 @@ export default function SettingsScreen() {
               {phoneLoading ? 'Saving...' : phoneNumbers.length > 1 ? 'Save phones' : 'Save phone'}
             </Text>
           </TouchableOpacity>
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* Voice PIN — V57.15.5 (Wael 2026-05-14). Identifies caller when they
+            phone Naavi from a number not in their phone_numbers[]. Backed by
+            the manage-voice-pin Edge Function. Hash never leaves the server. */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Voice PIN</Text>
+          <Text style={styles.sectionNote}>
+            A 4-digit code so Naavi recognizes you when you call from a phone
+            that isn't saved on your account.
+          </Text>
+          {pinSetAt ? (
+            <>
+              <Text style={[styles.fieldLabel, { marginTop: 6 }]}>
+                ✓ PIN set on {new Date(pinSetAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+              </Text>
+              <View style={[styles.phoneAddRow, { marginTop: 10 }]}>
+                <TouchableOpacity
+                  style={[styles.saveBtn, { flex: 1, marginRight: 8 }, pinLoading && styles.saveBtnDisabled]}
+                  onPress={openChangePinModal}
+                  disabled={pinLoading}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.saveBtnText}>Change PIN</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveBtn, styles.pinRemoveBtn, { flex: 1 }, pinLoading && styles.saveBtnDisabled]}
+                  onPress={handleRemovePin}
+                  disabled={pinLoading}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.saveBtnText}>{pinLoading ? '...' : 'Remove PIN'}</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <TouchableOpacity
+              style={[styles.saveBtn, pinLoading && styles.saveBtnDisabled, { marginTop: 10 }]}
+              onPress={openSetPinModal}
+              disabled={pinLoading}
+              accessibilityRole="button"
+            >
+              <Text style={styles.saveBtnText}>Set a 4-digit PIN</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.divider} />
@@ -803,9 +1074,69 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V57.15.4 (build 175)</Text>
+        <Text style={styles.version}>MyNaavi — V57.15.5 (build 176)</Text>
 
       </ScrollView>
+
+      {/* Voice PIN modal — set OR change. Two PIN fields, popup-style. */}
+      <Modal
+        visible={pinModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !pinLoading && setPinModalVisible(false)}
+      >
+        <Pressable style={styles.pinModalBackdrop} onPress={() => !pinLoading && setPinModalVisible(false)}>
+          <Pressable style={styles.pinModalCard} onPress={e => e.stopPropagation()}>
+            <Text style={styles.pinModalTitle}>
+              {pinModalMode === 'change' ? 'Change your voice PIN' : 'Set your voice PIN'}
+            </Text>
+            <Text style={styles.pinModalLabel}>Choose a 4-digit PIN</Text>
+            <TextInput
+              style={styles.pinModalInput}
+              value={newPin}
+              onChangeText={(t) => { setNewPin(t.replace(/\D/g, '').slice(0, 4)); if (pinError) setPinError(null); }}
+              placeholder="••••"
+              placeholderTextColor={Colors.textMuted}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={4}
+              autoFocus
+              accessibilityLabel="New voice PIN"
+            />
+            <Text style={[styles.pinModalLabel, { marginTop: 14 }]}>Type it again to confirm</Text>
+            <TextInput
+              style={styles.pinModalInput}
+              value={confirmPin}
+              onChangeText={(t) => { setConfirmPin(t.replace(/\D/g, '').slice(0, 4)); if (pinError) setPinError(null); }}
+              placeholder="••••"
+              placeholderTextColor={Colors.textMuted}
+              keyboardType="number-pad"
+              secureTextEntry
+              maxLength={4}
+              accessibilityLabel="Confirm voice PIN"
+            />
+            {pinError && <Text style={styles.pinModalError}>{pinError}</Text>}
+            <View style={styles.pinModalBtnRow}>
+              <TouchableOpacity
+                style={[styles.pinModalBtn, styles.pinModalBtnSecondary]}
+                onPress={() => setPinModalVisible(false)}
+                disabled={pinLoading}
+              >
+                <Text style={styles.pinModalBtnSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.pinModalBtn, styles.pinModalBtnPrimary, pinLoading && styles.saveBtnDisabled]}
+                onPress={handleSavePin}
+                disabled={pinLoading}
+              >
+                {pinLoading
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={styles.pinModalBtnPrimaryText}>Save PIN</Text>}
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1037,4 +1368,66 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
   },
+
+  // ── Voice PIN section + modal (V57.15.5) ─────────────────────────────────
+  pinRemoveBtn: {
+    backgroundColor: Colors.alert,
+  },
+  pinModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  pinModalCard: {
+    backgroundColor: Colors.bgCard,
+    borderRadius: 14,
+    padding: 22,
+    maxWidth: 380,
+    width: '100%',
+  },
+  pinModalTitle: {
+    color: Colors.textPrimary,
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 14,
+  },
+  pinModalLabel: {
+    color: Colors.textSecondary,
+    fontSize: 13,
+    marginBottom: 6,
+  },
+  pinModalInput: {
+    backgroundColor: Colors.bgElevated,
+    color: Colors.textPrimary,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    fontSize: 22,
+    letterSpacing: 8,
+    textAlign: 'center',
+  },
+  pinModalError: {
+    color: Colors.alert,
+    fontSize: 13,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  pinModalBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 18,
+  },
+  pinModalBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pinModalBtnSecondary:     { backgroundColor: Colors.bgElevated },
+  pinModalBtnSecondaryText: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
+  pinModalBtnPrimary:       { backgroundColor: Colors.accent },
+  pinModalBtnPrimaryText:   { color: '#fff', fontSize: 15, fontWeight: '600' },
 });

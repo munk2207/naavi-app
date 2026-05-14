@@ -12,7 +12,7 @@ tags:
 # This flow:
 #   1. Opens the 3-dot menu
 #   2. Taps Lists
-#   3. Verifies all three tabs are visible
+#   3. Verifies all three tabs are visible (by testID)
 #   4. Taps each tab in sequence
 #   5. Screenshots the All tab
 
@@ -49,33 +49,26 @@ tags:
       text: "Your Lists"
     timeout: 5000
 
-# Three tabs, in the order defined in app/lists.tsx::TABS.
-#
-# The tab JSX puts the label in the outer <Text> and the count "(N)"
-# in a nested <Text style={styles.tabCount}> — different styles, so on
-# Android they render as separate TextViews inside a single tab. Maestro
-# substring-matches "All" reliably against the outer Text only when no
-# nested child sibling exists; when the user has lists the inner "(N)"
-# child appears and the matcher misses the outer "All " (trailing space).
-#
-# Workaround for V57.15.4 — match a regex that always lands on the outer
-# Text whether the count child is present or not. testIDs are the proper
-# fix and are queued for V57.15.5 in app/lists.tsx.
+# Three tabs, in the order defined in app/lists.tsx::TABS. V57.15.5
+# added testIDs (lists-tab-all / -attached / -standalone) on each
+# TouchableOpacity so we can target them by id without the prior
+# regex-on-text workaround. testID is set on the parent Touchable; the
+# inner Text count "(N)" no longer interferes with matching.
 - extendedWaitUntil:
     visible:
-      text: "All.*"
+      id: "lists-tab-all"
     timeout: 5000
 - assertVisible:
-    text: "Attached.*"
+    id: "lists-tab-attached"
 - assertVisible:
-    text: "Standalone.*"
+    id: "lists-tab-standalone"
 
 # Tap each tab — proves they're touch-responsive, not just rendered.
 - tapOn:
-    text: "Attached.*"
+    id: "lists-tab-attached"
 - tapOn:
-    text: "Standalone.*"
+    id: "lists-tab-standalone"
 - tapOn:
-    text: "All.*"
+    id: "lists-tab-all"
 
 - takeScreenshot: 14-lists-screen-tabs
