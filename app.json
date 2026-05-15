@@ -21,7 +21,7 @@
       }
     },
     "android": {
-      "versionCode": 182,
+      "versionCode": 183,
       "softwareKeyboardLayoutMode": "pan",
       "package": "ca.naavi.app",
       "googleServicesFile": "./google-services.json",
@@ -67,7 +67,12 @@
       ],
       "expo-web-browser",
       "expo-gradle-ext-vars",
-      "react-native-background-geolocation"
+      [
+        "react-native-background-geolocation",
+        {
+          "license": "eyJhbGciOiJFZERTQSIsImtpZCI6ImVkMjU1MTktbWFpbi12MSJ9.eyJvcyI6ImFuZHJvaWQiLCJhcHBfaWQiOiJjYS5uYWF2aS5hcHAiLCJvcmRlcl9udW1iZXIiOiIiLCJyZW5ld2FsX3VybCI6IiIsImN1c3RvbWVyX2lkIjoiIiwicHJvZHVjdCI6InJlYWN0LW5hdGl2ZS1iYWNrZ3JvdW5kLWdlb2xvY2F0aW9uIiwia2V5X3ZlcnNpb24iOjEsImFsbG93ZWRfc3VmZml4ZXMiOlsiLmRldiIsIi5kZXZlbG9wbWVudCIsIi5zdGFnaW5nIiwiLnN0YWdlIiwiLnFhIiwiLnVhdCIsIi50ZXN0IiwiLmRlYnVnIl0sIm1heF9idWlsZF9zdGFtcCI6MjAyNjA2MTQsImdyYWNlX2J1aWxkcyI6MCwiZW50aXRsZW1lbnRzIjpbImNvcmUiLCJwb2x5Z29uLWdlb2ZlbmNpbmciXSwiaWF0IjoxNzc4ODYxMTU0LCJleHAiOjE3ODE0NTMxNTQsInRyaWFsIjp0cnVlLCJ0cmlhbF9kYXlzIjozMH0.wMtWns6_Siky7sB-UqQ-IgAAF7KzinwD9CDva0UCVq_TDoZcO7hbgNMfBH3yz6GH6YhVtfbH-NzTp10SAicdDQ"
+        }
+      ]
     ],
     "scheme": "naavi",
     "extra": {
