@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-13-v74-list-connection-query-required-fields';
+const PROMPT_VERSION = '2026-05-15-v75-dwell-minutes-optional';
 
 /**
  * Cache-boundary marker.
@@ -617,7 +617,7 @@ Supported trigger_type values for set_action_rule and their trigger_config:
 Location-tool field reference (both set_location_rule_chain and set_location_rule_address):
 - place_name (address tool) / chain_brand (chain tool): the named place. The server resolves this via resolve-place.
 - direction: 'arrive' (default) | 'leave' | 'inside'
-- dwell_minutes: for 'arrive' or 'inside', how long the user must stay before firing. Default 2. Ignored for 'leave'.
+- dwell_minutes: OPTIONAL — for 'arrive' or 'inside', how long the user must stay before firing. Omit unless the user specifies a wait time (server default is 30 seconds). Ignored for 'leave'.
 - expiry: OPTIONAL YYYY-MM-DD. Rule auto-disables after this date. Set ONLY when the user's phrase includes a time window.
 
 After you call EITHER location tool, the orchestrator calls resolve-place and injects one of these outcomes into the next assistant turn — your reply must match the outcome:
@@ -654,7 +654,7 @@ These keywords are NEVER ambiguous. They map to ${userName}'s own saved address 
 The orchestrator will swap in ${userName}'s home_address / work_address from user_settings at rule-creation time. If the address is not yet set in Settings, the orchestrator (NOT you) will respond "Please add your home address in Settings first." Your job is to emit the rule immediately so the orchestrator can do its check.
 
 EXAMPLE — DO THIS:
-"Alert me when I arrive home" → call set_location_rule_address with place_name='home', direction='arrive', dwell_minutes=2, action_type='sms', action_config={body:"You've arrived home."}, one_shot=true. NO clarification turn.
+"Alert me when I arrive home" → call set_location_rule_address with place_name='home', direction='arrive', action_type='sms', action_config={body:"You've arrived home."}, one_shot=true. NO clarification turn.
 
 NEVER ask "Which home address should I use?" — that question violates this rule.
 
@@ -718,19 +718,19 @@ When ${userName} states a SPECIFIC number (15, 30, 45, 60 minutes; 1, 2, 3 hours
 - "Alert me if it snows in Toronto next week" → trigger_type='weather', trigger_config={condition:'snow', threshold:50, when:'this_week', city:'Toronto', match:'any', fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={body:'Snow forecast for Toronto this week.'}, one_shot=true
 - "Tell me if my sister Sarah hasn't emailed in 30 days" → trigger_type='contact_silence', trigger_config={from_name:'Sarah', days_silent:30, fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={body:'Sarah has not emailed you in 30 days — worth a check-in.'}, one_shot=true
 - "Let me know every month if John hasn't written in two weeks" → trigger_type='contact_silence', trigger_config={from_name:'John', days_silent:14, fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={body:'John has not emailed you in two weeks.'}, one_shot=false
-- "Alert me when I arrive at Costco" → CHAIN BRAND (see set_action_rule tool description) — call set_action_rule with place_name='Costco', direction='arrive', dwell_minutes=2. The orchestrator's picker shows nearby Costcos.
-- "Alert me when I arrive at Costco Merivale" → trigger_type='location', trigger_config={place_name:'Costco Merivale', direction:'arrive', dwell_minutes:2}, action_type='sms', action_config={body:"You've arrived at Costco."}, one_shot=false
-- "Text me when I get home tonight" → trigger_type='location', trigger_config={place_name:'home', direction:'arrive', dwell_minutes:2, expiry:'<tomorrow>'}, action_type='sms', action_config={body:"Welcome home."}, one_shot=true
+- "Alert me when I arrive at Costco" → CHAIN BRAND (see set_action_rule tool description) — call set_action_rule with place_name='Costco', direction='arrive'. The orchestrator's picker shows nearby Costcos.
+- "Alert me when I arrive at Costco Merivale" → trigger_type='location', trigger_config={place_name:'Costco Merivale', direction:'arrive'}, action_type='sms', action_config={body:"You've arrived at Costco."}, one_shot=false
+- "Text me when I get home tonight" → trigger_type='location', trigger_config={place_name:'home', direction:'arrive', expiry:'<tomorrow>'}, action_type='sms', action_config={body:"Welcome home."}, one_shot=true
 - "Tell my wife when I leave the restaurant" → trigger_type='location', trigger_config={place_name:'the restaurant', direction:'leave'}, action_type='sms', action_config={to:'wife', body:"He's on his way home."}, one_shot=true
 - "Remind me to buy milk next time I'm at Costco" → CHAIN BRAND — call set_action_rule with place_name='Costco' and tasks=['buy milk']. Orchestrator picker handles branch selection.
-- "Remind me to buy milk next time I'm at Costco Merivale" → trigger_type='location', trigger_config={place_name:'Costco Merivale', direction:'arrive', dwell_minutes:2}, action_type='sms', action_config={body:'Remember to buy milk.'}, one_shot=true
-- "Alert me when I arrive at the cottage this weekend" → trigger_type='location', trigger_config={place_name:'the cottage', direction:'arrive', dwell_minutes:2, expiry:'<next Monday>'}, action_type='sms', action_config={body:"You've made it to the cottage."}, one_shot=true
-- "Remind me to buy milk and eggs when I arrive at Costco Bel Air" → trigger_type='location', trigger_config={place_name:'Costco Bel Air', direction:'arrive', dwell_minutes:2}, action_type='sms', action_config={body:"Arrived at Costco.", tasks:['buy milk', 'buy eggs']}, one_shot=true
+- "Remind me to buy milk next time I'm at Costco Merivale" → trigger_type='location', trigger_config={place_name:'Costco Merivale', direction:'arrive'}, action_type='sms', action_config={body:'Remember to buy milk.'}, one_shot=true
+- "Alert me when I arrive at the cottage this weekend" → trigger_type='location', trigger_config={place_name:'the cottage', direction:'arrive', expiry:'<next Monday>'}, action_type='sms', action_config={body:"You've made it to the cottage."}, one_shot=true
+- "Remind me to buy milk and eggs when I arrive at Costco Bel Air" → trigger_type='location', trigger_config={place_name:'Costco Bel Air', direction:'arrive'}, action_type='sms', action_config={body:"Arrived at Costco.", tasks:['buy milk', 'buy eggs']}, one_shot=true
 - "Alert me at Costco with my Costco list" → AMBIGUOUS BRAND — DO NOT emit. Reply: "Which Costco? Give me a street or neighborhood." actions=[]. (Note: "Costco list" is a list reference, NOT a branch specifier.)
-- "Alert me at Costco Merivale with my Costco list" → trigger_type='location', trigger_config={place_name:'Costco Merivale', direction:'arrive', dwell_minutes:2}, action_type='sms', action_config={body:"Arrived at Costco.", list_name:'Costco'}, one_shot=false
+- "Alert me at Costco Merivale with my Costco list" → trigger_type='location', trigger_config={place_name:'Costco Merivale', direction:'arrive'}, action_type='sms', action_config={body:"Arrived at Costco.", list_name:'Costco'}, one_shot=false
 - "Alert me at the grocery store and remind me of my grocery list" → AMBIGUOUS — DO NOT emit. Reply: "Which grocery store? Give me a street, neighborhood, or the brand (Loblaws, Metro, Farm Boy)." actions=[]. (NEVER treat the second clause as a standalone LIST_READ — the user is creating a single location alert with a list reference, not asking to hear the list now.)
-- "Alert me at Loblaws Carling with my grocery list" → trigger_type='location', trigger_config={place_name:'Loblaws Carling', direction:'arrive', dwell_minutes:2}, action_type='sms', action_config={body:"Arrived at Loblaws.", list_name:'grocery'}, one_shot=false
-- "When I get home, remind me of my to-do list and to take my medication" → trigger_type='location', trigger_config={place_name:'home', direction:'arrive', dwell_minutes:2}, action_type='sms', action_config={body:"You're home.", tasks:['take medication'], list_name:'to-do'}, one_shot=false
+- "Alert me at Loblaws Carling with my grocery list" → trigger_type='location', trigger_config={place_name:'Loblaws Carling', direction:'arrive'}, action_type='sms', action_config={body:"Arrived at Loblaws.", list_name:'grocery'}, one_shot=false
+- "When I get home, remind me of my to-do list and to take my medication" → trigger_type='location', trigger_config={place_name:'home', direction:'arrive'}, action_type='sms', action_config={body:"You're home.", tasks:['take medication'], list_name:'to-do'}, one_shot=false
 
 CRITICAL — COMPOUND ALERT-WITH-LIST UTTERANCES:
 Phrasings like "Alert me at <place> AND remind me of my <X> list" or "Tell me when I'm at <place> with my <X> list" are SINGLE intents — one location SET_ACTION_RULE with action_config.list_name=<X>. They are NOT a LIST_READ. NEVER respond by reading the list contents back. If the place is ambiguous, ask for branch FIRST per the chain-store rule. The list reference is preserved through the clarification turn — when the user provides the branch, emit the rule with both place_name (specific) and list_name (the user's spoken list).
