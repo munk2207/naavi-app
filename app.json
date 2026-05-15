@@ -21,7 +21,7 @@
       }
     },
     "android": {
-      "versionCode": 178,
+      "versionCode": 180,
       "softwareKeyboardLayoutMode": "pan",
       "package": "ca.naavi.app",
       "googleServicesFile": "./google-services.json",
@@ -49,14 +49,22 @@
       "@mykin-ai/expo-audio-stream",
       "expo-contacts",
       [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#5DCAA5"
+        }
+      ],
+      [
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "MyNaavi uses your location to alert you when you arrive at or leave places you care about (like home, Costco, or the cottage). Your location is used only to trigger alerts you've set up, never shared, and not stored as history.",
-          "isAndroidBackgroundLocationEnabled": true,
-          "isAndroidForegroundServiceEnabled": true
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false
         }
       ],
       "expo-web-browser",
+      "expo-gradle-ext-vars",
       "react-native-background-geolocation"
     ],
     "scheme": "naavi",
