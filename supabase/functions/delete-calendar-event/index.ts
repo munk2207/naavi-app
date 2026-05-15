@@ -93,9 +93,11 @@ serve(async (req) => {
     const accessToken = await getNewAccessToken(refreshToken);
 
     // Search window for matching events.
-    // User path: -1 day to +1 year (typical usage on mobile).
-    // Admin path (body.user_id present, i.e. server-side teardown/cleanup):
-    // -1 year to +100 years so far-future test events can also be reached.
+    // User path: -1 day to +1 year (typical usage on mobile, uses q= filter).
+    // Admin path (body.user_id present, server-side teardown/cleanup):
+    // -1 year to +100 years AND lists without q= filter so just-created
+    // events not yet in Google's freetext index can be deleted. Client-side
+    // summary substring filter replaces the q= server filter.
     const now = new Date();
     const isAdmin = !!bodyUserId;
     const lookBackDays   = isAdmin ? 365   : 1;
@@ -103,7 +105,10 @@ serve(async (req) => {
     const timeMin = new Date(now.getTime() - lookBackDays * 24 * 60 * 60 * 1000).toISOString();
     const timeMax = new Date(now.getTime() + lookForwardDays * 24 * 60 * 60 * 1000).toISOString();
 
-    const searchUrl = `${CALENDAR_BASE}/events?q=${encodeURIComponent(query)}&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=false&maxResults=25`;
+    // Admin: no q= (indexing lag misses fresh events). User: q= for speed.
+    const searchUrl = isAdmin
+      ? `${CALENDAR_BASE}/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=false&maxResults=250`
+      : `${CALENDAR_BASE}/events?q=${encodeURIComponent(query)}&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=false&maxResults=25`;
 
     const searchRes = await fetch(searchUrl, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -117,7 +122,13 @@ serve(async (req) => {
     }
 
     const searchData = await searchRes.json();
-    const events = searchData.items ?? [];
+    let events = searchData.items ?? [];
+
+    if (isAdmin) {
+      // Admin path: client-side filter by summary substring (case-insensitive).
+      const needle = query.toLowerCase();
+      events = events.filter((e: any) => (e.summary ?? '').toLowerCase().includes(needle));
+    }
 
     if (events.length === 0) {
       return new Response(JSON.stringify({ success: true, deleted: 0, message: 'No matching events found' }), {
