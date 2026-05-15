@@ -115,11 +115,11 @@ export const promptRegressionTests: TestCase[] = [
   {
     id: 'prompt-regression.calendar-no-auto-invite',
     category: 'prompt-regression',
-    description: 'V57.11.6 regression — "schedule a meeting with Bob on Friday at 4 PM" must emit CREATE_EVENT with empty attendees (no auto-invite)',
+    description: 'V57.11.6 regression — "schedule a meeting with Bob tomorrow at 9 AM" must emit CREATE_EVENT with empty attendees (no auto-invite). 2026-05-15: date phrasing made wall-clock-agnostic — original "Friday at 4 PM" became ambiguous when run after 4 PM Eastern on a Friday.',
     timeoutMs: 30_000,
     async run(ctx) {
       const { status, data } = await adapters.naaviChat(ctx, {
-        messages: [{ role: 'user', content: 'schedule a meeting with Bob on Friday at 4 PM' }],
+        messages: [{ role: 'user', content: 'schedule a meeting with Bob tomorrow at 9 AM' }],
         max_tokens: 1024,
       });
       expect2xx(status, 'naavi-chat');
