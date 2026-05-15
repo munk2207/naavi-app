@@ -162,8 +162,11 @@ function convertLocationToolToActionRule(
     place_name: placeName,
     direction: input.direction,
   };
+  // V57.16 — only set dwell_minutes when Claude explicitly emitted one.
+  // Previously we defaulted to 2 minutes here, which overrode the server's
+  // new 30s default in report-location-event. Now: if the user / Claude
+  // didn't specify, the field is omitted and the server uses its 30s default.
   if (typeof input.dwell_minutes === 'number') triggerConfig.dwell_minutes = input.dwell_minutes;
-  else triggerConfig.dwell_minutes = 2;
   if (typeof input.expiry === 'string' && input.expiry) triggerConfig.expiry = input.expiry;
 
   const result: Record<string, any> = {
