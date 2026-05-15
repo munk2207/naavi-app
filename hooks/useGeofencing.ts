@@ -254,44 +254,66 @@ export async function handleGeofenceEvent(event: GeofenceEvent): Promise<void> {
     }
   }
 
-  if (!supabase) return;
+  // V57.16 — fail-open rule lookup. Prior behavior: if the Supabase rule
+  // query returned null (e.g. headless task with no live session →
+  // RLS-blocked / JWT-expired), the handler returned silently after T1 and
+  // the event never reached the server. Drove for 898 Bayview 2026-05-15
+  // and saw T1 fire with no T2 — the server never knew the user arrived.
+  // New behavior: still attempt the lookup; if it succeeds, apply the
+  // checks (disabled / initial-state / cross-user). If it fails or returns
+  // null, log the reason remotely and POST to the server anyway — the
+  // Edge Function is service-role and will validate authoritatively.
+  let ruleRow: { user_id: string; created_at: string; enabled: boolean } | null = null;
+  if (supabase) {
+    try {
+      const { data } = await queryWithTimeout(
+        supabase
+          .from('action_rules')
+          .select('id, user_id, created_at, enabled')
+          .eq('id', ruleId)
+          .maybeSingle(),
+        15_000,
+        'select-action-rule-for-geofence',
+      );
+      ruleRow = data ?? null;
+      if (!ruleRow) {
+        remoteLog(eventId, 'geofence-T1-rule-lookup-null', { rule_id: ruleId });
+      }
+    } catch (err) {
+      remoteLog(eventId, 'geofence-T1-rule-lookup-failed', {
+        rule_id: ruleId,
+        error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+      });
+    }
+  }
 
-  try {
-    const { data: ruleRow } = await queryWithTimeout(
-      supabase
-        .from('action_rules')
-        .select('id, user_id, created_at, enabled')
-        .eq('id', ruleId)
-        .maybeSingle(),
-      15_000,
-      'select-action-rule-for-geofence',
-    );
-
-    if (!ruleRow || !ruleRow.enabled) {
-      console.log(`[geofence-task] rule ${ruleId} not found or disabled`);
+  if (ruleRow) {
+    if (!ruleRow.enabled) {
+      remoteLog(eventId, 'geofence-T1-skipped', { rule_id: ruleId, reason: 'disabled' });
       return;
     }
-
-    // Layer 3: suppress initial-inside fires within 10s of creation (Q7)
+    // Initial-state suppression — within 10s of rule creation
     if (eventName === 'enter' || eventName === 'dwell') {
       const msSinceCreation = Date.now() - new Date(ruleRow.created_at).getTime();
       if (msSinceCreation < 10_000) {
-        console.log(`[geofence-task] suppressing initial-state fire for rule ${ruleId}`);
+        remoteLog(eventId, 'geofence-T1-skipped', { rule_id: ruleId, reason: 'initial-state' });
         return;
       }
     }
-
-    // Layer 2: verify current user matches rule owner (Q3)
+    // Cross-user safety — only enforce if we have a live session
     const session = await getSessionWithTimeout();
     const currentUserId = session?.user?.id;
     if (currentUserId && currentUserId !== ruleRow.user_id) {
-      console.log(`[geofence-task] cross-user fire blocked: rule ${ruleRow.user_id} vs current ${currentUserId}`);
+      remoteLog(eventId, 'geofence-T1-skipped', { rule_id: ruleId, reason: 'cross-user' });
       return;
     }
+  }
 
+  try {
     remoteLog(eventId, 'geofence-T2-about-to-post', {
       rule_id: ruleId,
       event: eventName,
+      has_user_id: !!ruleRow?.user_id,
     });
     const res = await fetch(`${SUPABASE_URL}/functions/v1/report-location-event`, {
       method: 'POST',
@@ -300,7 +322,7 @@ export async function handleGeofenceEvent(event: GeofenceEvent): Promise<void> {
         Authorization: `Bearer ${SUPABASE_ANON}`,
       },
       body: JSON.stringify({
-        user_id: ruleRow.user_id,
+        ...(ruleRow?.user_id ? { user_id: ruleRow.user_id } : {}),
         rule_id: ruleId,
         lat: event.location?.coords?.latitude ?? null,
         lng: event.location?.coords?.longitude ?? null,
