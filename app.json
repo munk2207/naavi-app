@@ -21,7 +21,7 @@
       }
     },
     "android": {
-      "versionCode": 177,
+      "versionCode": 178,
       "softwareKeyboardLayoutMode": "pan",
       "package": "ca.naavi.app",
       "googleServicesFile": "./google-services.json",
@@ -56,7 +56,8 @@
           "isAndroidForegroundServiceEnabled": true
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "react-native-background-geolocation"
     ],
     "scheme": "naavi",
     "extra": {

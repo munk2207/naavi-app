@@ -224,10 +224,12 @@ If in doubt, ASK before creating parallel config.
 
 **Top of next session — PRIORITY ORDER (Wael 2026-05-14):**
 
-1. **⭐ V57.15.6 build 178 — bundle 3 bugs caught during build 177 live test.** ~1 hour code + retest + AAB + APK. Closes V57.15.5 cycle.
+1. **⭐ V57.15.6 build 178 — bundle 5 bugs caught during build 177 live test.** ~1 hour code + retest + AAB + APK. Closes V57.15.5 cycle.
    - **PIN modal KAV restructure** — current wrap is wrong (KAV nested inside centered backdrop fights the layout). Fix: KAV becomes the OUTERMOST child of `<Modal>`, backdrop nested inside, anchor card with `justifyContent: 'flex-start'` + `paddingTop: 60` (bulletproof against any keyboard quirk). Unblocks visual UX for Tests 3 + 4 (today they passed via blind-type workaround — keyboard hides the field).
    - **Primary edit screen-shift** — same keyboard family. Either KAV-wraps the section or relies on existing `onSubmitEditing` (already shipped — keypad Done commits without on-screen ✓).
    - **Multi-phone auto-persist (root cause UX bug)** — remove the explicit "Save phones" button entirely. Auto-persist on **+**, **X**, and edit-✓. Today's repro: users tap **+** expecting persistence; entry sits in local state until **Save phones** is tapped, leading to "the number disappeared after navigation" reports. Auto-persist eliminates the failure mode. Makes the *"Saved 3 backup numbers"* wording fix moot (no more save alert).
+   - **Settings section header visibility** (Wael 2026-05-15 retest) — `styles.sectionTitle` at [app/settings.tsx:1304](app/settings.tsx:1304) currently uses `color: Colors.textHint` (dimmest tone, reserved for placeholders) and `fontWeight: Typography.semibold`. Headers literally render DIMMER than their own descriptions (which use `textSecondary`). Fix: change color → `Colors.textPrimary`, fontWeight → `Typography.bold`. Same size, same uppercase styling — just makes the hierarchy correct.
+   - **All X icons → red** (Wael 2026-05-15 retest, Test 7 followup) — every `name="close"` Ionicon in the app currently uses `Colors.textMuted` (grey). Wael wants ALL X icons across ALL surfaces in `Colors.error` ('#D85A30') for consistent destructive/cancel signaling. Audit found 7 sites: [app/alerts.tsx:542](app/alerts.tsx:542), [app/contact.tsx:171](app/contact.tsx:171), [app/report.tsx:189](app/report.tsx:189), [app/lists/[id].tsx:268](app/lists/[id].tsx:268), [app/settings.tsx:785](app/settings.tsx:785) (primary cancel-edit), [app/settings.tsx:843](app/settings.tsx:843) (backup cancel-edit), [app/settings.tsx:860](app/settings.tsx:860) (backup row delete). One-color-token-change-per-site; mechanical edit.
 
 2. **Geofence reliability — STILL BLOCKED on vendor replies.** Transistorsoft email sent 2026-05-12 (no reply); **follow-up email DRAFTED in 2026-05-13 chat log** (not sent — Wael's call when to send). Radar email also sent 2026-05-12, no reply. **Do NOT pay the $350 Transistorsoft license without trial verification first.** When trial key arrives → install + drive-test on Samsung phone → pay only if reliable. If still no reply by next session, send the drafted follow-up first thing.
 
@@ -382,11 +384,22 @@ The old Anthropic API key leaked in session 8 was deleted in session 9. A new ke
 9. Wait for the auto-submit step to finish (EAS prints a Play Console link).
 10. User installs from Google Play on phone (Internal Testing track).
 
-### MUST USE GOOGLE PLAY (not direct APK)
+### MUST USE GOOGLE PLAY (not direct APK) — for distribution to OTHER users
 
-Google Sign-In requires the app to be signed with the certificate registered in Google Cloud OAuth. Direct-install APKs (EAS preview profile, sideload) are signed with a different key → Google refuses sign-in. Only AABs distributed through Google Play (Internal Testing or higher) get re-signed with the registered certificate.
+Google Sign-In requires the app to be signed with a certificate whose SHA-1 is registered in Google Cloud OAuth. Direct-install APKs (EAS preview profile, sideload) are signed with the EAS preview-build cert — which is a DIFFERENT key from the Google Play app-signing cert. For users WITHOUT that SHA-1 in OAuth, Sign-In fails on a sideloaded APK.
 
-Never suggest direct APK installs or preview builds for testing sign-in.
+**Distribution rule:** Only ship to OTHER users (e.g. Robert, beta testers) via Google Play AAB. Their installs use Play's app-signing cert, which IS registered in OAuth — so Sign-In works.
+
+**EXCEPTION — Wael's own testing on emulator AND real Samsung phone:** Wael has the EAS preview-build SHA-1 ALSO registered in Google Cloud OAuth. So preview APKs (`eas build --profile preview`) work for FULL Sign-In + OAuth + Google APIs on his devices — both emulator and his real Samsung phone. Empirically confirmed 2026-05-14 evening (sideloaded preview APK on Samsung after uninstalling Play Store version → Sign-In + Gmail + Calendar + Drive + Maps all green). See `feedback_apk_emulator_signin_works.md` for the full play-by-play.
+
+**For Wael's iterative testing of native-module changes (Transistorsoft, custom geofencing libs, anything that needs a real device drive-test), use preview APK — no AAB cycle needed.** Steps for real-phone install:
+
+1. `eas build --profile preview` produces an APK URL
+2. Wael UNINSTALLS the existing Play Store version FIRST (cert-mismatch blocks "update over Play install"; the installer source label is sticky)
+3. Wael downloads + installs the new APK (Drive / email / direct download)
+4. Sign-In works because his local SHA-1 is OAuth-registered
+
+**Never suggest direct APK installs for OTHER users** — only Wael has the registered SHA-1.
 
 ### HOW THE VOICE SERVER DEPLOYS
 
