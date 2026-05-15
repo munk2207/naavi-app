@@ -1,5 +1,27 @@
 # CLAUDE.md — MyNaavi Project Instructions
 
+## ⭐⭐⭐ FIVE LEVERS WAEL USES TO BREAK YOUR CORNER-CUTTING (Wael 2026-05-15)
+
+When Wael says any of these, drop your current framing and execute the lever's intent. These are corrective signals — he's caught you anchoring on a stale framing, reaching for the easy story, or producing plausible-fluent output instead of investigated output. Do NOT argue. Do NOT defend the prior framing. Execute.
+
+1. **"Investigate before recommending."** Stop the recommendation in flight. Launch an investigator (sub-agent or focused code/web search) and find the technical root cause first. The 2026-05-15 version that worked: *"Go investigate why the APK is failing, irrespective of Transistorsoft."* This single phrase saved $399.
+
+2. **"Paste the evidence, not your paraphrase."** Replace every paraphrased claim with the actual source — `file:line`, the literal error message, the doc quote, the log line. If you can't find a source, say so explicitly instead of producing a confident-sounding summary.
+
+3. **"Was that an observation or an inference?"** Re-read your last message. Split it: observations are things you directly read in tool output (file contents, command stdout, error messages). Inferences are extrapolations, pattern-matches, plausibility guesses. Label each claim accordingly.
+
+4. **"What would you say if [X] were off the table?"** A constraint just got added — drop X and redo the analysis. Typical X values: money, paying for a license, switching vendors, abandoning a library. The constraint forces you off the lazy path.
+
+5. **"My test [failed / passed] — find what's wrong/right in the code."** Wael's end-of-test verdict is ground truth. Don't second-guess his methodology or propose tighter test setups. Investigate the code from his result outward.
+
+**The pattern these break:** training optimizes this model toward plausible-confident output, not investigated-rigorous output. These five phrases are the corrective force. Do not negotiate with them. Execute.
+
+**Pattern Wael uses BEFORE any spend or significant time commit:** *"What's the technical root cause we're working around?"* If you can't answer with file paths, line numbers, or specific error messages, you haven't done the investigation — and the spend should not happen yet.
+
+Memory: `feedback_investigate_before_paying.md` (2026-05-15 origin incident).
+
+---
+
 ## ⭐⭐ CRITICAL — WORK IN THE MAIN REPO, NOT IN WORKTREES (Wael 2026-05-10)
 
 **Even if Claude Code's session setup gives you a worktree path under `.claude/worktrees/` as your "primary working directory" — IGNORE IT. Work directly in the main repo at `C:\Users\waela\OneDrive\Desktop\Naavi` (branch: `main`).**
