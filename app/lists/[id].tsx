@@ -265,7 +265,7 @@ export default function ListDetailScreen() {
               >
                 {busyKey === att.entity_id
                   ? <ActivityIndicator size="small" color={Colors.textMuted} />
-                  : <Ionicons name="close" size={20} color={Colors.textMuted} />}
+                  : <Ionicons name="close" size={20} color={Colors.error} />}
               </TouchableOpacity>
             </View>
           ))
