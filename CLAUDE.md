@@ -226,12 +226,16 @@ If in doubt, ASK before creating parallel config.
 
 1. **⭐ Promote V57.15.6 build 179 AAB to Internal Testing.** Sitting as DRAFT in Play Console (https://play.google.com/console → MyNaavi → Internal testing → "Send to internal testing"). ~30 sec + 5-15 min Play Store propagation. Phone 2 (mynaavi2207) + future testers will receive it. AAB is safe — no Transistorsoft, no license issue.
 
-2. **Geofence reliability — Transistorsoft attempt FAILED, decide what next.** Three paths:
-   - **(a) Retry Transistorsoft** with the 4 postmortem fixes (notification icon path → `'@drawable/notification_icon'` or generated mipmap; audit AndroidManifest for FOREGROUND_SERVICE/FOREGROUND_SERVICE_LOCATION/ACCESS_BACKGROUND_LOCATION/WAKE_LOCK/RECEIVE_BOOT_COMPLETED post-prebuild; RELEASE-first testing; then maybe pay $399 v5 license). Trial branch `claude/transistorsoft-trial` (commit `7c5605a`) has the full integration code if anyone wants to apply these.
-   - **(b) Try Radar** — original parallel evaluation candidate; SaaS pricing likely high (still no reply from sales). Different vendor, different mechanism.
-   - **(c) Accept geofencing-on-Samsung is unsolved** — focus on iOS or other Android OEMs where Expo's native API works. Block Robert's V57.x promotion permanently OR ship without geofencing.
+2. **⭐⭐ FINALIZE TRANSISTORSOFT INTEGRATION (Wael's decision 2026-05-15).** Path (a) chosen — retry with the 4 postmortem fixes from this session's investigation. Detailed plan:
+   - **Restore the trial branch** — start from `claude/transistorsoft-trial` (commit `7c5605a`) which has the full v5.1.1 integration. Either branch off it or cherry-pick the relevant commits.
+   - **Fix #1 — notification icon path.** Current `notification.smallIcon: 'mipmap/ic_launcher'` likely doesn't resolve in Expo prebuild. Try `'@drawable/notification_icon'` OR generate a dedicated mipmap entry via the Expo config plugin OR generate a `notification_icon.png` and reference it without the resource folder prefix. The fix that lets Android start the FG service unblocks the silent failure.
+   - **Fix #2 — AndroidManifest permissions audit.** After prebuild, `eas build` produces a manifest. Verify it has: `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `ACCESS_BACKGROUND_LOCATION`, `WAKE_LOCK`, `RECEIVE_BOOT_COMPLETED`. If missing, the Transistorsoft Expo config plugin needs additional invocations or the app.json plugins array needs explicit permission entries.
+   - **Fix #3 — RELEASE-first testing.** Per the postmortem, unlicensed RELEASE has more forgiving FG-service handling than unlicensed DEBUG. Build the AAB first, install via Play Store Internal Testing, drive-test BEFORE attempting the APK trial.
+   - **Fix #4 — drive-test on TWO phones again.** Same A/B (Wael + mynaavi2207) for clean comparison. Same target. Verify FG notification appears on BOTH (was the asymmetry that flagged Fix #1 as the likely root cause).
+   - **If the drive-test passes:** pay $399 v5 perpetual license from https://transistorsoft.com customer dashboard → add to app.json plugin config → rebuild RELEASE AAB with license active → ship V57.16.0 production → promote Robert from V56.6 to V57.16.0.
+   - **If drive-test fails again:** confirms Samsung One UI throttling we can't fix at the SDK layer → fall back to path (b) Radar or path (c) accept unsolved.
 
-   **No recommendation — Wael's strategic call.**
+   Estimated time: 3-4 hours code (fix integration) + 30 min EAS queue + 1-2 hours drive-test + license payment (if pass).
 
 3. **Server-side fast wins (always available, no AAB needed):** `naavi-spend-summary` Edge Function (~1 hour, approved 2026-04-30 but never built) + Voice live-calendar fetch (~30 min, voice still on stale snapshot vs mobile V57.11.6) + `resolve-place` radius 100→500 + address routing fix (~30 min). Three real user-visible improvements, zero AAB.
 

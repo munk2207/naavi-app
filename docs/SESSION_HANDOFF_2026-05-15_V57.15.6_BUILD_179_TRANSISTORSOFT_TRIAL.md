@@ -107,12 +107,18 @@ This unlocks "test heavy native-module changes (Transistorsoft, custom geofence 
 
 1. **Promote V57.15.6 build 179 AAB to Internal Testing** — sitting as DRAFT in Play Console. Standard "Send to internal testing" promotion. ~30 sec + 5-15 min Play Store propagation.
 
-2. **Geofence reliability — what next?** Transistorsoft attempt failed. Three paths:
-   - **(a) Retry Transistorsoft with the 4 postmortem fixes** (icon path, permissions audit, RELEASE-first testing) — could work but adds another full cycle of integration + drive-test + maybe license payment
-   - **(b) Try Radar** — original parallel evaluation candidate; SaaS pricing likely high (still no reply from sales). Different vendor, different mechanism.
-   - **(c) Accept geofencing-on-Samsung is unsolved** — focus on iOS or other Android OEMs where Expo's native API works. Block Robert's V57.x promotion permanently OR ship without geofencing.
+2. **⭐⭐ FINALIZE TRANSISTORSOFT — Wael's decision 2026-05-15: path (a).** Retry with the 4 postmortem fixes:
+   - **Fix #1:** notification icon path — try `'@drawable/notification_icon'` or generated mipmap (current `'mipmap/ic_launcher'` likely doesn't resolve in Expo prebuild → silent FG-service failure in DEBUG)
+   - **Fix #2:** AndroidManifest permissions audit after prebuild (FOREGROUND_SERVICE, FOREGROUND_SERVICE_LOCATION, ACCESS_BACKGROUND_LOCATION, WAKE_LOCK, RECEIVE_BOOT_COMPLETED) — Transistorsoft Expo plugin only adds license metadata + gradle deps; permissions need to come from app.json or extra plugin invocations
+   - **Fix #3:** RELEASE-first testing (unlicensed RELEASE more forgiving than unlicensed DEBUG); build AAB, Play Store Internal Testing install, drive-test BEFORE the APK trial
+   - **Fix #4:** two-phone drive test again (Wael + mynaavi2207, same target) — verify FG notification appears on BOTH this time (asymmetry was the diagnostic in this session)
 
-   **No recommendation yet — Wael's strategic call.**
+   Trial branch `claude/transistorsoft-trial` (commit `7c5605a`) is the starting point; either branch off it or cherry-pick.
+
+   If pass → pay $399 v5 license → add to app.json plugin config → rebuild RELEASE AAB → ship V57.16.0 → promote Robert from V56.6.
+   If fail → falls back to (b) Radar or (c) accept Samsung unsolved.
+
+   Estimated: 3-4 hours code + 30 min EAS queue + 1-2 hours drive-test + license payment.
 
 3. **Server-side fast wins (always available, no AAB needed):**
    - `naavi-spend-summary` Edge Function (~1 hour, approved 2026-04-30)
