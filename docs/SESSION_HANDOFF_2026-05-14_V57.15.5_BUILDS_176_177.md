@@ -105,7 +105,40 @@ Multiple reports of *"I added a phone, navigated away, came back, the new entry 
 
 This also makes the *"Saved 3 backup numbers"* wording fix moot — no more save alert because no more save button.
 
-### 4. (Not a bug — existing data observation)
+### 4. Settings section header visibility (added 2026-05-15 during retest)
+
+**What Wael noticed:** Looking at the Settings screen, the section headers (VOICE PIN, CONNECTED SERVICES, etc.) render DIMMER than their own descriptions. The hierarchy is inverted — body text outranks the title visually.
+
+**Root cause:** `styles.sectionTitle` at [app/settings.tsx:1304](app/settings.tsx:1304) uses:
+- `color: Colors.textHint` — the dimmest color in the palette, reserved for placeholders
+- `fontWeight: Typography.semibold`
+
+The body description below uses `Colors.textSecondary` which is brighter than `textHint`. So the title literally has less visual weight than what it's introducing.
+
+**Build 178 fix:** change to:
+- `color: Colors.textPrimary`
+- `fontWeight: Typography.bold`
+
+Keep the existing `fontSize: Typography.body`, `textTransform: 'uppercase'`, and `letterSpacing: 0.8` — only the color + weight change. Minimal blast radius (one styles object, applies to all 6 sections in Settings uniformly).
+
+### 5. All X icons → red (added 2026-05-15 retest, Test 7 followup)
+
+**What Wael noticed:** During Test 7 (backup edit-in-place), the cancel **×** in the inline edit row is the same grey as the row-delete **×**. Two distinct user intents (discard-edit vs remove-row) share one color → ambiguous.
+
+**Wael's call:** instead of a per-role color split, make EVERY **×** in the app red for consistent destructive/cancel signaling. One simple rule, no role nuance.
+
+**Audit — 7 sites currently using `Colors.textMuted`:**
+- [app/alerts.tsx:542](app/alerts.tsx:542)
+- [app/contact.tsx:171](app/contact.tsx:171)
+- [app/report.tsx:189](app/report.tsx:189)
+- [app/lists/[id].tsx:268](app/lists/[id].tsx:268)
+- [app/settings.tsx:785](app/settings.tsx:785) (primary cancel-edit)
+- [app/settings.tsx:843](app/settings.tsx:843) (backup cancel-edit)
+- [app/settings.tsx:860](app/settings.tsx:860) (backup row delete)
+
+**Fix:** change `color={Colors.textMuted}` → `color={Colors.error}` on each (`#D85A30` per [constants/Colors.ts:59](constants/Colors.ts:59)). Mechanical sweep, one prop per site. No layout impact.
+
+### 6. (Not a bug — existing data observation)
 
 `+1234567890` typed during testing pretty-prints as `+123 4567890` because it has only 9 digits after `+1` (not the 10-digit NA standard). The +1 branch of `prettyPhone` doesn't fire (length check 12); the fallback formatter treats `+123` as the country code. Not a bug — the formatter is correctly handling a non-NA-format input. Not on the build 178 list.
 
