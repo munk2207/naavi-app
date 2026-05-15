@@ -133,24 +133,32 @@ serve(async (req) => {
     if (rule.trigger_type !== 'location') return json({ error: 'Not a location rule' }, 400);
     if (!rule.enabled) return json({ ok: true, skipped: 'rule disabled' });
 
+    // V57.16 — dedup window: 30 minutes (was per-day). Wael 2026-05-15:
+    // false positives consume the daily dedup and lose the real arrival
+    // alert. Per-minute window means a false fire only locks the rule for
+    // 30 min; real arrivals after that re-arm. Anti-spam intact for
+    // multiple-fires-per-hour cases.
+    const DEDUP_WINDOW_MS = 30 * 60 * 1000;
+    const dedupCutoff = new Date(Date.now() - DEDUP_WINDOW_MS).toISOString();
+
     // 2pre. Pending-dwell cron bypass — we already crossed direction matching
     // when the original ENTER landed. Jump to dedup + fire so the fan-out
     // runs after the dwell timer completed.
     if (fromPendingDwell) {
       const direction = String(rule.trigger_config?.direction ?? 'arrive');
       const normalizedEvent = direction === 'leave' ? 'exit' : 'enter';
-      const today = new Date().toISOString().slice(0, 10);
-      const triggerRef = `loc-${rule_id}-${today}-${normalizedEvent}`;
+      const triggerRef = `loc-${rule_id}-${new Date().toISOString()}-${normalizedEvent}`;
 
-      const { data: existing } = await admin
+      const { data: recentFires } = await admin
         .from('action_rule_log')
-        .select('id')
+        .select('id, fired_at')
         .eq('rule_id', rule_id)
-        .eq('trigger_ref', triggerRef)
-        .maybeSingle();
+        .gte('fired_at', dedupCutoff)
+        .order('fired_at', { ascending: false })
+        .limit(1);
 
-      if (existing) {
-        return json({ ok: true, skipped: 'already fired today' });
+      if (recentFires && recentFires.length > 0) {
+        return json({ ok: true, skipped: 'already fired within last 30 min' });
       }
 
       const success = await fireLocationAction(rule, admin, supabaseUrl, interFnKey);
@@ -205,36 +213,42 @@ serve(async (req) => {
       return json({ ok: true, skipped: `event ${event} does not match direction ${direction}` });
     }
 
-    // 3. Dedup via action_rule_log. Normalize event to direction so an
-    // Android ENTER followed later in the day by a defensive DWELL still
-    // dedups to the same row. (Today notifyOnDwell is off — DWELL shouldn't
-    // arrive — but the normalization is cheap insurance.)
-    const today = new Date().toISOString().slice(0, 10);
+    // 3. Dedup via action_rule_log, time-windowed. See dedupCutoff above
+    // (30 min). The window guards against rapid double-fires (e.g.
+    // phantom EXIT + immediate re-ENTER from a flaky GPS) while still
+    // allowing a real second arrival later in the day.
     const normalizedEvent = direction === 'leave' ? 'exit' : 'enter';
-    const triggerRef = `loc-${rule_id}-${today}-${normalizedEvent}`;
+    const triggerRef = `loc-${rule_id}-${new Date().toISOString()}-${normalizedEvent}`;
 
-    const { data: existing } = await admin
+    const { data: recentFires } = await admin
       .from('action_rule_log')
-      .select('id')
+      .select('id, fired_at')
       .eq('rule_id', rule_id)
-      .eq('trigger_ref', triggerRef)
-      .maybeSingle();
+      .gte('fired_at', dedupCutoff)
+      .order('fired_at', { ascending: false })
+      .limit(1);
 
-    if (existing) {
-      return json({ ok: true, skipped: 'already fired today' });
+    if (recentFires && recentFires.length > 0) {
+      return json({ ok: true, skipped: 'already fired within last 30 min' });
     }
 
-    // 3b. Server-side dwell. If trigger_config.dwell_seconds > 0, defer the
-    // fire instead of running fan-out now. The fire-pending-dwells cron picks
-    // it up after the dwell completes — UNLESS the user reverses direction
-    // (handled in step 2's oppositeOfDirection branch above). Lets us widen
-    // geofence radius (e.g. 500 m) without false-firing on drive-through
-    // traffic. Default = 120 s. Set to 0 in trigger_config for legacy
-    // immediate-fire behavior (no AAB rule edit needed — server reads it
-    // per fire).
-    const dwellSeconds = typeof rule.trigger_config?.dwell_seconds === 'number'
-      ? Math.max(0, Math.floor(rule.trigger_config.dwell_seconds))
-      : 120;
+    // 3b. Server-side dwell. If > 0, defer the fire instead of running
+    // fan-out now. The fire-pending-dwells cron picks it up after the
+    // dwell completes — UNLESS the user reverses direction (handled in
+    // step 2's oppositeOfDirection branch above). Filters drive-throughs.
+    //
+    // V57.16 — read EITHER dwell_seconds OR dwell_minutes from trigger_config
+    // (rules historically wrote dwell_minutes which the prior code ignored).
+    // Default 30 s (was 120 s) — paired with 300 m default radius to fire
+    // earlier in the user's approach. Set explicitly to 0 for immediate fire.
+    let dwellSeconds: number;
+    if (typeof rule.trigger_config?.dwell_seconds === 'number') {
+      dwellSeconds = Math.max(0, Math.floor(rule.trigger_config.dwell_seconds));
+    } else if (typeof rule.trigger_config?.dwell_minutes === 'number') {
+      dwellSeconds = Math.max(0, Math.floor(rule.trigger_config.dwell_minutes * 60));
+    } else {
+      dwellSeconds = 30;
+    }
 
     if (dwellSeconds > 0) {
       // Defense in depth: clear any stale active row before insert so the

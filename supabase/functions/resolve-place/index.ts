@@ -118,7 +118,10 @@ serve(async (req) => {
     const placeName      = String(body.place_name ?? '').trim();
     const referenceLat   = body.reference_lat !== undefined ? Number(body.reference_lat) : null;
     const referenceLng   = body.reference_lng !== undefined ? Number(body.reference_lng) : null;
-    const radiusOverride = body.radius_meters !== undefined ? Number(body.radius_meters) : 100;
+    // V57.16 — default radius 100 → 300m. 100m fired alerts too late
+    // (user already inside the building); 300m gives early-arrival
+    // alert while the user is still approaching/parking.
+    const radiusOverride = body.radius_meters !== undefined ? Number(body.radius_meters) : 300;
 
     if (!user_id || !placeName) {
       return jsonResponse({ status: 'error', error: 'Missing user_id or place_name' }, 400);
