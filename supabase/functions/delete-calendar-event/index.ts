@@ -92,10 +92,16 @@ serve(async (req) => {
   try {
     const accessToken = await getNewAccessToken(refreshToken);
 
-    // Search for events matching the query (look back 1 day, forward 1 year)
+    // Search window for matching events.
+    // User path: -1 day to +1 year (typical usage on mobile).
+    // Admin path (body.user_id present, i.e. server-side teardown/cleanup):
+    // -1 year to +100 years so far-future test events can also be reached.
     const now = new Date();
-    const timeMin = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-    const timeMax = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
+    const isAdmin = !!bodyUserId;
+    const lookBackDays   = isAdmin ? 365   : 1;
+    const lookForwardDays = isAdmin ? 36500 : 365;
+    const timeMin = new Date(now.getTime() - lookBackDays * 24 * 60 * 60 * 1000).toISOString();
+    const timeMax = new Date(now.getTime() + lookForwardDays * 24 * 60 * 60 * 1000).toISOString();
 
     const searchUrl = `${CALENDAR_BASE}/events?q=${encodeURIComponent(query)}&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=false&maxResults=25`;
 
