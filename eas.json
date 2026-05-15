@@ -11,6 +11,13 @@
         "buildType": "apk"
       }
     },
+    "trial-debug": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      }
+    },
     "production": {
       "channel": "production",
       "android": {
