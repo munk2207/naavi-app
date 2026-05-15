@@ -168,7 +168,7 @@ export default function ContactScreen() {
                   onPress={() => setSuggestionsDismissed(true)}
                   hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
                 >
-                  <Ionicons name="close" size={16} color={Colors.textMuted} />
+                  <Ionicons name="close" size={16} color={Colors.error} />
                 </TouchableOpacity>
               </View>
               {suggestions.map(s => (

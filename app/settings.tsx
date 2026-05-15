@@ -330,7 +330,8 @@ export default function SettingsScreen() {
   // both a UX and a verification-cost concern.
   const MAX_PHONES = 5;
 
-  // F1a Wave 2 Phase E — add a backup phone number locally. Persists on Save.
+  // V57.15.6 build 179 — auto-persist on add. Local state + DB write fire
+  // together; "Save phones" button removed.
   function handleAddPhone() {
     const raw = normalizePhone(newPhoneInput);
     if (!isValidE164(raw)) {
@@ -351,8 +352,10 @@ export default function SettingsScreen() {
       );
       return;
     }
-    setPhoneNumbers(prev => [...prev, raw]);
+    const newNumbers = [...phoneNumbers, raw];
+    setPhoneNumbers(newNumbers);
     setNewPhoneInput('');
+    void persistPhoneNumbers(newNumbers, phone);
   }
 
   // V57.15.5 refinement #5 — start editing a backup row in place.
@@ -381,16 +384,16 @@ export default function SettingsScreen() {
       Alert.alert('Already added', 'That number is already on your list.');
       return;
     }
-    setPhoneNumbers(prev => prev.map((n, i) => (i === editingPhoneIdx ? raw : n)));
+    const newNumbers = phoneNumbers.map((n, i) => (i === editingPhoneIdx ? raw : n));
+    setPhoneNumbers(newNumbers);
     setEditingPhoneIdx(null);
     setEditingPhoneValue('');
+    void persistPhoneNumbers(newNumbers, phone);
   }
 
-  // V57.15.5 build 177 — Primary phone tap-to-edit (parallel to the backup
-  // row pattern). Default display = pretty-printed text + edit pencil; tap
-  // either → swap to TextInput + ✓/× buttons. Saving updates the local
-  // `phone` state; the user still has to tap "Save phones" at the bottom to
-  // persist all changes to the server (same flow as backups).
+  // V57.15.6 build 179 — Primary phone tap-to-edit + auto-persist. Tap row
+  // → swap to TextInput + ✓/× buttons. Saving updates local state AND
+  // persists to DB immediately (no separate "Save phones" button).
   function handleStartEditPrimary() {
     setEditingPrimary(true);
     setEditingPrimaryValue(phone);
@@ -416,48 +419,52 @@ export default function SettingsScreen() {
       setEditingPrimaryValue('');
       return;
     }
+    const filtered = phoneNumbers.filter(n => n !== raw);  // drop dup if any
+    const newNumbers = filtered.length > 0
+      ? [raw, ...filtered.slice(1)]               // replace index 0
+      : [raw];
     setPhone(raw);
-    setPhoneNumbers(prev => {
-      const filtered = prev.filter(n => n !== raw);  // drop dup if any
-      return filtered.length > 0
-        ? [raw, ...filtered.slice(1)]               // replace index 0
-        : [raw];
-    });
+    setPhoneNumbers(newNumbers);
     setEditingPrimary(false);
     setEditingPrimaryValue('');
+    void persistPhoneNumbers(newNumbers, raw);
   }
 
-  // Remove a non-primary phone. Primary (index 0) cannot be removed via
-  // this path — user changes primary by editing the legacy single-phone
-  // input above and re-saving (which will also rewrite phone_numbers[0]).
+  // V57.15.6 build 179 — Remove + auto-persist. Primary (index 0) cannot
+  // be removed via this path — user changes primary by tapping the primary
+  // row to edit it.
   function handleRemovePhone(idx: number) {
     if (idx === 0) return;   // primary protected
     if (phoneNumbers.length <= 1) return;
-    setPhoneNumbers(prev => prev.filter((_, i) => i !== idx));
+    const newNumbers = phoneNumbers.filter((_, i) => i !== idx);
+    setPhoneNumbers(newNumbers);
+    void persistPhoneNumbers(newNumbers, phone);
   }
 
-  // Save the WHOLE phone_numbers list. Dual-writes `phone` (= primary) so
-  // legacy code that reads the single column keeps working through the
-  // dual-write release.
-  async function handleSavePhone() {
-    const primary = normalizePhone(phone);
+  // V57.15.6 build 179 — silent auto-persist helper. Replaces the explicit
+  // "Save phones" button. Each phone-list mutation (add / remove / edit)
+  // calls this immediately so the entry lands in the DB right away. No
+  // success alert — the absence of an error IS the success signal. Errors
+  // (validation, conflict, network) still alert. Reverts local state on
+  // failure so the UI stays consistent with the DB.
+  async function persistPhoneNumbers(numbers: string[], primary: string): Promise<boolean> {
+    if (!supabase) return false;
     if (!isValidE164(primary)) {
       Alert.alert(
         'Invalid phone',
         'Use international format starting with +, then country code and number.\nExample: +16135551234'
       );
-      return;
+      return false;
     }
-    // Compose the final phone_numbers list — primary first, then the
-    // rest of the current list with any duplicate of the primary stripped.
-    const tail = phoneNumbers.filter(n => n !== primary);
+    // Compose final list — primary first, then the rest with any dup
+    // of the primary stripped.
+    const tail = numbers.filter(n => n !== primary);
     const finalNumbers = [primary, ...tail];
 
-    if (!supabase) return;
     setPhoneLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setPhoneLoading(false); return; }
+      if (!user) { setPhoneLoading(false); return false; }
       const { error } = await queryWithTimeout(
         supabase.from('user_settings').upsert({
           user_id:       user.id,
@@ -469,8 +476,6 @@ export default function SettingsScreen() {
         'upsert-user-phone',
       );
       if (error) {
-        // Trigger raises 23505 with a "phone_number_already_registered:
-        // <conflict_phone>" message when another user has the same number.
         const msg = String(error.message || '');
         if (msg.includes('phone_number_already_registered')) {
           const conflict = msg.split(':').slice(1).join(':').trim();
@@ -479,23 +484,19 @@ export default function SettingsScreen() {
             `${conflict} is already registered to another MyNaavi account. Each number can only belong to one user.`
           );
         } else {
-          throw error;
+          Alert.alert('Error', 'Could not save phone changes. Please try again.');
         }
-        return;
+        setPhoneLoading(false);
+        return false;
       }
-      setPhone(primary);
-      setPhoneNumbers(finalNumbers);
       setPhoneSaved(true);
-      Alert.alert(
-        'Saved',
-        finalNumbers.length === 1
-          ? 'Phone number saved. Naavi will call this number for your morning brief, and will recognize you when you call back.'
-          : `Saved ${finalNumbers.length} numbers. Naavi will call the primary for your morning brief and will recognize you when you call from any of them.`
-      );
+      setPhoneLoading(false);
+      return true;
     } catch (err) {
-      Alert.alert('Error', 'Could not save phone number. Please try again.');
+      Alert.alert('Error', 'Could not save phone changes. Please try again.');
+      setPhoneLoading(false);
+      return false;
     }
-    setPhoneLoading(false);
   }
 
   // ── Voice PIN handlers (V57.15.5, Wael 2026-05-14) ─────────────────────
@@ -666,6 +667,18 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
+      {/* V57.15.6 build 179 — wrap ScrollView in KAV so soft keyboard pushes
+          the content up cleanly. Fixes the Primary-edit screen-shift bug
+          where tapping ✓ would miss because the button moved when the
+          keyboard appeared. KAV applies to ALL inputs in the Settings
+          screen (Name, Primary phone edit, Backup phone edit, Add backup,
+          Home/Work address) — consistent behavior. The PIN modal lives
+          outside this KAV (modal overlays bypass parent KAV) and has its
+          own KAV restructure above. */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
@@ -782,7 +795,7 @@ export default function SettingsScreen() {
                     style={styles.phoneRemoveBtn}
                     accessibilityLabel="Cancel primary edit"
                   >
-                    <Ionicons name="close" size={18} color={Colors.textMuted} />
+                    <Ionicons name="close" size={18} color={Colors.error} />
                   </TouchableOpacity>
                 </>
               )}
@@ -840,7 +853,7 @@ export default function SettingsScreen() {
                           style={styles.phoneRemoveBtn}
                           accessibilityLabel="Cancel edit"
                         >
-                          <Ionicons name="close" size={18} color={Colors.textMuted} />
+                          <Ionicons name="close" size={18} color={Colors.error} />
                         </TouchableOpacity>
                       </>
                     ) : (
@@ -857,7 +870,7 @@ export default function SettingsScreen() {
                           style={styles.phoneRemoveBtn}
                           accessibilityLabel={`Remove ${num}`}
                         >
-                          <Ionicons name="close" size={18} color={Colors.textMuted} />
+                          <Ionicons name="close" size={18} color={Colors.error} />
                         </TouchableOpacity>
                       </>
                     )}
@@ -902,16 +915,16 @@ export default function SettingsScreen() {
             </>
           )}
 
-          <TouchableOpacity
-            style={[styles.saveBtn, (!phone.trim() || phoneLoading) && styles.saveBtnDisabled]}
-            onPress={handleSavePhone}
-            disabled={!phone.trim() || phoneLoading}
-            accessibilityRole="button"
-          >
-            <Text style={styles.saveBtnText}>
-              {phoneLoading ? 'Saving...' : phoneNumbers.length > 1 ? 'Save phones' : 'Save phone'}
+          {/* V57.15.6 build 179 — "Save phones" button removed. Each
+              add / remove / edit auto-persists to DB immediately. The brief
+              `phoneLoading` flicker on the section indicates the in-flight
+              upsert. Eliminates the "I added a phone, navigated away, came
+              back, the new entry disappeared" failure mode. */}
+          {phoneLoading && (
+            <Text style={[styles.fieldLabel, { marginTop: 10, textAlign: 'center' }]}>
+              Saving...
             </Text>
-          </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.divider} />
@@ -1173,9 +1186,10 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V57.16.0 (build 184)</Text>
+        <Text style={styles.version}>MyNaavi — V57.16.0 (build 185)</Text>
 
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Voice PIN modal — set OR change. Two PIN fields, popup-style. */}
       <Modal
@@ -1184,19 +1198,19 @@ export default function SettingsScreen() {
         animationType="fade"
         onRequestClose={() => !pinLoading && setPinModalVisible(false)}
       >
-        <Pressable style={styles.pinModalBackdrop} onPress={() => !pinLoading && setPinModalVisible(false)}>
-          {/* V57.15.5 build 177 fix — KeyboardAvoidingView keeps the modal
-              card above the soft keyboard so the confirm field + Save button
-              stay visible. Without it, on Android the keyboard pushes
-              everything but the absolute-positioned modal stays put and the
-              confirm field hides under the keyboard. behavior='padding' is
-              the cross-platform default that works for both iOS + Android. */}
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={{ width: '100%', maxWidth: 380, paddingHorizontal: 0 }}
-            pointerEvents="box-none"
-          >
-          <Pressable style={styles.pinModalCard} onPress={e => e.stopPropagation()}>
+        {/* V57.15.6 build 179 — KAV restructure. KAV is now the OUTERMOST
+            child of Modal (was nested inside centered backdrop, which fought
+            its layout). Backdrop is now anchored from the top with
+            paddingTop:60, so the card sits near the top of the screen
+            regardless of keyboard state — bulletproof against any keyboard
+            quirk. Replaces the V57.15.5 build 177 wrap which only hid the
+            title behind the keyboard. */}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <Pressable style={styles.pinModalBackdrop} onPress={() => !pinLoading && setPinModalVisible(false)}>
+            <Pressable style={styles.pinModalCard} onPress={e => e.stopPropagation()}>
             <Text style={styles.pinModalTitle}>
               {pinModalMode === 'change' ? 'Change your voice PIN' : 'Set your voice PIN'}
             </Text>
@@ -1249,9 +1263,9 @@ export default function SettingsScreen() {
                   : <Text style={styles.pinModalBtnPrimaryText}>Save PIN</Text>}
               </TouchableOpacity>
             </View>
+            </Pressable>
           </Pressable>
-          </KeyboardAvoidingView>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -1303,8 +1317,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: Typography.body,
-    fontWeight: Typography.semibold,
-    color: Colors.textHint,
+    fontWeight: Typography.bold,
+    color: Colors.textPrimary,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     marginBottom: 14,
@@ -1493,7 +1507,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 60,
     paddingHorizontal: 32,
   },
   pinModalCard: {
