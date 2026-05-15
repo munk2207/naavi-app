@@ -13,9 +13,12 @@
     },
     "trial-debug": {
       "distribution": "internal",
+      "env": {
+        "EXPO_DEBUGGABLE_RELEASE": "true"
+      },
       "android": {
         "buildType": "apk",
-        "gradleCommand": ":app:assembleDebug"
+        "gradleCommand": ":app:assembleRelease"
       }
     },
     "production": {
