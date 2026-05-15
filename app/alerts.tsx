@@ -539,7 +539,7 @@ export default function AlertsScreen() {
                                   >
                                     {detachingKey === key
                                       ? <ActivityIndicator size="small" color={Colors.textMuted} />
-                                      : <Ionicons name="close" size={20} color={Colors.textMuted} />}
+                                      : <Ionicons name="close" size={20} color={Colors.error} />}
                                   </TouchableOpacity>
                                 </View>
                               );
