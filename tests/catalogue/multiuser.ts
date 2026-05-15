@@ -102,15 +102,19 @@ const resolvePlaceMatrix = multiUserMatrix({
   validateOk: (data) => typeof data?.status === 'string',
 });
 
-// Calendar functions — body user_id required. Use a far-future event so
-// nothing real lands on Robert's calendar.
+// Calendar functions — body user_id required. Use a near-future event so
+// it falls within delete-calendar-event's search window (now+1 year), so
+// teardownSuite can actually clean up after the test. Original 2099 dates
+// were outside the window and accumulated on the test user's calendar.
+const calNearFutureStart = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
+const calNearFutureEnd   = new Date(calNearFutureStart.getTime() + 30 * 60_000);
 const createCalEventMatrix = multiUserMatrix({
   fnName: 'create-calendar-event',
   description: 'create-calendar-event (writes to user calendar)',
   body: {
     summary: 'multiuser-safety-test (delete me)',
-    start: '2099-01-01T10:00:00Z',
-    end: '2099-01-01T10:30:00Z',
+    start: calNearFutureStart.toISOString(),
+    end:   calNearFutureEnd.toISOString(),
   },
   // 401/403 (token missing/expired) is acceptable for body-userid test if
   // the test user has no Calendar OAuth — the resolution path still ran.

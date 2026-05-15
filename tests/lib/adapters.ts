@@ -150,6 +150,23 @@ export const adapters = {
       ...args,
     }, opts);
   },
+
+  /**
+   * delete-calendar-event — query-based deletion. Pass service-role auth
+   * + body.user_id so teardown can clean up without a user JWT. Calendar
+   * search window is now-1day to now+1year, so test-created events must
+   * use near-future dates to be deletable here.
+   */
+  async deleteCalendarEvent(
+    ctx: TestContext,
+    query: string,
+    opts: CallOptions = {},
+  ) {
+    return callEdgeFunction(ctx, 'delete-calendar-event', {
+      user_id: ctx.testUserId,
+      query,
+    }, { ...opts, asService: true });
+  },
 };
 
 /** Direct Postgres REST helpers via PostgREST (uses service-role for unrestricted writes). */

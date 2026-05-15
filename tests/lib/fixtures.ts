@@ -13,7 +13,7 @@
  * still work because they don't write to RLS-protected tables.
  */
 
-import { db } from './adapters';
+import { adapters, db } from './adapters';
 import type { TestContext } from './types';
 
 /** Tables to clear at suite teardown for the test user. */
@@ -50,6 +50,29 @@ export async function teardownSuite(ctx: TestContext): Promise<void> {
       // Some tables may not have user_id, or may not exist in this env.
       // Log and continue — best-effort cleanup.
       ctx.log(`[fixtures] teardown(${table}) skipped: ${(err as Error).message}`);
+    }
+  }
+
+  // V57.16 — clean up Google Calendar events created by the calendar +
+  // multiuser tests. Without this, every suite run leaves events behind on
+  // the test user's calendar (Wael flagged 2026-05-15 that mynaavi2207's
+  // calendar was flooded).
+  const calendarQueries = [
+    'Auto-tester sample event',
+    'multiuser-safety-test',
+  ];
+  for (const query of calendarQueries) {
+    try {
+      const { status, data } = await adapters.deleteCalendarEvent(ctx, query);
+      const deleted = data?.deleted ?? 0;
+      if (deleted > 0) {
+        ctx.log(`[fixtures] cleaned ${deleted} calendar event(s) matching "${query}"`);
+      }
+      if (status >= 400 && status !== 400) {
+        ctx.log(`[fixtures] calendar cleanup status=${status} for "${query}": ${JSON.stringify(data).slice(0, 120)}`);
+      }
+    } catch (err) {
+      ctx.log(`[fixtures] calendar cleanup for "${query}" failed: ${(err as Error).message}`);
     }
   }
 }

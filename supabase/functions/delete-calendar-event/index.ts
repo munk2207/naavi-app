@@ -43,7 +43,7 @@ serve(async (req) => {
   }
 
   const body = await req.json();
-  const { query } = body;
+  const { query, user_id: bodyUserId } = body;
 
   if (!query) {
     return new Response(JSON.stringify({ error: 'Missing query' }), {
@@ -51,26 +51,46 @@ serve(async (req) => {
     });
   }
 
-  const userClient = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } }
-  );
+  // V57.16 — dual auth path. Mirrors the multi-user pattern in
+  // create-calendar-event. If body.user_id is provided, treat the request
+  // as a service-role admin call (used by the test runner's teardown for
+  // automated calendar cleanup). Otherwise use the caller's JWT to look
+  // up THEIR tokens via RLS (production path — mobile app, Naavi voice).
+  let refreshToken: string | undefined;
+  if (bodyUserId) {
+    const adminClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    );
+    const { data: tokenRow } = await adminClient
+      .from('user_tokens')
+      .select('refresh_token')
+      .eq('user_id', bodyUserId)
+      .eq('provider', 'google')
+      .single();
+    refreshToken = tokenRow?.refresh_token;
+  } else {
+    const userClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+    const { data: tokenRow } = await userClient
+      .from('user_tokens')
+      .select('refresh_token')
+      .eq('provider', 'google')
+      .single();
+    refreshToken = tokenRow?.refresh_token;
+  }
 
-  const { data: tokenRow, error: tokenError } = await userClient
-    .from('user_tokens')
-    .select('refresh_token')
-    .eq('provider', 'google')
-    .single();
-
-  if (tokenError || !tokenRow?.refresh_token) {
+  if (!refreshToken) {
     return new Response(JSON.stringify({ error: 'No Google token found' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
   try {
-    const accessToken = await getNewAccessToken(tokenRow.refresh_token);
+    const accessToken = await getNewAccessToken(refreshToken);
 
     // Search for events matching the query (look back 1 day, forward 1 year)
     const now = new Date();
