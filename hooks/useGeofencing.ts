@@ -182,7 +182,7 @@ function ensureReady(): Promise<void> {
         notification: {
           title: 'MyNaavi is keeping your alerts ready',
           text: 'Tap to open Naavi',
-          smallIcon: 'mipmap/ic_launcher',
+          smallIcon: 'drawable/notification_icon',
           color: '#5DCAA5',
         },
       },
@@ -212,7 +212,7 @@ function ensureReady(): Promise<void> {
 
 // ── Geofence event handler (replaces the old GEOFENCE_TASK handler) ─────────
 
-async function handleGeofenceEvent(event: GeofenceEvent): Promise<void> {
+export async function handleGeofenceEvent(event: GeofenceEvent): Promise<void> {
   const ruleId = event.identifier;
   if (!ruleId) return;
 
