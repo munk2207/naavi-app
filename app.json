@@ -21,7 +21,7 @@
       }
     },
     "android": {
-      "versionCode": 180,
+      "versionCode": 181,
       "softwareKeyboardLayoutMode": "pan",
       "package": "ca.naavi.app",
       "googleServicesFile": "./google-services.json",
@@ -45,6 +45,7 @@
       "expo-sqlite",
       "expo-localization",
       "./plugins/withAppActions",
+      "./plugins/withDebuggableRelease",
       "expo-updates",
       "@mykin-ai/expo-audio-stream",
       "expo-contacts",
