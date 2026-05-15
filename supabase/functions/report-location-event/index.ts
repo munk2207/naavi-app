@@ -37,7 +37,11 @@ const corsHeaders = {
 };
 
 interface LocationEvent {
-  user_id:   string;
+  // V57.16 — now optional. Headless task on the phone may not have a live
+  // session and skip the client-side rule lookup; server derives user_id
+  // from the rule's owner. If client DID send it, server validates it
+  // matches rule.user_id (preserves cross-user safety check).
+  user_id?:  string;
   rule_id:   string;
   lat:       number;
   lng:       number;
@@ -87,11 +91,35 @@ serve(async (req) => {
 
   try {
     const body = (await req.json()) as LocationEvent;
-    const { user_id, rule_id, event, event_id } = body;
+    const { rule_id, event, event_id } = body;
+    let { user_id } = body;
     const fromPendingDwell = body.from_pending_dwell === true;
 
-    if (!user_id || !rule_id || !event) {
-      return json({ error: 'Missing user_id, rule_id, or event' }, 400);
+    if (!rule_id || !event) {
+      return json({ error: 'Missing rule_id or event' }, 400);
+    }
+
+    // 1. Fetch the rule first (service-role bypasses RLS) — verify it's a
+    // location rule and resolve user_id if the client didn't send one
+    // (V57.16: headless-task path may have no live session).
+    const { data: rule, error: ruleErr } = await admin
+      .from('action_rules')
+      .select('id, user_id, trigger_type, trigger_config, action_type, action_config, label, one_shot, enabled')
+      .eq('id', rule_id)
+      .maybeSingle();
+
+    if (ruleErr || !rule) return json({ error: 'Rule not found' }, 404);
+
+    if (user_id) {
+      // Client provided a user_id — validate it matches the rule's owner
+      // (cross-user safety: someone with a stolen rule_id can't fire it
+      // for a different user).
+      if (rule.user_id !== user_id) {
+        return json({ error: 'Rule does not belong to user' }, 403);
+      }
+    } else {
+      // Headless / session-less path — derive user_id from the rule itself
+      user_id = rule.user_id;
     }
 
     // V57.10.1 — T3 server received. Pairs with client T1/T2 to expose
@@ -102,15 +130,6 @@ serve(async (req) => {
       client_timestamp: body.timestamp,
     });
 
-    // 1. Fetch the rule — verify ownership + confirm it's a location rule
-    const { data: rule, error: ruleErr } = await admin
-      .from('action_rules')
-      .select('id, user_id, trigger_type, trigger_config, action_type, action_config, label, one_shot, enabled')
-      .eq('id', rule_id)
-      .maybeSingle();
-
-    if (ruleErr || !rule) return json({ error: 'Rule not found' }, 404);
-    if (rule.user_id !== user_id) return json({ error: 'Rule does not belong to user' }, 403);
     if (rule.trigger_type !== 'location') return json({ error: 'Not a location rule' }, 400);
     if (!rule.enabled) return json({ ok: true, skipped: 'rule disabled' });
 
