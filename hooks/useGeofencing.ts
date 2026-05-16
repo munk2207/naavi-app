@@ -238,13 +238,14 @@ function ensureReady(): Promise<void> {
       // Reset config across app launches — we always declare it fresh here.
       reset: true,
 
-      // V57.16.1 — vendor's #1 recommended diagnostic for "geofence not
-      // firing" reports (per maintainer @christocracy across Issues #2160,
-      // #2407, #1830). Plays per-event sound effects on the device so we can
-      // audibly confirm whether the native SDK detected a transition,
-      // independent of whether our JS handler ran. Trial-period only —
-      // disable for V57.18 production once geofence reliability is confirmed.
-      debug: true,
+      // V57.18.1 — debug sounds disabled. Reliability confirmed empirically
+      // on 2026-05-16 drive test (V57.17 native HTTP + V57.18 single-flight
+      // delivered alerts within ~1 sec of T1 on both phones, both addresses,
+      // multi-fire). The audible per-event chime was a trial-period
+      // diagnostic only; not needed in production. Re-enable temporarily by
+      // setting true if a future geofence-not-firing incident needs
+      // audible confirmation that the native SDK detected the transition.
+      debug: false,
 
       // V57.17 — Native HTTP autosync (Config.url). The SDK posts every
       // persisted geofence event directly to our webhook from native code,
