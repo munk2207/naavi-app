@@ -50,6 +50,37 @@ import { multiPhoneTests } from './catalogue/multi-phone';
 import { listsReconcileTests } from './catalogue/lists-reconcile';
 
 // ────────────────────────────────────────────────────────────────────────────
+// DISABLED 2026-05-16 by Wael — hard stop until explicitly re-enabled.
+//
+// Why disabled: destructive side effects on the real test user account
+// (mynaavi2207@gmail.com). Two observed incidents:
+//   - Google Calendar floods (multiuser + calendar tests created events
+//     without reliable cleanup until V57.16 fix landed)
+//   - user_settings.phone NULL'd on every run by multi-phone tests'
+//     clearTestUserPhones, blocking real-world geofence fan-out delivery
+//     for Phone 2 until V57.16 fixtures.snapshot/restore fix landed
+//
+// Both side effects have code fixes shipped, but Wael has paused the
+// runner pending an audit of any other destructive write paths against
+// real-user data. To re-enable, set AUTO_TESTER_ENABLED=true in env.
+//
+// CLAUDE.md Rule 15 (test:auto must be green before AAB) is SUSPENDED
+// while this gate is in place.
+// ────────────────────────────────────────────────────────────────────────────
+
+if (process.env.AUTO_TESTER_ENABLED !== 'true') {
+  console.error('────────────────────────────────────────────────────────');
+  console.error('Auto-tester DISABLED by Wael 2026-05-16.');
+  console.error('Reason: destructive side effects on mynaavi2207 account');
+  console.error('(calendar floods, phone NULLification).');
+  console.error('');
+  console.error('To re-enable: set AUTO_TESTER_ENABLED=true');
+  console.error('  e.g.  AUTO_TESTER_ENABLED=true npm run test:auto');
+  console.error('────────────────────────────────────────────────────────');
+  process.exit(2);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // .env loader (avoids adding dotenv as a dependency).
 // ────────────────────────────────────────────────────────────────────────────
 
