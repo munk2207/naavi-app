@@ -355,6 +355,25 @@ export async function handleGeofenceEvent(event: GeofenceEvent): Promise<void> {
   const ruleId = event.identifier;
   if (!ruleId) return;
 
+  // V57.16.2 — wake-the-brain: ask Android to keep our JS event loop alive
+  // for the duration of this handler. Without this wrap, Android suspends
+  // mid-await and our T2 POST lands minutes-to-hours later (V57.16.1 drive
+  // proved 15m 45s gap on Phone 1, 33m 8s gap on Phone 2 same drive).
+  // startBackgroundTask gives us ~30 sec of guaranteed JS lifetime; the
+  // finally block at the end of the function calls stopBackgroundTask so
+  // the OS can release the resource. Per vendor wiki "Android Headless Mode"
+  // — this is the documented pattern for long-running headless work.
+  let bgTaskId: number | null = null;
+  try {
+    bgTaskId = await BackgroundGeolocation.startBackgroundTask();
+  } catch (err) {
+    remoteLog(getLifecycleSession(), 'tsoft-start-bgtask-failed', {
+      error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+    });
+  }
+
+  try {
+
   const eventName =
     event.action === 'ENTER' ? 'enter' :
     event.action === 'EXIT'  ? 'exit'  :
@@ -480,6 +499,18 @@ export async function handleGeofenceEvent(event: GeofenceEvent): Promise<void> {
     console.log(`[geofence-task] posted ${eventName} for rule ${ruleId} → ${res.status}`);
   } catch (err) {
     console.error('[geofence-task] handler failed:', err);
+  }
+
+  } finally {
+    // V57.16.2 — release the OS-granted JS lifetime window. Wrapped in its
+    // own try so a stop failure (e.g., taskId already auto-expired by OS)
+    // never propagates out of the handler. Best effort — OS may have
+    // already terminated the task if our work exceeded ~30 sec.
+    if (bgTaskId !== null) {
+      try {
+        await BackgroundGeolocation.stopBackgroundTask(bgTaskId);
+      } catch { /* OS may have already released */ }
+    }
   }
 }
 

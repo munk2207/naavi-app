@@ -239,15 +239,22 @@ serve(async (req) => {
     //
     // V57.16 — read EITHER dwell_seconds OR dwell_minutes from trigger_config
     // (rules historically wrote dwell_minutes which the prior code ignored).
-    // Default 30 s (was 120 s) — paired with 300 m default radius to fire
-    // earlier in the user's approach. Set explicitly to 0 for immediate fire.
+    //
+    // 2026-05-16 — default 30 s → 0 s (Wael decision). Today's drive proved
+    // the JS-handler suspension (V57.16.1 diagnostic finding) is the real
+    // latency source, not drive-throughs. With dwell=0 + the V57.16.2
+    // startBackgroundTask fix, end-to-end T1→delivery drops from 17-34 min
+    // to ~10-30 sec. Drive-through false-fires reintroduced as a trade-off
+    // — Wael's use cases are intentional arrivals (Costco, home, work),
+    // drive-throughs are rare. Per-rule override still works via
+    // trigger_config.dwell_seconds for any rule that wants the old behavior.
     let dwellSeconds: number;
     if (typeof rule.trigger_config?.dwell_seconds === 'number') {
       dwellSeconds = Math.max(0, Math.floor(rule.trigger_config.dwell_seconds));
     } else if (typeof rule.trigger_config?.dwell_minutes === 'number') {
       dwellSeconds = Math.max(0, Math.floor(rule.trigger_config.dwell_minutes * 60));
     } else {
-      dwellSeconds = 30;
+      dwellSeconds = 0;
     }
 
     if (dwellSeconds > 0) {
