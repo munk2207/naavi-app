@@ -54,6 +54,13 @@ const REGISTRY_KEY = 'naavi.geofence.lastReg.v1';
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
+// V57.17 — Transistorsoft Config.url ingest endpoint. The SDK posts geofence
+// events here natively (no JS in the critical path), bypassing the Android
+// JS-event-loop suspension that made V57.16.x deliveries depend on the user
+// opening the app. Auth reuses the anon key (already baked in the APK; same
+// threat model as the SDK URL itself).
+const TSOFT_INGEST_URL = `${SUPABASE_URL}/functions/v1/tsoft-geofence-webhook`;
+
 // V57.10.5 — asymmetric suppression windows. Android sometimes emits
 // initial-state EXIT events 4+ minutes after registration. Since none of
 // Wael's rules use direction='leave', EXIT events are pure noise — the
@@ -211,6 +218,19 @@ function ensureReady(): Promise<void> {
       });
     });
 
+    // V57.17 — native HTTP autosync events. Fires once per POST the SDK
+    // makes to Config.url. Lets us see in real time whether the native
+    // path is succeeding (success:true, status:200) or retrying (status
+    // !=2xx, success:false). This is the primary instrument for proving
+    // V57.17's "JS no longer in critical path" claim.
+    BackgroundGeolocation.onHttp((event) => {
+      remoteLog(getLifecycleSession(), 'tsoft-http', {
+        success: event.success,
+        status: event.status,
+        response_chars: (event.responseText ?? '').length,
+      });
+    });
+
     // ready() blocks until the SDK is fully initialized. After this, we can
     // call addGeofences / startGeofences safely. v5 uses a nested Config
     // structure (geolocation / app / logger sub-objects).
@@ -223,8 +243,34 @@ function ensureReady(): Promise<void> {
       // #2407, #1830). Plays per-event sound effects on the device so we can
       // audibly confirm whether the native SDK detected a transition,
       // independent of whether our JS handler ran. Trial-period only —
-      // disable for V57.17 production once geofence reliability is confirmed.
+      // disable for V57.18 production once geofence reliability is confirmed.
       debug: true,
+
+      // V57.17 — Native HTTP autosync (Config.url). The SDK posts every
+      // persisted geofence event directly to our webhook from native code,
+      // NOT from JavaScript. This is the architectural fix for the
+      // JS-suspension class of bug documented in
+      // docs/TRANSISTORSOFT_HEADLESS_WAKE_INVESTIGATION_2026-05-16.md —
+      // Android suspends the JS event loop after an event, so our JS
+      // handler's `await fetch` was parked for 15 min to 3 hours until
+      // the user opened the app. Native code is not subject to that
+      // suspension.
+      url: TSOFT_INGEST_URL,
+      headers: {
+        // Reuse the anon key (same one already baked into the APK for
+        // other Supabase calls). The webhook validates this server-side.
+        authorization: `Bearer ${SUPABASE_ANON}`,
+      },
+      autoSync: true,        // Post each event immediately (no batching)
+      batchSync: false,      // Single-record posts, easier server logic
+      // Only persist (and therefore upload) geofence events. Without this,
+      // the SDK would post every motion-change/location update too —
+      // network + cost explosion. Per Config.d.ts:1178-1197.
+      persistMode: BackgroundGeolocation.PERSIST_MODE_GEOFENCE,
+      // SDK's SQLite buffer keeps events up to 3 days if our server is down,
+      // so a brief outage doesn't lose alerts.
+      maxDaysToPersist: 3,
+      httpTimeout: 30000,    // 30s — generous enough for cold-start fan-out
 
       geolocation: {
         // Geofence-only mode uses High accuracy for the periodic location
@@ -597,6 +643,11 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
         notifyOnEntry: r.notifyOnEntry,
         notifyOnExit: r.notifyOnExit,
         notifyOnDwell: false,
+        // V57.17 — bake user_id into geofence extras so the native HTTP
+        // path (Config.url) self-identifies the user without a server-side
+        // action_rules lookup. Per vendor: extras "are appended to the
+        // geofence event and posted to your configured Config.url".
+        extras: { user_id: userId } as any,
       }));
       await BackgroundGeolocation.addGeofences(tsoftGeofences);
       // startGeofences puts the SDK into geofence-only mode (vs full motion
