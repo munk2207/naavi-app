@@ -531,8 +531,29 @@ export async function handleGeofenceEvent(event: GeofenceEvent): Promise<void> {
 
 // ── Module-level sync function ──────────────────────────────────────────────
 
+// V57.18 — single-flight guard. Android emits MANY AppState='active' events
+// per second during app launch (10+ in a single second per today's data),
+// causing parallel syncGeofencesForUser calls. The SDK's addGeofences /
+// startGeofences are async and collide ("Waiting for previous start action
+// to complete" errors), leaving rules in indeterminate state and causing
+// real-world fires to miss (e.g., the 8182 driveway miss on the 2026-05-16
+// drive). Single-flight makes subsequent calls a no-op while one is running.
+let _syncInProgress = false;
+
 export async function syncGeofencesForUser(userId: string): Promise<number> {
   if (!userId || !supabase) return 0;
+
+  // V57.18 — drop if a sync is already in flight. The in-flight call will
+  // produce the up-to-date state when it finishes; queuing another behind
+  // it just creates a race.
+  if (_syncInProgress) {
+    remoteLog(getLifecycleSession(), 'syncGeofences-skip', {
+      reason: 'already-in-flight',
+      user_id_short: userId.slice(0, 8),
+    });
+    return 0;
+  }
+  _syncInProgress = true;
 
   try {
     remoteLog(getLifecycleSession(), 'syncGeofences-start', {
@@ -683,6 +704,11 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
       error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
     });
     return 0;
+  } finally {
+    // V57.18 — always release the single-flight lock, even on error / early
+    // return. Without this, one failed sync would permanently block all
+    // subsequent syncs.
+    _syncInProgress = false;
   }
 }
 
