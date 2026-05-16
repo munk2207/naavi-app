@@ -36,7 +36,52 @@ const OWNED_TABLES = [
   'email_actions',
 ];
 
+// V57.16 — multi-phone tests in the suite mutate user_settings.phone and
+// user_settings.phone_numbers on the test user. They were calling
+// clearTestUserPhones(ctx) → null in finally blocks, which nuked the real
+// phone every suite run (Wael 2026-05-16). Snapshot the original values
+// at suite start; restore them at suite end.
+let originalPhoneSnapshot: { phone: string | null; phone_numbers: string[] | null } | null = null;
+
+async function snapshotOriginalPhones(ctx: TestContext): Promise<void> {
+  try {
+    const url = `${ctx.supabaseUrl}/rest/v1/user_settings?user_id=eq.${ctx.testUserId}&select=phone,phone_numbers`;
+    const res = await fetch(url, {
+      headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}` },
+    });
+    const rows = (await res.json()) as Array<{ phone: string | null; phone_numbers: string[] | null }>;
+    originalPhoneSnapshot = rows[0] ?? { phone: null, phone_numbers: null };
+    ctx.log(`[fixtures] snapshot test-user phones: phone=${originalPhoneSnapshot.phone} numbers=${JSON.stringify(originalPhoneSnapshot.phone_numbers)}`);
+  } catch (err) {
+    ctx.log(`[fixtures] snapshot failed: ${(err as Error).message}`);
+  }
+}
+
+async function restoreOriginalPhones(ctx: TestContext): Promise<void> {
+  if (!originalPhoneSnapshot) return;
+  try {
+    const url = `${ctx.supabaseUrl}/rest/v1/user_settings?user_id=eq.${ctx.testUserId}`;
+    await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        apikey: ctx.serviceRoleKey,
+        Authorization: `Bearer ${ctx.serviceRoleKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        phone:         originalPhoneSnapshot.phone,
+        phone_numbers: originalPhoneSnapshot.phone_numbers,
+      }),
+    });
+    ctx.log(`[fixtures] restored test-user phones to original: phone=${originalPhoneSnapshot.phone}`);
+  } catch (err) {
+    ctx.log(`[fixtures] restore phones failed: ${(err as Error).message}`);
+  }
+}
+
 export async function setupSuite(ctx: TestContext): Promise<void> {
+  // Snapshot phones BEFORE teardown so we capture the real value.
+  await snapshotOriginalPhones(ctx);
   // Idempotent — we don't insert auth.users, the test user must exist.
   // We just make sure our tables don't have stale data from a prior run.
   await teardownSuite(ctx);
@@ -52,6 +97,10 @@ export async function teardownSuite(ctx: TestContext): Promise<void> {
       ctx.log(`[fixtures] teardown(${table}) skipped: ${(err as Error).message}`);
     }
   }
+
+  // V57.16 — restore the test user's phone+phone_numbers if multi-phone
+  // tests nuked them via clearTestUserPhones(). Snapshot taken in setupSuite.
+  await restoreOriginalPhones(ctx);
 
   // V57.16 — clean up Google Calendar events created by the calendar +
   // multiuser tests. Without this, every suite run leaves events behind on
