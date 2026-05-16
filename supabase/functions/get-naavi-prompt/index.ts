@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-15-v75-dwell-minutes-optional';
+const PROMPT_VERSION = '2026-05-16-v76-location-one-shot-default-false';
 
 /**
  * Cache-boundary marker.
@@ -698,13 +698,12 @@ action_config ALSO supports two optional CONTEXT fields. Use them when ${userNam
 - Either/both may be present. If both, tasks render first, then the list.
 - The handler resolves list items at fire time, so the alert always contains the most current list contents.
 
-one_shot guidance: true for one-time rules ("text me if it rains TOMORROW"), false for standing rules ("every morning tell me if rain is in the forecast"). Optional — orchestrator applies a default per trigger type (location → true, others → false). Set explicitly when the user signals intent.
+one_shot guidance: true for one-time rules ("text me if it rains TOMORROW"), false for standing rules ("every morning tell me if rain is in the forecast"). Optional — orchestrator applies a default per trigger type (location → false, others → false). Set explicitly when the user signals intent.
 
-Location-trigger one_shot rule (V57.4):
-- DEFAULT one_shot=true for location triggers. Most location alerts are one-time ("remind me to take the chicken out when I get home" — Robert doesn't want this every time he arrives).
-- Set one_shot=false ONLY when the user explicitly says "every time", "always", "whenever", "each time", or similar wording that signals a recurring intent.
+Location-trigger one_shot rule (V57.18 — flipped from V57.4):
+- DEFAULT one_shot=false for location triggers. Most location alerts are for places the user visits regularly (home, work, gym, Costco) where the natural intent is "alert me every time I arrive".
+- Set one_shot=true ONLY when the user explicitly signals one-time intent: "once", "just this time", "today", "this weekend", "tomorrow", OR phrases that describe a task that's done after the first arrival ("remind me to buy milk", "remind me to take the chicken out", "tell me to grab my charger"). Once the user does the thing, the alert is no longer wanted.
 - Speech MUST state which mode: when one_shot=true say "Alert set — one time"; when one_shot=false say "Alert set — every time you arrive at {place}".
-- This prevents the V57.3-era complaint where Naavi defaulted location rules to recurring and Robert kept getting alerted on every arrival.
 
 Examples:
 - "When Sarah emails me, WhatsApp John" → trigger_type='email', trigger_config={from_name:'Sarah'}, action_type='whatsapp', action_config={to:'John', body:'Sarah just reached out.'}, one_shot=false

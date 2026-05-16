@@ -745,9 +745,14 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             ?? (pending.originalAction?.trigger_config as any)?.radius_meters
             ?? 150,
         };
-        // V57.4 — location alerts default to ONE-TIME (one_shot=true). See
+        // V57.18 — location alerts default to RECURRING (one_shot=false). See
         // matching note in the SET_ACTION_RULE intercept below.
-        const oneShot = pending.originalAction?.one_shot ?? true;
+        // V57.18 — default flipped true → false. Most location alerts users create
+// are for places they visit regularly (home, work, gym, Costco) where the
+// natural intent is "alert me every time I arrive", not "alert me once
+// then forget." Set explicit one_shot:true via prompt when user signals
+// one-time intent ("this weekend", "today", "remind me to do X").
+const oneShot = pending.originalAction?.one_shot ?? false;
         const { data: insertedRule, error } = await queryWithTimeout(
           supabase
             .from('action_rules')
@@ -886,7 +891,12 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         }
         // V57.4 — speech now states one-time vs every-time so Robert always
         // knows which mode the rule is in.
-        const oneShot = pending.originalAction?.one_shot ?? true;
+        // V57.18 — default flipped true → false. Most location alerts users create
+// are for places they visit regularly (home, work, gym, Costco) where the
+// natural intent is "alert me every time I arrive", not "alert me once
+// then forget." Set explicit one_shot:true via prompt when user signals
+// one-time intent ("this weekend", "today", "remind me to do X").
+const oneShot = pending.originalAction?.one_shot ?? false;
         const modeText = oneShot ? 'one time' : 'every time';
         const speech = ok
           ? `Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.`
@@ -981,7 +991,12 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                 console.error('[orch:loc:clarif-memory] permission check threw:', err);
               }
               const { ok, ruleId, alreadyExists } = await commitPending(session.user.id, 'confirmed');
-              const oneShot = pending.originalAction?.one_shot ?? true;
+              // V57.18 — default flipped true → false. Most location alerts users create
+// are for places they visit regularly (home, work, gym, Costco) where the
+// natural intent is "alert me every time I arrive", not "alert me once
+// then forget." Set explicit one_shot:true via prompt when user signals
+// one-time intent ("this weekend", "today", "remind me to do X").
+const oneShot = pending.originalAction?.one_shot ?? false;
               pendingLocationRef.current = null;
               if (alreadyExists) {
                 const existingMode = alreadyExists.oneShot ? 'one-time' : 'recurring';
@@ -2208,14 +2223,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                         ?? (action.trigger_config as any)?.radius_meters
                         ?? 150,
                     };
-                    // V57.4 — location alerts default to ONE-TIME (one_shot=true).
-                    // Naavi only flips this to recurring if Robert says
-                    // "every time" / "always" / similar. The server prompt v41
-                    // is supposed to emit one_shot=true on default location
-                    // requests, but we also default to true here as a safety
-                    // net so a forgotten field can't silently downgrade the
-                    // rule to recurring.
-                    const oneShot = action.one_shot ?? true;
+                    // V57.18 — location alerts default to RECURRING (one_shot=false).
+                    // Most users create alerts for places they visit regularly
+                    // (home, work, gym, Costco) where "every time I arrive"
+                    // is the natural intent. The server prompt sets one_shot=true
+                    // explicitly when the user signals one-time intent ("this
+                    // weekend", "today", "remind me to do X" — a task that's
+                    // done after the first arrival). We default to false here as
+                    // a safety net so a forgotten field doesn't silently disable
+                    // the rule after one fire.
+                    const oneShot = action.one_shot ?? false;
                     // V57.4 Part B — capture the inserted rule's id so the
                     // turn can render a "Make it recurring / one-time" toggle.
                     const { data: insertedRule, error: insertErr } = await queryWithTimeout(
