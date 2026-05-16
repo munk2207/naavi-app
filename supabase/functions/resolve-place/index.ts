@@ -158,12 +158,68 @@ serve(async (req) => {
 
     let biasLat: number | null = referenceLat;
     let biasLng: number | null = referenceLng;
-    if ((biasLat === null || biasLng === null) && homeAddress) {
+    let homeCountry: string | null = null;
+    if (homeAddress) {
+      // Always geocode home_address — we need its country for the numeric-
+      // address gate, even when bias coords were passed in by the caller.
       const homeCoords = await geocodeAddress(homeAddress, apiKey);
       if (homeCoords) {
-        biasLat = homeCoords.lat;
-        biasLng = homeCoords.lng;
+        if (biasLat === null || biasLng === null) {
+          biasLat = homeCoords.lat;
+          biasLng = homeCoords.lng;
+        }
+        homeCountry = homeCoords.country;
       }
+    }
+
+    // 2026-05-16 — numbered street addresses → geocode API with 3-check gate
+    // (country, precision, postal completeness). Wael's design principle:
+    // reject ANY geocode result lacking a complete postal code (in Canada,
+    // 6 chars; 3-char FSA-only means "approximate area," not a real address).
+    // No silent fall-through to textsearch — better to ask user to retype
+    // than to register an alert at wrong coords.
+    // Matches CLAUDE.md holding-list item 16.
+    if (/^\s*\d/.test(placeName)) {
+      // Try raw geocode first (cheapest path — single API call when the
+      // user typed the address correctly).
+      let result = await geocodeBestCandidate(placeName, apiKey, homeCountry);
+
+      // 2026-05-16 retry — Google geocode is strict on spelling. Wael's
+      // test "8042 Jean d'Arc Boulevard north" returned no usable
+      // candidate because the street is actually "Jeanne-d'Arc". Re-trying
+      // the SAME query with the user's home city/province appended often
+      // disambiguates without changing the user's typo. Costs +1 geocode
+      // call ($0.005) ONLY when the first call returned no passing candidate.
+      if (!result && homeAddress) {
+        const parts = homeAddress.split(/,\s*/);
+        if (parts.length >= 2) {
+          const cityProv = parts.slice(-2).join(', ');  // "Ottawa, Ontario"
+          const enriched = `${placeName}, ${cityProv}`;
+          console.log(`[resolve-place v5] geocode no-pass for "${placeName}", retrying with "${enriched}"`);
+          result = await geocodeBestCandidate(enriched, apiKey, homeCountry);
+        }
+      }
+
+      if (result) {
+        console.log(`[resolve-place v5] numeric-address path → geocode (gated): "${placeName}" → ${result.formatted}`);
+        return jsonResponse({
+          status:        'ok',
+          source:        'fresh',
+          place_name:    result.formatted ?? placeName,
+          address:       result.formatted,
+          lat:           result.lat,
+          lng:           result.lng,
+          radius_meters: radiusOverride,
+        });
+      }
+      // 2026-05-16 — gate rejected every candidate (or geocode returned
+      // nothing). Return not_found instead of falling through to textsearch.
+      // textsearch returns business-name matches for numbered queries,
+      // which is wrong (Wael's "8042 Jean d'Arc" test returned "1887 St
+      // Joseph Blvd", "Ottawa," etc. — all the wrong place). The
+      // orchestrator handles not_found by asking the user to retype.
+      console.log(`[resolve-place v5] numeric-address: no candidate passed gate for "${placeName}", returning not_found`);
+      return jsonResponse({ status: 'not_found' });
     }
 
     const qs = new URLSearchParams({ query: placeName, key: apiKey });
@@ -238,7 +294,18 @@ serve(async (req) => {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-async function geocodeAddress(address: string, apiKey: string): Promise<{ lat: number; lng: number; formatted: string | null } | null> {
+// 2026-05-16 — extended return shape to include the signals geocodeBestCandidate
+// needs (country, postal_code, location_type, partial_match). Callers that only
+// use lat/lng/formatted continue to work — extra fields are ignored.
+async function geocodeAddress(address: string, apiKey: string): Promise<{
+  lat: number;
+  lng: number;
+  formatted: string | null;
+  country: string | null;
+  postalCode: string | null;
+  locationType: string | null;
+  partialMatch: boolean;
+} | null> {
   try {
     const qs = new URLSearchParams({ address, key: apiKey });
     const res = await fetch(`${PLACES_GEOCODE}?${qs.toString()}`);
@@ -246,16 +313,116 @@ async function geocodeAddress(address: string, apiKey: string): Promise<{ lat: n
     const data = await res.json();
     if (data.status && data.status !== 'OK') return null;
     const first = data.results?.[0];
-    const lat = first?.geometry?.location?.lat;
-    const lng = first?.geometry?.location?.lng;
-    const formatted = first?.formatted_address ?? null;
-    if (typeof lat === 'number' && typeof lng === 'number') {
-      return { lat, lng, formatted };
-    }
-    return null;
+    return extractGeocodeFields(first);
   } catch (err) {
     console.error(`[geocode] exception for "${address}":`, err instanceof Error ? err.message : String(err));
     return null;
+  }
+}
+
+// Extract the fields we care about from a single Google geocode result.
+// Returns null if lat/lng are missing.
+function extractGeocodeFields(result: any): {
+  lat: number;
+  lng: number;
+  formatted: string | null;
+  country: string | null;
+  postalCode: string | null;
+  locationType: string | null;
+  partialMatch: boolean;
+} | null {
+  if (!result) return null;
+  const lat = result?.geometry?.location?.lat;
+  const lng = result?.geometry?.location?.lng;
+  if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+  const formatted = result?.formatted_address ?? null;
+  const locationType = result?.geometry?.location_type ?? null;
+  const partialMatch = result?.partial_match === true;
+  const components = Array.isArray(result?.address_components) ? result.address_components : [];
+  const countryComp = components.find((c: any) => Array.isArray(c?.types) && c.types.includes('country'));
+  const postalComp = components.find((c: any) => Array.isArray(c?.types) && c.types.includes('postal_code'));
+  return {
+    lat,
+    lng,
+    formatted,
+    country: countryComp?.short_name ?? null,
+    postalCode: postalComp?.long_name ?? null,
+    locationType,
+    partialMatch,
+  };
+}
+
+// 2026-05-16 — iterate ALL geocode results, return the first one passing the
+// 3-check gate (country, precision, postal completeness). Returns null when
+// no candidate passes — caller treats that as not_found (no silent fallback
+// to textsearch, no silent acceptance of an imprecise coord pair).
+async function geocodeBestCandidate(
+  address: string,
+  apiKey: string,
+  expectedCountry: string | null,
+): Promise<{ lat: number; lng: number; formatted: string | null; country: string | null; postalCode: string | null } | null> {
+  try {
+    const qs = new URLSearchParams({ address, key: apiKey });
+    const res = await fetch(`${PLACES_GEOCODE}?${qs.toString()}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.status && data.status !== 'OK') return null;
+    const results: any[] = Array.isArray(data.results) ? data.results : [];
+    for (const candidate of results) {
+      const fields = extractGeocodeFields(candidate);
+      if (!fields) continue;
+      // Gate 1 — Country must match (kills Albania/Belgium fallbacks).
+      if (expectedCountry && fields.country && fields.country !== expectedCountry) {
+        console.log(`[geocodeBestCandidate] reject (country=${fields.country}, expected=${expectedCountry}): ${fields.formatted}`);
+        continue;
+      }
+      // Gate 2 — Precision (rejects APPROXIMATE / GEOMETRIC_CENTER and partial matches).
+      if (fields.partialMatch || (fields.locationType !== 'ROOFTOP' && fields.locationType !== 'RANGE_INTERPOLATED')) {
+        console.log(`[geocodeBestCandidate] reject (precision: loc_type=${fields.locationType} partial=${fields.partialMatch}): ${fields.formatted}`);
+        continue;
+      }
+      // Gate 3 — Postal code completeness (catches FSA-only Canadian results like K1C).
+      if (!isPostalCodeComplete(fields.postalCode, fields.country)) {
+        console.log(`[geocodeBestCandidate] reject (postal incomplete: ${fields.postalCode}, country=${fields.country}): ${fields.formatted}`);
+        continue;
+      }
+      console.log(`[geocodeBestCandidate] accept: ${fields.formatted}`);
+      return {
+        lat: fields.lat,
+        lng: fields.lng,
+        formatted: fields.formatted,
+        country: fields.country,
+        postalCode: fields.postalCode,
+      };
+    }
+    return null;
+  } catch (err) {
+    console.error(`[geocodeBestCandidate] exception for "${address}":`, err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
+
+// Country-specific postal code completeness check.
+// Wael 2026-05-16: incomplete postal codes (e.g., Canada's 3-char FSA "K1C")
+// are a strong signal that geocode fell back to an imprecise area, not a
+// specific address. Reject those — return not_found and ask the user to retype.
+function isPostalCodeComplete(code: string | null, country: string | null): boolean {
+  if (!code) return false;
+  const compact = code.replace(/\s+/g, '');
+  switch (country) {
+    case 'CA':
+      // Canadian postal codes: 6 alphanumeric chars in pattern A1A1A1
+      return /^[A-Z]\d[A-Z]\d[A-Z]\d$/i.test(compact);
+    case 'US':
+      // US ZIP: 5 digits, optionally + ZIP+4 (9 digits)
+      return /^\d{5}(\d{4})?$/.test(compact);
+    case 'GB':
+      // UK postcodes: variable but always have outward + inward (5-7 chars)
+      return compact.length >= 5;
+    default:
+      // Permissive default for countries we haven't validated — require
+      // any postal code at all + sane minimum length.
+      return compact.length >= 3;
   }
 }
 
