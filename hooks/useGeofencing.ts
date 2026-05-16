@@ -148,12 +148,83 @@ function ensureReady(): Promise<void> {
       });
     });
 
+    // V57.16.1 — full event-subscription set per gap-doc Q5 + Q7. Vendor
+    // describes each as relevant when geofences misbehave. All log via
+    // remoteLog only — no behavior change, pure observability.
+
+    // MOVING ↔ STATIONARY transitions. Per @christocracy Issue #1830 the
+    // SDK's willingness to fire geofence events in geofence-only mode hinges
+    // on this; with geofenceModeHighAccuracy:true now set, expect to see
+    // motion changes feed back into more responsive geofence pickup.
+    BackgroundGeolocation.onMotionChange((event) => {
+      remoteLog(getLifecycleSession(), 'tsoft-motion-change', {
+        is_moving: event.isMoving,
+        lat: event.location?.coords?.latitude,
+        lng: event.location?.coords?.longitude,
+      });
+    });
+
+    // Activity-recognition transitions (still / on_foot / in_vehicle / etc).
+    // Per Philosophy wiki this is the SDK's primary state-transition signal
+    // on Android.
+    BackgroundGeolocation.onActivityChange((event) => {
+      remoteLog(getLifecycleSession(), 'tsoft-activity-change', {
+        activity: event.activity,
+        confidence: event.confidence,
+      });
+    });
+
+    // Android Power Saving mode entry/exit — Doze territory. When true, OS
+    // is throttling background services, which can delay geofence delivery.
+    BackgroundGeolocation.onPowerSaveChange((isPowerSaveMode) => {
+      remoteLog(getLifecycleSession(), 'tsoft-power-save-change', {
+        is_power_save_mode: isPowerSaveMode,
+      });
+    });
+
+    // SDK enabled-state changes — fires if something disables the SDK
+    // (license expiry, manual stop, etc).
+    BackgroundGeolocation.onEnabledChange((enabled) => {
+      remoteLog(getLifecycleSession(), 'tsoft-enabled-change', {
+        enabled,
+      });
+    });
+
+    // Geofence pool swaps. With geofenceProximityRadius=5000, only geofences
+    // within 5 km of the user are "actively monitored"; others sit dormant.
+    // This event fires when that active set changes — tells us which of our
+    // rules are currently being watched vs. inactive.
+    BackgroundGeolocation.onGeofencesChange((event) => {
+      remoteLog(getLifecycleSession(), 'tsoft-geofences-change', {
+        on_count: Array.isArray(event.on) ? event.on.length : 0,
+        off_count: Array.isArray(event.off) ? event.off.length : 0,
+        on_ids: Array.isArray(event.on) ? event.on.map((g: any) => g.identifier) : [],
+        off_ids: Array.isArray(event.off) ? event.off : [],
+      });
+    });
+
+    // Network connectivity changes — useful for explaining T2/T3 gaps where
+    // our fetch() to the server might have failed due to lost connectivity.
+    BackgroundGeolocation.onConnectivityChange((event) => {
+      remoteLog(getLifecycleSession(), 'tsoft-connectivity-change', {
+        connected: event.connected,
+      });
+    });
+
     // ready() blocks until the SDK is fully initialized. After this, we can
     // call addGeofences / startGeofences safely. v5 uses a nested Config
     // structure (geolocation / app / logger sub-objects).
     const state: State = await BackgroundGeolocation.ready({
       // Reset config across app launches — we always declare it fresh here.
       reset: true,
+
+      // V57.16.1 — vendor's #1 recommended diagnostic for "geofence not
+      // firing" reports (per maintainer @christocracy across Issues #2160,
+      // #2407, #1830). Plays per-event sound effects on the device so we can
+      // audibly confirm whether the native SDK detected a transition,
+      // independent of whether our JS handler ran. Trial-period only —
+      // disable for V57.17 production once geofence reliability is confirmed.
+      debug: true,
 
       geolocation: {
         // Geofence-only mode uses High accuracy for the periodic location
@@ -165,6 +236,17 @@ function ensureReady(): Promise<void> {
         // user are activated at any time. Saves battery + sidesteps
         // Android's 100-geofence-per-app native limit.
         geofenceProximityRadius: 5000, // 5 km — covers Wael's typical day
+
+        // V57.16.1 — vendor's documented fix for "lazy" geofence-only mode.
+        // Per @christocracy Issue #1830: "Android geofence-only mode is
+        // lazier with passively monitoring geofences… you could achieve the
+        // same thing [as launching Google Maps to keep services warm]
+        // without launching Google Maps by configuring
+        // Config.geofenceModeHighAccuracy, which will turn on
+        // location-services in geofence-only mode." Demo's applyTestConfig
+        // sets this true. Directly addresses the Phone 1 5×-lower fire-rate
+        // observed in the May 15-16 drives.
+        geofenceModeHighAccuracy: true,
 
         // Don't auto-fire ENTER on registration if user happens to be
         // inside the region; we have our own initial-state suppression.
@@ -184,6 +266,15 @@ function ensureReady(): Promise<void> {
           text: 'Tap to open Naavi',
           smallIcon: 'drawable/notification_icon',
           color: '#5DCAA5',
+          // V57.16.1 — per NotificationConfig docs: "Configure the Android
+          // Foreground Service icon and notification to be displayed
+          // **always**. Defaults to false; normally shows only while device
+          // is moving." Per @christocracy Issue #2113: "in geofence-only
+          // mode, config.isMoving is **always** false" — meaning with
+          // sticky:false the FG notification can be absent or intermittent
+          // in our mode. Matches the asymmetry observed May 15 trial
+          // (Phone 1 had no FG notif, Phone 2 did).
+          sticky: true,
         },
       },
 
@@ -198,6 +289,22 @@ function ensureReady(): Promise<void> {
       tracking_mode: state.trackingMode,
       schedulerEnabled: state.schedulerEnabled,
     });
+
+    // V57.16.1 — vendor's only Samsung/OEM-specific affordance is the
+    // DeviceSettings API. isIgnoringBatteryOptimizations() returns true if
+    // the user (or our own V57.14.2 in-app prompt) successfully whitelisted
+    // the app. Logging this on every ready() pass means every diagnostic
+    // event has the contemporaneous device-state alongside.
+    try {
+      const ignoringBatteryOpt = await BackgroundGeolocation.deviceSettings.isIgnoringBatteryOptimizations();
+      remoteLog(getLifecycleSession(), 'tsoft-device-settings', {
+        ignoring_battery_optimizations: ignoringBatteryOpt,
+      });
+    } catch (err) {
+      remoteLog(getLifecycleSession(), 'tsoft-device-settings-failed', {
+        error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+      });
+    }
   })().catch((err) => {
     // Reset so the next call retries
     readyPromise = null;
@@ -208,6 +315,38 @@ function ensureReady(): Promise<void> {
     throw err;
   });
   return readyPromise;
+}
+
+// ── SDK-internal log snapshot helper (V57.16.1 diagnostic addition) ─────────
+// On every T1 (geofence event detected by the SDK's native side), pull the
+// SDK's own log for the prior 5 minutes — that's where vendor records the
+// native-side timeline (`💀 event: geofence`, `onHeadlessJsTaskStart taskId:
+// N`, `onActivityRecognitionResult still (100%)`, etc.). Truncate to 5 KB
+// before remoteLog'ing so we don't blow the diagnostic payload. Fire-and-
+// forget so the main fan-out path is never blocked.
+
+async function captureSdkLogSnapshot(eventId: string, ruleId: string): Promise<void> {
+  try {
+    const Logger = BackgroundGeolocation.logger;
+    const sinceMs = Date.now() - 5 * 60 * 1000; // last 5 minutes
+    const log = await Logger.getLog({
+      start: sinceMs,
+      end: Date.now(),
+      order: Logger.ORDER_DESC,
+      limit: 200,
+    });
+    const truncated = log.length > 5000 ? log.slice(0, 5000) + '\n…[truncated]' : log;
+    remoteLog(eventId, 'tsoft-sdk-log-snapshot', {
+      rule_id: ruleId,
+      log_chars: log.length,
+      log: truncated,
+    });
+  } catch (err) {
+    remoteLog(eventId, 'tsoft-sdk-log-snapshot-failed', {
+      rule_id: ruleId,
+      error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+    });
+  }
 }
 
 // ── Geofence event handler (replaces the old GEOFENCE_TASK handler) ─────────
@@ -233,6 +372,12 @@ export async function handleGeofenceEvent(event: GeofenceEvent): Promise<void> {
     event: eventName,
     src: 'tsoft',
   });
+
+  // V57.16.1 — fire-and-forget capture of the SDK's own log from the prior
+  // 5 minutes. Lets us see the native-side timeline (when the SDK actually
+  // detected the geofence vs. when our JS handler ran) so the next T1→T2
+  // gap can be attributed to OS / SDK / JS instead of being opaque.
+  captureSdkLogSnapshot(eventId, ruleId).catch(() => { /* never blocks */ });
 
   // V57.10.3 — phantom-event suppression. Android emits initial-state
   // events on registration for every region in the user's current
