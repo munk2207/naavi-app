@@ -105,16 +105,24 @@ function normalizeOrdinalsForTTS(text: string): string {
 // V57.8 — expand street-suffix abbreviations to full words so Aura reads
 // addresses correctly. Wael flagged Naavi pronouncing "962 Terranova Dr"
 // as "962 Terranova Doctor" — "Dr" was being read as "Doctor" because
-// that's the more common dictionary expansion. Address abbreviations
-// only get expanded when in unambiguous address context (preceded by a
-// street name token + followed by ",", " in", or end-of-line).
+// that's the more common dictionary expansion.
 //
-// "Dr." with a period followed by a capitalized name (Dr. Smith) is
-// LEFT ALONE — that's correctly read as "Doctor".
+// 2026-05-16 — relaxed the lookahead so mid-sentence usage expands too.
+// Previously the regex required "Dr" to be followed by comma / EOL /
+// newline; freeform Naavi replies like "I'll alert you when arriving at
+// Terranova Dr in Ottawa" left "Dr" raw and Aura read it as "DEE-ARR".
+// New approach: expand whenever "StreetName Abbrev" appears, UNLESS
+// followed by a capitalized-name word (which would indicate person-title
+// usage like "Dr Smith").
+//
+// Trade-offs:
+//   - "Maple Dr Ottawa" (no comma between address + city) stays as "Dr"
+//     since we can't distinguish from a person title without a comma.
+//     This is rare in Naavi-generated speech.
+//   - "Dr Smith" stays as "Dr" (correct — read as "Doctor").
+//   - Trailing period is now preserved (was stripped).
 function expandAddressAbbreviations(text: string): string {
   if (!text) return text;
-  // Each entry: bare abbrev (no period), expansion. Only one-word
-  // street suffixes — multi-word like "Apt 4" stay unchanged.
   const SUFFIX_MAP: Record<string, string> = {
     'Dr':   'Drive',
     'St':   'Street',
@@ -130,14 +138,22 @@ function expandAddressAbbreviations(text: string): string {
     'Ter':  'Terrace',
     'Cir':  'Circle',
     'Trl':  'Trail',
+    'Cres': 'Crescent',  // 2026-05-16 — was missing; voice server already has it
   };
-  // Pattern: street name word + abbrev + (comma | space + city-ish word | EOL)
-  // We require a preceding capitalized word so "I'll Dr you home" doesn't match.
+  // Pattern: capitalized-word + space + suffix-abbrev + optional period,
+  // NOT followed by whitespace + capitalized-lowercase pair (person name).
+  //   "Terranova Dr in Ottawa"      → expands (after "Dr" is " in", lowercase)
+  //   "Terranova Dr, Ottawa"        → expands (no whitespace after match start of comma)
+  //   "Terranova Dr."               → expands (no whitespace before EOL)
+  //   "Jeanne-d'Arc Blvd. N"        → expands (after "Blvd." is " N" — single
+  //                                   capital letter without trailing lowercase
+  //                                   is not a name; matches direction suffix)
+  //   "Dr Smith said"               → does NOT expand ("Sm" is [A-Z][a-z])
   const pattern = new RegExp(
-    `(\\b[A-Z][a-zA-Z]+)\\s+(${Object.keys(SUFFIX_MAP).join('|')})\\b(\\.?)(?=\\s*(?:,|$|\\n))`,
+    `(\\b[A-Z][a-zA-Z]+)\\s+(${Object.keys(SUFFIX_MAP).join('|')})\\b(\\.?)(?!\\s+[A-Z][a-z])`,
     'g',
   );
-  return text.replace(pattern, (_m, name, abbrev, _dot) => `${name} ${SUFFIX_MAP[abbrev]}`);
+  return text.replace(pattern, (_m, name, abbrev, dot) => `${name} ${SUFFIX_MAP[abbrev]}${dot || ''}`);
 }
 
 serve(async (req) => {
