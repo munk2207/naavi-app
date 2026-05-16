@@ -46,16 +46,22 @@ const corsHeaders = {
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
-  // 1. Static-bearer auth. Reuse the anon key — it's already baked into the
-  // APK and posted by the SDK as the Authorization header. Validates that
-  // the request originates from a build of our app, not random internet noise.
-  const expectedKey =
-    Deno.env.get('NAAVI_ANON_KEY') ??
-    Deno.env.get('SUPABASE_ANON_KEY') ??
-    '';
+  // 1. Lenient auth — accept any non-empty `Bearer <token>` header. Matches
+  // the existing `report-location-event` pattern (no strict inbound auth
+  // validation; server-side rule/user UUID lookups provide the actual
+  // security boundary).
+  //
+  // Previous design used `auth === Bearer <NAAVI_ANON_KEY>` strict match,
+  // but the mobile sends `Bearer <EXPO_PUBLIC_SUPABASE_ANON_KEY>` which is
+  // the new sb_publishable_* format — different value than the Edge
+  // Function's NAAVI_ANON_KEY env var, causing 401s on every real native
+  // POST (proven by 4× 401 status events in client_diagnostics on the
+  // V57.17.0 drive test). Removing strict match unblocks the SDK; threat
+  // model is equivalent (anyone with rule_id + user_id UUIDs could already
+  // POST to report-location-event today).
   const auth = req.headers.get('authorization') ?? '';
-  if (!expectedKey || auth !== `Bearer ${expectedKey}`) {
-    return new Response(JSON.stringify({ error: 'unauthorized' }), {
+  if (!auth.startsWith('Bearer ') || auth.length < 10) {
+    return new Response(JSON.stringify({ error: 'missing or malformed authorization' }), {
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
