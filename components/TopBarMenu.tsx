@@ -8,7 +8,7 @@
  * Items (in order): Info (integrations modal), Notes, Alerts, Settings.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -16,9 +16,13 @@ import {
   Modal,
   StyleSheet,
   Pressable,
+  InteractionManager,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/Colors';
+import { remoteLog } from '@/lib/remoteLog';
+import { getLifecycleSession } from '@/lib/appLifecycle';
 
 type MenuItem = {
   label: string;
@@ -31,6 +35,18 @@ type Props = {
 
 export function TopBarMenu({ items }: Props) {
   const [open, setOpen] = useState(false);
+  const insets = useSafeAreaInsets();
+
+  // Log insets + open/close transitions so we can correlate Wael's reported
+  // "screen draws behind nav bar after force-stop" bug to modal interactions.
+  useEffect(() => {
+    remoteLog(getLifecycleSession(), open ? 'topbar-modal-open' : 'topbar-modal-close', {
+      insets_top:    insets.top,
+      insets_bottom: insets.bottom,
+      insets_left:   insets.left,
+      insets_right:  insets.right,
+    });
+  }, [open]);
 
   return (
     <>
@@ -56,10 +72,27 @@ export function TopBarMenu({ items }: Props) {
                 key={item.label}
                 style={[styles.item, i === items.length - 1 && styles.itemLast]}
                 onPress={() => {
+                  const session = getLifecycleSession();
+                  remoteLog(session, 'topbar-item-tap', { label: item.label });
                   setOpen(false);
-                  // Defer to next tick so the modal dismiss animation isn't
-                  // cut short by the navigation push.
-                  setTimeout(() => item.onPress(), 0);
+                  // V57.19 — replaced setTimeout(0) with InteractionManager.
+                  // The old 0ms deferral fired BEFORE the Modal's fade-out
+                  // animation finished, and expo-router silently dropped
+                  // router.push() calls made while a Modal was still
+                  // considered active. runAfterInteractions waits for the
+                  // dismiss to settle, then runs the navigation cleanly.
+                  InteractionManager.runAfterInteractions(() => {
+                    remoteLog(session, 'topbar-item-deferred-fire', { label: item.label });
+                    try {
+                      item.onPress();
+                      remoteLog(session, 'topbar-item-onpress-returned', { label: item.label });
+                    } catch (err) {
+                      remoteLog(session, 'topbar-item-onpress-threw', {
+                        label: item.label,
+                        err: err instanceof Error ? err.message : String(err),
+                      });
+                    }
+                  });
                 }}
               >
                 <Text style={styles.itemText}>{item.label}</Text>
