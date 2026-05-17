@@ -133,6 +133,66 @@ serve(async (req) => {
     if (rule.trigger_type !== 'location') return json({ error: 'Not a location rule' }, 400);
     if (!rule.enabled) return json({ ok: true, skipped: 'rule disabled' });
 
+    // 2026-05-17 — PHANTOM-FIRE REJECTION (cold-start initial-state guard).
+    //
+    // Wael reported being woken at 02:36 AM 2026-05-17 by alerts for both
+    // 8042 and 8182 while physically at home (lat 45.4879, lng -75.5232 —
+    // 1+ km from either geofence). The mobile JS handler ran a full chain
+    // (T2 → T3 → fan-out) for both rules within the same second. Phone was
+    // not in either geofence and had not moved. Almost certainly cold-start
+    // initial-state events from Transistorsoft surviving our 5-sec
+    // post-registration phantom-suppress on the mobile side (because rules
+    // were registered hours/days ago, not seconds).
+    //
+    // Server-side guard: if the reported location is far outside the rule's
+    // geofence radius, reject the fire as phantom. Per vendor type defs
+    // (Location.d.ts:18-235), coords are guaranteed non-null in every
+    // GeofenceEvent — but our handler-side code defensively sends null on
+    // missing coords, so we accept (don't reject) when lat/lng absent.
+    //
+    // Tolerance: 2× the rule's radius — generous enough to absorb normal
+    // GPS noise + the boundary fact that a phone slightly outside the
+    // circle can still trigger ENTER. 2× is well outside any normal arrival
+    // and well inside the typical phantom-fire distance (today: 10× radius).
+    if (!fromPendingDwell) {
+      const reportedLat = typeof body.lat === 'number' ? body.lat : null;
+      const reportedLng = typeof body.lng === 'number' ? body.lng : null;
+      const ruleLat = rule.trigger_config?.resolved_lat;
+      const ruleLng = rule.trigger_config?.resolved_lng;
+      const radiusM = typeof rule.trigger_config?.radius_meters === 'number'
+        ? rule.trigger_config.radius_meters
+        : 300;
+      if (
+        reportedLat !== null && reportedLng !== null &&
+        typeof ruleLat === 'number' && typeof ruleLng === 'number'
+      ) {
+        const distanceM = haversineMeters(reportedLat, reportedLng, ruleLat, ruleLng);
+        if (distanceM > radiusM * 2) {
+          console.log(
+            `[report-location-event] PHANTOM rejected rule=${rule_id.slice(0,8)} ` +
+            `reported=(${reportedLat.toFixed(5)}, ${reportedLng.toFixed(5)}) ` +
+            `rule_center=(${ruleLat.toFixed(5)}, ${ruleLng.toFixed(5)}) ` +
+            `distance=${distanceM.toFixed(0)}m radius=${radiusM}m`
+          );
+          await diag(admin, event_id, user_id, 'geofence-T3-phantom-rejected', {
+            rule_id,
+            reported_lat: reportedLat,
+            reported_lng: reportedLng,
+            rule_lat: ruleLat,
+            rule_lng: ruleLng,
+            distance_m: Math.round(distanceM),
+            radius_m: radiusM,
+          });
+          return json({
+            ok: true,
+            skipped: 'phantom — reported location outside geofence',
+            distance_m: Math.round(distanceM),
+            radius_m: radiusM,
+          });
+        }
+      }
+    }
+
     // V57.16 — dedup window: 30 minutes (was per-day). Wael 2026-05-15:
     // false positives consume the daily dedup and lose the real arrival
     // alert. Per-minute window means a false fire only locks the rule for
@@ -518,6 +578,24 @@ async function fireLocationAction(
   console.log(`[report-location-event] Rule ${rule.id} fan-out (${mode}): ${parts.join(' ')} — ${successCount}/${sends.length} ok`);
 
   return successCount > 0;
+}
+
+// 2026-05-17 — great-circle distance between two lat/lng points, in meters.
+// Used by the phantom-fire guard above to compare the SDK's reported phone
+// location to the rule's geofence center. Standard haversine formula.
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000; // Earth radius in meters
+  const toRad = (deg: number) => deg * Math.PI / 180;
+  const phi1 = toRad(lat1);
+  const phi2 = toRad(lat2);
+  const dPhi = toRad(lat2 - lat1);
+  const dLambda = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dPhi / 2) * Math.sin(dPhi / 2) +
+    Math.cos(phi1) * Math.cos(phi2) *
+    Math.sin(dLambda / 2) * Math.sin(dLambda / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 function json(body: unknown, status = 200): Response {
