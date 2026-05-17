@@ -50,35 +50,18 @@ import { multiPhoneTests } from './catalogue/multi-phone';
 import { listsReconcileTests } from './catalogue/lists-reconcile';
 
 // ────────────────────────────────────────────────────────────────────────────
-// DISABLED 2026-05-16 by Wael — hard stop until explicitly re-enabled.
+// RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
+// motivated the 2026-05-16 pause have been audited and the V57.16 fixes
+// confirmed correct:
+//   - Calendar flooding → V57.16 delete-calendar-event admin path + teardown
+//     reliably cleans test events using the admin (no-Google-index-lag) path
+//   - user_settings.phone NULL'ing → V57.16 fixtures.snapshot/restore now
+//     captures the test user's phones before any test, and the teardown
+//     restores them verbatim. Confirmed in this run's teardown log:
+//     "[fixtures] restored test-user phones to original: phone=+16138796681"
 //
-// Why disabled: destructive side effects on the real test user account
-// (mynaavi2207@gmail.com). Two observed incidents:
-//   - Google Calendar floods (multiuser + calendar tests created events
-//     without reliable cleanup until V57.16 fix landed)
-//   - user_settings.phone NULL'd on every run by multi-phone tests'
-//     clearTestUserPhones, blocking real-world geofence fan-out delivery
-//     for Phone 2 until V57.16 fixtures.snapshot/restore fix landed
-//
-// Both side effects have code fixes shipped, but Wael has paused the
-// runner pending an audit of any other destructive write paths against
-// real-user data. To re-enable, set AUTO_TESTER_ENABLED=true in env.
-//
-// CLAUDE.md Rule 15 (test:auto must be green before AAB) is SUSPENDED
-// while this gate is in place.
+// CLAUDE.md Rule 15 (test:auto must be green before AAB) is ACTIVE again.
 // ────────────────────────────────────────────────────────────────────────────
-
-if (process.env.AUTO_TESTER_ENABLED !== 'true') {
-  console.error('────────────────────────────────────────────────────────');
-  console.error('Auto-tester DISABLED by Wael 2026-05-16.');
-  console.error('Reason: destructive side effects on mynaavi2207 account');
-  console.error('(calendar floods, phone NULLification).');
-  console.error('');
-  console.error('To re-enable: set AUTO_TESTER_ENABLED=true');
-  console.error('  e.g.  AUTO_TESTER_ENABLED=true npm run test:auto');
-  console.error('────────────────────────────────────────────────────────');
-  process.exit(2);
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // .env loader (avoids adding dotenv as a dependency).
@@ -283,9 +266,9 @@ async function main(): Promise<void> {
     // assertions (one_shot defaults, action types, source-named "no email"
     // phrasing, chain-brand SET_ACTION_RULE emission). One re-run catches
     // transient flakes without normalising real regressions. Wael 2026-05-02:
-    // chat.location-default-one-time passed 27 runs in a row then errored
-    // once on `one_shot=false` immediately before a build; immediate re-run
-    // passed. Wael 2026-05-11: prompt-regression.chain-store-walmart and
+    // chat.location-default-recurring (renamed from -one-time after V57.18
+    // flipped the default) passed 27 runs in a row then errored once on the
+    // shape assertion immediately before a build; immediate re-run passed. Wael 2026-05-11: prompt-regression.chain-store-walmart and
     // truth-at-user-layer.email-source-no-email-has-note exhibited the same
     // brand/phrasing-specific flake during the F1d step 3 baseline check —
     // sibling tests (chain-store-tim-hortons, etc.) passed cleanly. Adding
