@@ -433,4 +433,81 @@ export const promptRegressionTests: TestCase[] = [
         `expected entityType present (likely action_rule), got: ${JSON.stringify(action.entityType)}`);
     },
   },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // ALL-DAY EVENTS — must use date-only "YYYY-MM-DD" format.
+  // Bug 2026-05-17: Huss saw "Today — Victoria Day at 8:00 p.m." for an
+  // event meant for May 18. Claude was emitting "2026-05-18T00:00:00Z"
+  // which renders as 8 PM EDT the PREVIOUS day in Toronto. Prompt v77
+  // added explicit all-day rules + a critical warning. These two tests
+  // lock the date-only-string requirement for holidays and the explicit
+  // "all day" phrasing.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'prompt-regression.all-day-holiday-date-only-format',
+    category: 'prompt-regression',
+    description: 'V57 prompt v77 — holiday name + date must emit CREATE_EVENT with date-only start (YYYY-MM-DD), NEVER T00:00:00',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'Add Victoria Day to my calendar on May 18' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
+
+      const action = findActionInRawText(data?.rawText ?? '', 'CREATE_EVENT');
+      expectTruthy(action, 'CREATE_EVENT action — holiday must create an event');
+      expectActionType(action, 'CREATE_EVENT');
+
+      const start = String(action.start ?? '');
+      const end   = String(action.end ?? '');
+      ctx.log(`start=${start}  end=${end}`);
+
+      // The whole point — date-only string, no time, no timezone suffix.
+      expectTruthy(
+        /^\d{4}-\d{2}-\d{2}$/.test(start),
+        `start must be date-only "YYYY-MM-DD" for all-day holiday, got: ${JSON.stringify(start)}`,
+      );
+      expectTruthy(
+        /^\d{4}-\d{2}-\d{2}$/.test(end),
+        `end must be date-only "YYYY-MM-DD" for all-day holiday, got: ${JSON.stringify(end)}`,
+      );
+      // Reject the exact failure shape that bit Huss
+      expectTruthy(
+        !/T00:00:00/i.test(start),
+        `start must NOT contain T00:00:00 (renders as 8 PM EDT prior day): ${JSON.stringify(start)}`,
+      );
+    },
+  },
+  {
+    id: 'prompt-regression.all-day-explicit-phrasing-date-only-format',
+    category: 'prompt-regression',
+    description: 'V57 prompt v77 — user explicitly says "all day" → CREATE_EVENT must use date-only format, never T00:00:00',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'Schedule a vacation day all day on Friday' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
+
+      const action = findActionInRawText(data?.rawText ?? '', 'CREATE_EVENT');
+      expectTruthy(action, 'CREATE_EVENT action — explicit "all day" must create an event');
+      expectActionType(action, 'CREATE_EVENT');
+
+      const start = String(action.start ?? '');
+      ctx.log(`start=${start}`);
+
+      expectTruthy(
+        /^\d{4}-\d{2}-\d{2}$/.test(start),
+        `start must be date-only "YYYY-MM-DD" when user says "all day", got: ${JSON.stringify(start)}`,
+      );
+      expectTruthy(
+        !/T00:00:00/i.test(start),
+        `start must NOT contain T00:00:00 (renders as 8 PM EDT prior day): ${JSON.stringify(start)}`,
+      );
+    },
+  },
 ];

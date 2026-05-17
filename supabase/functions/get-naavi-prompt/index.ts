@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-16-v76-location-one-shot-default-false';
+const PROMPT_VERSION = '2026-05-17-v77-all-day-event-date-only-format';
 
 /**
  * Cache-boundary marker.
@@ -321,15 +321,25 @@ Examples:
 
 DEFAULT FORMAT — TIMED, NOT ALL-DAY. CREATE_EVENT must use full datetime ISO format ("2026-04-28T09:00:00") in 99% of cases. The orchestrator and create-calendar-event Edge Function treat full datetime as a TIMED event (with start/end at specific clock times).
 
-Date-only format ("2026-04-28") is for ALL-DAY events ONLY, and only allowed for these specific cases:
+Date-only format ("2026-04-28") is for ALL-DAY events ONLY, used in these cases:
+- The user EXPLICITLY says "all day", "all-day", "whole day", "entire day"
+- Public holidays (Victoria Day, Thanksgiving, Christmas, New Year, etc.)
+- Religious observances (Ramadan, Easter, Eid, Hanukkah, etc.)
+- Civic / school days off ("no school", "PD day", "spring break", "snow day")
+- Day-long personal observances (Mother's Day, Father's Day, Remembrance Day)
 - Birthdays / anniversaries (per RULE 5 DATE-FACT FANOUT)
 - One-time expiry dates (passport, visa expiry — per RULE 5)
 
-For everything else — meetings, appointments, medications, doses, follow-ups, calls, tasks, daily routines — USE FULL DATETIME with specific clock time. If no time was stated, default to 09:00 local (NOT all-day). All-day events for these would render as multi-day banners and confuse the user.
+For everything else — meetings, appointments, medications, doses, follow-ups, calls, tasks, daily routines — USE FULL DATETIME with specific clock time. If no time was stated, default to 09:00 local (NOT all-day).
+
+⚠️ CRITICAL — ALL-DAY MUST USE DATE-ONLY STRING. NEVER emit "T00:00:00" or "T00:00:00Z" for an all-day event. Midnight UTC renders as 8 PM EDT the PREVIOUS day on the user's calendar — a real bug that has shipped. The correct shape is exactly "YYYY-MM-DD" (10 characters, no T, no time, no timezone suffix). End date is the NEXT day in the same format (Google treats end-date as exclusive).
 
 EXAMPLES — CREATE_EVENT format:
 - "Add a meeting tomorrow at 2 PM" → start: "2026-04-28T14:00:00", end: "2026-04-28T15:00:00" ✓ TIMED
-- "Add Sarah's birthday October 15" → start: "2026-10-15", end: "2026-10-16", recurrence: ["RRULE:FREQ=YEARLY"] ✓ ALL-DAY (birthday only)
+- "Add Sarah's birthday October 15" → start: "2026-10-15", end: "2026-10-16", recurrence: ["RRULE:FREQ=YEARLY"] ✓ ALL-DAY (birthday)
+- "Add Victoria Day to my calendar on May 18" → start: "2026-05-18", end: "2026-05-19" ✓ ALL-DAY (holiday) — NEVER "2026-05-18T00:00:00Z"
+- "Schedule a vacation day all day Friday" → start: "2026-05-22", end: "2026-05-23" ✓ ALL-DAY (user said "all day")
+- "Mark May 18 as no school" → start: "2026-05-18", end: "2026-05-19" ✓ ALL-DAY (school day off)
 - "Doctor follow-up in three weeks" → start: "2026-05-18T09:00:00" (3 weeks out, default 9 AM) ✓ TIMED
 - "Take Amoxicillin daily for 10 days" → use SCHEDULE_MEDICATION action, NOT CREATE_EVENT
 

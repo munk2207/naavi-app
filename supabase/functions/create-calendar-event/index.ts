@@ -147,11 +147,39 @@ serve(async (req) => {
     // All-day events use { date: "YYYY-MM-DD" }; timed events use
     // { dateTime, timeZone }. Detect format from input shape.
     const isDateOnly = (s: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+    // 2026-05-17 — defensive all-day coercion. If Claude emits an all-day
+    // event as midnight UTC ("YYYY-MM-DDT00:00:00" or "YYYY-MM-DDT00:00:00Z")
+    // and the duration is exactly 24h, Google would render it as 8 PM EDT
+    // the PREVIOUS day (UTC midnight → -4 hours in Toronto TZ). Real bug —
+    // Huss saw "Today — Victoria Day at 8:00 p.m." on 2026-05-17 for a
+    // May 18 holiday. Coerce these to proper { date: "YYYY-MM-DD" } all-day
+    // events here even if Claude's prompt update slipped. Catches the
+    // failure at the API boundary.
+    const allDayMidnightRe = /^(\d{4}-\d{2}-\d{2})T00:00:00(?:\.000)?(?:Z|\+00:00)?$/;
+    const startMidnight = typeof start === 'string' ? allDayMidnightRe.exec(start) : null;
+    const endMidnight   = typeof end   === 'string' ? allDayMidnightRe.exec(end)   : null;
+    let normalisedStart = start;
+    let normalisedEnd   = end;
+    if (startMidnight && endMidnight) {
+      const startDate = new Date(`${startMidnight[1]}T00:00:00Z`);
+      const endDate   = new Date(`${endMidnight[1]}T00:00:00Z`);
+      const diffDays  = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (diffDays >= 0.99 && diffDays <= 1.01) {
+        normalisedStart = startMidnight[1];
+        normalisedEnd   = endMidnight[1];
+        console.log(
+          `[create-calendar-event] all-day coercion: ` +
+          `${start} / ${end} → ${normalisedStart} / ${normalisedEnd}`
+        );
+      }
+    }
+
     const event: Record<string, unknown> = {
       summary,
       description: description ?? '',
-      start: isDateOnly(start) ? { date: start } : { dateTime: start, timeZone: 'America/Toronto' },
-      end:   isDateOnly(end)   ? { date: end }   : { dateTime: end,   timeZone: 'America/Toronto' },
+      start: isDateOnly(normalisedStart) ? { date: normalisedStart } : { dateTime: normalisedStart, timeZone: 'America/Toronto' },
+      end:   isDateOnly(normalisedEnd)   ? { date: normalisedEnd }   : { dateTime: normalisedEnd,   timeZone: 'America/Toronto' },
     };
 
     // Only include attendees that look like email addresses
@@ -188,14 +216,17 @@ serve(async (req) => {
     // diagnose why Linking.openURL is failing to open it on the phone.
     console.log(`[create-calendar-event][DIAG] htmlLink: ${created.htmlLink}`);
 
-    // Save to Supabase calendar_events table with priority flag
+    // Save to Supabase calendar_events table with priority flag.
+    // Store the coerced (date-only) form when applicable so the home brief
+    // and any other reader of calendar_events sees the same all-day shape
+    // we sent to Google.
     await adminClient.from('calendar_events').upsert({
       user_id: user.id,
       google_event_id: created.id,
       title: summary,
       description: description ?? '',
-      start_time: start,
-      end_time: end,
+      start_time: normalisedStart,
+      end_time:   normalisedEnd,
       is_priority: is_priority || false,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'google_event_id' });
