@@ -174,16 +174,29 @@ serve(async (req) => {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    const { text } = JSON.parse(rawBody);
+    const { text, voice: requestedVoice } = JSON.parse(rawBody);
     if (!text?.trim()) {
       return new Response(JSON.stringify({ error: 'Missing text' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    const normalised = expandAddressAbbreviations(normalizeOrdinalsForTTS(normalizePhoneForTTS(text)));
-    console.log('[text-to-speech] voice: aura-hera-en, text length:', text.length, 'normalised length:', normalised.length);
+    // Voice allowlist: Hera is the unified app/phone voice (default).
+    // Aura-2 storytelling voices are accepted ONLY for website narration A/B.
+    // Mobile and voice clients never send `voice`, so they always get Hera.
+    const VOICE_ALLOWLIST = new Set([
+      'aura-hera-en',
+      'aura-2-cora-en',
+      'aura-2-athena-en',
+      'aura-2-minerva-en',
+    ]);
+    const model = (typeof requestedVoice === 'string' && VOICE_ALLOWLIST.has(requestedVoice))
+      ? requestedVoice
+      : 'aura-hera-en';
 
-    const res = await fetch('https://api.deepgram.com/v1/speak?model=aura-hera-en&encoding=mp3', {
+    const normalised = expandAddressAbbreviations(normalizeOrdinalsForTTS(normalizePhoneForTTS(text)));
+    console.log('[text-to-speech] voice:', model, 'text length:', text.length, 'normalised length:', normalised.length);
+
+    const res = await fetch(`https://api.deepgram.com/v1/speak?model=${model}&encoding=mp3`, {
       method: 'POST',
       headers: {
         'Authorization': `Token ${apiKey}`,
