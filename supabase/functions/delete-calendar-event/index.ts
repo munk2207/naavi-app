@@ -43,7 +43,7 @@ serve(async (req) => {
   }
 
   const body = await req.json();
-  const { query, user_id: bodyUserId } = body;
+  const { query, user_id: bodyUserId, diag } = body;
 
   if (!query) {
     return new Response(JSON.stringify({ error: 'Missing query' }), {
@@ -91,6 +91,77 @@ serve(async (req) => {
 
   try {
     const accessToken = await getNewAccessToken(refreshToken);
+
+    // 2026-05-17 — Diagnostic mode (read-only). When body.diag === true, list
+    // EVERY calendar the user has access to and scan each one for events
+    // matching `query`. Returns the full picture without deleting anything,
+    // so we can diagnose why teardown's primary-calendar search misses real
+    // events. Keep this branch — it doubles as an admin diagnostic for
+    // future calendar-cleanup investigations.
+    if (diag === true) {
+      const calListRes = await fetch(
+        'https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250',
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!calListRes.ok) {
+        return new Response(JSON.stringify({ error: `calendarList failed: ${await calListRes.text()}` }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const calData = await calListRes.json();
+      const cals = calData.items ?? [];
+      const now = new Date();
+      const timeMinDiag = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000).toISOString();
+      const timeMaxDiag = new Date(now.getTime() + 36500 * 24 * 60 * 60 * 1000).toISOString();
+      const needle = String(query).toLowerCase();
+      const perCalendar: Array<{
+        id: string;
+        summary: string;
+        primary?: boolean;
+        accessRole: string;
+        total_events: number;
+        matching: Array<{ id: string; summary: string; start: string }>;
+      }> = [];
+      for (const c of cals) {
+        const calId = encodeURIComponent(c.id);
+        const evRes = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?` +
+          `timeMin=${encodeURIComponent(timeMinDiag)}&timeMax=${encodeURIComponent(timeMaxDiag)}` +
+          `&singleEvents=false&maxResults=250`,
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+        );
+        if (!evRes.ok) {
+          perCalendar.push({
+            id: c.id, summary: c.summary, primary: c.primary,
+            accessRole: c.accessRole, total_events: -1,
+            matching: [],
+          });
+          continue;
+        }
+        const evData = await evRes.json();
+        const items = evData.items ?? [];
+        const matching = items
+          .filter((e: any) => (e.summary ?? '').toLowerCase().includes(needle))
+          .map((e: any) => ({
+            id: e.id, summary: e.summary,
+            start: e.start?.dateTime ?? e.start?.date ?? '',
+          }));
+        perCalendar.push({
+          id: c.id, summary: c.summary, primary: c.primary,
+          accessRole: c.accessRole, total_events: items.length,
+          matching,
+        });
+      }
+      return new Response(JSON.stringify({
+        success: true,
+        diag: true,
+        query,
+        user_id: bodyUserId,
+        calendars: perCalendar,
+      }, null, 2), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // Search window for matching events.
     // User path: -1 day to +1 year (typical usage on mobile, uses q= filter).
