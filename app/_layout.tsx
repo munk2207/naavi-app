@@ -8,7 +8,7 @@ import { Platform, View, Text, StyleSheet, Image, TouchableOpacity } from 'react
 import { Stack, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
 import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
@@ -269,6 +269,7 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
+      <InsetDiagnostic />
       <StatusBar style="light" backgroundColor={Colors.bgApp} />
       <Stack
         screenOptions={{
@@ -363,6 +364,23 @@ export default function RootLayout() {
       </Stack>
     </SafeAreaProvider>
   );
+}
+
+// V57.19 — instruments the inset-leak bug Wael reported ("screen draws behind
+// the nav bar until I force-stop the app"). Logs every inset change to
+// client_diagnostics so we can identify which UI event corrupts the state.
+// Renders nothing. Must be a child of SafeAreaProvider.
+function InsetDiagnostic() {
+  const insets = useSafeAreaInsets();
+  useEffect(() => {
+    remoteLog(getLifecycleSession(), 'inset-snapshot', {
+      top:    insets.top,
+      bottom: insets.bottom,
+      left:   insets.left,
+      right:  insets.right,
+    });
+  }, [insets.top, insets.bottom, insets.left, insets.right]);
+  return null;
 }
 
 const headerStyles = StyleSheet.create({
