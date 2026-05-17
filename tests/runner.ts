@@ -266,9 +266,10 @@ async function main(): Promise<void> {
     // assertions (one_shot defaults, action types, source-named "no email"
     // phrasing, chain-brand SET_ACTION_RULE emission). One re-run catches
     // transient flakes without normalising real regressions. Wael 2026-05-02:
-    // chat.location-default-recurring (renamed from -one-time after V57.18
-    // flipped the default) passed 27 runs in a row then errored once on the
-    // shape assertion immediately before a build; immediate re-run passed. Wael 2026-05-11: prompt-regression.chain-store-walmart and
+    // chat.location-default-one-time (renamed back from -recurring after
+    // V57.19 reverted the V57.18 default flip) passed 27 runs in a row then
+    // errored once on the shape assertion immediately before a build;
+    // immediate re-run passed. Wael 2026-05-11: prompt-regression.chain-store-walmart and
     // truth-at-user-layer.email-source-no-email-has-note exhibited the same
     // brand/phrasing-specific flake during the F1d step 3 baseline check —
     // sibling tests (chain-store-tim-hortons, etc.) passed cleanly. Adding

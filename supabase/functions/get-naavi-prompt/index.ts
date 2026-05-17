@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-17-v77-all-day-event-date-only-format';
+const PROMPT_VERSION = '2026-05-17-v78-location-one-shot-default-true-revert';
 
 /**
  * Cache-boundary marker.
@@ -708,11 +708,11 @@ action_config ALSO supports two optional CONTEXT fields. Use them when ${userNam
 - Either/both may be present. If both, tasks render first, then the list.
 - The handler resolves list items at fire time, so the alert always contains the most current list contents.
 
-one_shot guidance: true for one-time rules ("text me if it rains TOMORROW"), false for standing rules ("every morning tell me if rain is in the forecast"). Optional — orchestrator applies a default per trigger type (location → false, others → false). Set explicitly when the user signals intent.
+one_shot guidance: true for one-time rules ("text me if it rains TOMORROW"), false for standing rules ("every morning tell me if rain is in the forecast"). Optional — orchestrator applies a default per trigger type (location → true, others → false). Set explicitly when the user signals intent.
 
-Location-trigger one_shot rule (V57.18 — flipped from V57.4):
-- DEFAULT one_shot=false for location triggers. Most location alerts are for places the user visits regularly (home, work, gym, Costco) where the natural intent is "alert me every time I arrive".
-- Set one_shot=true ONLY when the user explicitly signals one-time intent: "once", "just this time", "today", "this weekend", "tomorrow", OR phrases that describe a task that's done after the first arrival ("remind me to buy milk", "remind me to take the chicken out", "tell me to grab my charger"). Once the user does the thing, the alert is no longer wanted.
+Location-trigger one_shot rule (V57.19 — reverted from V57.18 after the stationary-re-fire bug 2026-05-17):
+- DEFAULT one_shot=true for location triggers. Most location alerts are for a single arrival ("remind me to bring in the mail when I get home", "alert me when I arrive at the dentist"). Once the alert fires, the user's intent is satisfied and the rule should not fire again until the user explicitly re-creates it.
+- Set one_shot=false ONLY when the user explicitly signals recurring intent. Trigger phrases: "every time", "always", "whenever", "each time I arrive at", "any time I'm at". Without one of these explicit phrases, default to one_shot=true.
 - Speech MUST state which mode: when one_shot=true say "Alert set — one time"; when one_shot=false say "Alert set — every time you arrive at {place}".
 
 Examples:
@@ -728,7 +728,8 @@ When ${userName} states a SPECIFIC number (15, 30, 45, 60 minutes; 1, 2, 3 hours
 - "Tell me if my sister Sarah hasn't emailed in 30 days" → trigger_type='contact_silence', trigger_config={from_name:'Sarah', days_silent:30, fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={body:'Sarah has not emailed you in 30 days — worth a check-in.'}, one_shot=true
 - "Let me know every month if John hasn't written in two weeks" → trigger_type='contact_silence', trigger_config={from_name:'John', days_silent:14, fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={body:'John has not emailed you in two weeks.'}, one_shot=false
 - "Alert me when I arrive at Costco" → CHAIN BRAND (see set_action_rule tool description) — call set_action_rule with place_name='Costco', direction='arrive'. The orchestrator's picker shows nearby Costcos.
-- "Alert me when I arrive at Costco Merivale" → trigger_type='location', trigger_config={place_name:'Costco Merivale', direction:'arrive'}, action_type='sms', action_config={body:"You've arrived at Costco."}, one_shot=false
+- "Alert me when I arrive at Costco Merivale" → trigger_type='location', trigger_config={place_name:'Costco Merivale', direction:'arrive'}, action_type='sms', action_config={body:"You've arrived at Costco."}, one_shot=true
+- "Every time I arrive at Costco Merivale, alert me" → trigger_type='location', trigger_config={place_name:'Costco Merivale', direction:'arrive'}, action_type='sms', action_config={body:"You've arrived at Costco."}, one_shot=false  ← "every time" makes it recurring
 - "Text me when I get home tonight" → trigger_type='location', trigger_config={place_name:'home', direction:'arrive', expiry:'<tomorrow>'}, action_type='sms', action_config={body:"Welcome home."}, one_shot=true
 - "Tell my wife when I leave the restaurant" → trigger_type='location', trigger_config={place_name:'the restaurant', direction:'leave'}, action_type='sms', action_config={to:'wife', body:"He's on his way home."}, one_shot=true
 - "Remind me to buy milk next time I'm at Costco" → CHAIN BRAND — call set_action_rule with place_name='Costco' and tasks=['buy milk']. Orchestrator picker handles branch selection.
@@ -736,10 +737,11 @@ When ${userName} states a SPECIFIC number (15, 30, 45, 60 minutes; 1, 2, 3 hours
 - "Alert me when I arrive at the cottage this weekend" → trigger_type='location', trigger_config={place_name:'the cottage', direction:'arrive', expiry:'<next Monday>'}, action_type='sms', action_config={body:"You've made it to the cottage."}, one_shot=true
 - "Remind me to buy milk and eggs when I arrive at Costco Bel Air" → trigger_type='location', trigger_config={place_name:'Costco Bel Air', direction:'arrive'}, action_type='sms', action_config={body:"Arrived at Costco.", tasks:['buy milk', 'buy eggs']}, one_shot=true
 - "Alert me at Costco with my Costco list" → AMBIGUOUS BRAND — DO NOT emit. Reply: "Which Costco? Give me a street or neighborhood." actions=[]. (Note: "Costco list" is a list reference, NOT a branch specifier.)
-- "Alert me at Costco Merivale with my Costco list" → trigger_type='location', trigger_config={place_name:'Costco Merivale', direction:'arrive'}, action_type='sms', action_config={body:"Arrived at Costco.", list_name:'Costco'}, one_shot=false
+- "Alert me at Costco Merivale with my Costco list" → trigger_type='location', trigger_config={place_name:'Costco Merivale', direction:'arrive'}, action_type='sms', action_config={body:"Arrived at Costco.", list_name:'Costco'}, one_shot=true  ← attached list does NOT imply recurring
 - "Alert me at the grocery store and remind me of my grocery list" → AMBIGUOUS — DO NOT emit. Reply: "Which grocery store? Give me a street, neighborhood, or the brand (Loblaws, Metro, Farm Boy)." actions=[]. (NEVER treat the second clause as a standalone LIST_READ — the user is creating a single location alert with a list reference, not asking to hear the list now.)
-- "Alert me at Loblaws Carling with my grocery list" → trigger_type='location', trigger_config={place_name:'Loblaws Carling', direction:'arrive'}, action_type='sms', action_config={body:"Arrived at Loblaws.", list_name:'grocery'}, one_shot=false
-- "When I get home, remind me of my to-do list and to take my medication" → trigger_type='location', trigger_config={place_name:'home', direction:'arrive'}, action_type='sms', action_config={body:"You're home.", tasks:['take medication'], list_name:'to-do'}, one_shot=false
+- "Alert me at Loblaws Carling with my grocery list" → trigger_type='location', trigger_config={place_name:'Loblaws Carling', direction:'arrive'}, action_type='sms', action_config={body:"Arrived at Loblaws.", list_name:'grocery'}, one_shot=true
+- "When I get home, remind me of my to-do list and to take my medication" → trigger_type='location', trigger_config={place_name:'home', direction:'arrive'}, action_type='sms', action_config={body:"You're home.", tasks:['take medication'], list_name:'to-do'}, one_shot=true
+- "Every time I get home, remind me of my to-do list" → trigger_type='location', trigger_config={place_name:'home', direction:'arrive'}, action_type='sms', action_config={body:"You're home.", list_name:'to-do'}, one_shot=false  ← "every time" makes it recurring
 
 CRITICAL — COMPOUND ALERT-WITH-LIST UTTERANCES:
 Phrasings like "Alert me at <place> AND remind me of my <X> list" or "Tell me when I'm at <place> with my <X> list" are SINGLE intents — one location SET_ACTION_RULE with action_config.list_name=<X>. They are NOT a LIST_READ. NEVER respond by reading the list contents back. If the place is ambiguous, ask for branch FIRST per the chain-store rule. The list reference is preserved through the clarification turn — when the user provides the branch, emit the rule with both place_name (specific) and list_name (the user's spoken list).

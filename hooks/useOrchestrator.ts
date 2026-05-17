@@ -747,12 +747,15 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         };
         // V57.18 — location alerts default to RECURRING (one_shot=false). See
         // matching note in the SET_ACTION_RULE intercept below.
-        // V57.18 — default flipped true → false. Most location alerts users create
-// are for places they visit regularly (home, work, gym, Costco) where the
-// natural intent is "alert me every time I arrive", not "alert me once
-// then forget." Set explicit one_shot:true via prompt when user signals
-// one-time intent ("this weekend", "today", "remind me to do X").
-const oneShot = pending.originalAction?.one_shot ?? false;
+        // V57.19 — reverted from V57.18 default flip after the 2026-05-17
+// stationary-re-fire bug. Wael received a phantom "you arrived home" alert
+// while sitting at home (never moved). Root cause: SDK re-fires ENTER
+// opportunistically on a stationary device, and the V57.18 recurring-by-
+// default meant each re-fire fanouts. one_shot=true (one-time) default
+// auto-disables the rule after first fire — re-fires fanout nothing.
+// User says "every time" / "always" / "whenever" → one_shot:false (recurring,
+// guarded by the V57.17/V57.18 state machine).
+const oneShot = pending.originalAction?.one_shot ?? true;
         const { data: insertedRule, error } = await queryWithTimeout(
           supabase
             .from('action_rules')
@@ -891,12 +894,15 @@ const oneShot = pending.originalAction?.one_shot ?? false;
         }
         // V57.4 — speech now states one-time vs every-time so Robert always
         // knows which mode the rule is in.
-        // V57.18 — default flipped true → false. Most location alerts users create
-// are for places they visit regularly (home, work, gym, Costco) where the
-// natural intent is "alert me every time I arrive", not "alert me once
-// then forget." Set explicit one_shot:true via prompt when user signals
-// one-time intent ("this weekend", "today", "remind me to do X").
-const oneShot = pending.originalAction?.one_shot ?? false;
+        // V57.19 — reverted from V57.18 default flip after the 2026-05-17
+// stationary-re-fire bug. Wael received a phantom "you arrived home" alert
+// while sitting at home (never moved). Root cause: SDK re-fires ENTER
+// opportunistically on a stationary device, and the V57.18 recurring-by-
+// default meant each re-fire fanouts. one_shot=true (one-time) default
+// auto-disables the rule after first fire — re-fires fanout nothing.
+// User says "every time" / "always" / "whenever" → one_shot:false (recurring,
+// guarded by the V57.17/V57.18 state machine).
+const oneShot = pending.originalAction?.one_shot ?? true;
         const modeText = oneShot ? 'one time' : 'every time';
         const speech = ok
           ? `Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.`
@@ -991,12 +997,15 @@ const oneShot = pending.originalAction?.one_shot ?? false;
                 console.error('[orch:loc:clarif-memory] permission check threw:', err);
               }
               const { ok, ruleId, alreadyExists } = await commitPending(session.user.id, 'confirmed');
-              // V57.18 — default flipped true → false. Most location alerts users create
-// are for places they visit regularly (home, work, gym, Costco) where the
-// natural intent is "alert me every time I arrive", not "alert me once
-// then forget." Set explicit one_shot:true via prompt when user signals
-// one-time intent ("this weekend", "today", "remind me to do X").
-const oneShot = pending.originalAction?.one_shot ?? false;
+              // V57.19 — reverted from V57.18 default flip after the 2026-05-17
+// stationary-re-fire bug. Wael received a phantom "you arrived home" alert
+// while sitting at home (never moved). Root cause: SDK re-fires ENTER
+// opportunistically on a stationary device, and the V57.18 recurring-by-
+// default meant each re-fire fanouts. one_shot=true (one-time) default
+// auto-disables the rule after first fire — re-fires fanout nothing.
+// User says "every time" / "always" / "whenever" → one_shot:false (recurring,
+// guarded by the V57.17/V57.18 state machine).
+const oneShot = pending.originalAction?.one_shot ?? true;
               pendingLocationRef.current = null;
               if (alreadyExists) {
                 const existingMode = alreadyExists.oneShot ? 'one-time' : 'recurring';
@@ -2232,7 +2241,7 @@ const oneShot = pending.originalAction?.one_shot ?? false;
                     // done after the first arrival). We default to false here as
                     // a safety net so a forgotten field doesn't silently disable
                     // the rule after one fire.
-                    const oneShot = action.one_shot ?? false;
+                    const oneShot = action.one_shot ?? true;
                     // V57.4 Part B — capture the inserted rule's id so the
                     // turn can render a "Make it recurring / one-time" toggle.
                     const { data: insertedRule, error: insertErr } = await queryWithTimeout(
@@ -2402,7 +2411,7 @@ const oneShot = pending.originalAction?.one_shot ?? false;
                   action_type:    actionType,
                   action_config:  actionConfig,
                   label:          String(action.label ?? 'Action rule'),
-                  one_shot:       action.one_shot ?? false,
+                  one_shot:       action.one_shot ?? true,
                 }),
                 15_000,
                 'insert-action-rule',
