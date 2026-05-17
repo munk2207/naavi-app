@@ -266,6 +266,23 @@ serve(async (req) => {
       } else {
         console.log(`[report-location-event] Cancelled pending dwell for rule ${rule_id} (user reversed via ${event})`);
       }
+
+      // 2026-05-17 — also update last_exited_at on the state machine. For
+      // an "arrive" rule, EXIT is the opposite direction and bails here
+      // without reaching the EXIT-handler in step 3 below. Without this
+      // write, the state machine would lock the user "inside" forever
+      // until the 4h TTL expires — and they'd miss the next legitimate
+      // arrival alert.
+      if ((direction === 'arrive' || direction === 'inside') && event === 'exit') {
+        const { error: exitErr } = await admin
+          .from('action_rules')
+          .update({ last_exited_at: new Date().toISOString() })
+          .eq('id', rule_id);
+        if (exitErr) {
+          console.error('[report-location-event] last_exited_at UPDATE error (opposite-dir branch):', exitErr.message);
+        }
+      }
+
       return json({ ok: true, cancelled: true });
     }
 
@@ -273,13 +290,77 @@ serve(async (req) => {
       return json({ ok: true, skipped: `event ${event} does not match direction ${direction}` });
     }
 
-    // 3. Dedup via action_rule_log, time-windowed. See dedupCutoff above
-    // (30 min). The window guards against rapid double-fires (e.g.
-    // phantom EXIT + immediate re-ENTER from a flaky GPS) while still
-    // allowing a real second arrival later in the day.
+    // 3. State-machine dedup (2026-05-17, supersedes the action_rule_log
+    // 30-min window). Two failure modes the old dedup didn't catch:
+    //
+    //   A) 11:37 phantom — Transistorsoft re-fires ENTER for a stationary
+    //      device hours after the real arrival. The 30-min window had
+    //      already expired (117 min elapsed) so the second fire passed
+    //      and the user got a duplicate alert while never having moved.
+    //   B) 09:40 race — two T3s arrived 283 ms apart, both queried the
+    //      action_rule_log in parallel, both saw "no recent fires", both
+    //      fanned out. User got double quadruple-channel alerts.
+    //
+    // Fix: atomic UPDATE on action_rules with a state-machine predicate.
+    // Only the winning T3 gets a row back; losers (whether racing or
+    // post-stale-ENTER duplicates) see zero rows returned and skip the
+    // fan-out. Killing both bugs with one mechanism.
+    //
+    // Predicate (allow ENTER if any of):
+    //   - last_entered_at IS NULL (never entered before)
+    //   - last_exited_at is newer than last_entered_at (user left and is
+    //     returning — a real second arrival)
+    //   - last_entered_at is older than 4 hours (TTL safety net: if
+    //     Transistorsoft missed an EXIT event, don't trap the user in
+    //     "already inside" forever — auto-treat stale ENTER as exited)
     const normalizedEvent = direction === 'leave' ? 'exit' : 'enter';
     const triggerRef = `loc-${rule_id}-${new Date().toISOString()}-${normalizedEvent}`;
+    const STATE_TTL_HOURS = 4;
 
+    if (normalizedEvent === 'enter') {
+      // Atomic state-machine check via SQL function (PostgREST cannot do
+      // column-to-column comparisons in .or() filters, so we wrap the UPDATE
+      // in try_enter_geofence — see migration 20260517_action_rules_inside_
+      // outside_state.sql). Returns one row if fanout should proceed, no
+      // rows if the rule says we're already inside (stationary re-fire or
+      // T3 race loser).
+      const { data: rows, error: updErr } = await admin
+        .rpc('try_enter_geofence', { p_rule_id: rule_id, p_ttl_hours: STATE_TTL_HOURS });
+
+      if (updErr) {
+        console.error('[report-location-event] try_enter_geofence RPC error:', updErr.message);
+        // Fail open — if the RPC breaks, fall through to the legacy
+        // action_rule_log check below so a real arrival still fires.
+      } else if (!rows || rows.length === 0) {
+        // State machine said no — user is already considered "inside"
+        // (either a duplicate ENTER from a stationary re-fire or the
+        // loser of a T3 race).
+        console.log(
+          `[report-location-event] STATE-MACHINE skipped rule=${rule_id.slice(0,8)} ` +
+          `event=${event} reason=already-inside (last_entered_at within ${STATE_TTL_HOURS}h, no exit since)`
+        );
+        await diag(admin, event_id, user_id, 'geofence-T3-state-already-inside', {
+          rule_id,
+          event,
+          ttl_hours: STATE_TTL_HOURS,
+        });
+        return json({ ok: true, skipped: 'state-machine — already inside (no exit since last entry)' });
+      }
+    } else {
+      // EXIT — idempotently bump last_exited_at. Multiple consecutive
+      // EXITs while already outside are harmless (just keeps the
+      // timestamp fresh). Lets the next ENTER pass the state-machine.
+      const { error: exitErr } = await admin
+        .from('action_rules')
+        .update({ last_exited_at: new Date().toISOString() })
+        .eq('id', rule_id);
+      if (exitErr) {
+        console.error('[report-location-event] last_exited_at UPDATE error:', exitErr.message);
+      }
+    }
+
+    // Legacy fallback dedup (kept as a safety net in case the state-machine
+    // UPDATE failed). Same 30-min window as before.
     const { data: recentFires } = await admin
       .from('action_rule_log')
       .select('id, fired_at')
@@ -289,7 +370,7 @@ serve(async (req) => {
       .limit(1);
 
     if (recentFires && recentFires.length > 0) {
-      return json({ ok: true, skipped: 'already fired within last 30 min' });
+      return json({ ok: true, skipped: 'already fired within last 30 min (legacy fallback dedup)' });
     }
 
     // 3b. Server-side dwell. If > 0, defer the fire instead of running
