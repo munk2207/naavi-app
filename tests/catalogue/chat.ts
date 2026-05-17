@@ -8,9 +8,9 @@ import type { TestCase } from '../lib/types';
 
 export const chatTests: TestCase[] = [
   {
-    id: 'chat.location-default-one-time',
+    id: 'chat.location-default-recurring',
     category: 'chat',
-    description: '"Alert me when I arrive home" returns SET_ACTION_RULE with one_shot=true',
+    description: '"Alert me when I arrive home" returns SET_ACTION_RULE with one_shot=false (V57.18 default flip)',
     timeoutMs: 30_000,
     async run(ctx) {
       const { status, data } = await adapters.naaviChat(ctx, {
@@ -24,12 +24,15 @@ export const chatTests: TestCase[] = [
       expectTruthy(action, 'SET_ACTION_RULE action');
       ctx.log(`action: ${JSON.stringify(action)}`);
 
-      // Per V57.4 prompt v41: location alerts default to one_shot=true.
+      // V57.18.0 (commit 8dda06a) intentionally flipped the default from true
+      // to false: location alerts now repeat unless the user says "just once".
+      // This matched user intent — most arrival alerts (home/office/store)
+      // are recurring needs, not one-time errands.
       if (action.trigger_type !== 'location') {
         throw new Error(`expected trigger_type='location', got '${action.trigger_type}'`);
       }
-      if (action.one_shot !== true) {
-        throw new Error(`expected one_shot=true (V57.4 default), got ${JSON.stringify(action.one_shot)}`);
+      if (action.one_shot !== false) {
+        throw new Error(`expected one_shot=false (V57.18 default), got ${JSON.stringify(action.one_shot)}`);
       }
     },
   },
