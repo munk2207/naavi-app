@@ -47,7 +47,7 @@ COMMENT ON COLUMN action_rules.last_exited_at IS
 -- row level; only one wins and gets the id back.
 CREATE OR REPLACE FUNCTION try_enter_geofence(
   p_rule_id   uuid,
-  p_ttl_hours int DEFAULT 4
+  p_ttl_hours int DEFAULT 24
 )
 RETURNS TABLE(id uuid)
 LANGUAGE sql
