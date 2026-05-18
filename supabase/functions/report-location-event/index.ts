@@ -315,7 +315,15 @@ serve(async (req) => {
     //     "already inside" forever — auto-treat stale ENTER as exited)
     const normalizedEvent = direction === 'leave' ? 'exit' : 'enter';
     const triggerRef = `loc-${rule_id}-${new Date().toISOString()}-${normalizedEvent}`;
-    const STATE_TTL_HOURS = 4;
+    // 2026-05-18 — TTL bumped from 4h to 24h (Wael decision). 4h was too
+    // short for stationary users — SDK opportunistic re-fires of ENTER
+    // crossed the 4h boundary and slipped through (Wael's 7:24 PM phantom
+    // on 2026-05-17). 24h covers a full sleep cycle + most stay-at-home
+    // days, while still preventing permanent lockout if SDK misses an
+    // EXIT event. Behavior framing: this is a MISSED-EXIT SAFETY NET,
+    // not a rate limit — legitimate exit-and-return within 24h still
+    // fanouts on each ENTER because last_exited_at > last_entered_at.
+    const STATE_TTL_HOURS = 24;
 
     if (normalizedEvent === 'enter') {
       // Atomic state-machine check via SQL function (PostgREST cannot do
