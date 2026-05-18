@@ -451,6 +451,20 @@ He does NOT care about: code architecture explanations, npm internals, React lif
 
 Complete silence during processing or waiting makes the user feel the call dropped. A soft ticking sound MUST play during all silent gaps (between greeting and first input, during thinking/processing). Never remove or disable the thinking music without replacing it with another audio cue. If debugging call issues, keep the tick sound — it is a core UX requirement, not a nice-to-have.
 
+### VOICE ROLE SPLIT — TWO VOICES BY DESIGN (Wael 2026-05-17)
+
+Naavi uses TWO distinct voices, each with a clear role. This is NOT inconsistency — it's deliberate role separation, analogous to a company spokesperson vs the actual product.
+
+- **Cora — `aura-2-cora-en` — BRAND voice.** Used on every public-facing / outward presentation surface: help pages on `mynaavi-website` (`/help/*` audio narration), public demo line (1-888-91-NAAVI — migration pending, see holding-list F4e), marketing presentations, tutorial / explainer content. Cora is "Smooth, Melodic, Caring" — the storytelling-tagged Aura-2 voice. She represents Naavi to the world.
+
+- **Hera — `aura-hera-en` — IN-APP personal voice.** Used everywhere a real user actually interacts with Naavi: mobile chat TTS, phone calls from registered users, PIN verification, voice biometric, every future voice feature. Hera is conversational, low-latency, battle-tested across the full spectrum of dynamic content (names, addresses, phone numbers, dates, multi-language). She IS Naavi for the user.
+
+**Why two voices:** Wael 2026-05-17 — Aura-1 Hera is great for short conversational replies but rushed on longer narration; Aura-2 Cora is great as a storyteller but slower / higher-latency for in-call use. Forcing one voice would compromise one role. Two voices, two clear roles, no overlap = no confusion.
+
+**Rule for any new TTS code:** if it's content the END USER hears INSIDE the app or on a phone call from their own number, use Hera. If it's content explaining what Naavi does to someone evaluating / learning the product, use Cora.
+
+**The demo line is an explicit exception case.** The 1-888-91-NAAVI public demo is a brand-facing surface (people calling to evaluate the product), so it gets Cora. But it's currently on Twilio's built-in Polly Joanna `<Say>` TwiML — Polly→Cora migration is tracked as F4e in `docs/HOLDING_LIST_CLASSIFICATION_2026-05-08.md`.
+
 ### CLAUDE PROMPT — SHARED SOURCE OF TRUTH
 
 The Naavi Claude system prompt lives in ONE place: the `get-naavi-prompt` Edge Function (`supabase/functions/get-naavi-prompt/index.ts`). Both the voice server and (eventually) the mobile app fetch the prompt from this function at session start.
