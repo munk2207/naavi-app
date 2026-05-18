@@ -58,7 +58,8 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 | F4a | Voice action parity — DELETE_EVENT, LIST_RULES, DELETE_MEMORY on the voice surface | voice | Mobile chat surfaces these actions; voice surface does not. User asks voice to delete a calendar event or list their alerts and voice can't complete. Server-side voice-server + voice-prompt updates. Related to B2a (voice SCHEDULE_MEDICATION) but covers separate actions. | Server |
 | F4b | Inbound SMS / WhatsApp queryability — capture path for incoming messages | both | Outbound is covered (sent_messages table + Global Search). Inbound has no capture path — user can't ask "did anyone text me?". Reopened from F1b-closed 2026-05-09 only if a clean architectural path emerges (WhatsApp Business API has structural limits; SMS via Twilio proxy needs carrier-level config most users can't manage). Queued for revisit, not for build. | Both |
 | F4c | Help section / user-manual website — recipe pages + Aura narration | website | New `/help/` section on mynaavi-website. Landing page + Quick Start (`/help/start`) + first recipe (`/help/i-want-to/arrive`) shipped 2026-05-17 with Aura Hera audio. Remaining: 7 more recipe pages (send-message, remember, today, list, email, call-from-anywhere, someone-set-up-for-me) + reference pages (settings, troubleshoot, privacy) + audio for each. Plus repoint `/how-to-use` → `/help/` with content fold. Marketing site only. | Server |
-| F4d | AWS Polly voice unification — mobile → phone | both | Decision 2026-05-04: unify mobile + phone TTS on Polly Joanna (rejected Aura speed parameter approach). Migration not yet started. Today both surfaces use Aura Hera; the unification would be a switch to Polly. Memory: `project_naavi_voice_unification_open.md`. | Both |
+| F4d | AWS Polly voice unification — mobile → phone | both | Decision 2026-05-04: unify mobile + phone TTS on Polly Joanna (rejected Aura speed parameter approach). Migration not yet started. Today both surfaces use Aura Hera; the unification would be a switch to Polly. Memory: `project_naavi_voice_unification_open.md`. **Likely now obsolete** — superseded by the voice role split decision 2026-05-17 (Cora for brand, Hera for in-app). Close this item next session unless Polly migration is still wanted. | Both |
+| F4e | Public demo line Polly Joanna → Cora migration | voice | Per Wael 2026-05-17 voice role split — Cora is the brand voice for every public-facing surface including the 1-888-91-NAAVI demo. Today the demo runs Twilio's built-in Polly Joanna `<Say>` TwiML across ~15 prompts (`buildDemoAskNameTwiml`, `buildDemoConnectTwiml`, `buildDemoMenuTwiml`, `buildDemoScenarioPromptTwiml`, `buildDemoScenarioResponseTwiml`, `buildDemoCtaTwiml`, `buildDemoClosingTwiml`, etc.). Migration: convert each `<Say voice="Polly.Joanna">` to `<Play>${host}/tts-play/${createPlayToken(text, 'aura-2-cora-en')}</Play>` + add `voice` param to `createPlayToken` + rework SSML `<break>` pacing into sentence-level chunks (Aura has no SSML support). Adds ~150-300ms first-byte latency per prompt fetch. Requires dedicated session + live demo-call test before shipping (high user-facing surface, first impression for evaluators). | Server |
 
 ---
 
@@ -130,11 +131,11 @@ Items not in the original 26-item holding list but addressed during the session:
 | List | Count | IDs |
 |---|---|---|
 | Bugs (B) | 11 | B2a, B2g, B2h, B2i, B2j, B2l, B3e, B3f, B3g, B3h, B3i |
-| Features (F) | 6 | F2a, F2b, F4a, F4b, F4c, F4d |
+| Features (F) | 7 | F2a, F2b, F4a, F4b, F4c, F4d, F4e |
 | Tooling (T) | 6 | T1a, T2a, T2b, T3a, T3b, T3c |
 | Ideas (I) | 3 | I2a, I2b, I3a |
 | Closed without entry | 21 | Items 4, 12, 14, B1a, B1b, B1c, B1d, B2b, B2c, B2d, B2e, B3a, B3b, B3c, B3d, F1a, F1b, F1c, F1d, F2c, F3a |
-| **Total** | **47** | (26 original holding-list + 5 items added across earlier sessions: B1c B1d B2e F1d F2c + 16 items added 2026-05-17: B2g B2h B2i B2j B2l B3f B3g B3h B3i F4a F4b F4c F4d T3a T3b T3c. Net active: 26; closed: 21.) |
+| **Total** | **48** | (26 original holding-list + 5 items added across earlier sessions + 17 items added 2026-05-17: B2g B2h B2i B2j B2l B3f B3g B3h B3i F4a F4b F4c F4d F4e T3a T3b T3c. Net active: 27; closed: 21.) |
 
 ### Tally by Server/AAB
 
@@ -148,7 +149,7 @@ Items not in the original 26-item holding list but addressed during the session:
 
 | Surface | Count | IDs |
 |---|---|---|
-| voice | 6 | B2a, B2g, B2h, B2i, B2j, F2b, F4a |
+| voice | 7 | B2a, B2g, B2h, B2i, B2j, F2b, F4a, F4e |
 | mobile | 4 | B2l, B3h, F2a, T2a |
 | both | 5 | B3i, F4b, F4d, T1a, T3c |
 | backend | 6 | B3f, B3g, T2b, T3b, I2a, I2b, I3a |
@@ -164,11 +165,11 @@ Severity buckets are best-estimate per item; refine as the inventory matures.
 | Severity | B | F | T | I | Total |
 |---|---|---|---|---|---|
 | 1 (top) | 4 | 1 | 2 | 0 | 7 |
-| 2 (medium) | 4 | 4 | 3 | 2 | 13 |
+| 2 (medium) | 4 | 5 | 3 | 2 | 14 |
 | 3 (low) | 3 | 1 | 1 | 1 | 6 |
-| **Total** | 11 | 6 | 6 | 3 | **26** |
+| **Total** | 11 | 7 | 6 | 3 | **27** |
 
-(Total active = 26. Add 21 closed-without-entry to reach the 47-item total. Last bulk inventory refresh: 2026-05-17.)
+(Total active = 27. Add 21 closed-without-entry to reach the 48-item total. Last bulk inventory refresh: 2026-05-17. F4e added 2026-05-17 — public demo line Polly→Cora migration.)
 
 ---
 
