@@ -49,7 +49,6 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 | ID | Description | Surface | Notes | Server/AAB |
 |----|-------------|---------|-------|------------|
 | F1a | Lists wired to entities (alerts / calendar events / reminders) | mobile | A list is a first-class entity that can be CONNECTED to any alert / calendar event / reminder. One list ↔ many entities; each entity ↔ at most one list. Voice vocabulary (connect / attach / link / disconnect / query), confirmation flow, cascade behavior, and migration of today's two patterns (inline tasks + shared-list name) all defined. New Lists section in the 3-dots menu with three subcategories (All / Connected / Standalone). **Spec locked 2026-05-09 — no open design questions.** ~1.5–2 focused sessions: backend migration + mobile UI. | Both |
-| F1d | User-controlled mute on PC + Mobile (replaces F1c) | both | User stops Naavi mid-reply when in public — long-press on mobile chat, or *"no sound"* / *"quiet"* / *"shh"* on phone. Phone path then offers *"Want me to text the rest to your phone?"* — confirmed reply delivers the full content via email + SMS hot link. Replaces the auto-classify approach (F1c, closed 2026-05-09). Mute vocabulary (kill-response bucket vs new privacy-mute bucket), content delivery, recovery, and 9 edge cases all defined. **Spec locked 2026-05-09 — no open design questions.** ~0.5–1 session. Mobile change is JS-only and ships via EAS Update (OTA) to existing builds — **no AAB rebuild required**; rest is voice-server + new Edge Function + new web page (all auto-deploy). | Both |
 | F2a | Onboarding Review (multi-phone + 7 other gaps) | mobile | Onboarding doc + Settings UI covering 8 gaps (multi-phone setup, voice keyterms capture at setup, quiet hours field, verified-address expectation, consolidated privacy callout, post-install rehearsal with starter prompts, re-install / new-phone flow, first-week-vs-week-two expectation calibration). Postponed 2026-05-09 — not all 8 have crisp product decisions; needs a dedicated session looking at onboarding end-to-end. Settings UI changes require AAB; doc is a build-script regen. | Both |
 | F2b | Demo line maturity (richer scenarios + conversion path + telemetry) | voice | Demo phone line gets richer scenarios, a conversion path back to a real account, and telemetry to see what works. Postponed 2026-05-09 — marketing/growth decisions (which metrics matter, which scenarios resonate) need a focused session. Three sub-pieces in sequence: telemetry first (total calls, scenario popularity, opt-in rate, signup conversion), conversion attribution second (per-call token in the SMS link), scenario richness third (medication scheduling, navigation, recurring delegation, variable data, light branching). Already shipped: 5 canned scenarios, name capture, personalized SMS recap. | Server |
 | F3a | Picovoice Eagle voice biometric (caller voiceprint ID) | both | Naavi recognizes who's speaking on a shared phone via voiceprint ID. Deferred until unknown-number caller confusion shows up as a real user pattern. Decoupled from F2a multi-phone work — multi-phone ships first via the additional-phones list, no biometric coupling. Vendor: Picovoice Eagle primary, ID R&D backup. Stays in Features (not Ideas) — solution exists; only vendor selection is open. | Both |
@@ -98,6 +97,7 @@ Items walked but not added to any table. Reopen if symptom recurs.
 | B3c | Haptic vibration feels too subtle on Samsung long-press | **Parked 2026-05-10 — duration bump did NOT solve the bug.** Build 166 shipped `Vibration.vibrate(80)` → `Vibration.vibrate(150)`. On Wael's Samsung One UI / Android 14 device: long-press triggers the recording UI (function fires correctly) but produces NO perceptible buzz — both `Vibration.vibrate` and `Haptics.impactAsync(Heavy)` silently fail despite OS-level vibration intensity ~80% and all System vibration toggles ON. Suggests an Android 14 / Samsung-specific API issue, not a code-logic issue. Reopen with a new approach (vibration pattern instead of single shot, runtime VIBRATE permission re-check, or a different library like `react-native-haptic-feedback`) when haptic UX becomes a priority again. |
 | B3b | Cosmetic ruler leak on long-wrap user bubbles | **Parked 2026-05-10 — cosmetic, low priority.** Build 166 shipped the one-line fix (`color: 'transparent'` → `opacity: 0` on the chat-bubble ruler style). Not retested by Wael (haptic distraction took precedence). The fix is shipped and ready to verify in a future session; until then it's parked because it's a cosmetic-only issue (faint dots behind a long user bubble on Samsung) with no functional impact. Reopen if the dots are visibly annoying when next viewed on a long bubble. |
 | B3a | User hears two voices on mobile: Naavi's voice + the phone's built-in voice | **Parked 2026-05-10 — Path 1 only partially solved the bug.** Build 166 shipped Path 1 (`staysActiveInBackground: true` + `FOREGROUND_SERVICE_MEDIA_PLAYBACK` permission). Wael's test result: background-during-reply keeps the cloud voice cleanly (Path 1 working), but resume-to-foreground mid-reply still triggers fallback to phone's native voice (Path 1 doesn't cover the resume case). Path 2 (custom Expo plugin declaring an Android foreground service for media playback) is the next step but parked until cloud-voice consistency becomes a recurring complaint. Reopen with Path 2 when the foreground-resume audio fragmentation becomes annoying. |
+| F1d | User-controlled mute on PC + Mobile (replaced F1c) | **Closed 2026-05-13 — fully shipped across mobile + voice + backend + web page, all live tests passed.** Sub-pieces shipped: (a) Mobile long-press → mute mid-TTS in V57.14.1 build 167 (commit `663d440`); (b) Voice phrases "no sound" / "quiet" / "shh" → mute on phone via step 3 backend (`6ba6d2b`); (c) "Want me to text the rest?" offer wired in step 2 + 3; (d) SMS hot-link delivery via `/r/<token>` web page (`6448cb0` + route fix `bc810d9`); (e) Hosted-replies backend storage + Edge Functions + 5 tests in auto-tester (`9259887`, still 5/5 green as of 2026-05-17); (f) Live Twilio tests 3 + 4 PASS with 4 voice-server fixes (`4eef2da` `2b86391` `01d4f72` `1f14748`) — recursive mute, 30-sec silence false-positive guard, Deepgram confusables regex, aggregated-text UtteranceEnd check, SMS confirmation TTS clarity, idle-prompt suppression during quiet windows. Doc-vs-reality note: spec said mobile half would ship via EAS Update (OTA); in practice it shipped bundled in AAB build 167 — same outcome, just AAB not OTA. Reference memory: `project_naavi_voice_privacy.md`. |
 
 ---
 
@@ -114,11 +114,11 @@ Items not in the original 26-item holding list but addressed during the session:
 | List | Count | IDs |
 |---|---|---|
 | Bugs (B) | 6 | B1b, B1d, B2a, B2e, B3d, B3e |
-| Features (F) | 5 | F1a, F1d, F2a, F2b, F3a |
+| Features (F) | 4 | F1a, F2a, F2b, F3a |
 | Tooling (T) | 3 | T1a, T2a, T2b |
 | Ideas (I) | 3 | I2a, I2b, I3a |
-| Closed without entry | 14 | Items 4, 12, 14, B1a, B1c, B2b, B2c, B2d, F1b, F1c, F2c, B3c, B3b, B3a |
-| **Total** | **31** | (26 holding-list + 1 missed item B1c added 2026-05-08 + 1 new feature F2c added 2026-05-08 — closed 2026-05-10 + 1 new feature F1d added 2026-05-09 superseding F1c + 1 new bug B2e added 2026-05-09 + 1 new bug B1d added 2026-05-10) |
+| Closed without entry | 15 | Items 4, 12, 14, B1a, B1c, B2b, B2c, B2d, F1b, F1c, F1d, F2c, B3c, B3b, B3a |
+| **Total** | **31** | (26 holding-list + 1 missed item B1c added 2026-05-08 + 1 new feature F2c added 2026-05-08 — closed 2026-05-10 + 1 new feature F1d added 2026-05-09 superseding F1c — closed 2026-05-13 + 1 new bug B2e added 2026-05-09 + 1 new bug B1d added 2026-05-10) |
 
 ### Tally by Server/AAB
 
@@ -134,7 +134,7 @@ Items not in the original 26-item holding list but addressed during the session:
 |---|---|---|
 | voice | 2 | B2a, F2b |
 | mobile | 5 | B1b, B1d, F1a, F2a, T2a |
-| both | 5 | B2e, B3d, F1d, F3a, T1a |
+| both | 4 | B2e, B3d, F3a, T1a |
 | backend | 4 | T2b, I2a, I2b, I3a |
 | website | 1 | B3e |
 
@@ -145,11 +145,11 @@ Items tagged `both` are the ones where Voice Completion Roadmap discipline matte
 | Severity | B | F | T | I | Total |
 |---|---|---|---|---|---|
 | 1 (top) | 2 | 2 | 1 | 0 | 5 |
-| 2 (medium) | 1 | 2 | 2 | 2 | 7 |
+| 2 (medium) | 1 | 1 | 2 | 2 | 6 |
 | 3 (low) | 3 | 1 | 0 | 1 | 5 |
-| **Total** | 6 | 5 | 3 | 3 | **17** |
+| **Total** | 6 | 4 | 3 | 3 | **16** |
 
-(Total active = 17. Add 14 closed-without-entry to reach the 31-item total.)
+(Total active = 16. Add 15 closed-without-entry to reach the 31-item total. F1d closed 2026-05-13.)
 
 ---
 
