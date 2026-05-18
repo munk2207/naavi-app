@@ -134,20 +134,41 @@ serve(async (req) => {
 
           for (const event of events) {
             liveIds.push(event.id);
+
+            // 2026-05-17 — CLAUDE.md Rule 18: present source data as-is.
+            // Google distinguishes all-day events (start.date, end.date)
+            // from timed events (start.dateTime, end.dateTime). Previously
+            // we collapsed both into start_time/end_time (timestamptz),
+            // which silently shifted all-day events by the user's UTC
+            // offset (Victoria Day on May 18 became 8 PM May 17 in Toronto).
+            // Now we route each kind into its own column.
+            const isAllDay = !event.start?.dateTime && !!event.start?.date;
+            const baseRow: Record<string, unknown> = {
+              user_id,
+              google_event_id: event.id,
+              item_type:   'event',
+              title:       event.summary   ?? 'Event',
+              description: event.description ?? '',
+              location:    event.location   ?? '',
+              attendees:   event.attendees  ?? [],
+              updated_at:  new Date().toISOString(),
+              is_all_day:  isAllDay,
+            };
+            if (isAllDay) {
+              baseRow.start_date = event.start.date;
+              baseRow.end_date   = event.end?.date ?? null;
+              baseRow.start_time = null;
+              baseRow.end_time   = null;
+            } else {
+              baseRow.start_time = event.start?.dateTime ?? null;
+              baseRow.end_time   = event.end?.dateTime   ?? null;
+              baseRow.start_date = null;
+              baseRow.end_date   = null;
+            }
+
             const { error } = await adminClient
               .from('calendar_events')
-              .upsert({
-                user_id,
-                google_event_id: event.id,
-                item_type:   'event',
-                title:       event.summary   ?? 'Event',
-                start_time:  event.start?.dateTime ?? event.start?.date,
-                end_time:    event.end?.dateTime   ?? event.end?.date,
-                description: event.description ?? '',
-                location:    event.location   ?? '',
-                attendees:   event.attendees  ?? [],
-                updated_at:  new Date().toISOString(),
-              }, { onConflict: 'user_id,google_event_id' });
+              .upsert(baseRow, { onConflict: 'user_id,google_event_id' });
 
             if (!error) eventCount++;
           }
