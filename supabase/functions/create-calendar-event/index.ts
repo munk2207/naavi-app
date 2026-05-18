@@ -216,20 +216,33 @@ serve(async (req) => {
     // diagnose why Linking.openURL is failing to open it on the phone.
     console.log(`[create-calendar-event][DIAG] htmlLink: ${created.htmlLink}`);
 
-    // Save to Supabase calendar_events table with priority flag.
-    // Store the coerced (date-only) form when applicable so the home brief
-    // and any other reader of calendar_events sees the same all-day shape
-    // we sent to Google.
-    await adminClient.from('calendar_events').upsert({
+    // Save to Supabase calendar_events table.
+    // CLAUDE.md Rule 18: present source data as-is. All-day events route
+    // into start_date/end_date with is_all_day=true; timed events stay in
+    // start_time/end_time. Mirrors the sync-google-calendar shape so any
+    // reader sees the same model regardless of who created the event.
+    const isAllDayInsert = isDateOnly(normalisedStart) && isDateOnly(normalisedEnd);
+    const calRow: Record<string, unknown> = {
       user_id: user.id,
       google_event_id: created.id,
       title: summary,
       description: description ?? '',
-      start_time: normalisedStart,
-      end_time:   normalisedEnd,
       is_priority: is_priority || false,
+      is_all_day: isAllDayInsert,
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'google_event_id' });
+    };
+    if (isAllDayInsert) {
+      calRow.start_date = normalisedStart;
+      calRow.end_date   = normalisedEnd;
+      calRow.start_time = null;
+      calRow.end_time   = null;
+    } else {
+      calRow.start_time = normalisedStart;
+      calRow.end_time   = normalisedEnd;
+      calRow.start_date = null;
+      calRow.end_date   = null;
+    }
+    await adminClient.from('calendar_events').upsert(calRow, { onConflict: 'google_event_id' });
 
     return new Response(JSON.stringify({ success: true, eventId: created.id, htmlLink: created.htmlLink }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

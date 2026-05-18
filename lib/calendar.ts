@@ -262,32 +262,43 @@ function mapEventToBriefItem(event: {
   end_time: string | null;
   location: string | null;
   description: string | null;
+  is_all_day?: boolean;
+  start_date?: string | null;
+  end_date?: string | null;
 }, dayLabel?: string): BriefItem {
-  const startRaw = event.start_time ?? '';
-  const isAllDay = !startRaw.includes('T');
+  // CLAUDE.md Rule 18 — for all-day events the day label itself already
+  // says "Today — all day" / "May 18 to May 21 — all day", so we drop
+  // the "at <time>" suffix to avoid "Today — all day — Victoria Day at
+  // All day". For timed events, format the clock time from start_time.
+  const isAllDay = !!event.is_all_day;
+  const startRaw = isAllDay
+    ? (event.start_date ? `${event.start_date}T12:00:00` : '')
+    : (event.start_time ?? '');
 
-  const timeLabel = isAllDay
-    ? 'All day'
-    : new Date(startRaw).toLocaleTimeString('en-CA', {
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-      });
-
-  const urgent = !isAllDay &&
-    (new Date(startRaw).getTime() - Date.now()) < 2 * 60 * 60 * 1000 &&
-    new Date(startRaw).getTime() > Date.now();
+  const urgent = !isAllDay && startRaw
+    ? (new Date(startRaw).getTime() - Date.now()) < 2 * 60 * 60 * 1000 &&
+      new Date(startRaw).getTime() > Date.now()
+    : false;
 
   const prefix = dayLabel ? `${dayLabel} — ` : '';
+  let title: string;
+  if (isAllDay) {
+    title = `${prefix}${event.title}`;
+  } else {
+    const timeLabel = startRaw
+      ? new Date(startRaw).toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true })
+      : '';
+    title = timeLabel ? `${prefix}${event.title} at ${timeLabel}` : `${prefix}${event.title}`;
+  }
 
   return {
     id: event.google_event_id,
     category: 'calendar' as const,
-    title: `${prefix}${event.title} at ${timeLabel}`,
+    title,
     detail: event.location || event.description || '',
     urgent,
-    startISO: startRaw || undefined,
-    endISO: event.end_time || undefined,
+    startISO: isAllDay ? (event.start_date ?? undefined) : (startRaw || undefined),
+    endISO:   isAllDay ? (event.end_date   ?? undefined) : (event.end_time || undefined),
     location: event.location || undefined,
   };
 }
@@ -336,19 +347,53 @@ export async function fetchUpcomingEvents(days = 30, passedUserId?: string): Pro
   future.setDate(future.getDate() + days);
 
   try {
-    const { data: events, error: evError } = await queryWithTimeout(
-      supabase
-        .from('calendar_events')
-        .select('google_event_id, title, start_time, end_time, location, description, item_type')
-        .eq('user_id', userId)
-        .neq('item_type', 'task')
-        .gte('start_time', startOfDay.toISOString())
-        .lte('start_time', future.toISOString())
-        .order('start_time', { ascending: true })
-        .limit(20),
-      15_000,
-      'select-upcoming-events',
-    );
+    // 2026-05-17 — Rule 18 — read all-day events from start_date and
+    // timed events from start_time. Two separate queries combined client-
+    // side so each kind uses the right column for the date filter (legacy
+    // approach of stuffing date-only events into start_time produced the
+    // Victoria Day "Today" bug).
+    const startOfDayISO = startOfDay.toISOString();
+    const futureISO = future.toISOString();
+    const todayDateStr = startOfDay.toISOString().slice(0, 10);
+    const futureDateStr = future.toISOString().slice(0, 10);
+
+    const [timedRes, allDayRes] = await Promise.all([
+      queryWithTimeout(
+        supabase
+          .from('calendar_events')
+          .select('google_event_id, title, start_time, end_time, location, description, item_type, is_all_day, start_date, end_date')
+          .eq('user_id', userId)
+          .neq('item_type', 'task')
+          .eq('is_all_day', false)
+          .gte('start_time', startOfDayISO)
+          .lte('start_time', futureISO)
+          .order('start_time', { ascending: true })
+          .limit(20),
+        15_000,
+        'select-upcoming-events-timed',
+      ),
+      queryWithTimeout(
+        supabase
+          .from('calendar_events')
+          .select('google_event_id, title, start_time, end_time, location, description, item_type, is_all_day, start_date, end_date')
+          .eq('user_id', userId)
+          .neq('item_type', 'task')
+          .eq('is_all_day', true)
+          .gte('start_date', todayDateStr)
+          .lte('start_date', futureDateStr)
+          .order('start_date', { ascending: true })
+          .limit(20),
+        15_000,
+        'select-upcoming-events-all-day',
+      ),
+    ]);
+    const events = [...(timedRes.data ?? []), ...(allDayRes.data ?? [])]
+      .sort((a, b) => {
+        const aKey = a.is_all_day ? `${a.start_date}T00:00:00Z` : (a.start_time ?? '');
+        const bKey = b.is_all_day ? `${b.start_date}T00:00:00Z` : (b.start_time ?? '');
+        return aKey < bKey ? -1 : aKey > bKey ? 1 : 0;
+      });
+    const evError = timedRes.error ?? allDayRes.error;
 
     // Fetch all incomplete tasks — sync only stores incomplete tasks
     const { data: tasks, error: taskError } = await queryWithTimeout(
@@ -370,22 +415,60 @@ export async function fetchUpcomingEvents(days = 30, passedUserId?: string): Pro
     const allItems = [...(events ?? []), ...(tasks ?? [])];
 
     return allItems.map(event => {
-      const startRaw = event.start_time ?? '';
       const isTask = event.item_type === 'task';
-      const date = startRaw ? new Date(startRaw) : null;
-      const today = new Date();
-      const tomorrow = new Date(); tomorrow.setDate(today.getDate() + 1);
+      const isAllDay = !!event.is_all_day;
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
 
+      // CLAUDE.md Rule 18 — all-day events use start_date as-is; timed
+      // events use start_time. Day label computed from the right field
+      // for each kind so a date-only "May 18" never gets shifted into
+      // "May 17 8 PM" by a timestamp conversion.
       let dayLabel: string;
-      if (!date) {
-        dayLabel = 'No due date';
-      } else if (date.toDateString() === today.toDateString()) {
-        dayLabel = 'Today';
-      } else if (date.toDateString() === tomorrow.toDateString()) {
-        dayLabel = 'Tomorrow';
+      if (isAllDay) {
+        const startDate = event.start_date ?? '';
+        const endDateExclusive = event.end_date ?? '';
+        // Parse YYYY-MM-DD as local-noon to avoid TZ edge cases when
+        // computing the date label.
+        const startLocal = startDate ? new Date(`${startDate}T12:00:00`) : null;
+        const endLocal   = endDateExclusive ? new Date(`${endDateExclusive}T12:00:00`) : null;
+        const todayStr = today.toDateString();
+        const tomorrowStr = tomorrow.toDateString();
+        const sameDay = startLocal && endLocal
+          ? (new Date(endLocal.getTime() - 24 * 60 * 60 * 1000).toDateString() === startLocal.toDateString())
+          : true;
+
+        if (!startLocal) {
+          dayLabel = 'All day';
+        } else if (sameDay) {
+          const startStr = startLocal.toDateString();
+          if (startStr === todayStr) dayLabel = 'Today — all day';
+          else if (startStr === tomorrowStr) dayLabel = 'Tomorrow — all day';
+          else dayLabel = `${startLocal.toLocaleDateString('en-CA', { weekday: 'long', month: 'short', day: 'numeric' })} — all day`;
+        } else {
+          // Multi-day range. Google's end_date is exclusive; show user-
+          // facing inclusive range.
+          const inclusiveEnd = endLocal ? new Date(endLocal.getTime() - 24 * 60 * 60 * 1000) : startLocal;
+          const startFmt = startLocal.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+          const endFmt   = inclusiveEnd.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+          dayLabel = `${startFmt} to ${endFmt} — all day`;
+        }
       } else {
-        dayLabel = date.toLocaleDateString('en-CA', { weekday: 'long', month: 'short', day: 'numeric' });
+        const startRaw = event.start_time ?? '';
+        const date = startRaw ? new Date(startRaw) : null;
+        if (!date) {
+          dayLabel = 'No due date';
+        } else if (date.toDateString() === today.toDateString()) {
+          dayLabel = 'Today';
+        } else if (date.toDateString() === tomorrow.toDateString()) {
+          dayLabel = 'Tomorrow';
+        } else {
+          dayLabel = date.toLocaleDateString('en-CA', { weekday: 'long', month: 'short', day: 'numeric' });
+        }
       }
+      // Keep `date` variable in scope for the existing isTask branch below.
+      const startRawForTask = event.start_time ?? (event.start_date ? `${event.start_date}T12:00:00` : '');
+      const date = startRawForTask ? new Date(startRawForTask) : null;
 
       if (isTask) {
         const taskDateStr = date
