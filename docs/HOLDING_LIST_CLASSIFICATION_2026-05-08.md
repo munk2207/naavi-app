@@ -51,6 +51,7 @@ Active feature list as of 2026-05-19 — all kept open for further product discu
 | F2a | Onboarding Review (multi-phone + 7 other gaps) | mobile | Onboarding doc + Settings UI covering 8 gaps (multi-phone setup, voice keyterms capture at setup, quiet hours field, verified-address expectation, consolidated privacy callout, post-install rehearsal with starter prompts, re-install / new-phone flow, first-week-vs-week-two expectation calibration). Postponed 2026-05-09 — not all 8 have crisp product decisions; needs a dedicated session looking at onboarding end-to-end. Settings UI changes require AAB; doc is a build-script regen. | Both | open (postponed) |
 | F2b | Demo line maturity (richer scenarios + conversion path + telemetry) | voice | Demo phone line gets richer scenarios, a conversion path back to a real account, and telemetry to see what works. Postponed 2026-05-09 — marketing/growth decisions (which metrics matter, which scenarios resonate) need a focused session. Three sub-pieces in sequence: telemetry first (total calls, scenario popularity, opt-in rate, signup conversion), conversion attribution second (per-call token in the SMS link), scenario richness third (medication scheduling, navigation, recurring delegation, variable data, light branching). Already shipped: 5 canned scenarios, name capture, personalized SMS recap. | Server | open (postponed) |
 | F2d | Mobile auto-listen after confirmation prompts | mobile | When Naavi finishes a yes/no or numbered-pick prompt (the orchestrator already tracks "pending confirmation" state), mic auto-opens for 20-30s and auto-sends on speech-end. Removes tap-to-talk + tap-to-send friction for confirmations specifically. Only triggers when the prior turn used voice input (not text), so office typers never get surprised. Discussed 2026-05-19 — Wael deferred: voice phone line (1-888-91-NAAVI via "Hey Google, call Naavi") already covers driving + cooking hands-free with full Naavi capability, and the at-desk tap friction is mild because eyes are on screen anyway. Re-open only if hands-full at desk becomes a recurring pain point not already solved by the voice call. ~6-8 hours code + 1 AAB. | AAB | open (deferred) |
+| F2e | Alert state visibility — Active / Done / Expired badges on Alerts screen + voice list | both | Today both the Alerts screen and voice `LIST_RULES` show every rule the same way, regardless of whether it has fired, completed (one-shot), or expired (time-trigger past with no fire). Robert can't tell at a glance which alerts are still waiting vs which already fired vs which are done. Proposed state model from action_rules columns: ACTIVE-WAITING (`enabled=true, last_fired_at=null`), ACTIVE-REPEATING (`enabled=true, last_fired_at≠null, one_shot=false`), DONE (`enabled=false`), EXPIRED (`enabled=true, time-trigger datetime<now, last_fired_at=null`). Mobile: add a per-row state badge + group Active first / hide Done behind a toggle. Voice: hide Done by default, offer "do you also want to hear the completed ones?" as a follow-up. Discussion 2026-05-19. Mobile side requires AAB; voice side is server-only. | Both | open (discussion) |
 
 ---
 
@@ -140,7 +141,7 @@ Items not in the original 26-item holding list but addressed during the session:
 | List | Count | IDs |
 |---|---|---|
 | Bugs (B) | 2 | B2l (queued V57.20.1 build 194), B3g (watching, absorbed T3b) |
-| Features (F) | 3 | F2a, F2b (both postponed pending product discussion), F2d (mobile auto-listen — deferred) |
+| Features (F) | 4 | F2a, F2b (both postponed pending product discussion), F2d (mobile auto-listen — deferred), F2e (alert state visibility — discussion) |
 | Tooling (T) | 4 | T1a, T2a, T2b, T3c |
 | Ideas (I) | 3 | I2a, I2b, I3a |
 | Closed without entry | 38 | All prior closures + the 17 closed 2026-05-19 |
@@ -151,7 +152,7 @@ Items not in the original 26-item holding list but addressed during the session:
 | Scope | Count | Implication |
 |---|---|---|
 | Server-only | 5 | T1a (partly), T2b, T3c, B3g (watching), F2b. Ship without AAB cycle. |
-| AAB-only | 3 | F2a, F2d (deferred), B2l (in flight — V57.20.1 build 194). |
+| AAB-only | 3 | F2a, F2d (deferred), B2l (in flight — V57.20.1 build 194). F2e split — mobile side AAB, voice side server. |
 | Both | 2 | T1a (Server + Mobile), T2a (Mobile + emulator infra) |
 
 ### Tally by Surface (cross-surface drift discipline)
@@ -159,7 +160,7 @@ Items not in the original 26-item holding list but addressed during the session:
 | Surface | Count | IDs |
 |---|---|---|
 | voice | 1 | F2b |
-| mobile | 4 | B2l, F2a, F2d, T2a |
+| mobile | 5 | B2l, F2a, F2d, F2e (mobile side), T2a |
 | both | 2 | T1a, T3c |
 | backend | 4 | B3g, T2b, I2a, I2b |
 | (Ideas, deferred) | 1 | I3a (health trigger) |
@@ -171,11 +172,11 @@ Items tagged `both` (T1a + T3c) are the cross-surface drift discipline items —
 | Severity | B | F | T | I | Total |
 |---|---|---|---|---|---|
 | 1 (top) | 0 | 0 | 1 | 0 | 1 (T1a) |
-| 2 (medium) | 1 | 2 | 2 | 1 | 6 (B3g, F2a, F2b, T2a, T3c, I2a) |
+| 2 (medium) | 1 | 3 | 2 | 1 | 7 (B3g, F2a, F2b, F2e, T2a, T3c, I2a) |
 | 3 (low) / watching / deferred | 1 | 1 | 1 | 2 | 5 (B2l, F2d, T2b, I2b, I3a) |
-| **Total** | 2 | 3 | 4 | 3 | **12** |
+| **Total** | 2 | 4 | 4 | 3 | **13** |
 
-(Total active = 10 distinct items. Last bulk closure: 2026-05-19 — 17 items closed in one pass after B3i fix shipped, F4a completed by B3i, Cora→Andromeda voice swap finalized, and Wael's strategic close-down decision. F2d added 2026-05-19 — mobile auto-listen for confirmations, deferred since voice-call channel already covers hands-free use cases.)
+(Total active = 11 distinct items. Last bulk closure: 2026-05-19 — 17 items closed in one pass after B3i fix shipped, F4a completed by B3i, Cora→Andromeda voice swap finalized, and Wael's strategic close-down decision. Same-day additions: F2d mobile auto-listen for confirmations [deferred], F2e alert state visibility badges [discussion].)
 
 ---
 
