@@ -44,12 +44,13 @@ Active bug list as of 2026-05-19 — both on "watching" status, no active build 
 
 ## Features (F)
 
-Active feature list as of 2026-05-19 — both kept open for further product discussion (no engineering blocker; product decisions still pending). See the Closed table below for the 5 features closed today.
+Active feature list as of 2026-05-19 — all kept open for further product discussion (no engineering blocker; product decisions still pending). See the Closed table below for the 5 features closed today.
 
 | ID | Description | Surface | Notes | Server/AAB | Status |
 |----|-------------|---------|-------|------------|--------|
 | F2a | Onboarding Review (multi-phone + 7 other gaps) | mobile | Onboarding doc + Settings UI covering 8 gaps (multi-phone setup, voice keyterms capture at setup, quiet hours field, verified-address expectation, consolidated privacy callout, post-install rehearsal with starter prompts, re-install / new-phone flow, first-week-vs-week-two expectation calibration). Postponed 2026-05-09 — not all 8 have crisp product decisions; needs a dedicated session looking at onboarding end-to-end. Settings UI changes require AAB; doc is a build-script regen. | Both | open (postponed) |
 | F2b | Demo line maturity (richer scenarios + conversion path + telemetry) | voice | Demo phone line gets richer scenarios, a conversion path back to a real account, and telemetry to see what works. Postponed 2026-05-09 — marketing/growth decisions (which metrics matter, which scenarios resonate) need a focused session. Three sub-pieces in sequence: telemetry first (total calls, scenario popularity, opt-in rate, signup conversion), conversion attribution second (per-call token in the SMS link), scenario richness third (medication scheduling, navigation, recurring delegation, variable data, light branching). Already shipped: 5 canned scenarios, name capture, personalized SMS recap. | Server | open (postponed) |
+| F2d | Mobile auto-listen after confirmation prompts | mobile | When Naavi finishes a yes/no or numbered-pick prompt (the orchestrator already tracks "pending confirmation" state), mic auto-opens for 20-30s and auto-sends on speech-end. Removes tap-to-talk + tap-to-send friction for confirmations specifically. Only triggers when the prior turn used voice input (not text), so office typers never get surprised. Discussed 2026-05-19 — Wael deferred: voice phone line (1-888-91-NAAVI via "Hey Google, call Naavi") already covers driving + cooking hands-free with full Naavi capability, and the at-desk tap friction is mild because eyes are on screen anyway. Re-open only if hands-full at desk becomes a recurring pain point not already solved by the voice call. ~6-8 hours code + 1 AAB. | AAB | open (deferred) |
 
 ---
 
@@ -139,7 +140,7 @@ Items not in the original 26-item holding list but addressed during the session:
 | List | Count | IDs |
 |---|---|---|
 | Bugs (B) | 2 | B2l (queued V57.20.1 build 194), B3g (watching, absorbed T3b) |
-| Features (F) | 2 | F2a, F2b (both postponed pending product discussion) |
+| Features (F) | 3 | F2a, F2b (both postponed pending product discussion), F2d (mobile auto-listen — deferred) |
 | Tooling (T) | 4 | T1a, T2a, T2b, T3c |
 | Ideas (I) | 3 | I2a, I2b, I3a |
 | Closed without entry | 38 | All prior closures + the 17 closed 2026-05-19 |
@@ -150,7 +151,7 @@ Items not in the original 26-item holding list but addressed during the session:
 | Scope | Count | Implication |
 |---|---|---|
 | Server-only | 5 | T1a (partly), T2b, T3c, B3g (watching), F2b. Ship without AAB cycle. |
-| AAB-only | 2 | F2a, B2l (in flight — V57.20.1 build 194). |
+| AAB-only | 3 | F2a, F2d (deferred), B2l (in flight — V57.20.1 build 194). |
 | Both | 2 | T1a (Server + Mobile), T2a (Mobile + emulator infra) |
 
 ### Tally by Surface (cross-surface drift discipline)
@@ -158,7 +159,7 @@ Items not in the original 26-item holding list but addressed during the session:
 | Surface | Count | IDs |
 |---|---|---|
 | voice | 1 | F2b |
-| mobile | 3 | B2l, F2a, T2a |
+| mobile | 4 | B2l, F2a, F2d, T2a |
 | both | 2 | T1a, T3c |
 | backend | 4 | B3g, T2b, I2a, I2b |
 | (Ideas, deferred) | 1 | I3a (health trigger) |
@@ -171,10 +172,10 @@ Items tagged `both` (T1a + T3c) are the cross-surface drift discipline items —
 |---|---|---|---|---|---|
 | 1 (top) | 0 | 0 | 1 | 0 | 1 (T1a) |
 | 2 (medium) | 1 | 2 | 2 | 1 | 6 (B3g, F2a, F2b, T2a, T3c, I2a) |
-| 3 (low) / watching / deferred | 1 | 0 | 1 | 2 | 4 (B2l, T2b, I2b, I3a) |
-| **Total** | 2 | 2 | 4 | 3 | **11** |
+| 3 (low) / watching / deferred | 1 | 1 | 1 | 2 | 5 (B2l, F2d, T2b, I2b, I3a) |
+| **Total** | 2 | 3 | 4 | 3 | **12** |
 
-(Total active = 9 distinct items. Last bulk closure: 2026-05-19 — 17 items closed in one pass after B3i fix shipped, F4a completed by B3i, Cora→Andromeda voice swap finalized, and Wael's strategic close-down decision.)
+(Total active = 10 distinct items. Last bulk closure: 2026-05-19 — 17 items closed in one pass after B3i fix shipped, F4a completed by B3i, Cora→Andromeda voice swap finalized, and Wael's strategic close-down decision. F2d added 2026-05-19 — mobile auto-listen for confirmations, deferred since voice-call channel already covers hands-free use cases.)
 
 ---
 
