@@ -425,12 +425,30 @@ export default function AlertsScreen() {
     setDeleting(true);
     try {
       if (!supabase) throw new Error('No Supabase client');
+      const deleted = pendingDelete;
       const { error: err } = await invokeWithTimeout('manage-rules', {
-        body: { op: 'delete', rule_id: pendingDelete.id },
+        body: { op: 'delete', rule_id: deleted.id },
       }, 15_000);
       if (err) throw err;
-      setRules(prev => prev.filter(r => r.id !== pendingDelete.id));
+      setRules(prev => prev.filter(r => r.id !== deleted.id));
       setPendingDelete(null);
+
+      // B2l fix (2026-05-19) — re-sync the Transistorsoft SDK so the
+      // deleted rule's geofence is removed from the device. Without
+      // this, the SDK keeps the geofence registered and fires orphan
+      // ENTER events that the server rejects silently at T1
+      // (geofence-T1-rule-lookup-null). Only worth re-syncing for
+      // location rules; non-location deletes are a no-op for the SDK.
+      if (deleted.trigger_type === 'location') {
+        getSessionWithTimeout()
+          .then(session => {
+            if (!session?.user?.id) return;
+            return import('@/hooks/useGeofencing').then(({ syncGeofencesForUser }) =>
+              syncGeofencesForUser(session.user.id),
+            );
+          })
+          .catch(err => console.error('[alerts] sync after delete failed:', err));
+      }
     } catch (e: unknown) {
       setError(formatErrorForUser(e));
     } finally {

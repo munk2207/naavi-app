@@ -21,6 +21,16 @@ import type { TestCase, TestContext } from '../lib/types';
 const TEST_LAT = 45.41111;
 const TEST_LNG = -75.71111;
 
+// 2026-05-19 — ENTER events must report coords near the geofence boundary
+// to pass the cold-start phantom guard in report-location-event (rejects
+// first ENTER if reported coords are within 70% of radius from center —
+// real arrivals fire when the phone crosses the boundary, not at the
+// geometric center). For the 500 m radius test rule, the boundary lies
+// ~500 m from center; we offset latitude by ~0.0036° (≈400 m at 45° N)
+// so the reported coords sit comfortably past the 350 m threshold.
+const ENTER_LAT = TEST_LAT + 0.0036;
+const ENTER_LNG = TEST_LNG;
+
 async function deleteTestRules(ctx: TestContext) {
   await fetch(
     `${ctx.supabaseUrl}/rest/v1/action_rules`
@@ -228,7 +238,7 @@ export const pendingDwellTests: TestCase[] = [
         const res = await adapters.call(ctx, 'report-location-event', {
           user_id: ctx.testUserId,
           rule_id: ruleId,
-          lat: TEST_LAT, lng: TEST_LNG,
+          lat: ENTER_LAT, lng: ENTER_LNG,
           event: 'enter',
           timestamp: new Date().toISOString(),
         }, { asService: true });
@@ -265,18 +275,18 @@ export const pendingDwellTests: TestCase[] = [
     async run(ctx) {
       const ruleId = await createTestRule(ctx, 'pending-dwell-test-cancel');
       try {
-        // Defer via ENTER
+        // Defer via ENTER (boundary coords clear the cold-start guard)
         const enterRes = await adapters.call(ctx, 'report-location-event', {
           user_id: ctx.testUserId,
           rule_id: ruleId,
-          lat: TEST_LAT, lng: TEST_LNG,
+          lat: ENTER_LAT, lng: ENTER_LNG,
           event: 'enter',
           timestamp: new Date().toISOString(),
         }, { asService: true });
         expect2xx(enterRes.status, 'report-location-event ENTER');
         expectEqual(await countPending(ctx, ruleId, true), 1, 'should have 1 active pending after ENTER');
 
-        // Cancel via EXIT
+        // Cancel via EXIT (any coords — EXIT is not gated by the guard)
         const exitRes = await adapters.call(ctx, 'report-location-event', {
           user_id: ctx.testUserId,
           rule_id: ruleId,
