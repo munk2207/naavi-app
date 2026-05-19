@@ -190,6 +190,62 @@ serve(async (req) => {
             radius_m: radiusM,
           });
         }
+
+        // 2026-05-19 — STATIONARY-PHANTOM REJECTION (deep-inside guard).
+        //
+        // Counterpart to the "far outside" check above. Wael's 12:51 AM
+        // May 19 phantom showed the failure mode: phone stationary inside
+        // home for 6+ hours, Transistorsoft re-fires ENTER, state machine's
+        // 24h TTL allows it through. Reported coords were 0m from the rule
+        // center — clearly not a boundary crossing.
+        //
+        // Real ENTER fires when the phone CROSSES the geofence boundary,
+        // so the GPS fix at T1 is typically near the boundary (within 5-50m
+        // of it). A stationary phantom while deep inside reports coords at
+        // wherever the phone has been sitting — typically near the center
+        // for small "home" geofences.
+        //
+        // Guard: if the reported coords are within 30% of the rule's
+        // radius from the center (i.e., > 70% of the radius from the
+        // boundary), the phone wasn't crossing — it was already inside.
+        // Reject as stationary-phantom regardless of state-machine TTL.
+        //
+        // 30% threshold rationale: scales with geofence size (works for
+        // 50m and 500m radii alike), conservative enough that real
+        // arrivals where the phone gets a quick fix slightly inside the
+        // boundary (e.g., 40m past in a 100m radius = 40m from center =
+        // 40% of radius) still pass. Only rejects when the phone is
+        // genuinely deep inside.
+        if (event === 'enter') {
+          const STATIONARY_PHANTOM_RATIO = 0.3;
+          const phantomThresholdM = radiusM * STATIONARY_PHANTOM_RATIO;
+          if (distanceM < phantomThresholdM) {
+            console.log(
+              `[report-location-event] STATIONARY-PHANTOM rejected rule=${rule_id.slice(0,8)} ` +
+              `reported=(${reportedLat.toFixed(5)}, ${reportedLng.toFixed(5)}) ` +
+              `rule_center=(${ruleLat.toFixed(5)}, ${ruleLng.toFixed(5)}) ` +
+              `distance=${distanceM.toFixed(0)}m radius=${radiusM}m threshold=${phantomThresholdM.toFixed(0)}m ` +
+              `(phone deep inside geofence — not a boundary crossing)`
+            );
+            await diag(admin, event_id, user_id, 'geofence-T3-stationary-phantom-rejected', {
+              rule_id,
+              reported_lat: reportedLat,
+              reported_lng: reportedLng,
+              rule_lat: ruleLat,
+              rule_lng: ruleLng,
+              distance_m: Math.round(distanceM),
+              radius_m: radiusM,
+              threshold_m: Math.round(phantomThresholdM),
+            });
+            return json({
+              ok: true,
+              skipped: 'phantom — phone deep inside geofence, not crossing boundary',
+              distance_m: Math.round(distanceM),
+              radius_m: radiusM,
+              threshold_m: Math.round(phantomThresholdM),
+            });
+          }
+        }
       }
     }
 
