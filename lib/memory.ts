@@ -102,31 +102,65 @@ async function getCalendarEventsForPerson(name: string): Promise<CalendarEntry[]
   const threeMonthsAhead = new Date();
   threeMonthsAhead.setMonth(threeMonthsAhead.getMonth() + 3);
 
+  // 2026-05-19 — B3i fix. Two-query pattern matches lib/calendar.ts:
+  // timed events filter by start_time; all-day events filter by
+  // start_date. The legacy single-query approach skipped every all-day
+  // event because start_time IS NULL after Rule 18.
+  const sixMonthsAgoISO = sixMonthsAgo.toISOString();
+  const threeMonthsAheadISO = threeMonthsAhead.toISOString();
+  const sixMonthsAgoDateStr = sixMonthsAgoISO.slice(0, 10);
+  const threeMonthsAheadDateStr = threeMonthsAheadISO.slice(0, 10);
+  const personOrFilter = `title.ilike.%${nameLower}%,description.ilike.%${nameLower}%,location.ilike.%${nameLower}%,attendees.cs.[{"displayName":"${name}"}]`;
+
   try {
-    const { data: events, error } = await queryWithTimeout(
-      supabase
-        .from('calendar_events')
-        .select('title, start_time, location')
-        .eq('user_id', userId)
-        .gte('start_time', sixMonthsAgo.toISOString())
-        .lte('start_time', threeMonthsAhead.toISOString())
-        .or(`title.ilike.%${nameLower}%,description.ilike.%${nameLower}%,location.ilike.%${nameLower}%,attendees.cs.[{"displayName":"${name}"}]`)
-        .order('start_time', { ascending: true })
-        .limit(50),
-      15_000,
-      'select-calendar-for-person',
-    );
+    const [timedRes, allDayRes] = await Promise.all([
+      queryWithTimeout(
+        supabase
+          .from('calendar_events')
+          .select('title, start_time, location, is_all_day, start_date')
+          .eq('user_id', userId)
+          .eq('is_all_day', false)
+          .gte('start_time', sixMonthsAgoISO)
+          .lte('start_time', threeMonthsAheadISO)
+          .or(personOrFilter)
+          .order('start_time', { ascending: true })
+          .limit(50),
+        15_000,
+        'select-calendar-for-person-timed',
+      ),
+      queryWithTimeout(
+        supabase
+          .from('calendar_events')
+          .select('title, start_time, location, is_all_day, start_date')
+          .eq('user_id', userId)
+          .eq('is_all_day', true)
+          .gte('start_date', sixMonthsAgoDateStr)
+          .lte('start_date', threeMonthsAheadDateStr)
+          .or(personOrFilter)
+          .order('start_date', { ascending: true })
+          .limit(50),
+        15_000,
+        'select-calendar-for-person-all-day',
+      ),
+    ]);
 
-    if (error || !events) return [];
+    if (timedRes.error && allDayRes.error) return [];
 
-    return events.map(event => {
-      const startRaw = event.start_time ?? '';
-      const date = new Date(startRaw);
-      const isAllDay = !startRaw.includes('T');
+    const combined = [
+      ...((timedRes.data ?? []) as any[]),
+      ...((allDayRes.data ?? []) as any[]),
+    ];
+
+    return combined.map((event: any) => {
+      const isAllDay = !!event.is_all_day;
+      const dateRaw = isAllDay
+        ? (event.start_date ?? '')
+        : (event.start_time ?? '');
+      const date = isAllDay ? null : new Date(event.start_time ?? '');
       return {
         title: event.title ?? 'Meeting',
-        date: startRaw,
-        time: !isAllDay
+        date: dateRaw,
+        time: !isAllDay && date && !isNaN(date.getTime())
           ? date.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true })
           : undefined,
       };

@@ -125,9 +125,16 @@ async function fetchUnreadEmailSenders(
 
 interface CalendarEvent {
   title: string;
-  start_time: string;
-  end_time: string;
+  start_time: string | null;
+  end_time: string | null;
   location: string | null;
+  // 2026-05-19 — Rule 18 — all-day events store start_time NULL and use
+  // start_date / end_date instead. The reader has to be aware of both
+  // shapes so the schedule answer surfaces all-day events alongside
+  // timed ones (B3i fix). is_all_day distinguishes the two.
+  is_all_day?: boolean | null;
+  start_date?: string | null;
+  end_date?: string | null;
 }
 
 interface EmailAction {
@@ -149,14 +156,31 @@ async function handleBrief(
   const todayEnd   = new Date(now); todayEnd.setHours(23, 59, 59, 999);
   const sevenDays  = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  const [{ data: events }, unreadResult] = await Promise.all([
+  // 2026-05-19 — B3i fix. Two-query pattern from lib/calendar.ts so
+  // all-day events (start_time IS NULL, start_date populated) appear
+  // alongside timed events. Without this, the brief and calendar reply
+  // silently skip every all-day event the user has on the day.
+  const todayStartISO = todayStart.toISOString();
+  const todayEndISO   = todayEnd.toISOString();
+  const todayDateStr  = todayStart.toISOString().slice(0, 10);
+
+  const [timedRes, allDayRes, unreadResult] = await Promise.all([
     adminClient
       .from('calendar_events')
-      .select('title, start_time, end_time, location')
+      .select('title, start_time, end_time, location, is_all_day, start_date, end_date')
       .eq('user_id', userId)
-      .gte('start_time', todayStart.toISOString())
-      .lte('start_time', todayEnd.toISOString())
+      .eq('is_all_day', false)
+      .gte('start_time', todayStartISO)
+      .lte('start_time', todayEndISO)
       .order('start_time')
+      .limit(5),
+    adminClient
+      .from('calendar_events')
+      .select('title, start_time, end_time, location, is_all_day, start_date, end_date')
+      .eq('user_id', userId)
+      .eq('is_all_day', true)
+      .lte('start_date', todayDateStr)
+      .gte('end_date', todayDateStr)
       .limit(5),
     // Wael 2026-05-10: brief reports unread email count + sender list,
     // descriptively. Naavi cannot truthfully claim "items needing
@@ -166,18 +190,29 @@ async function handleBrief(
     fetchUnreadEmailSenders(adminClient, userId, 10),
   ]);
 
+  // Combine timed + all-day events. All-day events sort first
+  // (no clock time) so they read as the day's framing context, then
+  // timed events follow in chronological order.
+  const evList: CalendarEvent[] = [
+    ...((allDayRes.data ?? []) as CalendarEvent[]),
+    ...((timedRes.data ?? []) as CalendarEvent[]),
+  ];
+
   const sentences: string[] = [];
   sentences.push(`Good morning. Here is your brief for ${formatDate(now.toISOString())}.`);
 
-  const evList = (events as CalendarEvent[] | null) ?? [];
   if (evList.length > 0) {
     sentences.push(
       `You have ${evList.length} event${evList.length > 1 ? 's' : ''} today.`
     );
     for (const ev of evList.slice(0, 3)) {
-      const time = formatTime(ev.start_time);
+      // 2026-05-19 — B3i — all-day events have NULL start_time; describe
+      // them as "all day" instead of trying to format a clock time.
+      const whenPhrase = ev.is_all_day
+        ? 'all day'
+        : `at ${formatTime(ev.start_time ?? '')}`;
       sentences.push(
-        `${ev.title} at ${time}${ev.location ? `, at ${ev.location}` : ''}.`
+        `${ev.title} ${whenPhrase}${ev.location ? `, at ${ev.location}` : ''}.`
       );
     }
     if (evList.length > 3) {
@@ -221,17 +256,39 @@ async function handleCalendar(
   const dayStart = new Date(target); dayStart.setHours(0, 0, 0, 0);
   const dayEnd   = new Date(target); dayEnd.setHours(23, 59, 59, 999);
 
-  const { data: events } = await adminClient
-    .from('calendar_events')
-    .select('title, start_time, end_time, location')
-    .eq('user_id', userId)
-    .gte('start_time', dayStart.toISOString())
-    .lte('start_time', dayEnd.toISOString())
-    .order('start_time')
-    .limit(10);
+  // 2026-05-19 — B3i — same two-query pattern as handleBrief above so
+  // all-day events appear in the answer for any day, not just timed
+  // events. Without this, "what's on my calendar Monday?" silently
+  // skipped all-day events that day.
+  const dayStartISO = dayStart.toISOString();
+  const dayEndISO   = dayEnd.toISOString();
+  const dayDateStr  = dayStart.toISOString().slice(0, 10);
 
-  const evList = (events as CalendarEvent[] | null) ?? [];
-  const label  = formatDate(target.toISOString());
+  const [timedRes, allDayRes] = await Promise.all([
+    adminClient
+      .from('calendar_events')
+      .select('title, start_time, end_time, location, is_all_day, start_date, end_date')
+      .eq('user_id', userId)
+      .eq('is_all_day', false)
+      .gte('start_time', dayStartISO)
+      .lte('start_time', dayEndISO)
+      .order('start_time')
+      .limit(10),
+    adminClient
+      .from('calendar_events')
+      .select('title, start_time, end_time, location, is_all_day, start_date, end_date')
+      .eq('user_id', userId)
+      .eq('is_all_day', true)
+      .lte('start_date', dayDateStr)
+      .gte('end_date', dayDateStr)
+      .limit(10),
+  ]);
+
+  const evList: CalendarEvent[] = [
+    ...((allDayRes.data ?? []) as CalendarEvent[]),
+    ...((timedRes.data ?? []) as CalendarEvent[]),
+  ];
+  const label = formatDate(target.toISOString());
 
   if (evList.length === 0) {
     return wrap(`Your calendar is clear on ${label}.`);
@@ -241,8 +298,12 @@ async function handleCalendar(
     `You have ${evList.length} event${evList.length > 1 ? 's' : ''} on ${label}.`,
   ];
   for (const ev of evList) {
-    const time = formatTime(ev.start_time);
-    sentences.push(`${ev.title} at ${time}${ev.location ? `, at ${ev.location}` : ''}.`);
+    // 2026-05-19 — B3i — describe all-day events as "all day" rather
+    // than trying to format a clock time from a NULL start_time.
+    const whenPhrase = ev.is_all_day
+      ? 'all day'
+      : `at ${formatTime(ev.start_time ?? '')}`;
+    sentences.push(`${ev.title} ${whenPhrase}${ev.location ? `, at ${ev.location}` : ''}.`);
   }
 
   return wrap(sentences.join(' '));
