@@ -37,7 +37,7 @@ Active bug list as of 2026-05-19 — both on "watching" status, no active build 
 
 | ID | Description | Surface | Notes | Server/AAB | Status |
 |----|-------------|---------|-------|------------|--------|
-| B2l | Orphan SDK geofence — deleted action_rule still fires T1 events on user's phone | mobile | After a location rule is deleted from `action_rules`, the Transistorsoft SDK on the user's phone still has the geofence registered → keeps firing T1 ENTER events that the server correctly rejects at `geofence-T1-rule-lookup-null` (no fanout, silent). Identified 2026-05-17 (orphan rule `4446feda` on Wael's phone). `syncGeofencesForUser` should remove deleted rules — investigation needed. Mobile-side fix. **Status (Wael 2026-05-19): watching** — silent (no user-facing harm beyond diagnostic noise); fix requires an AAB build; defer until pattern recurs or AAB is being cut anyway. | AAB | watching |
+| B2l | Orphan SDK geofence — deleted action_rule still fires T1 events on user's phone | mobile | After a location rule is deleted from `action_rules`, the Transistorsoft SDK on the user's phone still has the geofence registered → keeps firing T1 ENTER events that the server correctly rejects at `geofence-T1-rule-lookup-null` (no fanout, silent). Identified 2026-05-17 (orphan rule `4446feda` on Wael's phone). **Fix (queued for V57.20.1 build 194, 2026-05-19):** every successful delete path (Alerts screen tap-delete + 3 orchestrator paths: deterministic delete-all intercept, bulk "all" reply on multi-match, DELETE_RULE action handler) now fires `syncGeofencesForUser(userId)` after the delete lands. The sync stops the SDK, removes ALL geofences, and re-adds only the rules still in `action_rules` — so the deleted rule's geofence is dropped. Fire-and-forget; never blocks the chat turn. Only triggers when at least one deleted rule had `trigger_type='location'`. | AAB | queued V57.20.1 build 194 |
 | B3g | OAuth silent-revoke detection — users can lose Naavi without any signal | server | Discovered 2026-05-17 — Huss's Google refresh token returned `invalid_grant` (revoked) and Naavi silently failed all his calendar operations. No proactive detection. **Planned fix (formerly tracked as T3b, merged here 2026-05-19):** daily cron pings Google for each `user_tokens.refresh_token`; on `invalid_grant`, marks `user_settings.google_token_revoked = true` and sends a push notification ("Reconnect Naavi to Google"). Tap launches the re-auth flow and stores a fresh token. Server-only build, ~1-2 hours. **Status (Wael 2026-05-19): watching** — Huss's case may have been a deliberate sign-out; keep on the list to see if pattern recurs with other users before building. | Server | watching |
 
 ---
@@ -138,7 +138,7 @@ Items not in the original 26-item holding list but addressed during the session:
 
 | List | Count | IDs |
 |---|---|---|
-| Bugs (B) | 2 | B2l (watching), B3g (watching, absorbed T3b) |
+| Bugs (B) | 2 | B2l (queued V57.20.1 build 194), B3g (watching, absorbed T3b) |
 | Features (F) | 2 | F2a, F2b (both postponed pending product discussion) |
 | Tooling (T) | 4 | T1a, T2a, T2b, T3c |
 | Ideas (I) | 3 | I2a, I2b, I3a |
@@ -150,7 +150,7 @@ Items not in the original 26-item holding list but addressed during the session:
 | Scope | Count | Implication |
 |---|---|---|
 | Server-only | 5 | T1a (partly), T2b, T3c, B3g (watching), F2b. Ship without AAB cycle. |
-| AAB-only | 2 | F2a, B2l (watching). Bundle into next AAB. |
+| AAB-only | 2 | F2a, B2l (in flight — V57.20.1 build 194). |
 | Both | 2 | T1a (Server + Mobile), T2a (Mobile + emulator infra) |
 
 ### Tally by Surface (cross-surface drift discipline)
