@@ -104,7 +104,7 @@ serve(async (req) => {
     // (V57.16: headless-task path may have no live session).
     const { data: rule, error: ruleErr } = await admin
       .from('action_rules')
-      .select('id, user_id, trigger_type, trigger_config, action_type, action_config, label, one_shot, enabled')
+      .select('id, user_id, trigger_type, trigger_config, action_type, action_config, label, one_shot, enabled, last_event_lat, last_event_lng, last_event_at')
       .eq('id', rule_id)
       .maybeSingle();
 
@@ -245,8 +245,116 @@ serve(async (req) => {
               threshold_m: Math.round(phantomThresholdM),
             });
           }
+
+          // 2026-05-19 — MOVEMENT CHECK + COLD-START GRACE (Wael's ship-
+          // both decision). Defends against Transistorsoft phantoms that
+          // slip past the deep-inside guard (e.g., phone parked between
+          // 30%-70% of radius from center — inside the geofence but not
+          // at the dead center). Two cases:
+          //
+          //   A) No prior event for this rule (last_event_at IS NULL).
+          //      This is the FIRST ever event. A real first arrival fires
+          //      at the boundary — distance from center ≥ 70% of radius
+          //      (Wael's testimony: he gets alerts at the 300m boundary
+          //      for a 300m radius geofence). A cold-start phantom fires
+          //      with reported coords anywhere INSIDE the geofence. So:
+          //      require distance from center ≥ 70% of radius on the
+          //      FIRST event; otherwise reject as cold-start.
+          //
+          //   B) Prior event exists. Compare reported coords to the
+          //      previous event's coords. If the phone moved less than
+          //      50m AND the previous event was within 24h, this is a
+          //      stationary phantom — phone hasn't moved between events.
+          //      Reject.
+          //
+          // 50m delta is the right threshold for our 300m geofence
+          // (Wael's calibration): big enough to absorb GPS jitter on a
+          // truly stationary device (5-20m typical), small enough that
+          // any real movement (car length, parking-lot walk) exceeds it.
+          const priorLat = rule.last_event_lat;
+          const priorLng = rule.last_event_lng;
+          const priorAt  = rule.last_event_at;
+          const priorEventExists =
+            typeof priorLat === 'number' && typeof priorLng === 'number' && typeof priorAt === 'string';
+
+          if (!priorEventExists) {
+            // CASE A — cold-start guard on first event
+            const COLD_START_BOUNDARY_RATIO = 0.7;
+            const coldStartThresholdM = radiusM * COLD_START_BOUNDARY_RATIO;
+            if (distanceM < coldStartThresholdM) {
+              console.log(
+                `[report-location-event] COLD-START-PHANTOM rejected rule=${rule_id.slice(0,8)} ` +
+                `first event ever, reported=(${reportedLat.toFixed(5)}, ${reportedLng.toFixed(5)}) ` +
+                `distance_from_center=${distanceM.toFixed(0)}m threshold=${coldStartThresholdM.toFixed(0)}m ` +
+                `(real first arrivals fire at the boundary; this fired deep inside — cold-start initial-state)`
+              );
+              await diag(admin, event_id, user_id, 'geofence-T3-cold-start-phantom-rejected', {
+                rule_id,
+                reported_lat: reportedLat,
+                reported_lng: reportedLng,
+                distance_from_center_m: Math.round(distanceM),
+                radius_m: radiusM,
+                threshold_m: Math.round(coldStartThresholdM),
+              });
+              return json({
+                ok: true,
+                skipped: 'phantom — first ever event for rule fired deep inside, not at boundary (cold-start initial-state)',
+                distance_from_center_m: Math.round(distanceM),
+                threshold_m: Math.round(coldStartThresholdM),
+              });
+            }
+          } else {
+            // CASE B — movement check vs prior event
+            const MOVEMENT_THRESHOLD_M = 50;
+            const PRIOR_TTL_MS = 24 * 60 * 60 * 1000;
+            const eventDeltaM = haversineMeters(reportedLat, reportedLng, priorLat as number, priorLng as number);
+            const priorAgeMs = Date.now() - new Date(priorAt as string).getTime();
+            if (eventDeltaM < MOVEMENT_THRESHOLD_M && priorAgeMs < PRIOR_TTL_MS) {
+              console.log(
+                `[report-location-event] MOVEMENT-PHANTOM rejected rule=${rule_id.slice(0,8)} ` +
+                `delta_from_last_event=${eventDeltaM.toFixed(0)}m threshold=${MOVEMENT_THRESHOLD_M}m ` +
+                `prior_age=${Math.round(priorAgeMs/60000)}min ` +
+                `(phone has not moved since last event)`
+              );
+              await diag(admin, event_id, user_id, 'geofence-T3-movement-phantom-rejected', {
+                rule_id,
+                reported_lat: reportedLat,
+                reported_lng: reportedLng,
+                prior_lat: priorLat,
+                prior_lng: priorLng,
+                event_delta_m: Math.round(eventDeltaM),
+                threshold_m: MOVEMENT_THRESHOLD_M,
+                prior_age_minutes: Math.round(priorAgeMs / 60000),
+              });
+              return json({
+                ok: true,
+                skipped: 'phantom — phone has not moved since last event for this rule',
+                event_delta_m: Math.round(eventDeltaM),
+                threshold_m: MOVEMENT_THRESHOLD_M,
+              });
+            }
+          }
         }
       }
+    }
+
+    // 2026-05-19 — Update last_event_* on the rule for the next movement
+    // check. Run this for non-rejected events of ANY type (enter / exit /
+    // dwell) so the comparison is always against the most recent
+    // legitimate event. Fire-and-forget; if it fails, the next event
+    // still works (just compares to a slightly older prior).
+    if (typeof body.lat === 'number' && typeof body.lng === 'number') {
+      admin
+        .from('action_rules')
+        .update({
+          last_event_lat: body.lat,
+          last_event_lng: body.lng,
+          last_event_at: new Date().toISOString(),
+        })
+        .eq('id', rule_id)
+        .then(({ error: updErr }: any) => {
+          if (updErr) console.error('[report-location-event] last_event_* update failed:', updErr.message);
+        });
     }
 
     // V57.16 — dedup window: 30 minutes (was per-day). Wael 2026-05-15:
