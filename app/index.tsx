@@ -634,6 +634,22 @@ export default function HomeScreen() {
   const [memoTranscript, setMemoTranscript] = useState<string | null>(null);
   const [brief, setBrief] = useState<BriefItem[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // 2026-05-19 (Wael) — ref mirrors currentUserId so the AppState listener
+  // below can be registered EXACTLY ONCE (deps=[]) and still read the
+  // latest user id. Re-registering the listener on every currentUserId
+  // flip was leaking AppState handlers — RN's .remove() doesn't always
+  // unregister cleanly, so after enough flips two+ listeners fire per
+  // foreground transition. That kept the JS thread overloaded with
+  // duplicate home-foreground-recheck cascades and intermittently
+  // disrupted expo-router's stack state — causing the Alerts tap to
+  // bounce on phones with more session churn (Wael's) while staying
+  // clean on phones with less churn (mynaavi2207). Diagnosed
+  // 2026-05-19 via diagnostics: ratio app-state-change/lifecycle-appstate
+  // was 2.0 on Wael's phone and 1.0 on mynaavi2207's. After force-stop
+  // (which wiped the leaked listeners), 10 consecutive Alerts navs all
+  // succeeded.
+  const currentUserIdRef = useRef<string | null>(null);
+  useEffect(() => { currentUserIdRef.current = currentUserId; }, [currentUserId]);
   // AAB queue item 23 (Wael 2026-05-11) — automate the Android Battery
   // Optimization opt-out for users with location alerts. Hook checks on
   // mount, sets visible=true only when all three gating conditions pass.
@@ -827,6 +843,16 @@ export default function HomeScreen() {
   // Re-check location permission on every app foreground — the user may have
   // changed it via system settings while away. Without this we'd keep showing
   // the "Enable location" banner even after the user granted from Settings.
+  //
+  // 2026-05-19 (Wael) — deps were `[currentUserId]`, which re-ran the effect
+  // on every auth-state flip. Re-registering AppState listeners on RN is
+  // unreliable (.remove() doesn't always actually unregister), so each
+  // flip could leak another listener. After enough leaks, two+ listeners
+  // fired per foreground transition, doubling the home-foreground-recheck
+  // cascade. That overload occasionally disrupted expo-router's nav state
+  // and dropped router.push('/alerts') silently — the Alerts-bounce bug.
+  // Fix: register exactly once (deps=[]) and read currentUserId via the
+  // ref. Listener can no longer duplicate.
   useEffect(() => {
     const sub = AppState.addEventListener('change', async (state) => {
       // V57.12.4 Bug H instrumentation — log EVERY AppState change with
@@ -835,7 +861,8 @@ export default function HomeScreen() {
       // timers throttle when an Android RN app is in background, so a
       // missing heartbeat between alive states could be an explanation.
       remoteLog(newDiagSession(), 'app-state-change', { state });
-      if (state === 'active' && currentUserId) {
+      const uid = currentUserIdRef.current;
+      if (state === 'active' && uid) {
         // V57.10.1 — banner hides when EITHER foreground or background
         // permission is granted (see initial-check useEffect above).
         const [fg, bg] = await Promise.all([
@@ -853,7 +880,7 @@ export default function HomeScreen() {
           location_status: bg, // keeps the legacy field name pointing at background
           location_foreground: fg,
           location_any_granted: anyGranted,
-          current_user_id_present: !!currentUserId,
+          current_user_id_present: !!uid,
         });
         try {
           const connected = await isCalendarConnected();
@@ -869,7 +896,7 @@ export default function HomeScreen() {
       }
     });
     return () => sub.remove();
-  }, [currentUserId]);
+  }, []);
 
   // V57.9.9 diagnostic — log every currentUserId flip (null ↔ user-id) so we
   // can see the exact sequence when auth state changes around a location
