@@ -74,7 +74,7 @@ export default function AboutScreen() {
         </TouchableOpacity>
 
         <Text style={styles.copyright}>
-          © 2026 MyNaavi.{'\n'}Made with care for active seniors.
+          © 2026 MyNaavi.{'\n'}Your life, orchestrated.
         </Text>
       </ScrollView>
     </SafeAreaView>

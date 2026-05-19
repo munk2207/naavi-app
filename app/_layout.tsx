@@ -351,7 +351,7 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="about"
-          options={{ title: 'About & Legal', headerShown: true }}
+          options={{ title: 'Terms & Legal', headerShown: true }}
         />
         <Stack.Screen
           name="permission-location"

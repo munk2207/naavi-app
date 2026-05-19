@@ -63,7 +63,7 @@ export default function HelpScreen() {
     },
     {
       icon: 'information-circle',
-      label: 'About & Legal',
+      label: 'Terms & Legal',
       sub: 'Version, privacy, terms',
       onPress: () => router.push('/about'),
     },
