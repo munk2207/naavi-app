@@ -152,10 +152,27 @@ function formatTriggerSummary(r: ActionRule): string {
   }
 }
 
-function formatActionSummary(r: ActionRule): string {
+// 2026-05-19 (Wael) — isSelf detection now matches the server's logic in
+// report-location-event.ts: no recipient at all → self-alert; OR to_phone
+// matches user's phone → self; OR to_email matches user's email → self.
+// Previously the UI used `!!to_phone && !to` which mislabelled both
+// no-recipient rules (showed "a contact" instead of "you") and rules
+// targeting the user's own phone explicitly.
+function detectIsSelf(a: any, userPhone: string | null, userEmail: string | null): boolean {
+  const toPhone = String(a?.to_phone ?? '');
+  const toEmail = String(a?.to_email ?? '');
+  const to = String(a?.to ?? '');
+  const noRecipient = !toPhone && !toEmail && !to;
+  if (noRecipient) return true;
+  if (userPhone && toPhone && toPhone === userPhone) return true;
+  if (userEmail && toEmail && toEmail.toLowerCase() === userEmail.toLowerCase()) return true;
+  return false;
+}
+
+function formatActionSummary(r: ActionRule, userPhone: string | null, userEmail: string | null): string {
   const a  = r.action_config ?? {};
   const to = (a as any).to_name ?? (a as any).to ?? (a as any).to_phone ?? 'you';
-  const isSelf = !!(a as any).to_phone && !((a as any).to);
+  const isSelf = detectIsSelf(a, userPhone, userEmail);
   const who    = isSelf ? 'you' : String(to);
   const extras: string[] = [];
   if ((a as any).list_name) extras.push(`${(a as any).list_name} list`);
@@ -174,15 +191,23 @@ function formatWhenDetail(r: ActionRule): string {
     case 'location': {
       const place = c.place_name ?? 'a place';
       const dir = c.direction ?? 'arrive';
-      const dwell = c.dwell_minutes ?? 2;
-      // V57.13.4 — include the full Google-formatted address in the WHEN
-      // detail so the user can verify which physical branch this alert
-      // covers (matters when several branches of the same brand exist).
+      // 2026-05-19 (Wael) — only show "(after staying N minutes)" when the
+      // rule explicitly carries a positive dwell. Server default dwell was
+      // dropped to 0 sec on 2026-05-16 — most rules fire immediately on
+      // arrival; the legacy "after staying 2 minutes" text was stale and
+      // misleading.
+      const dwellRaw = typeof c.dwell_minutes === 'number' ? c.dwell_minutes : 0;
       const address = c.address as string | undefined;
       const placeFull = address ? `${place} at ${address}` : place;
       if (dir === 'leave')  return `You leave ${placeFull}.`;
-      if (dir === 'inside') return `You're at ${placeFull} for at least ${dwell} minutes.`;
-      return `You arrive at ${placeFull}${dwell ? ` (after staying ${dwell} minute${dwell === 1 ? '' : 's'})` : ''}.`;
+      if (dir === 'inside') {
+        const dwellInside = dwellRaw > 0 ? dwellRaw : 2; // 'inside' variant inherently needs a dwell — fall back to 2 min only here.
+        return `You're at ${placeFull} for at least ${dwellInside} minute${dwellInside === 1 ? '' : 's'}.`;
+      }
+      // Default arrive variant — no dwell phrasing unless > 0.
+      return dwellRaw > 0
+        ? `You arrive at ${placeFull} (after staying ${dwellRaw} minute${dwellRaw === 1 ? '' : 's'}).`
+        : `You arrive at ${placeFull}.`;
     }
     case 'weather': {
       const cond = c.condition ?? 'weather';
@@ -227,9 +252,9 @@ function formatWhenDetail(r: ActionRule): string {
 // Plain-language "WHAT HAPPENS" explainer. Describes the delivery channels,
 // the spoken body, and any list/task extras — never exposes to_phone digits
 // or internal config keys.
-function formatWhatHappens(r: ActionRule): { channelsLine: string; bodyLine: string | null; extraLines: string[] } {
+function formatWhatHappens(r: ActionRule, userPhone: string | null, userEmail: string | null): { channelsLine: string; bodyLine: string | null; extraLines: string[] } {
   const a = (r.action_config ?? {}) as any;
-  const isSelf = !!a.to_phone && !a.to;
+  const isSelf = detectIsSelf(a, userPhone, userEmail);
   const body = String(a.body ?? '').trim();
 
   let channelsLine: string;
@@ -279,6 +304,13 @@ export default function AlertsScreen() {
   // in flight, so multiple rows in the same expanded alert can detach
   // independently and show their own spinner.
   const [detachingKey, setDetachingKey] = useState<string | null>(null);
+  // 2026-05-19 (Wael) — user's own phone + email, used by detectIsSelf
+  // so the "Naavi sends YOU" copy fires when an alert targets the user's
+  // own channels (matching the server's report-location-event.ts logic).
+  // Without these, rules sending to user's phone got rendered as
+  // "Naavi sends a contact a text message" — incorrect and confusing.
+  const [userPhone, setUserPhone] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     // V57.10.5 — UI freeze instrumentation. Wael 2026-05-03 saw the app
@@ -301,6 +333,21 @@ export default function AlertsScreen() {
         remoteLog(getLifecycleSession(), 'alerts-load-end', { reason: 'no-session', ms: Date.now() - t0 });
         setLoading(false);
         return;
+      }
+      // 2026-05-19 (Wael) — capture user's own email from the session and
+      // phone from user_settings. Used to detect self-alerts in the
+      // formatters (so we say "Naavi sends YOU" instead of "a contact").
+      setUserEmail(session.user.email ?? null);
+      try {
+        const { data: settings } = await queryWithTimeout(
+          supabase.from('user_settings').select('phone').eq('user_id', session.user.id).maybeSingle(),
+          5_000,
+          'alerts-load-user-phone',
+        );
+        setUserPhone((settings as any)?.phone ?? null);
+      } catch (e: any) {
+        // Non-fatal — without phone, self-detection falls back to email + no-recipient.
+        console.warn('[alerts] user_settings phone fetch failed:', e?.message ?? e);
       }
       remoteLog(getLifecycleSession(), 'alerts-load-invoke-start');
       const { data, error: err } = await invokeWithTimeout('manage-rules', {
@@ -516,7 +563,7 @@ export default function AlertsScreen() {
                     />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.rowTitle} numberOfLines={1}>{formatTriggerSummary(rule)}</Text>
-                      <Text style={styles.rowSub}   numberOfLines={1}>{formatActionSummary(rule)}</Text>
+                      <Text style={styles.rowSub}   numberOfLines={1}>{formatActionSummary(rule, userPhone, userEmail)}</Text>
                     </View>
                     <Ionicons
                       name={isOpen ? 'chevron-up' : 'chevron-down'}
@@ -526,7 +573,7 @@ export default function AlertsScreen() {
                   </TouchableOpacity>
 
                   {isOpen && (() => {
-                    const { channelsLine, bodyLine, extraLines } = formatWhatHappens(rule);
+                    const { channelsLine, bodyLine, extraLines } = formatWhatHappens(rule, userPhone, userEmail);
                     const attached = connectedLists[rule.id] ?? [];
                     return (
                       <View style={styles.detailBox}>
@@ -538,12 +585,21 @@ export default function AlertsScreen() {
                         {extraLines.map((line, i) => (
                           <Text key={i} style={styles.detailProse}>{line}</Text>
                         ))}
-                        {attached.length > 0 && (
-                          <>
-                            <Text style={[styles.detailHeader, { marginTop: 14 }]}>
-                              {attached.length === 1 ? 'Attached list' : `Attached lists (${attached.length})`}
-                            </Text>
-                            {attached.map(conn => {
+                        {/* 2026-05-19 (Wael) — ALWAYS render the "Attached lists"
+                            section, even when empty. List details already shows
+                            "Not attached to anything. Standalone list." for the
+                            inverse direction; alert details now mirrors that. */}
+                        <Text style={[styles.detailHeader, { marginTop: 14 }]}>
+                          {attached.length === 0 ? 'Attached lists'
+                            : attached.length === 1 ? 'Attached list'
+                            : `Attached lists (${attached.length})`}
+                        </Text>
+                        {attached.length === 0 ? (
+                          <Text style={[styles.detailProse, styles.attachEmpty]}>
+                            No list attached.
+                          </Text>
+                        ) : (
+                          attached.map(conn => {
                               const key = `${rule.id}:${conn.listId}`;
                               return (
                                 <View key={conn.listId} style={styles.attachCard}>
@@ -561,8 +617,7 @@ export default function AlertsScreen() {
                                   </TouchableOpacity>
                                 </View>
                               );
-                            })}
-                          </>
+                            })
                         )}
                         <Text style={styles.detailMeta}>
                           {rule.one_shot ? 'Fires once, then stops.' : 'Repeats until you delete it.'}
@@ -762,6 +817,13 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     fontSize: 15,
     fontWeight: '600',
+  },
+  // 2026-05-19 — empty-state copy when an alert has no attached list.
+  // Matches the muted italic style used by List details for the inverse
+  // case ("Not attached to anything. Standalone list.").
+  attachEmpty: {
+    color: Colors.textMuted,
+    fontStyle: 'italic',
   },
   attachDetachBtn: {
     padding: 6,
