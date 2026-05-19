@@ -181,13 +181,17 @@ serve(async (req) => {
       });
     }
     // Voice allowlist: Hera is the unified app/phone voice (default).
-    // Aura-2 storytelling voices are accepted ONLY for website narration A/B.
-    // Mobile and voice clients never send `voice`, so they always get Hera.
+    // Aura-2 storytelling voices + pacier alternatives accepted ONLY for
+    // website narration A/B. Mobile and voice clients never send `voice`,
+    // so they always get Hera. 2026-05-18 — added andromeda + thalia for
+    // the friends-feedback A/B test against Cora (which was rated too slow).
     const VOICE_ALLOWLIST = new Set([
       'aura-hera-en',
       'aura-2-cora-en',
       'aura-2-athena-en',
       'aura-2-minerva-en',
+      'aura-2-andromeda-en',
+      'aura-2-thalia-en',
     ]);
     const model = (typeof requestedVoice === 'string' && VOICE_ALLOWLIST.has(requestedVoice))
       ? requestedVoice
