@@ -419,23 +419,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const pendingDeleteRef = useRef<{
     match: string;
     matchIds: string[]; // rule ids shown in the disambiguation
-    // B2l (2026-05-19) — set when ANY of the matched rules is a location
-    // rule, so the bulk-delete branch below knows whether to re-sync the
-    // Transistorsoft SDK after the deletes land. Without the sync the SDK
-    // keeps the geofence registered and fires orphan ENTER events.
-    hasLocation: boolean;
   } | null>(null);
-
-  // B2l (2026-05-19) — re-sync geofences with the SDK after a delete so
-  // the deleted rule's geofence is removed from the device. Otherwise the
-  // SDK keeps firing orphan ENTERs that the server rejects silently at
-  // T1 (geofence-T1-rule-lookup-null). Fire-and-forget; never blocks the
-  // chat turn.
-  const syncGeofencesAfterDelete = (userId: string) => {
-    import('@/hooks/useGeofencing')
-      .then(({ syncGeofencesForUser }) => syncGeofencesForUser(userId))
-      .catch(err => console.error('[Orchestrator] sync after delete failed:', err));
-  };
 
   // Always-current ref — send() reads this so it never uses a stale brief
   const briefRef = useRef(briefItems);
@@ -556,11 +540,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             speech = okCount === matches.length
               ? `Done — deleted all ${okCount} ${label}alerts.`
               : `Deleted ${okCount} of ${matches.length} ${label}alerts.`;
-            // B2l — re-sync if any deleted rule was a location rule.
-            if (okCount > 0 && matches.some(r => r.trigger_type === 'location')) {
-              const { data: { session } } = await supabase.auth.getSession();
-              if (session?.user?.id) syncGeofencesAfterDelete(session.user.id);
-            }
           }
           pendingDeleteRef.current = null;
           // If Robert tapped orange Stop during the supabase round-trip, abort
@@ -602,7 +581,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       } else if (isBulk) {
         const ids = pendingDeleteRef.current.matchIds;
         const label = pendingDeleteRef.current.match;
-        const hadLocation = pendingDeleteRef.current.hasLocation;
         pendingDeleteRef.current = null;
         try {
           const results = await Promise.allSettled(ids.map(id =>
@@ -612,11 +590,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           const speech  = okCount === ids.length
             ? `Done — deleted all ${ids.length} ${label ? label + ' ' : ''}alerts.`
             : `Deleted ${okCount} of ${ids.length}. ${ids.length - okCount} couldn't be removed.`;
-          // B2l — re-sync if any deleted rule was a location rule.
-          if (okCount > 0 && hadLocation) {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (session?.user?.id) syncGeofencesAfterDelete(session.user.id);
-          }
           // Cancel-during-thinking guard — see delete-all intercept comment.
           if (isCancelled()) return;
           setTurns(prev => [...prev, {
@@ -2008,9 +1981,6 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               pendingDeleteRef.current = {
                 match,
                 matchIds: matches.map(r => String(r.id)),
-                // B2l — flag if any candidate is a location rule, so the
-                // bulk "all" reply branch can re-sync the SDK.
-                hasLocation: matches.some(r => r.trigger_type === 'location'),
               };
             } else {
               // Delete one or many in parallel
@@ -2019,11 +1989,6 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               );
               const okCount   = results.filter(r => r.status === 'fulfilled' && !(r as any).value?.error).length;
               const failCount = matches.length - okCount;
-              // B2l — re-sync if any deleted rule was a location rule.
-              if (okCount > 0 && matches.some(r => r.trigger_type === 'location') && supabase) {
-                const { data: { session } } = await supabase.auth.getSession();
-                if (session?.user?.id) syncGeofencesAfterDelete(session.user.id);
-              }
               if (okCount === 0) {
                 turnSpeechOverride = "I couldn't delete those alerts — something went wrong.";
               } else if (matches.length === 1) {
