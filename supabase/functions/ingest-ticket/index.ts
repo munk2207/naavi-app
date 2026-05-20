@@ -63,11 +63,14 @@ interface IngestPayload {
   // lookup when Wael already knows who the ticket is from.
   user_id?: string;
 
-  // Formspree webhook payload shape — fields named per the form's
+  // Web form payload shape — fields named per the form's
   // <input name="..."> attributes. We extract subject/body from
-  // these when source_channel starts with 'formspree-'.
-  // Example shape: { email, name, phone, description, context,
-  //   severity, source, ... }
+  // these when source_channel starts with 'web-' or 'formspree-' or
+  // 'mobile-'. Optional fields cover all 4 production forms today:
+  //   /report  — description + context + email + severity
+  //   /contact — email + reason + message
+  //   /start   — name + email + phone + note
+  //   /#signup — email + intent + message
   email?:       string;
   name?:        string;
   phone?:       string;
@@ -75,6 +78,9 @@ interface IngestPayload {
   context?:     string;
   message?:     string;
   reason?:      string;
+  intent?:      string;
+  note?:        string;
+  source?:      string; // analytics tag — home-signup / phone-demo-line / web-report etc.
 }
 
 function json(body: unknown, status = 200): Response {
@@ -97,10 +103,18 @@ serve(async (req) => {
     const channel = String(payload.source_channel ?? '').trim();
 
     // ── Validate source_channel ──────────────────────────────────────
+    // web-* channels are public form submissions (browser-originated);
+    // formspree-* kept for backward compat if a Formspree submission
+    // hits before the Formspree projects are deleted; mobile-* come
+    // from the in-app screens; internal-relay is Wael creating tickets
+    // via Claude; voice-call is the future Twilio path.
     const allowedChannels = new Set([
       'formspree-report',
       'formspree-contact',
       'formspree-invitation',
+      'web-report',
+      'web-contact',
+      'web-invitation',
       'mobile-report',
       'mobile-contact',
       'internal-relay',
@@ -108,6 +122,28 @@ serve(async (req) => {
     ]);
     if (!allowedChannels.has(channel)) {
       return json({ error: `unknown source_channel: ${channel}` }, 400);
+    }
+
+    // ── CSRF / origin validation for web-* channels ─────────────────
+    // Browser-originated POSTs MUST come from mynaavi.com (or a known
+    // dev origin). Server-originated calls (internal-relay, mobile-*,
+    // voice-call) come without an Origin header and require the
+    // Authorization Bearer service-role check upstream — they bypass
+    // this gate. The check is belt-and-suspenders to Cloudflare's
+    // Bot Fight Mode at the edge.
+    if (channel.startsWith('web-')) {
+      const origin = req.headers.get('origin') || '';
+      const allowedOrigins = [
+        'https://mynaavi.com',
+        'https://www.mynaavi.com',
+        // Vercel preview deploys + local dev allowed for testing.
+        // Production rejects everything else.
+      ];
+      const isAllowed = allowedOrigins.includes(origin) || /^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(origin);
+      if (!isAllowed) {
+        console.warn(`[ingest-ticket] rejected web-* call from origin: "${origin}"`);
+        return json({ error: 'origin_not_allowed' }, 403);
+      }
     }
 
     // ── Extract subject + body — shape varies by source ──────────────
@@ -120,17 +156,28 @@ serve(async (req) => {
     const context     = String(payload.context ?? '').trim();
     const message     = String(payload.message ?? '').trim();
     const reason      = String(payload.reason ?? '').trim();
+    const intent      = String(payload.intent ?? '').trim();
+    const note        = String(payload.note ?? '').trim();
+    const sourceTag   = String(payload.source ?? '').trim();
 
     if (!body) {
-      // Formspree /report shape: description (required) + context (optional).
+      // /report shape — description (required) + context (optional).
       if (description) body = context ? `${description}\n\n— context: ${context}` : description;
-      // Formspree /contact shape: message + reason.
-      else if (message) body = reason ? `[${reason}] ${message}` : message;
+      // /contact shape — message + reason.
+      else if (message && reason) body = `[${reason}] ${message}`;
+      // /#signup shape — intent + message.
+      else if (intent || message) body = `intent: ${intent || '(none)'}\n\n${message || '(no message)'}`;
+      // /start shape — note (freeform "Anything we should know?").
+      else if (note) body = note;
+      // Bare message fallback (no reason).
+      else if (message) body = message;
     }
     if (!subject) {
-      // Derive a subject from the first line of body when not provided.
       if (description) subject = description.slice(0, 80);
-      else if (message) subject = (reason || 'Contact form') + ': ' + message.slice(0, 60);
+      else if (reason && message) subject = `${reason}: ${message.slice(0, 60)}`;
+      else if (intent) subject = `Web signup (${intent})`;
+      else if (note) subject = `Invitation request${sourceTag ? ' — ' + sourceTag : ''}`;
+      else if (message) subject = message.slice(0, 80);
       else if (body) subject = body.slice(0, 80);
     }
 
