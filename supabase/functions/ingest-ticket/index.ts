@@ -45,8 +45,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const WAEL_PHONE   = '+16137697957';
-const WAEL_USER_ID = '788fe85c-b6be-4506-87e8-a8736ec8e1d1';
+const HUBSPOT_API = 'https://api.hubapi.com';
+// "Support Pipeline" id=0, stage "New" id=1 — verified 2026-05-20 via connectivity test
+const HUBSPOT_PIPELINE_ID    = '0';
+const HUBSPOT_PIPELINE_STAGE = '1';
+const HUBSPOT_PORTAL_ID      = '343125145'; // MyNaavi Foundation
 
 interface IngestPayload {
   // Common fields — all entry points populate these.
@@ -95,7 +98,6 @@ serve(async (req) => {
 
   const supabaseUrl  = Deno.env.get('SUPABASE_URL')!;
   const serviceKey   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  const interFnKey   = Deno.env.get('NAAVI_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY')!;
   const admin = createClient(supabaseUrl, serviceKey);
 
   try {
@@ -185,6 +187,20 @@ serve(async (req) => {
       return json({ error: 'subject and body required (either directly or via description/message)' }, 400);
     }
 
+    // 2026-05-20 (Wael) — mandatory email for all web-* and formspree-*
+    // submissions. Email is the only reply channel for these tickets
+    // (no phone collected on the forms). Server-side guard mirrors
+    // the HTML required attribute; rejects malformed payloads that
+    // bypassed the browser. Internal-relay and mobile-* sources can
+    // skip this since they carry user_id directly.
+    const isPublicForm = channel.startsWith('web-') || channel.startsWith('formspree-');
+    if (isPublicForm) {
+      const emailCandidate = String(payload.email ?? payload.reporter_email ?? '').trim();
+      if (!emailCandidate || !/@/.test(emailCandidate)) {
+        return json({ error: 'email required and must be a valid address' }, 400);
+      }
+    }
+
     // ── Resolve user_id from reporter_email / reporter_phone ─────────
     // Service-role auth lets us join across auth.users + user_settings
     // to find the matching account. Best-effort — anonymous reports
@@ -247,30 +263,127 @@ serve(async (req) => {
 
     console.log(`[ingest-ticket] new ticket #${ticket.ticket_number} via ${channel}: "${ticket.subject.slice(0,60)}"`);
 
-    // ── Notify Wael via SMS (fire-and-forget) ────────────────────────
-    // Per the CLAUDE.md outbound-message rule, this SMS is a NEUTRAL
-    // status notification to the team member who owns triage — not a
-    // message to the reporter. Safe to fire without per-claim
-    // verification because we're only relaying ticket # + subject.
-    const notifBody = `[Naavi support] New ticket #${ticket.ticket_number} via ${channel}: ${ticket.subject.slice(0, 120)}`;
-    fetch(`${supabaseUrl}/functions/v1/send-sms`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${interFnKey}` },
-      body: JSON.stringify({
-        to: WAEL_PHONE,
-        body: notifBody,
-        channel: 'sms',
-        user_id: WAEL_USER_ID,
-        recipient_name: 'Wael',
-        sender_name: 'Naavi',
-        source: 'ticket-ingest-notification',
-      }),
-    }).then(res => {
-      if (!res.ok) console.warn(`[ingest-ticket] notification SMS returned ${res.status}`);
-    }).catch(err => console.warn('[ingest-ticket] notification SMS threw:', err.message ?? err));
+    // ── Create HubSpot ticket (awaited) ──────────────────────────────
+    // HubSpot Service Hub is the team's triage surface. For each ticket
+    // with a reporter_email we:
+    //   (a) find-or-create a Contact in HubSpot by email
+    //   (b) create a Ticket in the Support Pipeline → "New" stage,
+    //       associated with the Contact
+    // HubSpot's built-in pipeline automation handles the customer
+    // acknowledgment email (configured server-side in HubSpot, not in
+    // this function).
+    //
+    // Awaited because Deno Edge Functions kill unfinished async work
+    // when the response is sent. Failures are recorded in audit_trail
+    // but do not block — the DB row is the source of truth.
+    let hubspotTicketId: string | null = null;
+    let hubspotContactId: string | null = null;
+    let hubspotError:    string | null = null;
+    if (reporterEmail) {
+      const hsToken = Deno.env.get('HUBSPOT_ACCESS_TOKEN');
+      if (hsToken) {
+        const hsHeaders = {
+          Authorization: `Bearer ${hsToken}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        };
+        try {
+          // Find existing contact by email.
+          const searchRes = await fetch(`${HUBSPOT_API}/crm/v3/objects/contacts/search`, {
+            method: 'POST',
+            headers: hsHeaders,
+            body: JSON.stringify({
+              filterGroups: [{ filters: [{ propertyName: 'email', operator: 'EQ', value: reporterEmail }] }],
+              properties: ['email', 'firstname', 'lastname'],
+              limit: 1,
+            }),
+          });
+          const searchBody = await searchRes.json();
+          if (!searchRes.ok) {
+            throw new Error(`contact_search_${searchRes.status}: ${JSON.stringify(searchBody).slice(0, 200)}`);
+          }
+          if (searchBody.results?.length) {
+            hubspotContactId = String(searchBody.results[0].id);
+          } else {
+            // Create new contact.
+            let firstname = '';
+            let lastname  = '';
+            if (reporterName.trim()) {
+              const parts = reporterName.trim().split(/\s+/);
+              firstname = parts[0];
+              lastname  = parts.slice(1).join(' ');
+            }
+            const createContactRes = await fetch(`${HUBSPOT_API}/crm/v3/objects/contacts`, {
+              method: 'POST',
+              headers: hsHeaders,
+              body: JSON.stringify({
+                properties: {
+                  email: reporterEmail,
+                  firstname: firstname || reporterEmail.split('@')[0],
+                  lastname:  lastname  || '',
+                  phone:     reporterPhone || undefined,
+                },
+              }),
+            });
+            const createContactBody = await createContactRes.json();
+            if (!createContactRes.ok) {
+              throw new Error(`contact_create_${createContactRes.status}: ${JSON.stringify(createContactBody).slice(0, 200)}`);
+            }
+            hubspotContactId = String(createContactBody.id);
+          }
 
-    // Always return success even if notification fails — the ticket is
-    // already saved; we just couldn't ping Wael yet.
+          // Create ticket, associated with the contact.
+          // hs_ticket_category accepts free-text; we put the source_channel there
+          // for triage. Naavi ticket # goes into the subject prefix.
+          const ticketRes = await fetch(`${HUBSPOT_API}/crm/v3/objects/tickets`, {
+            method: 'POST',
+            headers: hsHeaders,
+            body: JSON.stringify({
+              properties: {
+                subject:           `[#${ticket.ticket_number}] ${ticket.subject}`.slice(0, 200),
+                content:           body + `\n\n— Source: ${channel}` + (sourceTag ? ` (${sourceTag})` : '') + `\n— Ticket: #${ticket.ticket_number}` + `\n— Reporter: ${reporterEmail}`,
+                hs_pipeline:       HUBSPOT_PIPELINE_ID,
+                hs_pipeline_stage: HUBSPOT_PIPELINE_STAGE,
+                hs_ticket_priority: 'MEDIUM',
+              },
+              associations: [{
+                to: { id: hubspotContactId },
+                types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 16 }],
+              }],
+            }),
+          });
+          const ticketBody = await ticketRes.json();
+          if (!ticketRes.ok) {
+            throw new Error(`ticket_create_${ticketRes.status}: ${JSON.stringify(ticketBody).slice(0, 300)}`);
+          }
+          hubspotTicketId = String(ticketBody.id);
+          console.log(`[ingest-ticket] HubSpot ticket ${hubspotTicketId} created for Naavi ticket #${ticket.ticket_number}`);
+        } catch (err) {
+          hubspotError = err instanceof Error ? err.message : String(err);
+          console.warn('[ingest-ticket] HubSpot integration threw:', hubspotError);
+        }
+      } else {
+        hubspotError = 'credentials_missing';
+        console.warn('[ingest-ticket] HUBSPOT_ACCESS_TOKEN not set — skipping HubSpot ticket create');
+      }
+
+      // Append audit_trail entry with the outcome.
+      const followupEntry = {
+        at: new Date().toISOString(),
+        actor: 'system',
+        from_status: 'new',
+        to_status: 'new',
+        note: hubspotTicketId
+          ? `HubSpot ticket ${hubspotTicketId} created (contact ${hubspotContactId}) — https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/ticket/${hubspotTicketId}`
+          : `HubSpot integration failed: ${hubspotError}`,
+      };
+      await admin.from('tickets').update({
+        audit_trail: [auditEntry, followupEntry],
+      }).eq('id', ticket.id);
+    }
+
+    // Always return success even if Help Scout fails — the
+    // ticket is already saved.
     return json({
       success:       true,
       ticket_id:     ticket.id,
