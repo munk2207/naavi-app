@@ -35,6 +35,7 @@ import {
   queryListConnections,
   deleteListWithConnections,
   formatConnectionQueryResult,
+  ensureListAttachedToRule,
   type ConnectionRow,
 } from '@/lib/list_connections';
 import type { StorageFile, NavigationResult } from '@/lib/types';
@@ -808,6 +809,19 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         // V57.13.3 — save-to-cache call removed. user_places no longer exists;
         // action_rules carries the resolved coordinates the geofence registry
         // needs.
+        // 2026-05-20 (Wael, B4j) — eager-create list + connection when the
+        // rule's action_config carries a list_name reference. Same pattern
+        // as the memory-hit + non-location SET_ACTION_RULE paths.
+        const _ac = pending.originalAction?.action_config as any;
+        const listNameRef = String(_ac?.list_name ?? '').trim();
+        if (listNameRef) {
+          ensureListAttachedToRule(String(insertedRule.id), listNameRef)
+            .then(r => {
+              if (r.success) console.log(`[Orchestrator] B4j ensureList commit-pending: listLabel="${r.listLabel}" created=${r.created}`);
+              else console.error('[Orchestrator] B4j ensureList commit-pending failed:', r.error);
+            })
+            .catch(err => console.error('[Orchestrator] B4j ensureList commit-pending threw:', err));
+        }
         // V57.13 — fire-and-forget. Awaiting syncGeofencesForUser added ~7-8s
         // between user "yes" and the chat turn rendering (Bug U). Geofence
         // wiring runs in the background; the rule is already in the DB by
@@ -2312,6 +2326,20 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                         address: data.address ?? null,
                         oneShot,
                       });
+                      // 2026-05-20 (Wael, B4j) — if action_config carries a
+                      // list_name reference, eager-create the list + the
+                      // list_connections row so the rule self-references a
+                      // real list at fire time (instead of "your X list is
+                      // empty" because no list exists at all).
+                      const listNameRef = String((actionConfig as any).list_name ?? '').trim();
+                      if (listNameRef) {
+                        ensureListAttachedToRule(String(insertedRule!.id), listNameRef)
+                          .then(r => {
+                            if (r.success) console.log(`[Orchestrator] B4j ensureList memory-hit: listLabel="${r.listLabel}" created=${r.created}`);
+                            else console.error('[Orchestrator] B4j ensureList memory-hit failed:', r.error);
+                          })
+                          .catch(err => console.error('[Orchestrator] B4j ensureList memory-hit threw:', err));
+                      }
                       // V57.13 Bug U — fire-and-forget so memory-hit replies
                       // don't wait 7-8s on geofence registration before the
                       // chat turn renders.
@@ -2438,7 +2466,11 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               }
 
               // ── Non-location triggers: original insert path ──────────────
-              const { error } = await queryWithTimeout(
+              // 2026-05-20 (Wael, B4j) — capture the inserted id so we can
+              // attach a list_connection if action_config carries a
+              // list_name reference. Switched from no-return insert to
+              // .select('id').single() for the rule id.
+              const { data: insertedRow, error } = await queryWithTimeout(
                 supabase.from('action_rules').insert({
                   user_id:        session.user.id,
                   trigger_type:   triggerType,
@@ -2447,12 +2479,27 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                   action_config:  actionConfig,
                   label:          String(action.label ?? 'Action rule'),
                   one_shot:       action.one_shot ?? true,
-                }),
+                }).select('id').single(),
                 15_000,
                 'insert-action-rule',
               );
-              if (error) console.error('[Orchestrator] SET_ACTION_RULE failed:', error.message);
-              else console.log('[Orchestrator] SET_ACTION_RULE saved:', action.label);
+              if (error) {
+                console.error('[Orchestrator] SET_ACTION_RULE failed:', error.message);
+              } else {
+                console.log('[Orchestrator] SET_ACTION_RULE saved:', action.label);
+                // B4j — eager-create list + connection for the legacy
+                // list_name reference shape.
+                const listNameRef = String((actionConfig as any).list_name ?? '').trim();
+                const ruleIdNew = String((insertedRow as any)?.id ?? '');
+                if (listNameRef && ruleIdNew) {
+                  ensureListAttachedToRule(ruleIdNew, listNameRef)
+                    .then(r => {
+                      if (r.success) console.log(`[Orchestrator] B4j ensureList non-location: listLabel="${r.listLabel}" created=${r.created}`);
+                      else console.error('[Orchestrator] B4j ensureList non-location failed:', r.error);
+                    })
+                    .catch(err => console.error('[Orchestrator] B4j ensureList non-location threw:', err));
+                }
+              }
             }
           }
         }

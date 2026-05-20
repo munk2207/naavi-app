@@ -342,3 +342,111 @@ export async function deleteListWithConnections(listName: string): Promise<Delet
     cascadedCount: Array.isArray(data.cascaded_connections) ? data.cascaded_connections.length : 0,
   };
 }
+
+// 2026-05-20 (Wael / B4j fix) — eager list + connection creation for the
+// legacy `action_config.list_name` pattern.
+//
+// Today the SET_ACTION_RULE handler in useOrchestrator.ts inserts a rule
+// row with `action_config.list_name = "X"` whenever Claude emits that
+// shape (instead of the F1a LIST_CONNECT path). The fan-out at fire time
+// reads `list_name` and looks up the list — if the list doesn't exist,
+// the alert says "Your X list is empty." even though X has no backing
+// row to populate.
+//
+// Hussein's "work todo" arrival alert today (2026-05-20 08:50 AM EST)
+// is the canonical instance: rule referenced a list called "work todo"
+// that he had never created.
+//
+// This helper makes the legacy path self-consistent:
+//   - Resolve list by name. If found, use that list_id.
+//   - If not found, create an empty list with that name.
+//   - Insert into list_connections (idempotent — uniqueness enforced by
+//     the DB constraint added in 20260511_list_connections.sql).
+//
+// Idempotent at every step — safe to call multiple times for the same
+// rule + list pair.
+export interface EnsureListResult {
+  success:    boolean;
+  listId?:    string;
+  listLabel?: string;
+  created?:   boolean;
+  error?:     string;
+}
+export async function ensureListAttachedToRule(
+  ruleId:   string,
+  listName: string,
+): Promise<EnsureListResult> {
+  const cleanName = String(listName ?? '').trim();
+  if (!ruleId)    return { success: false, error: 'ruleId required' };
+  if (!cleanName) return { success: false, error: 'listName required' };
+
+  // 1. Try to resolve an existing list with this name.
+  let listId: string | null = null;
+  let listLabel = cleanName;
+  let created = false;
+
+  const listRes  = await resolveEntityRef('list', cleanName);
+  if (!listRes?.error) {
+    const listPick = pickResolverMatch(listRes?.matches);
+    if (listPick.kind === 'one') {
+      listId    = listPick.match.entity_id;
+      listLabel = listPick.match.label;
+    }
+    // Ambiguous: take the top match by score; the resolver already sorts
+    // descending. For an eager-create path we prefer "use the closest
+    // match" over "block the rule creation" since the user said the
+    // name and Naavi assumes good faith. Edge cases (two lists with
+    // the exact same name) are vanishingly rare and the user can
+    // re-attach via the Lists UI.
+    if (listPick.kind === 'ambiguous' && listPick.tied[0]) {
+      listId    = listPick.tied[0].entity_id;
+      listLabel = listPick.tied[0].label;
+    }
+  }
+
+  // 2. If no existing list, create one via manage-list LIST_CREATE.
+  // manage-list creates the backing Drive doc + the metadata row in `lists`
+  // (drive_file_id is NOT NULL so we cannot bypass Drive). If the user has
+  // no Google token (revoked / never connected), this step fails with
+  // "No Google access token" and we surface that to the caller — the rule
+  // still got created above; the user just won't have an attached list
+  // until they reconnect Google.
+  if (!listId) {
+    const { data: createRes, error: createErr } = await invokeWithTimeout('manage-list', {
+      body: { type: 'LIST_CREATE', name: cleanName },
+    }, 15_000);
+    if (createErr) return { success: false, error: `list_create_failed: ${createErr.message}` };
+    if ((createRes as any)?.success === false) {
+      return { success: false, error: `list_create_failed: ${(createRes as any)?.error ?? 'unknown'}` };
+    }
+    listId    = String((createRes as any)?.list?.id ?? (createRes as any)?.id ?? '');
+    listLabel = String((createRes as any)?.list?.name ?? cleanName);
+    created   = true;
+    if (!listId) {
+      // manage-list LIST_CREATE returns the list metadata WITHOUT id in some
+      // paths (the response shape includes name + drive_file_id + web_view_link
+      // but not id when created fresh). Re-resolve to get the id.
+      const reRes  = await resolveEntityRef('list', cleanName);
+      const rePick = pickResolverMatch(reRes?.matches);
+      if (rePick.kind === 'one') {
+        listId = rePick.match.entity_id;
+        listLabel = rePick.match.label;
+      }
+    }
+    if (!listId) return { success: false, error: 'list_create_returned_no_id' };
+  }
+
+  // 3. Connect rule ↔ list. manage-list-connections CONNECT is idempotent
+  // (unique constraint on (entity_type, entity_id, list_id)).
+  const connectData = await manageConnections({
+    type:        'CONNECT',
+    list_id:     listId,
+    entity_type: 'action_rule',
+    entity_id:   ruleId,
+  });
+  if (!connectData?.success && connectData?.error && !/already|duplicate|unique|conflict/i.test(String(connectData.error))) {
+    return { success: false, error: `connect_failed: ${connectData.error}`, listId, listLabel, created };
+  }
+
+  return { success: true, listId, listLabel, created };
+}

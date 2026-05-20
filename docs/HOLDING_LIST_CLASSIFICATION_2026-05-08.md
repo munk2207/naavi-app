@@ -48,6 +48,7 @@ Active bug list as of 2026-05-20.
 | B4g | Province codes on mobile TTS | mobile | Voice surface expands `ON` → "Ontario", `QC` → "Quebec"; mobile TTS does not. Same parity gap class as B4f. | Server | open |
 | B4h | Ordinal expansion on voice TTS | voice | Voice TTS does not expand ordinals ("15th" → "fifteenth"). Mobile does. Reverse-direction parity gap (mobile correct, voice missing). | Server | open |
 | B4i | Address read-back trust bar on voice | voice | Bundle from W10 voice polish: postal-code phonetics + street-suffix expansion (Dr → Drive) + ordinal expansion (15th → fifteenth) treated as one work item so voice reads back addresses naturally on every alert confirmation. V57.13.4 made full address visible everywhere; voice has to read it back correctly. | Server | open |
+| B4j | Rule with `list_name` reference doesn't create/connect the list | both | When Claude emits `SET_ACTION_RULE` with `action_config.list_name = "X"` (legacy text-reference shape), the orchestrator + voice server insert the rule but never create the backing `lists` row or the `list_connections` link. At fire time, `buildAlertBody` looks up the list by name, finds nothing, appends *"Your X list is empty."* — even though X has no list to populate. **Canonical instance:** Hussein 2026-05-20 08:50 AM EST arrival alert at office — rule referenced *"work todo"* list that he had never created. **Fix shipped 2026-05-20:** new `ensureListAttachedToRule(ruleId, listName)` helper in `lib/list_connections.ts` (mobile) + `_f1aEnsureListAttachedToRule(uid, ruleId, listName)` in `naavi-voice-server/src/index.js` (voice). Called from all 4 SET_ACTION_RULE insert paths (mobile memory-hit / mobile non-location / mobile commit-pending / voice). Eagerly resolves list by name; if missing, creates via `manage-list LIST_CREATE` + inserts `list_connections` row (idempotent). **Hussein's specific case can't be healed retroactively** because his Google token is revoked (B3g) and `manage-list LIST_CREATE` requires a working Google token to create the backing Drive doc. He needs to reconnect Google first, then re-create the rule. | Both | shipped 2026-05-20 (voice server live; mobile rides next AAB) |
 
 ---
 
@@ -154,7 +155,7 @@ Items not in the original 26-item holding list but addressed during the session:
 
 | List | Count | IDs |
 |---|---|---|
-| Bugs (B) | 11 | B2l (queued V57.20.1), B3g (watching), B4a-B4i (Voice Completion Roadmap consolidation 2026-05-20) |
+| Bugs (B) | 12 | B2l (queued V57.20.1), B3g (watching), B4a-B4i (roadmap consolidation 2026-05-20), B4j (rule-with-list-name fix shipped 2026-05-20) |
 | Features (F) | 7 | F2a, F2b, F2d, F2e, F5a, F5b, F5c (last 3 from Voice Completion Roadmap consolidation 2026-05-20) |
 | Tooling (T) | 6 | T1a, T2a, T2b, T3c, T4b, T4c (last 2 from Voice Completion Roadmap consolidation 2026-05-20) |
 | Ideas (I) | 3 | I2a, I2b, I3a |
