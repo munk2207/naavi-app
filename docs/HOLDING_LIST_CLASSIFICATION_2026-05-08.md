@@ -33,12 +33,21 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 
 ## Bugs (B)
 
-Active bug list as of 2026-05-19 — both on "watching" status, no active build planned. See the Closed table below for the 9 bugs closed today.
+Active bug list as of 2026-05-20.
 
 | ID | Description | Surface | Notes | Server/AAB | Status |
 |----|-------------|---------|-------|------------|--------|
 | B2l | Orphan SDK geofence — deleted action_rule still fires T1 events on user's phone | mobile | After a location rule is deleted from `action_rules`, the Transistorsoft SDK on the user's phone still has the geofence registered → keeps firing T1 ENTER events that the server correctly rejects at `geofence-T1-rule-lookup-null` (no fanout, silent). Identified 2026-05-17 (orphan rule `4446feda` on Wael's phone). **Fix (queued for V57.20.1 build 194, 2026-05-19):** every successful delete path (Alerts screen tap-delete + 3 orchestrator paths: deterministic delete-all intercept, bulk "all" reply on multi-match, DELETE_RULE action handler) now fires `syncGeofencesForUser(userId)` after the delete lands. The sync stops the SDK, removes ALL geofences, and re-adds only the rules still in `action_rules` — so the deleted rule's geofence is dropped. Fire-and-forget; never blocks the chat turn. Only triggers when at least one deleted rule had `trigger_type='location'`. | AAB | queued V57.20.1 build 194 |
 | B3g | OAuth silent-revoke detection — users can lose Naavi without any signal | server | Discovered 2026-05-17 — Huss's Google refresh token returned `invalid_grant` (revoked) and Naavi silently failed all his calendar operations. No proactive detection. **Planned fix (formerly tracked as T3b, merged here 2026-05-19):** daily cron pings Google for each `user_tokens.refresh_token`; on `invalid_grant`, marks `user_settings.google_token_revoked = true` and sends a push notification ("Reconnect Naavi to Google"). Tap launches the re-auth flow and stores a fresh token. Server-only build, ~1-2 hours. **Status (Wael 2026-05-19): watching** — Huss's case may have been a deliberate sign-out; keep on the list to see if pattern recurs with other users before building. | Server | watching |
+| B4a | Stop-word interrupt regression — "Naavi stop" no longer cuts TTS | voice | Voice server stopWords matcher at `naavi-voice-server/src/index.js:5161` does not strip the leading wake-word, so "Naavi stop" fails to match while bare "stop" works. User experience: when caller barges in with "Naavi stop", TTS continues instead of cutting off, and the stop phrase gets recorded as the next user question. Fix: strip leading wake-word in the matcher; optional follow-up to fire on interim transcripts (not just FINAL) for faster cut-off. Memory: `project_naavi_stop_word_regression.md`. From W1 voice quality bundle. | Server | open |
+| B4b | Deepgram first-word truncation on barge-in | voice | Deepgram drops the leading word when caller barges in during TTS — "What time is it?" gets transcribed as "Time is it?", breaking the trivial fast-path regex at `naavi-voice-server/src/index.js:1343` and forcing the slow Sonnet path for trivial questions. Proven 2026-04-19. Fix: extend the trivial fast-path regex to cover leading-word-clipped variants (time / day / date). Long-term: investigate audio-prebuffer / endpointing-tuning / STT-retry. Memory: `project_naavi_deepgram_first_word_truncation.md`. From W1. | Server | open |
+| B4c | Voice name-search mistranscription (Hussein, etc.) | voice | High-value names get mistranscribed by Deepgram and the search misses them. Voice STT breaks name lookups that text handles fine ("Hussein"). Fix: verify high-value names are in `user_settings.voice_keyterms` OR `knowledge_fragments` (type=relationship). If keyterm priming insufficient, escalate to phonetic fallback (Soundex / Metaphone / Levenshtein on transcript). Memory: `project_naavi_voice_name_search.md`. From W1. | Server | open |
+| B4d | SCHEDULE_MEDICATION action missing on voice | voice | Mobile orchestrator has SCHEDULE_MEDICATION handler at `hooks/useOrchestrator.ts:1549`; voice server's switch statement does not handle this action. Caller saying "remind me at 8 am and 8 pm to take Lipitor for 30 days" gets confused response or no action. Fix: port the mobile handler into the voice server switch (uses the same `create-calendar-event` Edge Function loop). From W4 (was B2a in old classification). | Server | open |
+| B4e | DELETE_MEMORY voice vs mobile behavior diff | voice | Voice does direct DB DELETE on `knowledge_fragments` by ILIKE keyword at `naavi-voice-server/src/index.js:1967`; mobile path may differ subtly. Same input ("forget that I take Lipitor") may remove different sets of fragments across surfaces. Fix: side-by-side test (same input, count removed) + harmonize divergence if any. From W4 sub-item. | Server | open |
+| B4f | Postal code phonetics on mobile TTS | mobile | Voice surface speaks postal codes phonetically (`K1A 0B1` → "K-one-A space zero-B-one"); mobile TTS does not. Parity gap from W0 audit. Mobile reads `K1A 0B1` as a run-together string. Low severity — most user-facing mobile TTS is brief; postal codes rarely read aloud. | Server | open |
+| B4g | Province codes on mobile TTS | mobile | Voice surface expands `ON` → "Ontario", `QC` → "Quebec"; mobile TTS does not. Same parity gap class as B4f. | Server | open |
+| B4h | Ordinal expansion on voice TTS | voice | Voice TTS does not expand ordinals ("15th" → "fifteenth"). Mobile does. Reverse-direction parity gap (mobile correct, voice missing). | Server | open |
+| B4i | Address read-back trust bar on voice | voice | Bundle from W10 voice polish: postal-code phonetics + street-suffix expansion (Dr → Drive) + ordinal expansion (15th → fifteenth) treated as one work item so voice reads back addresses naturally on every alert confirmation. V57.13.4 made full address visible everywhere; voice has to read it back correctly. | Server | open |
 
 ---
 
@@ -51,7 +60,10 @@ Active feature list as of 2026-05-19 — all kept open for further product discu
 | F2a | Onboarding Review (multi-phone + 7 other gaps) | mobile | Onboarding doc + Settings UI covering 8 gaps (multi-phone setup, voice keyterms capture at setup, quiet hours field, verified-address expectation, consolidated privacy callout, post-install rehearsal with starter prompts, re-install / new-phone flow, first-week-vs-week-two expectation calibration). Postponed 2026-05-09 — not all 8 have crisp product decisions; needs a dedicated session looking at onboarding end-to-end. Settings UI changes require AAB; doc is a build-script regen. | Both | open (postponed) |
 | F2b | Demo line maturity (richer scenarios + conversion path + telemetry) | voice | Demo phone line gets richer scenarios, a conversion path back to a real account, and telemetry to see what works. Postponed 2026-05-09 — marketing/growth decisions (which metrics matter, which scenarios resonate) need a focused session. Three sub-pieces in sequence: telemetry first (total calls, scenario popularity, opt-in rate, signup conversion), conversion attribution second (per-call token in the SMS link), scenario richness third (medication scheduling, navigation, recurring delegation, variable data, light branching). Already shipped: 5 canned scenarios, name capture, personalized SMS recap. | Server | open (postponed) |
 | F2d | Mobile auto-listen after confirmation prompts | mobile | When Naavi finishes a yes/no or numbered-pick prompt (the orchestrator already tracks "pending confirmation" state), mic auto-opens for 20-30s and auto-sends on speech-end. Removes tap-to-talk + tap-to-send friction for confirmations specifically. Only triggers when the prior turn used voice input (not text), so office typers never get surprised. Discussed 2026-05-19 — Wael deferred: voice phone line (1-888-91-NAAVI via "Hey Google, call Naavi") already covers driving + cooking hands-free with full Naavi capability, and the at-desk tap friction is mild because eyes are on screen anyway. Re-open only if hands-full at desk becomes a recurring pain point not already solved by the voice call. ~6-8 hours code + 1 AAB. | AAB | open (deferred) |
-| F2e | Alert state visibility — Active / Done / Expired badges on Alerts screen + voice list | both | Today both the Alerts screen and voice `LIST_RULES` show every rule the same way, regardless of whether it has fired, completed (one-shot), or expired (time-trigger past with no fire). Robert can't tell at a glance which alerts are still waiting vs which already fired vs which are done. Proposed state model from action_rules columns: ACTIVE-WAITING (`enabled=true, last_fired_at=null`), ACTIVE-REPEATING (`enabled=true, last_fired_at≠null, one_shot=false`), DONE (`enabled=false`), EXPIRED (`enabled=true, time-trigger datetime<now, last_fired_at=null`). Mobile: add a per-row state badge + group Active first / hide Done behind a toggle. Voice: hide Done by default, offer "do you also want to hear the completed ones?" as a follow-up. Discussion 2026-05-19. Mobile side requires AAB; voice side is server-only. | Both | open (discussion) |
+| F2e | Alert state visibility — show only Active, offer 5 most recent expired on demand | both | Today both the Alerts screen and voice `LIST_RULES` show every rule the same way, regardless of whether it has fired, completed (one-shot), or expired (time-trigger past with no fire). Robert can't tell at a glance which alerts are still waiting vs which already fired vs which are done. **Design decided 2026-05-19 (Wael):** (1) Default view shows ONLY Active alerts (`enabled=true`) — Done + Expired are HIDDEN from the main list across mobile UI + voice + PC (parity across surfaces). (2) After listing Active, Naavi offers "I can also list your 5 most recent expired alerts" — ONLY when at least one expired exists (no offer when there are none). (3) "Expired" means BOTH DONE (`enabled=false`, e.g. one-shot fired or user-disabled) AND time-expired (`enabled=true, time-trigger datetime<now, last_fired_at=null`). Sort top-5 by recency: latest `last_fired_at` desc, then latest `datetime` desc for never-fired-but-expired. Mobile side requires AAB; voice side is server-only — Wael's call 2026-05-19: bundle BOTH with the next AAB push to keep behaviour consistent across surfaces at release. Build queued; not started yet (more spec input pending from Wael). | Both | open (spec'ing) |
+| F5a | Picker robustness on voice (multi-option scenarios) | voice | V57.13.3 no-cache architecture surfaces a Google picker on every "alert me at X". Voice STT for picker responses ("the second one" / "the Innes Road one" / "two" / barge-in mid-list) is the gate. Caller can't reliably pick from a 3-option list because STT either misses the digit, hears the wrong street name, or interrupts the list. Fix: pre-train picker-response grammar + tighter speech-end detection + structured "say one, two, or three" prompts. From W1 voice quality bundle. | Server | open |
+| F5b | Self-cleansing memory on voice | voice | STT mistranscriptions create malformed entries — one "Hussein" can become three knowledge_fragments rows under "Houssain", "Hussein", "Hoosein". Today nothing detects or merges them. Fix: phonetic-merge on read (Soundex / Metaphone variant matching) + detect-and-flag malformed memory at fetch time. Every read sheds degraded data without manual cleanup. From W1 voice quality bundle. | Server | open |
+| F5c | Email instant-search live-overlay | server | Email currently has 7-day sync only, no live-overlay. Caller asking "did Bob email me about the renewal?" hits cached `gmail_messages` only — stale if the email arrived after the last sync window. Apply the architectural principle (every queryable channel = sync + live-overlay): ADD live Gmail API search at question-time (q= against subject + body, `Cache-Control: no-cache`, merge with cached). Same shape as `fetchLiveCalendarEvents`. From W1 #7 (was B1c). Architectural parity with calendar. | Server | open |
 
 ---
 
@@ -65,6 +77,8 @@ Active tooling list as of 2026-05-19. T3a closed (docs shipped, automation gaps 
 | T2a | Maestro full-suite mobile UI test coverage | mobile | Mobile UI test suite — 13 scenarios. Smoke passes. Full suite 2026-05-08: 6 pass, 7 fail. Failures look like a mix of stale assertions (UI labels renamed since test was written) and real regressions. Triage required before the suite becomes a pre-build gate. Now also owns the Maestro UI flow automation gaps formerly tracked under T3a. | Server | open (blocked on emulator Internal Testing install) |
 | T2b | Phase 2 demo data (Gmail seeding for mynaavidemo) | backend | Demo-data seeding for the demo account — Phase 1 (calendar) shipped; Phase 2 (Gmail) gap. Use cases: mobile-app demo recordings without personal data, deterministic backing for the Maestro spend-summary scenario, and future un-canning of the demo phone line. ~30 min to add and run the seed. | Server | open |
 | T3c | Voice automated regression suite (W3 from Voice Completion Roadmap) | voice | Voice surface has no automated regression coverage today. W3 from `docs/VOICE_COMPLETION_ROADMAP_2026-05-08` defines the suite. Pairs with T1a (Structured Outputs convergence) — both together close the cross-surface drift gap that Rule 16's `parity-impact:` discipline currently fills manually. Now also owns the voice action-parity test automation gap formerly tracked under T3a. Server-only. | Server | open |
+| T4b | Refreshed Parity Baseline audit (W0 from Voice Completion Roadmap) | docs | The mobile-vs-phone audit (`docs/MOBILE_VS_PHONE_AUDIT_2026-05-04`) is stale and predates V57.12 / V57.13 / V57.15.x / canned demo / Structured Outputs. W0 from the Voice Completion Roadmap defines a refresh: action coverage, prompt context comparison, backstop coverage, knowledge access parity, TTS normalization deltas, latency baseline. Produces a current-dated audit doc that subsequent voice work can cite by line. ~1 focused session, server-only research output. | Server | open |
+| T4c | Soft-tick presence audit on voice | voice infra | Soft-tick thinking sound must play in every silent gap during a call — including during the ~1s Google Places fetch on every "alert me at X" (V57.13.3 no-cache architecture). Wael's hard rule (CLAUDE.md): silence breaks Robert's trust. Today there's no systematic audit of every silent moment; some new code paths may have re-introduced silence. W10 sub-item from the Voice Completion Roadmap. ~30 min audit + targeted fixes per gap found. | Server | open |
 
 ---
 
@@ -140,43 +154,44 @@ Items not in the original 26-item holding list but addressed during the session:
 
 | List | Count | IDs |
 |---|---|---|
-| Bugs (B) | 2 | B2l (queued V57.20.1 build 194), B3g (watching, absorbed T3b) |
-| Features (F) | 4 | F2a, F2b (both postponed pending product discussion), F2d (mobile auto-listen — deferred), F2e (alert state visibility — discussion) |
-| Tooling (T) | 4 | T1a, T2a, T2b, T3c |
+| Bugs (B) | 11 | B2l (queued V57.20.1), B3g (watching), B4a-B4i (Voice Completion Roadmap consolidation 2026-05-20) |
+| Features (F) | 7 | F2a, F2b, F2d, F2e, F5a, F5b, F5c (last 3 from Voice Completion Roadmap consolidation 2026-05-20) |
+| Tooling (T) | 6 | T1a, T2a, T2b, T3c, T4b, T4c (last 2 from Voice Completion Roadmap consolidation 2026-05-20) |
 | Ideas (I) | 3 | I2a, I2b, I3a |
 | Closed without entry | 38 | All prior closures + the 17 closed 2026-05-19 |
-| **Total** | **49** | Active: 9 (6 truly active + 2 on watch + 1 expanded count). Closed: 38 + 2 watching = 40 effectively-not-blocking. F4d had been listed in the F table with "deleted" status; now properly moved to Closed without entry. |
+| **Total** | **65** | Active: 27 (11 B + 7 F + 6 T + 3 I). Closed: 38. Holding list now consolidated as the single inventory + tracking document (Wael 2026-05-20). |
 
 ### Tally by Server/AAB (active items only)
 
 | Scope | Count | Implication |
 |---|---|---|
-| Server-only | 5 | T1a (partly), T2b, T3c, B3g (watching), F2b. Ship without AAB cycle. |
-| AAB-only | 3 | F2a, F2d (deferred), B2l (in flight — V57.20.1 build 194). F2e split — mobile side AAB, voice side server. |
-| Both | 2 | T1a (Server + Mobile), T2a (Mobile + emulator infra) |
+| Server-only | 18 | T1a (partly), T2b, T3c, T4b, T4c, B3g, B4a-B4e, B4h-B4i, F2b, F5a-F5c. Most voice items. Ship without AAB cycle. |
+| AAB-only | 5 | F2a, F2d, F2e (mobile side), B2l (in flight V57.20.1 build 194), B4f-B4g (mobile TTS). |
+| Both | 4 | T1a (Server + Mobile), T2a (Mobile + emulator infra), F2e (split), T3c covers both surfaces |
 
 ### Tally by Surface (cross-surface drift discipline)
 
 | Surface | Count | IDs |
 |---|---|---|
-| voice | 1 | F2b |
-| mobile | 5 | B2l, F2a, F2d, F2e (mobile side), T2a |
+| voice | 12 | F2b, F5a, F5b, B4a-B4e, B4h-B4i, T3c, T4c |
+| mobile | 7 | B2l, B4f, B4g, F2a, F2d, F2e (mobile side), T2a |
+| backend / server | 5 | B3g, F5c, T2b, I2a, I2b |
+| docs | 1 | T4b (audit refresh) |
 | both | 2 | T1a, T3c |
-| backend | 4 | B3g, T2b, I2a, I2b |
-| (Ideas, deferred) | 1 | I3a (health trigger) |
+| (Ideas, deferred) | 1 | I3a |
 
-Items tagged `both` (T1a + T3c) are the cross-surface drift discipline items — when one surface ships changes, the other must follow before drift accumulates.
+Items tagged `both` (T1a + T3c) are the cross-surface drift discipline items.
 
 ### Tally by severity (active items only)
 
 | Severity | B | F | T | I | Total |
 |---|---|---|---|---|---|
 | 1 (top) | 0 | 0 | 1 | 0 | 1 (T1a) |
-| 2 (medium) | 1 | 3 | 2 | 1 | 7 (B3g, F2a, F2b, F2e, T2a, T3c, I2a) |
-| 3 (low) / watching / deferred | 1 | 1 | 1 | 2 | 5 (B2l, F2d, T2b, I2b, I3a) |
-| **Total** | 2 | 4 | 4 | 3 | **13** |
+| 2 (medium) | 6 | 6 | 4 | 1 | 17 (B3g, B4a-B4d, B4i, F2a, F2b, F2e, F5a, F5b, F5c, T2a, T3c, T4b, T4c, I2a) |
+| 3 (low) / watching / deferred | 5 | 1 | 1 | 2 | 9 (B2l, B4e, B4f, B4g, B4h, F2d, T2b, I2b, I3a) |
+| **Total** | 11 | 7 | 6 | 3 | **27** |
 
-(Total active = 11 distinct items. Last bulk closure: 2026-05-19 — 17 items closed in one pass after B3i fix shipped, F4a completed by B3i, Cora→Andromeda voice swap finalized, and Wael's strategic close-down decision. Same-day additions: F2d mobile auto-listen for confirmations [deferred], F2e alert state visibility badges [discussion].)
+(Active = 27 items, up from 11 on 2026-05-19. **2026-05-20 consolidation** — 14 new entries pulled from `docs/VOICE_COMPLETION_ROADMAP_2026-05-08.docx`: B4a-B4i [9 bugs: voice quality + TTS gaps], F5a-F5c [3 features: picker robustness, self-cleansing memory, email live-overlay], T4b [W0 audit refresh] + T4c [soft-tick audit]. W2/W3/W6/W7/W8/F1c skipped — already in holding list as T1a/T3c, or already closed/shipped, or superseded. Holding list now the single inventory + tracking document per Wael's direction 2026-05-20.)
 
 ---
 
