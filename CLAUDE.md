@@ -18,6 +18,31 @@ When Wael says any of these, drop your current framing and execute the lever's i
 
 **Pattern Wael uses BEFORE any spend or significant time commit:** *"What's the technical root cause we're working around?"* If you can't answer with file paths, line numbers, or specific error messages, you haven't done the investigation — and the spend should not happen yet.
 
+## ⭐⭐⭐⭐ NEVER PUT UNVERIFIED CLAIMS IN ANY OUTBOUND MESSAGE TO A REAL USER (Wael 2026-05-20)
+
+**Context that earned this rule:** 2026-05-20 — I drafted an SMS to Hussein saying *"your Google account got disconnected from Naavi"* based on ONE error message from a single API call plus a 3-day-old log note. I had **zero evidence Hussein took any disconnection action**. He hadn't. I conflated my inference into a confident factual claim about HIS behavior and was about to send it to him. Wael caught it. If he hadn't, Hussein would have read a false accusation about himself signed *"— Wael"*, and trust in Naavi / Wael would have eroded for no good reason. **The damage is reputational, not technical.**
+
+**The rule:** Every assertion in any outbound message — SMS, email, push notification, voice call body, social post, support reply — must trace to direct, current evidence. If you can't trace it, you can't write it. Default to LESS specificity over MORE when stakes touch a real user's perception of Naavi / Wael / the team.
+
+**How to apply:**
+
+1. **Before drafting an outbound message, list every factual claim you intend to make.** For each claim, name the SPECIFIC evidence: which DB row, which log line, which user statement, which Twilio webhook payload. If the answer is *"I inferred it from X"*, the claim is NOT verified — rewrite or drop.
+
+2. **Specifically watch for claims about what the USER did or chose.** *"You disconnected"*, *"You changed"*, *"You stopped"*, *"You revoked"* — these accuse the user of an action. Never write them unless you have a log row showing them performing that action. Reframe to neutral observations of state: *"Naavi's connection to your account isn't working — here's how to restore it."*
+
+3. **Prefer the action over the diagnosis.** Tell the user the EXACT step to take (*"open Settings → reconnect Google"*), and skip the why if you can't verify the why. The user doesn't need the diagnosis; the user needs the fix.
+
+4. **If you don't know the cause, say "we don't know yet" — don't invent one.** Naavi / Wael's reputation rests on truthful messages. A *"we don't know the cause yet but here's how to restore it"* message earns trust. A confident-but-wrong message destroys it.
+
+5. **Treat draft messages as serious even when Wael will review them.** A draft framed as plausible-fluent will get reviewed less carefully than a draft framed as cautious. Don't outsource verification to the reviewer.
+
+**Triggers this rule fires on:**
+- Any message bound for `send-sms`, `send-user-email`, `send-push-notification`, Naavi's voice call body, public web copy, GitHub PR description, EAS support ticket — anything that leaves our walls.
+- Anything signed *"— Naavi"* or *"— Wael"* or implying authorship from inside the team.
+- Internal diagnostic narratives in chat are NOT subject to this rule (we can speculate together), but the moment you draft text bound for an external party, the bar shifts.
+
+**Sister rules:** 5-levers #2 (*"Paste the evidence, not your paraphrase"*) and #3 (*"Was that an observation or an inference?"*). This rule extends them to outbound messages specifically, where the cost of getting it wrong lands on a real person reading a confident-sounding lie.
+
 ## ⭐⭐⭐ ALWAYS DISPLAY TIMES IN EST, NEVER UTC (Wael 2026-05-20)
 
 Every timestamp Wael sees — in conversation, in diagnostic output, in commit messages, in log lines copy-pasted back to him — must be in **Eastern Time (America/Toronto)** and labeled **EST** (the spoken name Wael uses regardless of DST). Never show raw UTC. UTC is fine inside DB columns and code; it's user-facing display that must be EST.
