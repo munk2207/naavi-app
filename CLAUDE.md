@@ -18,6 +18,22 @@ When Wael says any of these, drop your current framing and execute the lever's i
 
 **Pattern Wael uses BEFORE any spend or significant time commit:** *"What's the technical root cause we're working around?"* If you can't answer with file paths, line numbers, or specific error messages, you haven't done the investigation — and the spend should not happen yet.
 
+## ⭐⭐⭐ ALWAYS DISPLAY TIMES IN EST, NEVER UTC (Wael 2026-05-20)
+
+Every timestamp Wael sees — in conversation, in diagnostic output, in commit messages, in log lines copy-pasted back to him — must be in **Eastern Time (America/Toronto)** and labeled **EST** (the spoken name Wael uses regardless of DST). Never show raw UTC. UTC is fine inside DB columns and code; it's user-facing display that must be EST.
+
+How to apply:
+- In Node / SQL diagnostic scripts: convert `created_at` / `sent_at` / `fired_at` / `last_event_at` (and every other timestamp column) to America/Toronto before printing. The script's `.toLocaleString('en-CA', { timeZone: 'America/Toronto' })` is the safe path.
+- When citing log entries in conversation: restate the time in EST. Don't quote a UTC timestamp from the raw log and ask Wael to mentally convert.
+- When a fact in your reply hinges on a time ("rule fired at X"), express X in EST and add the date so there's no ambiguity.
+- If the source data's timezone is unclear, ask once and label clearly thereafter.
+
+Examples:
+- Wrong: *"rule fired at 2026-05-20 12:50 UTC"*
+- Right: *"rule fired at 2026-05-20 8:50 AM EST"*
+
+This rule exists because Wael lives in EST. Forcing him to convert UTC every time he reads diagnostic output is friction with no upside.
+
 Memory: `feedback_investigate_before_paying.md` (2026-05-15 origin incident).
 
 ---
