@@ -48,6 +48,7 @@ import { listConnectionsTests } from './catalogue/list-connections';
 import { voicePinTests } from './catalogue/voice-pin';
 import { multiPhoneTests } from './catalogue/multi-phone';
 import { listsReconcileTests } from './catalogue/lists-reconcile';
+import { ticketsTests } from './catalogue/tickets';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -131,6 +132,7 @@ const ALL_TESTS: TestCase[] = [
   ...voicePinTests,
   ...multiPhoneTests,
   ...listsReconcileTests,
+  ...ticketsTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
