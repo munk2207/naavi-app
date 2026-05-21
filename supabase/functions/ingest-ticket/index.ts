@@ -187,18 +187,16 @@ serve(async (req) => {
       return json({ error: 'subject and body required (either directly or via description/message)' }, 400);
     }
 
-    // 2026-05-20 (Wael) — mandatory email for all web-* and formspree-*
-    // submissions. Email is the only reply channel for these tickets
-    // (no phone collected on the forms). Server-side guard mirrors
-    // the HTML required attribute; rejects malformed payloads that
-    // bypassed the browser. Internal-relay and mobile-* sources can
-    // skip this since they carry user_id directly.
-    const isPublicForm = channel.startsWith('web-') || channel.startsWith('formspree-');
-    if (isPublicForm) {
-      const emailCandidate = String(payload.email ?? payload.reporter_email ?? '').trim();
-      if (!emailCandidate || !/@/.test(emailCandidate)) {
-        return json({ error: 'email required and must be a valid address' }, 400);
-      }
+    // 2026-05-20 (Wael) — every ticket MUST carry a reporter email,
+    // no exceptions. Public submitters need it as the only response
+    // channel. Registered users carry it via OAuth. Voice-call and
+    // internal-relay paths must look up the user's email before
+    // invoking ingest-ticket. Rejecting at the entry keeps the
+    // tickets.reporter_email column reliable for every downstream
+    // path (HubSpot mirror, analyze-ticket drafter, reply routing).
+    const emailCandidate = String(payload.email ?? payload.reporter_email ?? '').trim();
+    if (!emailCandidate || !/@/.test(emailCandidate)) {
+      return json({ error: 'email required and must be a valid address' }, 400);
     }
 
     // ── Resolve user_id from reporter_email / reporter_phone ─────────
