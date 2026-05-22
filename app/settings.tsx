@@ -1132,12 +1132,12 @@ export default function SettingsScreen() {
               </Text>
             </View>
             <TouchableOpacity
-              style={[styles.connectBtn, morningCallEnabled && styles.connectBtnActive]}
+              style={[styles.connectBtn, !morningCallEnabled && styles.connectBtnInactive]}
               onPress={() => {
                 setMorningCallEnabled(!morningCallEnabled);
               }}
             >
-              <Text style={[styles.connectBtnText, morningCallEnabled && styles.connectBtnTextActive]}>
+              <Text style={[styles.connectBtnText, !morningCallEnabled && styles.connectBtnTextInactive]}>
                 {morningCallEnabled ? 'On' : 'Off'}
               </Text>
             </TouchableOpacity>
@@ -1194,13 +1194,13 @@ export default function SettingsScreen() {
                   <Text style={styles.toolStatus}>{detail}</Text>
                 </View>
                 <TouchableOpacity
-                  style={[styles.connectBtn, isOn && styles.connectBtnActive, isLastOn && { opacity: 0.6 }]}
+                  style={[styles.connectBtn, !isOn && styles.connectBtnInactive, isLastOn && { opacity: 0.6 }]}
                   onPress={() => toggleAlertChannel(key)}
                   disabled={alertChannelsLoading}
                   accessibilityRole="button"
                   accessibilityLabel={`${label}: ${isOn ? 'on' : 'off'} ${isLastOn ? '(last enabled channel, cannot turn off)' : ''}`}
                 >
-                  <Text style={[styles.connectBtnText, isOn && styles.connectBtnTextActive]}>
+                  <Text style={[styles.connectBtnText, !isOn && styles.connectBtnTextInactive]}>
                     {isOn ? 'On' : 'Off'}
                   </Text>
                 </TouchableOpacity>
@@ -1588,6 +1588,15 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   connectBtn: {
+    // 2026-05-22 — On/Off color convention (Wael):
+    //   On  state / action button (default) = teal (Colors.accent).
+    //   Off state on a STATE TOGGLE         = muted (connectBtnInactive overlay).
+    // Action buttons ("Turn On", "Enable", "✓ On") use connectBtn alone
+    // and stay teal as call-to-action. State toggles (morning call,
+    // alert channels) apply connectBtnInactive when the state is OFF
+    // so On reads green/teal (correct) and Off reads muted (correct).
+    // Previously connectBtnActive made the ON state orange/red, which
+    // inverted the standard On=green / Off=red convention.
     backgroundColor: Colors.accent,
     borderRadius: 10,
     paddingVertical: 8,
@@ -1595,13 +1604,16 @@ const styles = StyleSheet.create({
     minHeight: 36,
     justifyContent: 'center',
   },
-  connectBtnActive: {
-    backgroundColor: Colors.alert,
+  connectBtnInactive: {
+    backgroundColor: Colors.bgElevated,
   },
   connectBtnText: {
     color: Colors.accentDark,
     fontSize: Typography.body,
     fontWeight: Typography.semibold,
+  },
+  connectBtnTextInactive: {
+    color: Colors.textMuted,
   },
   version: {
     fontSize: Typography.caption,

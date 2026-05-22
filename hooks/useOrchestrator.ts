@@ -718,24 +718,29 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       ): Promise<{
         ok: boolean;
         ruleId: string | null;
-        alreadyExists?: { ruleId: string; placeName: string; address: string | null; oneShot: boolean };
+        alreadyExists?: { ruleId: string; placeName: string; address: string | null; oneShot: boolean; enabled: boolean };
       }> => {
         if (!pending.resolved) return { ok: false, ruleId: null };
         // V57.13.3 — pre-INSERT duplicate check. Before creating the action_rule,
-        // query for any existing ENABLED location rule at the same rounded
-        // coordinates for this user. If found, the orchestrator will render
-        // the "you already have an alert at X" prompt instead of failing the
-        // INSERT against the new unique constraint.
+        // query for any existing location rule at the same rounded coordinates
+        // for this user. If found, render the "you already have an alert at X"
+        // prompt instead of failing the INSERT against the unique constraint.
+        //
+        // 2026-05-22 (Wael) — dedup across fire cycles. The original check only
+        // matched ENABLED rules, so when an alert FIRED (one_shot=true →
+        // enabled=false), a second request to set an alert at the same coords
+        // would create a duplicate row. Now matches ANY rule at the coords;
+        // the consumer branches on `enabled` to render the right message
+        // (existing → "you already have", expired → point user to Reactivate).
         const epsilon = 0.00001; // 5-decimal rounding tolerance
         const lat = pending.resolved.lat;
         const lng = pending.resolved.lng;
         const { data: existingRules } = await queryWithTimeout(
           supabase
             .from('action_rules')
-            .select('id, trigger_config, one_shot')
+            .select('id, trigger_config, one_shot, enabled')
             .eq('user_id', sessionUserId)
-            .eq('trigger_type', 'location')
-            .eq('enabled', true),
+            .eq('trigger_type', 'location'),
           10_000,
           'check-duplicate-location-rule',
         );
@@ -755,6 +760,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                 placeName: String(dupe.trigger_config?.place_name ?? pending.resolved.place_name),
                 address: (dupe.trigger_config?.address as string | undefined) ?? null,
                 oneShot: !!dupe.one_shot,
+                enabled: dupe.enabled !== false,
               },
             };
           }
@@ -924,13 +930,19 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         // V57.13.3 — duplicate detected. Tell the user instead of silently
         // failing or creating a second rule. The DB unique constraint would
         // also reject — this is the gentler UX path.
+        // 2026-05-22 — F2e dedup across fire cycles. If the duplicate is
+        // DISABLED (fired one-shot or manually disabled), point the user to
+        // the Reactivate button rather than just refusing.
         if (alreadyExists) {
           const existingMode = alreadyExists.oneShot ? 'one-time' : 'recurring';
           const addrSuffix = alreadyExists.address
             ? ` at ${String(alreadyExists.address).split(',')[0]?.trim()}`
             : '';
           pendingLocationRef.current = null;
-          emitPendingTurn(`You already have a ${existingMode} alert for ${alreadyExists.placeName}${addrSuffix}. Say "list my alerts" if you want to change or remove it.`);
+          const msg = alreadyExists.enabled
+            ? `You already have a ${existingMode} alert for ${alreadyExists.placeName}${addrSuffix}. Say "list my alerts" if you want to change or remove it.`
+            : `Your previous ${existingMode} alert for ${alreadyExists.placeName}${addrSuffix} is expired. Open Alerts and tap Reactivate to re-arm it. Or delete the expired one first if you want me to create a fresh alert.`;
+          emitPendingTurn(msg);
           return;
         }
         // V57.4 — speech now states one-time vs every-time so Robert always
@@ -1053,7 +1065,12 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                 const addrSuffix = alreadyExists.address
                   ? ` at ${String(alreadyExists.address).split(',')[0]?.trim()}`
                   : '';
-                emitPendingTurn(`You already have a ${existingMode} alert for ${alreadyExists.placeName}${addrSuffix}. Say "list my alerts" if you want to change or remove it.`);
+                // 2026-05-22 — F2e dedup across fire cycles. Same branch as
+                // the yes-confirm path: disabled dupe → point to Reactivate.
+                const msg = alreadyExists.enabled
+                  ? `You already have a ${existingMode} alert for ${alreadyExists.placeName}${addrSuffix}. Say "list my alerts" if you want to change or remove it.`
+                  : `Your previous ${existingMode} alert for ${alreadyExists.placeName}${addrSuffix} is expired. Open Alerts and tap Reactivate to re-arm it. Or delete the expired one first if you want me to create a fresh alert.`;
+                emitPendingTurn(msg);
                 return;
               }
               // V57.13.3 — sourceText simplified. memory cache removed; only
@@ -2291,6 +2308,44 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                     // a safety net so a forgotten field doesn't silently disable
                     // the rule after one fire.
                     const oneShot = action.one_shot ?? true;
+                    // 2026-05-22 — F2e dedup across fire cycles. Same logic
+                    // as commitPending's pre-check: find any rule at these
+                    // coords (enabled OR disabled). Disabled dupe →
+                    // point user to Reactivate. Enabled dupe → "you
+                    // already have one". Without this, the memory-hit path
+                    // (settings_home / settings_work shortcuts) would
+                    // duplicate rows after an alert fired.
+                    {
+                      const dupEpsilon = 0.00001;
+                      const { data: existingDupes } = await queryWithTimeout(
+                        supabase
+                          .from('action_rules')
+                          .select('id, trigger_config, one_shot, enabled')
+                          .eq('user_id', session.user.id)
+                          .eq('trigger_type', 'location'),
+                        10_000,
+                        'check-dup-location-rule-memory-hit',
+                      );
+                      const dupe = Array.isArray(existingDupes) ? (existingDupes as any[]).find(r => {
+                        const rLat = r?.trigger_config?.resolved_lat;
+                        const rLng = r?.trigger_config?.resolved_lng;
+                        if (typeof rLat !== 'number' || typeof rLng !== 'number') return false;
+                        return Math.abs(rLat - data.lat) < dupEpsilon && Math.abs(rLng - data.lng) < dupEpsilon;
+                      }) : null;
+                      if (dupe) {
+                        const dupEnabled = dupe.enabled !== false;
+                        const dupMode = dupe.one_shot ? 'one-time' : 'recurring';
+                        const dupAddrSuffix = (dupe.trigger_config?.address)
+                          ? ` at ${String(dupe.trigger_config.address).split(',')[0]?.trim()}`
+                          : '';
+                        const dupPlace = String(dupe.trigger_config?.place_name ?? data.place_name);
+                        locationIntercepted = true;
+                        turnSpeechOverride = dupEnabled
+                          ? `You already have a ${dupMode} alert for ${dupPlace}${dupAddrSuffix}. Say "list my alerts" if you want to change or remove it.`
+                          : `Your previous ${dupMode} alert for ${dupPlace}${dupAddrSuffix} is expired. Open Alerts and tap Reactivate to re-arm it. Or delete the expired one first if you want me to create a fresh alert.`;
+                        continue;
+                      }
+                    }
                     // V57.4 Part B — capture the inserted rule's id so the
                     // turn can render a "Make it recurring / one-time" toggle.
                     const { data: insertedRule, error: insertErr } = await queryWithTimeout(
