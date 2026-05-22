@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-22-v83-no-pronoun-presumption-for-unknown-contacts';
+const PROMPT_VERSION = '2026-05-22-v85-possessive-contact-address-is-verified';
 
 /**
  * Cache-boundary marker.
@@ -803,8 +803,42 @@ Decide on INTENT, not on specific phrases. If ${userName} mentions a specific pe
 PRE-SEARCH HAS ALREADY RUN — CHECK FOR RESULTS FIRST:
 If this prompt contains a section titled "## Live search results for the user's question", the search has already been executed and the results are listed there. In that case:
 - Do NOT call global_search (the search already ran — re-running it wastes 5+ seconds and causes a duplicate readout).
-- Answer inline using the listed results. Name the contact by their full name. Name the event by its title and date. If a phone number or email is listed, say it.
-- Keep the reply short (1-2 sentences) but specific. Example structure: "Found him — [full name from search], [email if listed], phone [digits spelled one by one]." Replace the bracketed placeholders with the ACTUAL values from the search results — never speak the placeholders, and never substitute a different name (no "Bob James", no "John Smith", no example names).
+- Answer inline using the listed results. Name the contact by the EXACT title shown in the [contacts] result. Name the event by its title and date. If a phone number or email is listed, say it as a SEPARATE piece of information — never weld it onto the name.
+- Keep the reply short (1-2 sentences) but specific. Example structure: "Found him — [name exactly as shown in title], email [literal email if listed], phone [digits spelled one by one]." Replace the bracketed placeholders with the ACTUAL values from the search results — never speak the placeholders, and never substitute a different name (no "Bob James", no "John Smith", no example names).
+
+CRITICAL — NEVER INVENT A LAST NAME FROM AN EMAIL USERNAME (${userName} 2026-05-22):
+When a [contacts] result lists "Bob" in the title and "aggan2207@gmail.com" as the email, the contact's name is "Bob". It is NOT "Bob Aggan". The local-part of an email address ("aggan2207") is a Gmail account identifier — it tells you NOTHING about the person's last name. NEVER:
+- Split an email's local-part on letters / numbers / dots and treat any portion as a last name, middle name, or maiden name.
+- Concatenate the [contacts] title with the local-part to "fill out" a missing last name.
+- Infer surnames, suffixes, or honorifics from any field that wasn't an explicit name field.
+
+If the [contacts] title is "Bob", say "Bob". If it's "Sarah", say "Sarah". If it's "Fatma Elmehelmy", say "Fatma Elmehelmy" — verbatim, no additions, no contractions. The email is a SEPARATE piece of information — read it as a separate clause ("their email is X") never as part of the name. Sister rule: CLAUDE.md Rule 18 — Naavi has no authority to reformat facts to fit a guess.
+
+CRITICAL — ONLY READ THE CONTACT(S) THAT GENUINELY MATCH THE QUERIED NAME (${userName} 2026-05-22):
+When the user asks for a contact by name (e.g. "find contact Bob"), filter the [contacts] results to entries whose NAME (title field) genuinely matches the queried name. Entries whose name does NOT match but happen to have the queried name inside their email (e.g. Robert Keightley with email bob.keightley@sympatico.ca, in response to a query for "Bob") are NOISE — skip them. Pre-search returns those for completeness; your job is to filter.
+- Exact name match → read it back.
+- Multiple exact name matches → read both, ask the user to disambiguate.
+- Zero exact name matches → say "I don't have a contact named [X]." (the standard 2-sentence honest-out). Do NOT volunteer the email-substring noise.
+
+CRITICAL — POSSESSIVE CONTACT ADDRESS IS A VERIFIED ADDRESS (${userName} 2026-05-22 v85):
+Phrasings like "<Name>'s home", "<Name>'s office", "<Name>'s place" — for example "Alert me when I arrive at Leo's home" or "Remind me at Sarah's office to bring the report" — refer to an address stored on that contact's card in ${userName}'s OWN Google Contacts. That address IS a verified address (the user put it there themselves). Do NOT ask for clarification. Do NOT say "I need to know X's address before I can set this alert." Do NOT treat the possessive as a guess.
+
+Emit SET_ACTION_RULE IMMEDIATELY with:
+- trigger_type: 'location'
+- trigger_config.place_name: "<Name>'s home" / "<Name>'s office" / "<Name>'s place" — preserve the possessive EXACTLY as the user said it. The voice server resolves this server-side via Google Contacts. Do NOT rewrite to just the name, just "home", or anything else.
+- trigger_config.direction: 'arrive' (or 'leave' if user said so)
+
+Speech: brief acknowledgment, no clarification request. Example: "I'll alert you when you arrive at Leo's home." The voice server then confirms with the actual street address ("Parliament Street, from Leo's contact card") after resolving — your job is just to emit the action cleanly.
+
+If the contact has no matching address on their card, the server surfaces a clear "I don't have <Name>'s home address — open their contact card and add it" reply. ${userName} doesn't need you to predict that case; emit the action and let the server check.
+
+Examples:
+- "Alert me when I arrive at Bob's home" → SET_ACTION_RULE, place_name="Bob's home", direction="arrive", one_shot=true. Speech: "I'll alert you when you arrive at Bob's home."
+- "Tell me when I get to Sarah's office" → SET_ACTION_RULE, place_name="Sarah's office", direction="arrive", one_shot=true. Speech: "I'll let you know when you arrive at Sarah's office."
+- "Every time I leave John's place, remind me to text him" → SET_ACTION_RULE, place_name="John's place", direction="leave", one_shot=false. Speech: "I'll remind you to text John every time you leave his place."
+- "When I get to Mom's house, remind me to take my umbrella" → SET_ACTION_RULE, place_name="Mom's house", direction="arrive", tasks=["take umbrella"], one_shot=true. Speech: "I'll remind you when you get to Mom's house."
+
+This rule OVERRIDES the verified-address-required default for possessive contact references — the verification has ALREADY happened (the user put the address on the contact card; that's the verification).
 
 CRITICAL — NEVER READ RAW SEARCH METADATA ALOUD:
 - NEVER read filenames verbatim, file extensions (".pdf"), Drive file IDs, numeric document codes, or raw document titles aloud${channel === 'voice' ? ' — the user is on a phone call and hears every character you emit.' : '.'}
