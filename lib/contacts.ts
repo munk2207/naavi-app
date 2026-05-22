@@ -12,10 +12,20 @@
 import { supabase } from './supabase';
 import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
 
+export interface ContactAddress {
+  type: string;       // 'home' | 'work' | 'other' | etc.
+  formatted: string;  // formatted address (may contain newlines from People API)
+}
+
 export interface Contact {
   name: string;
   email: string | null;
   phone: string | null;
+  // 2026-05-22 (Wael) — addresses[] from People API. Only populated by the
+  // Google People API path in lookupContact (sources 2-4 don't have them).
+  // Used by the possessive resolver ("Alert me at Bob's home") to look up
+  // the contact's saved address without hitting Google Places.
+  addresses?: ContactAddress[];
 }
 
 export async function lookupContactByPhone(phone: string): Promise<Contact | null> {
@@ -65,13 +75,15 @@ export async function lookupContact(name: string): Promise<Contact | null> {
   //    Test Drive recording by a greedy digit regex).
   try {
     const { data, error } = await invokeWithTimeout<any>('lookup-contact', { body: { name } }, 15_000);
-    if (!error && !data?.error && data?.contact && (data.contact.phone || data.contact.email)) {
+    if (!error && !data?.error && data?.contact && (data.contact.phone || data.contact.email || (Array.isArray(data.contact.addresses) && data.contact.addresses.length > 0))) {
       // V57.12.2 Bug L fix — only short-circuit when Google People API
       // returned a contact with at least one usable channel. Previously a
       // null-phone-null-email Google match blocked the local-table fallback
       // that DID have the phone number. Wael 2026-05-06 saved John locally,
       // tried to text him, hit "no phone for John" because Google had a
       // partial record without a number.
+      // 2026-05-22 (Wael) — also accept contacts with only an address (no
+      // phone/email) since the possessive resolver only needs the address.
       console.log('[contacts] Found via Google People API:', data.contact.name);
       return data.contact;
     }

@@ -1275,6 +1275,12 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       const searchQuery = userMessage
         .replace(/^\s*(can you\s+)?(please\s+)?(find|look\s*up|search\s+(for)?|show\s*me|tell\s*me\s*(about)?|what\s+do\s+(we|you|i)\s+have\s+(on|about)?|what\s+do\s+you\s+know\s+about|do\s+(we|you|i)\s+have|is\s+there|information\s+on|anything\s+(about|on))\s+/i, '')
         .replace(/^(?:my\s+)?(contact|contacts|email|emails|message|messages|note|notes|reminder|reminders|alert|alerts|memory|memories|document|documents|file|files)\s+(?:for\s+|of\s+|about\s+|named\s+|called\s+|with\s+)?(?=\S)/i, '')
+        // 2026-05-22 (Wael) \u2014 punctuation strip MUST run before trailing
+        // strips. Deepgram puts a period at the end of "Find Bob in my
+        // contact." which blocked the trailing "in my <type>" pattern from
+        // matching (it required \s*$). Live evidence on voice server (same
+        // bug existed there, commit c3d154b). Mobile inherits same regex.
+        .replace(/[?.!,;]+\s*$/, '')
         // 2026-05-22 (Wael) \u2014 also strip a TRAILING "in/from my <type>" or
         // "in <type>s" suffix. "find bob in my contact" was leaving
         // "bob in my" as query because the existing trailing-noun strip
@@ -1282,7 +1288,6 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         .replace(/\s+(?:in|from)\s+(?:my\s+)?(contact|contacts|email|emails|message|messages|note|notes|reminder|reminders|alert|alerts|memory|memories|document|documents|file|files)s?\s*$/i, '')
         .replace(/['\u2019]s\s+(phone|email|number|address|contact|info|information|details?)\s*$/i, '')
         .replace(/\s+(phone|email|number|address|contact|info|information|details?)\s*$/i, '')
-        .replace(/[?.!,;]+\s*$/, '')
         .trim() || userMessage.trim();
 
       let preSearchResults: GlobalSearchResult[] = [];
@@ -2243,13 +2248,122 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               // Intercept the insert. Call resolve-place; branch on outcome.
               // See project_naavi_location_verified_address.md.
               if (triggerType === 'location') {
-                const placeName = String((action.trigger_config ?? {}).place_name ?? '').trim();
+                // 2026-05-22 (Wael) — let, not const: the possessive contact
+                // resolver below may rewrite placeName to a street address.
+                let placeName = String((action.trigger_config ?? {}).place_name ?? '').trim();
                 console.log(`[orch:loc] entering intercept | place="${placeName}" | one_shot=${action.one_shot} | label="${action.label}"`);
                 if (!placeName) {
                   locationIntercepted = true;
                   turnSpeechOverride = "I didn't catch the place for that alert. Can you say it again?";
                   console.log('[orch:loc] empty placeName — skipping');
                   continue;
+                }
+
+                // 2026-05-22 (Wael) — POSSESSIVE CONTACT RESOLUTION. Voice
+                // parity with naavi-voice-server/src/index.js commit b5446d0
+                // + baeac7d. "Alert me when I arrive at Bob's home" -> look
+                // up Bob in Google Contacts, use the home address from
+                // their contact card directly. No Places picker -- the
+                // user's own contact card is authoritative (verified-address
+                // rule satisfied: they put it there themselves).
+                let possessiveContactSource: { name: string; kind: 'home' | 'office' } | null = null;
+                const possessive = placeName.match(/^([A-Za-z][A-Za-z'\-]+(?:\s+[A-Za-z][A-Za-z'\-]+)?)['’]s\s+(home|house|place|office|work)\s*$/i);
+                if (possessive) {
+                  const cName = possessive[1].trim();
+                  const cKind = possessive[2].toLowerCase();
+                  const wantedTypes = (cKind === 'office' || cKind === 'work') ? ['work'] : ['home', 'other'];
+                  console.log(`[orch:loc:possessive] resolving "${placeName}" -> contact="${cName}" kind=${cKind}`);
+                  try {
+                    const { data: lookupData } = await invokeWithTimeout<any>('lookup-contact', { body: { name: cName } }, 15_000);
+                    const all = Array.isArray(lookupData?.contacts) ? lookupData.contacts : (lookupData?.contact ? [lookupData.contact] : []);
+                    const qLower = cName.toLowerCase();
+                    // Same ranking as voice (commit baeac7d): exact name +
+                    // has wanted-type address wins over starts-with no-addr.
+                    const scoreContact = (c: any): number => {
+                      const cname = String(c?.name || '').toLowerCase();
+                      const isExact = cname === qLower;
+                      const isStart = cname.startsWith(qLower + ' ');
+                      const isWord  = cname.split(/\s+/).includes(qLower);
+                      if (!isExact && !isStart && !isWord) return -1;
+                      const addrs = Array.isArray(c?.addresses) ? c.addresses : [];
+                      const hasWantedAddr = addrs.some((a: any) => wantedTypes.includes(String(a?.type || '').toLowerCase()));
+                      const hasAnyAddr    = addrs.length > 0;
+                      let s = 0;
+                      if (isExact)        s += 100;
+                      else if (isStart)   s += 50;
+                      else if (isWord)    s += 25;
+                      if (hasWantedAddr)  s += 1000;
+                      else if (hasAnyAddr) s += 200;
+                      return s;
+                    };
+                    const ranked = all
+                      .map((c: any) => ({ c, s: scoreContact(c) }))
+                      .filter((x: any) => x.s >= 0)
+                      .sort((a: any, b: any) => b.s - a.s);
+                    if (ranked.length === 0) {
+                      locationIntercepted = true;
+                      turnSpeechOverride = `I don't have a contact named ${cName}. Tell me the address directly, or save ${cName} to your contacts first.`;
+                      console.log(`[orch:loc:possessive] no name-match contact for "${cName}"`);
+                      continue;
+                    }
+                    const contact = ranked[0].c;
+                    const addr = (contact.addresses || []).find((a: any) => wantedTypes.includes(String(a?.type || '').toLowerCase()));
+                    console.log(`[orch:loc:possessive] ranked: ${ranked.map((r: any) => `${r.c.name}(addrs=${(r.c.addresses||[]).length})`).join(', ')} -> picked "${contact.name}"`);
+                    if (!addr) {
+                      const kindLabel = (cKind === 'office' || cKind === 'work') ? 'office' : 'home';
+                      locationIntercepted = true;
+                      turnSpeechOverride = `I don't have ${contact.name}'s ${kindLabel} address. Open ${contact.name}'s contact card and add it, or tell me the address now.`;
+                      console.log(`[orch:loc:possessive] picked "${contact.name}" has no ${wantedTypes.join('/')} address`);
+                      continue;
+                    }
+                    placeName = String(addr.formatted || '').replace(/\n+/g, ', ').replace(/\s*,\s*,\s*/g, ', ').trim();
+                    possessiveContactSource = { name: contact.name, kind: (cKind === 'office' || cKind === 'work') ? 'office' : 'home' };
+                    console.log(`[orch:loc:possessive] resolved to "${placeName}" from contact "${contact.name}"`);
+                  } catch (err: any) {
+                    console.error('[orch:loc:possessive] lookup failed:', err?.message || err);
+                    // Fall through; resolve-place will fail gracefully.
+                  }
+                }
+
+                // 2026-05-22 (Wael) — MEMORY-HIT PRE-RESOLVE CHECK. Voice
+                // parity with naavi-voice-server commit b12dbb2. When the
+                // user names a place they already have an alert for, surface
+                // "you already have one" BEFORE calling Google Places.
+                // Skipped for possessive contact resolutions (placeName was
+                // rewritten to a street address, no longer a name to match).
+                if (!possessiveContactSource) {
+                  try {
+                    const { data: existingRows } = await queryWithTimeout(
+                      supabase!
+                        .from('action_rules')
+                        .select('id, trigger_config, one_shot, enabled')
+                        .eq('user_id', session.user.id)
+                        .eq('trigger_type', 'location'),
+                      10_000,
+                      'pre-resolve-memory-hit',
+                    );
+                    const spokenLower = placeName.toLowerCase().trim();
+                    const match = (Array.isArray(existingRows) ? existingRows : []).find((r: any) => {
+                      const rPlace = String(r?.trigger_config?.place_name || '').toLowerCase().trim();
+                      return rPlace.length > 0 && rPlace === spokenLower;
+                    }) as any;
+                    if (match) {
+                      const mode = match.one_shot ? 'one-time' : 'recurring';
+                      const enabled = match.enabled !== false;
+                      const addrSuffix = (match.trigger_config?.address)
+                        ? ` at ${String(match.trigger_config.address).split(',')[0]?.trim()}`
+                        : '';
+                      locationIntercepted = true;
+                      turnSpeechOverride = enabled
+                        ? `You already have a ${mode} alert for ${match.trigger_config?.place_name || placeName}${addrSuffix}. Tap Alerts to change or remove it.`
+                        : `Your previous ${mode} alert for ${match.trigger_config?.place_name || placeName}${addrSuffix} is expired. Open Alerts and tap Reactivate to re-arm it.`;
+                      console.log(`[orch:loc:memory-hit] name-match for "${placeName}" -> rule ${match.id} (enabled=${enabled}, mode=${mode}) — skipping resolve-place`);
+                      continue;
+                    }
+                  } catch (err: any) {
+                    console.error('[orch:loc:memory-hit] check failed:', err?.message || err);
+                    // Fall through to standard resolve-place flow.
+                  }
                 }
                 // V57.10.1 — lazy permission request, "Allow all the time"
                 // required. Removed the persistent home banner; we now ask
