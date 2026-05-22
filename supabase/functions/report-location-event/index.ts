@@ -217,7 +217,18 @@ serve(async (req) => {
         // 40% of radius) still pass. Only rejects when the phone is
         // genuinely deep inside.
         if (event === 'enter') {
-          const STATIONARY_PHANTOM_RATIO = 0.3;
+          // 2026-05-21 (Wael) — RATIO lowered from 0.3 to 0. Rationale: the
+          // deep-inside guard's defensive value is fully absorbed by
+          // one_shot=true (all location rules default to single-entry; rule
+          // auto-disables after first fire so phantoms have no rule to match)
+          // + the state-machine TTL (24h) + the movement check + the
+          // cold-start grace. The 0.3 guard's only remaining role would be
+          // catching phantoms on multi-entry (one_shot=false) rules after
+          // 24h+ continuous stay — a narrow edge case Wael accepts. The cost
+          // of keeping it: real arrivals where GPS lands deep inside the
+          // fence (today's No Frills 87m miss) get silently dropped.
+          // RATIO=0 → threshold=0 → never rejects.
+          const STATIONARY_PHANTOM_RATIO = 0;
           const phantomThresholdM = radiusM * STATIONARY_PHANTOM_RATIO;
           if (distanceM < phantomThresholdM) {
             console.log(

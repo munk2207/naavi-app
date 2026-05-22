@@ -506,6 +506,7 @@ async function fetchLiveCalendarEvents(
       summary?: string;
       location?: string;
       start?: { dateTime?: string; date?: string };
+      end?: { dateTime?: string; date?: string };
     }>;
 
     // V57.11.2 — drop events whose start time has already passed. Without
@@ -515,24 +516,51 @@ async function fetchLiveCalendarEvents(
     // deterministic. The trade-off: an in-progress meeting won't appear in
     // the brief; if the user asks about it explicitly the global-search
     // calendar adapter still surfaces it (that adapter searches by keyword).
+    //
+    // 2026-05-22 — B4q fix. All-day events use a date-only string
+    // (YYYY-MM-DD) for start.date / end.date. `new Date("2026-05-22")`
+    // parses as midnight UTC = 8 PM EST May 21 — i.e., in the past
+    // relative to "now" on May 22 EST. The original .getTime() filter
+    // then dropped today's and tomorrow's all-day events because they
+    // looked "past" in UTC. For all-day events, compare DATE STRINGS
+    // (YYYY-MM-DD) against today's date in America/Toronto; never call
+    // .getTime() on a date-only string (Rule 18 — never reformat a fact
+    // to fit a column it doesn't have). Same Victoria Day bug class as
+    // B3i shipped for assistant-fulfillment.
     const now = Date.now();
+    const todayTorontoStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Toronto' });
     return items
       .map(e => {
+        const isAllDay = !e.start?.dateTime && !!e.start?.date;
         const start = e.start?.dateTime ?? e.start?.date ?? '';
         const startDate = start ? new Date(start) : new Date();
         const isValid = !Number.isNaN(startDate.getTime());
-        return { e, startDate, isValid };
+        return { e, startDate, isAllDay, isValid };
       })
-      .filter(({ startDate, isValid }) => {
+      .filter(({ e, startDate, isAllDay, isValid }) => {
         if (!isValid) return false;
+        if (isAllDay) {
+          // Keep if event still in progress: start.date <= today AND end.date > today (Google end.date is exclusive)
+          // OR event starts today / in the future.
+          const startStr = e.start?.date ?? '';
+          const endStr = e.end?.date ?? '';
+          if (startStr && startStr >= todayTorontoStr) return true;
+          if (endStr && endStr > todayTorontoStr) return true;
+          return false;
+        }
         return startDate.getTime() > now;
       })
-      .map(({ e, startDate }) => {
-        const timeStr = e.start?.dateTime
+      .map(({ e, startDate, isAllDay }) => {
+        const timeStr = !isAllDay
           ? startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/Toronto' })
           : 'all day';
-        const dateStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Toronto' });
-        const detailParts = [`${dateStr}${e.start?.dateTime ? ' at ' + timeStr : ''}`];
+        // For all-day events, parse start.date as local-noon so the date
+        // label doesn't shift back to yesterday in EST (Rule 18).
+        const dateForLabel = isAllDay && e.start?.date
+          ? new Date(`${e.start.date}T12:00:00`)
+          : startDate;
+        const dateStr = dateForLabel.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Toronto' });
+        const detailParts = [isAllDay ? `${dateStr} all day` : `${dateStr} at ${timeStr}`];
         if (e.location) detailParts.push(`at ${e.location}`);
         return {
           id: e.id ?? '',

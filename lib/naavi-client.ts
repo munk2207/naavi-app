@@ -222,6 +222,11 @@ export interface NaaviMessage {
 
 export interface NaaviResponse {
   speech: string;
+  // 2026-05-22 — B4r v81 two-field architecture. `display` is the rich-markdown
+  // version of the same answer; the chat bubble renders this if present (falls
+  // back to `speech`). TTS always uses `speech` (TTS-optimized prose, no bullets).
+  // Optional — Claude only emits it for 3+ item list replies.
+  display?: string;
   actions: NaaviAction[];
   pendingThreads: PendingThread[];
 }
@@ -755,6 +760,7 @@ function parseResponse(rawText: string): NaaviResponse {
         const actions = Array.isArray(json.actions) ? json.actions : [];
         return {
           speech: fixSentLanguage(json.speech, actions),
+          display: typeof json.display === 'string' ? json.display : undefined,
           actions,
           pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
         };
@@ -780,6 +786,7 @@ function parseResponse(rawText: string): NaaviResponse {
     const speech = typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?';
     return {
       speech: fixSentLanguage(speech, actions),
+      display: typeof json.display === 'string' ? json.display : undefined,
       actions,
       pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
     };
@@ -796,6 +803,7 @@ function parseResponse(rawText: string): NaaviResponse {
     const speech = typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?';
     return {
       speech: fixSentLanguage(speech, actions),
+      display: typeof json.display === 'string' ? json.display : undefined,
       actions,
       pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
     };
@@ -812,6 +820,7 @@ function parseResponse(rawText: string): NaaviResponse {
     const speech = typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?';
     return {
       speech: fixSentLanguage(speech, actions),
+      display: typeof json.display === 'string' ? json.display : undefined,
       actions,
       pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
     };

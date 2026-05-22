@@ -510,4 +510,138 @@ export const promptRegressionTests: TestCase[] = [
       );
     },
   },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // RULE 21 — Speech must match actions (Wael 2026-05-21 trust-breach rule).
+  // When the user asks to add nonsense / single-character items, Naavi must
+  // either (a) emit list_add with the items, or (b) refuse with explicit
+  // disclosure. NEVER say "Added" without the tool call.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'prompt-regression.rule21-list-add-single-letters',
+    category: 'prompt-regression',
+    description: 'V79 RULE 21 — "add A B C to my groceries list" must either emit LIST_ADD with those items OR say it didn\'t add. NEVER say "Added" without the tool call.',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'add A B C to my groceries list' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      const rawText = data?.rawText ?? '';
+      ctx.log(`rawText: ${rawText.slice(0, 400)}…`);
+
+      const action = findActionInRawText(rawText, 'LIST_ADD');
+      const speech = extractSpeech(rawText).toLowerCase();
+      const claimsSuccess = /\b(added|done|got it|saved|i added|i've added|i have added)\b/.test(speech);
+      const disclosesSkip = /(could you|do you mean|are you sure|i'm not sure|i don'?t|i didn'?t|clarify|confirm|skip|not going to|not adding|seems? like|looks? like)/i.test(speech);
+
+      if (action) {
+        // (a) Tool call emitted — that's a valid response. Verify items include the letters.
+        const items = Array.isArray((action as any).items) ? (action as any).items.map(String) : [];
+        ctx.log(`LIST_ADD emitted with items: ${JSON.stringify(items)}`);
+        // No strict assertion on what items contains — Naavi may emit ["A","B","C"] or ["a","b","c"] or even ["A B C"]; what matters is the tool call ran.
+      } else {
+        // (b) No tool call — speech MUST explicitly disclose the skip.
+        expectTruthy(
+          !claimsSuccess,
+          `Speech claims success ("Added" / "Done" / etc.) but no LIST_ADD tool call was emitted. This is the Rule 21 trust-breach. Speech: ${JSON.stringify(speech)}`,
+        );
+        expectTruthy(
+          disclosesSkip,
+          `No LIST_ADD emitted AND speech does not disclose the skip. Per Rule 21, must explicitly say "I didn't add" / "could you confirm" / etc. Speech: ${JSON.stringify(speech)}`,
+        );
+      }
+    },
+  },
+
+  {
+    id: 'prompt-regression.rule21-list-add-mixed-real-and-test',
+    category: 'prompt-regression',
+    description: 'V79 RULE 21 — "add milk eggs X to my groceries list" must NOT silently drop the X — either include all 3 in LIST_ADD or disclose the skip.',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'add milk eggs X to my groceries list' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      const rawText = data?.rawText ?? '';
+      ctx.log(`rawText: ${rawText.slice(0, 400)}…`);
+
+      const action = findActionInRawText(rawText, 'LIST_ADD');
+      const speech = extractSpeech(rawText).toLowerCase();
+      const claimsSuccess = /\b(added|done|got it|saved)\b/.test(speech);
+      const mentionsX = /\bx\b/i.test(speech);
+
+      if (action) {
+        const items = Array.isArray((action as any).items) ? (action as any).items.map(String) : [];
+        ctx.log(`LIST_ADD items: ${JSON.stringify(items)}`);
+        // If the tool call dropped X but kept milk and eggs, speech MUST mention the skip.
+        const itemsLower = items.map(s => s.toLowerCase());
+        const includesX = itemsLower.some(s => /\bx\b/.test(s));
+        if (!includesX) {
+          expectTruthy(
+            mentionsX || /skip|didn'?t add|not sure|confirm/i.test(speech),
+            `LIST_ADD dropped X silently and speech does not disclose. Rule 21 requires either all items in the tool call OR explicit disclosure. items=${JSON.stringify(items)} speech=${JSON.stringify(speech)}`,
+          );
+        }
+      } else if (claimsSuccess) {
+        throw new Error(`No LIST_ADD emitted but speech claims success. Rule 21 violation. Speech: ${JSON.stringify(speech)}`);
+      }
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // RULE 22 — speech must use natural prose, never bullet glyphs (•) or
+  // markdown bullets ("- " / "* "). Aura ignores those for pausing, so a
+  // bulleted list reads as one run-on sentence. Verified manually on
+  // Wael's phone 2026-05-22 — added v80 prompt rule. Test asks a
+  // list-shaped question that historically produced bullets and asserts
+  // the speech field is bullet-free.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'prompt-regression.rule22-speech-no-bullet-glyph',
+    category: 'prompt-regression',
+    description: 'V80 RULE 22 — schedule reply must not contain bullet glyph (•) in speech (Aura ignores it for pausing).',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'What is my schedule for today?' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      const rawText = data?.rawText ?? '';
+      ctx.log(`rawText: ${rawText.slice(0, 400)}…`);
+      const speech = extractSpeech(rawText);
+      ctx.log(`speech: ${JSON.stringify(speech)}`);
+      expectTruthy(
+        !/•/.test(speech),
+        `Speech contains bullet glyph "•" — Rule 22 violation. Aura reads bulleted lists as one run-on sentence. Speech: ${JSON.stringify(speech)}`,
+      );
+    },
+  },
+
+  {
+    id: 'prompt-regression.rule22-speech-no-markdown-bullets',
+    category: 'prompt-regression',
+    description: 'V80 RULE 22 — list-shaped reply must not contain markdown bullets ("- " or "* ") at line start in speech.',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'list my alerts' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      const rawText = data?.rawText ?? '';
+      ctx.log(`rawText: ${rawText.slice(0, 400)}…`);
+      const speech = extractSpeech(rawText);
+      ctx.log(`speech: ${JSON.stringify(speech)}`);
+      const hasMarkdownBullet = /(^|\n)\s*[-*]\s+\S/.test(speech);
+      expectTruthy(
+        !hasMarkdownBullet,
+        `Speech contains markdown bullet ("- " or "* ") at line start — Rule 22 violation. Speech: ${JSON.stringify(speech)}`,
+      );
+    },
+  },
 ];

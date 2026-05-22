@@ -88,6 +88,32 @@ function rejoinBrokenOrdinalsForTTS(text: string): string {
   );
 }
 
+// 2026-05-22 — B4r. Markdown-list pre-pass for Aura. Bulleted lists in
+// Claude replies (e.g., "Your schedule for today:\n\n• All day event\n
+// • Test event at 4:00 PM") were being read as one continuous sentence
+// because Deepgram Aura ignores bullet glyphs and newlines for pausing.
+// Convert list structure to periods so the voice produces audible breaks
+// between items. Mirrors the role of normalizePhoneForTTS but for the
+// markdown shape Claude emits when listing things.
+function normalizeListsForTTS(text: string): string {
+  if (!text) return text;
+  // Bullet glyph (•) at line start or after whitespace → period + space.
+  text = text.replace(/(^|\s)•\s+/g, '$1. ');
+  // Markdown bullets at line start (- or *) → period + space.
+  text = text.replace(/(^|\n)\s*[-*]\s+/g, '$1. ');
+  // Paragraph break → period + space (only if not already preceded by . ! ?).
+  text = text.replace(/([^.!?:\s])\s*\n\n+/g, '$1. ');
+  text = text.replace(/\n\n+/g, ' ');
+  // Single newlines (within a list) → period + space, same guard.
+  text = text.replace(/([^.!?:\s])\s*\n/g, '$1. ');
+  text = text.replace(/\n/g, ' ');
+  // De-duplicate runs of ". ." → ".".
+  text = text.replace(/\.(\s*\.)+/g, '.');
+  // Collapse multiple spaces.
+  text = text.replace(/[ \t]+/g, ' ').trim();
+  return text;
+}
+
 function normalizeOrdinalsForTTS(text: string): string {
   if (!text) return text;
   // Step 0: rejoin ordinals broken by mobile-side over-splitting
@@ -197,7 +223,7 @@ serve(async (req) => {
       ? requestedVoice
       : 'aura-hera-en';
 
-    const normalised = expandAddressAbbreviations(normalizeOrdinalsForTTS(normalizePhoneForTTS(text)));
+    const normalised = expandAddressAbbreviations(normalizeOrdinalsForTTS(normalizePhoneForTTS(normalizeListsForTTS(text))));
     console.log('[text-to-speech] voice:', model, 'text length:', text.length, 'normalised length:', normalised.length);
 
     const res = await fetch(`https://api.deepgram.com/v1/speak?model=${model}&encoding=mp3`, {

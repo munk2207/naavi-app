@@ -174,13 +174,17 @@ serve(async (req) => {
       // Bare message fallback (no reason).
       else if (message) body = message;
     }
+    // 2026-05-21 (Wael) — customer-facing subjects only. The dropdown/tag
+    // values (intent, reason, sourceTag) are internal classifications that
+    // appear in the HubSpot ticket BODY for staff context; they must NOT
+    // leak into the email subject the customer sees in their inbox.
     if (!subject) {
-      if (description) subject = description.slice(0, 80);
-      else if (reason && message) subject = `${reason}: ${message.slice(0, 60)}`;
-      else if (intent) subject = `Web signup (${intent})`;
-      else if (note) subject = `Invitation request${sourceTag ? ' — ' + sourceTag : ''}`;
-      else if (message) subject = message.slice(0, 80);
-      else if (body) subject = body.slice(0, 80);
+      if (description)         subject = description.slice(0, 80);              // /report — customer-written
+      else if (reason && message) subject = message.slice(0, 80);                // /contact — drop reason tag
+      else if (intent)         subject = 'Signup request';                       // homepage signup — drop intent tag
+      else if (note)           subject = 'Invitation request';                   // /start — drop sourceTag
+      else if (message)        subject = message.slice(0, 80);
+      else if (body)           subject = body.slice(0, 80);
     }
 
     if (!subject || !body) {
@@ -338,8 +342,15 @@ serve(async (req) => {
             headers: hsHeaders,
             body: JSON.stringify({
               properties: {
-                subject:           `[#${ticket.ticket_number}] ${ticket.subject}`.slice(0, 200),
-                content:           body + `\n\n— Source: ${channel}` + (sourceTag ? ` (${sourceTag})` : '') + `\n— Ticket: #${ticket.ticket_number}` + `\n— Reporter: ${reporterEmail}`,
+                // 2026-05-21 (Wael) — HubSpot ticket subject is JUST the
+                // Naavi ticket number. Customer subject line stays short
+                // and predictable ("Your ticket 'Ticket #1049' has been
+                // received") regardless of how long their typed content
+                // is. The customer's original subject + body content
+                // appear in the HubSpot ticket BODY below (so staff sees
+                // the full request when they click into a ticket).
+                subject:           `Ticket #${ticket.ticket_number}`,
+                content:           body + `\n\n— Source: ${channel}` + (sourceTag ? ` (${sourceTag})` : '') + `\n— Ticket: #${ticket.ticket_number}` + `\n— Sender Email: ${reporterEmail}`,
                 hs_pipeline:       HUBSPOT_PIPELINE_ID,
                 hs_pipeline_stage: HUBSPOT_PIPELINE_STAGE,
                 hs_ticket_priority: 'MEDIUM',
@@ -356,6 +367,47 @@ serve(async (req) => {
           }
           hubspotTicketId = String(ticketBody.id);
           console.log(`[ingest-ticket] HubSpot ticket ${hubspotTicketId} created for Naavi ticket #${ticket.ticket_number}`);
+
+          // 2026-05-21 (Wael) — also create an inbound EMAIL engagement
+          // representing the customer's submission. Without this, the
+          // ticket has no email thread for staff to "Reply" on — clicking
+          // the standalone Email button opens a blank composer with no
+          // subject / no recipient context. With this inbound email in
+          // the timeline, staff clicks Reply on it and HubSpot auto-fills
+          // the composer with subject "Re: Ticket #NNNN — <subject>",
+          // To: customer, From: staff. Decided after the 2026-05-21
+          // editable-Logged-email UI verification.
+          const inboundSubject = `Ticket #${ticket.ticket_number} — ${ticket.subject}`.slice(0, 200);
+          const inboundRes = await fetch(`${HUBSPOT_API}/crm/v3/objects/emails`, {
+            method:  'POST',
+            headers: hsHeaders,
+            body: JSON.stringify({
+              properties: {
+                hs_timestamp:       new Date().toISOString(),
+                hs_email_status:    'SENT',
+                hs_email_direction: 'INCOMING_EMAIL',
+                hs_email_subject:   inboundSubject,
+                hs_email_text:      body,
+                hs_email_headers:   JSON.stringify({
+                  from: { email: reporterEmail, firstName: reporterName.split(/\s+/)[0] || '', lastName: reporterName.split(/\s+/).slice(1).join(' ') || '' },
+                  to:   [{ email: 'support@mynaavi.com', firstName: 'MyNaavi', lastName: 'Team' }],
+                  cc:   [],
+                  bcc:  [],
+                }),
+              },
+              associations: [
+                { to: { id: hubspotTicketId },  types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 224 }] }, // email → ticket
+                { to: { id: hubspotContactId }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 198 }] }, // email → contact
+              ],
+            }),
+          });
+          if (!inboundRes.ok) {
+            const inboundErrBody = await inboundRes.json().catch(() => ({}));
+            console.warn(`[ingest-ticket] inbound email engagement create failed (non-fatal): ${inboundRes.status} ${JSON.stringify(inboundErrBody).slice(0, 200)}`);
+          } else {
+            const inboundBody = await inboundRes.json();
+            console.log(`[ingest-ticket] inbound email engagement ${inboundBody.id} created`);
+          }
         } catch (err) {
           hubspotError = err instanceof Error ? err.message : String(err);
           console.warn('[ingest-ticket] HubSpot integration threw:', hubspotError);
@@ -375,8 +427,15 @@ serve(async (req) => {
           ? `HubSpot ticket ${hubspotTicketId} created (contact ${hubspotContactId}) — https://app.hubspot.com/contacts/${HUBSPOT_PORTAL_ID}/ticket/${hubspotTicketId}`
           : `HubSpot integration failed: ${hubspotError}`,
       };
+      // Persist the HubSpot ids as dedicated columns so analyze-ticket can
+      // look them up without regex-parsing audit_trail text. Migration
+      // 20260521_tickets_hubspot_refs.sql added the columns + backfilled
+      // existing rows; this populates them going forward. Stays NULL when
+      // HubSpot integration failed.
       await admin.from('tickets').update({
-        audit_trail: [auditEntry, followupEntry],
+        audit_trail:        [auditEntry, followupEntry],
+        hubspot_ticket_id:  hubspotTicketId,
+        hubspot_contact_id: hubspotContactId,
       }).eq('id', ticket.id);
     }
 

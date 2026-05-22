@@ -31,9 +31,10 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-interface ListRequest   { op: 'list';   user_id?: string; }
-interface DeleteRequest { op: 'delete'; user_id?: string; rule_id: string; }
-type RulesRequest = ListRequest | DeleteRequest;
+interface ListRequest       { op: 'list';       user_id?: string; }
+interface DeleteRequest     { op: 'delete';     user_id?: string; rule_id: string; }
+interface ReactivateRequest { op: 'reactivate'; user_id?: string; rule_id: string; }
+type RulesRequest = ListRequest | DeleteRequest | ReactivateRequest;
 
 async function resolveUserId(req: Request, bodyUserId?: string): Promise<string | null> {
   // (a) JWT path — app caller with Authorization header
@@ -69,10 +70,17 @@ serve(async (req) => {
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     if (body.op === 'list') {
+      // 2026-05-22 (Wael) — F2e revised design REVERTS the 2026-05-21 Phase A
+      // enabled=true filter. Disabled (fired one-shot) rules must appear in
+      // the Alerts list so the mobile UI can render them greyed-out with a
+      // Reactivate button. The voice LIST_RULES read-aloud path filters to
+      // active-only at the read layer (so the list doesn't balloon when
+      // spoken), but the raw list returns everything for the mobile UI.
       const { data, error } = await admin
         .from('action_rules')
-        .select('id, trigger_type, trigger_config, action_type, action_config, label, one_shot, enabled, created_at')
+        .select('id, trigger_type, trigger_config, action_type, action_config, label, one_shot, enabled, last_fired_at, created_at')
         .eq('user_id', userId)
+        .order('enabled',      { ascending: false }) // active first
         .order('trigger_type', { ascending: true })
         .order('created_at',   { ascending: false });
       if (error) {
@@ -123,7 +131,45 @@ serve(async (req) => {
       });
     }
 
-    return new Response(JSON.stringify({ error: "op must be 'list' or 'delete'" }), {
+    if (body.op === 'reactivate') {
+      // 2026-05-22 (Wael) — F2e reactivate. Flips enabled=true and clears
+      // last_fired_at so the rule re-arms immediately. one_shot stays as
+      // configured. Ownership check identical to delete.
+      if (!body.rule_id) {
+        return new Response(JSON.stringify({ error: 'rule_id is required for reactivate' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const { data: existing, error: ownErr } = await admin
+        .from('action_rules')
+        .select('id, user_id')
+        .eq('id', body.rule_id)
+        .maybeSingle();
+      if (ownErr) {
+        return new Response(JSON.stringify({ error: ownErr.message }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      if (!existing || existing.user_id !== userId) {
+        return new Response(JSON.stringify({ error: 'Rule not found' }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const { error: updErr } = await admin
+        .from('action_rules')
+        .update({ enabled: true, last_fired_at: null })
+        .eq('id', body.rule_id);
+      if (updErr) {
+        return new Response(JSON.stringify({ error: updErr.message }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({ error: "op must be 'list', 'delete', or 'reactivate'" }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {

@@ -547,19 +547,27 @@ Naavi never creates a location alert from a guessed address. An address must be 
 
 Full design: `project_naavi_location_verified_address.md` + `project_naavi_location_trigger_plan.md` memory files.
 
-### ALERT FAN-OUT — self-alerts always quadruple-channel
+### ALERT FAN-OUT — self-alerts default to all five channels; user can opt out per channel
 
-Every alert where the destination is the user themselves MUST fire on **all four** channels: SMS + WhatsApp + Email + Push. Third-party alerts (alerts sent to someone other than the user) fire on SMS + WhatsApp only because we don't have email/push tokens for non-users.
+Every alert where the destination is the user themselves DEFAULTS to firing on **all five** channels: SMS + WhatsApp + Email + Push + Voice Call (voice call only for location-arrival alerts — see below). Users can opt out of any individual channel via Settings (F2g, shipped 2026-05-21). The choice is **per-user, not per-rule** — per-rule channel toggles remain forbidden.
 
-**Why:** SMS requires cell reception. A user on WiFi-only (traveling, international, weak signal) silently misses critical alerts. Multi-channel guarantees at least one path lands. Stability-over-cost applies — quadrupled messaging cost is acceptable; missed alerts are not.
+Third-party alerts (sent to someone other than the user) fire on SMS + WhatsApp only — same as before. The user's per-channel preferences do NOT affect what gets sent to third parties; preferences govern alerts the user themselves receives.
 
-**Where implemented:** `fireAction()` in `supabase/functions/evaluate-rules/index.ts` handles fan-out for `action_rules` triggers. `check-reminders` Edge Function does its own fan-out for the `reminders` table (currently SMS + WhatsApp + Push; email still to add).
+**Why the default is still all-on:** SMS requires cell reception. A user on WiFi-only (traveling, international, weak signal) silently misses critical alerts. Multi-channel default guarantees at least one path lands for users who never visit Settings. Stability-over-cost applies for the default — quadrupled messaging cost is acceptable when the user hasn't expressed a preference. Users who explicitly disable a channel are knowingly accepting that they may miss alerts on that channel; this is a user choice, not a system failure.
 
-**Self-alert detection:** `action_config.to_phone` matches user's `user_settings.phone` → self-alert. Otherwise → third-party.
+**At-least-one floor:** the `user_settings_alert_channels_at_least_one` CHECK constraint on `user_settings.alert_channels_enabled` (TEXT[]) prevents a user from disabling ALL channels. Mobile UI should also prevent disabling the last enabled channel for clear UX.
 
-**Graceful degradation:** missing phone/email/push token → skip that channel, fire the rest. Never block.
+**Where implemented:** `fireAction()` in `supabase/functions/evaluate-rules/index.ts` reads `user_settings.alert_channels_enabled` and gates each channel send. `check-reminders` Edge Function does its own fan-out for the `reminders` table (currently SMS + WhatsApp + Push; email still to add; not yet wired to the per-user preference — to do in F2g Phase 1 follow-up).
 
-Do NOT add per-rule channel toggles. Channel choice is not a user preference — it's a reliability guarantee. Full design in `project_naavi_alert_fanout.md` memory.
+**Self-alert detection:** `action_config.to_phone` matches user's `user_settings.phone` → self-alert (apply preferences). Otherwise → third-party (preferences NOT applied, full fan-out to third party).
+
+**Voice call (channel #5):** outbound voice call via Twilio, only fires for `trigger_type='location' AND direction='arrive'` self-alerts. Cost ~$0.02/call; the rationale is "phone ringing reaches a driver parking at Costco; visual channels don't." Stays gated by the same per-user `voice_call` preference.
+
+**Graceful degradation:** missing phone/email/push token → skip that channel, fire the rest. Never block. Same as before.
+
+**Do NOT add per-rule channel toggles.** Channel choice is a per-USER preference. Per-rule customization adds combinatorial complexity for no real-world use case (verified 2026-05-21).
+
+Full design + memory: `project_naavi_alert_fanout.md` (needs update to reflect 2026-05-21 per-user opt-out design).
 
 ### DRIVE STRUCTURE (Session 19 restructure)
 

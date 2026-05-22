@@ -2506,8 +2506,16 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       }
 
       // ── Append turn with all its cards ────────────────────────────────────────
+      // 2026-05-22 — B4r v81 two-field architecture. Use `display` (rich
+      // markdown with bullets / newlines) for the chat bubble if Claude
+      // emitted it; otherwise fall back to `speech` (TTS prose). TTS path
+      // below (finalSpeech) always uses `response.speech` — never `display`.
+      // Older builds that don't read `display` continue to render `speech`
+      // as before; no behavior change for replies without `display`.
+      let displaySpeech = (typeof response.display === 'string' && response.display.trim().length > 0)
+        ? response.display
+        : response.speech;
       // Strip "Say yes to send" from displayed text when not in hands-free
-      let displaySpeech = response.speech;
       if (!handsfreeRef.current && turnDrafts.some(d => isConfirmable(d))) {
         displaySpeech = displaySpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
       }

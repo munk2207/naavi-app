@@ -541,6 +541,59 @@ export async function handleGeofenceEvent(event: GeofenceEvent): Promise<void> {
 // drive). Single-flight makes subsequent calls a no-op while one is running.
 let _syncInProgress = false;
 
+// 2026-05-22 — B4m. Mutex around the SDK's startGeofences() call. The
+// existing `_syncInProgress` guards against concurrent `syncGeofencesForUser`
+// calls but does NOT prevent the SDK's INTERNAL "Waiting for previous start
+// action to complete" race that fired ~8 times in client_diagnostics since
+// 2026-05-15. This mutex serializes every `startGeofences()` invocation
+// across the whole app, regardless of which surface (AppState foreground,
+// user-id flip, alert-create handler) triggered the sync.
+let _startGeofencesPromise: Promise<void> | null = null;
+async function startGeofencesWithMutex(): Promise<void> {
+  if (_startGeofencesPromise) return _startGeofencesPromise;
+  _startGeofencesPromise = (async () => {
+    try {
+      await BackgroundGeolocation.startGeofences();
+    } finally {
+      _startGeofencesPromise = null;
+    }
+  })();
+  return _startGeofencesPromise;
+}
+
+// 2026-05-22 — B4n. Last sync outcome so the Alerts screen banner can show
+// a warning when registered=0 (permission denied / SDK threw / etc.).
+// Updated by every syncGeofencesForUser exit path. Consumers read via
+// `getLastSyncStatus()` below.
+export interface LastSyncStatus {
+  registered: number;
+  expectedCount: number | null; // null = unknown yet; mirrors action_rules count
+  reason: 'ok' | 'foreground-not-granted' | 'background-not-granted' | 'permission-prompt-denied' | 'threw' | 'unset';
+  permission: { foreground: string; background: string | null } | null;
+  at: number; // epoch ms
+}
+let _lastSyncStatus: LastSyncStatus = {
+  registered: 0,
+  expectedCount: null,
+  reason: 'unset',
+  permission: null,
+  at: 0,
+};
+export function getLastSyncStatus(): LastSyncStatus {
+  return { ..._lastSyncStatus };
+}
+const _statusListeners = new Set<(s: LastSyncStatus) => void>();
+export function subscribeLastSyncStatus(cb: (s: LastSyncStatus) => void): () => void {
+  _statusListeners.add(cb);
+  return () => { _statusListeners.delete(cb); };
+}
+function updateLastSyncStatus(next: Partial<LastSyncStatus>): void {
+  _lastSyncStatus = { ..._lastSyncStatus, ...next, at: Date.now() };
+  for (const cb of _statusListeners) {
+    try { cb({ ..._lastSyncStatus }); } catch { /* ignore listener errors */ }
+  }
+}
+
 export async function syncGeofencesForUser(userId: string): Promise<number> {
   if (!userId || !supabase) return 0;
 
@@ -561,8 +614,16 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
       user_id_short: userId.slice(0, 8),
     });
 
-    // Permission check — if not granted, stop all geofences and return.
-    const { status: fgStatus } = await Location.getForegroundPermissionsAsync();
+    // Permission check — if not granted, RE-PROMPT before silently bailing.
+    // 2026-05-22 — B4l. The prior version silently logged
+    // `foreground-not-granted` and exited with 0 fences registered, leaving
+    // the user with no visibility and no path to recovery. Now: if fg
+    // permission isn't granted (e.g., Samsung Sleeping Apps revoked it
+    // overnight, or it's still undetermined from first launch), we actively
+    // call requestForegroundPermissionsAsync to surface the OS prompt. If
+    // user accepts → continue sync. If user denies → record the outcome in
+    // _lastSyncStatus so the Alerts screen can render the B4n banner.
+    let { status: fgStatus } = await Location.getForegroundPermissionsAsync();
     let bgStatus: string | undefined;
     try {
       const bg = await Location.getBackgroundPermissionsAsync();
@@ -572,13 +633,57 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
       foreground: fgStatus,
       background: bgStatus ?? 'unavailable',
     });
+
+    if (fgStatus !== 'granted') {
+      remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-fg', {
+        prior: fgStatus,
+      });
+      try {
+        const requested = await Location.requestForegroundPermissionsAsync();
+        fgStatus = requested.status;
+        remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-fg-result', {
+          status: fgStatus,
+        });
+      } catch (err) {
+        remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-fg-threw', {
+          error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+        });
+      }
+    }
+
     if (fgStatus !== 'granted') {
       await stopAllGeofences();
+      updateLastSyncStatus({
+        registered: 0,
+        reason: 'permission-prompt-denied',
+        permission: { foreground: fgStatus, background: bgStatus ?? null },
+      });
       remoteLog(getLifecycleSession(), 'syncGeofences-end', {
         registered: 0,
         reason: 'foreground-not-granted',
+        post_prompt_status: fgStatus,
       });
       return 0;
+    }
+
+    // Foreground granted — also re-prompt for background if still missing.
+    // Background is required for the SDK to deliver ENTER events while the
+    // app isn't open. Silent failure here is the geofence-doesn't-fire bug.
+    if (bgStatus && bgStatus !== 'granted') {
+      remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-bg', {
+        prior: bgStatus,
+      });
+      try {
+        const requested = await Location.requestBackgroundPermissionsAsync();
+        bgStatus = requested.status;
+        remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-bg-result', {
+          status: bgStatus,
+        });
+      } catch (err) {
+        remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-bg-threw', {
+          error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+        });
+      }
     }
 
     // Get user's current position once — used as reference anchor for all
@@ -673,8 +778,10 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
       }));
       await BackgroundGeolocation.addGeofences(tsoftGeofences);
       // startGeofences puts the SDK into geofence-only mode (vs full motion
-      // tracking). Idempotent.
-      await BackgroundGeolocation.startGeofences();
+      // tracking). Idempotent. 2026-05-22 — B4m: route through mutex so
+      // concurrent syncs don't fire the SDK's "Waiting for previous start
+      // action to complete" race that nuked ~50% of syncs since 2026-05-15.
+      await startGeofencesWithMutex();
 
       // V57.10.3 — record per-rule registration time so the handler can
       // suppress phantom initial-state events.
@@ -692,6 +799,12 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
     }
 
     console.log(`[geofence-sync] user ${userId}: registered ${regions.length} geofences`);
+    updateLastSyncStatus({
+      registered: regions.length,
+      expectedCount: (rules ?? []).length,
+      reason: 'ok',
+      permission: { foreground: fgStatus, background: bgStatus ?? null },
+    });
     remoteLog(getLifecycleSession(), 'syncGeofences-end', {
       registered: regions.length,
       reason: 'ok',
@@ -699,6 +812,11 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
     return regions.length;
   } catch (err) {
     console.error('[geofence-sync] failed:', err);
+    updateLastSyncStatus({
+      registered: 0,
+      reason: 'threw',
+      permission: { foreground: fgStatus, background: bgStatus ?? null },
+    });
     remoteLog(getLifecycleSession(), 'syncGeofences-end', {
       registered: 0,
       reason: 'threw',

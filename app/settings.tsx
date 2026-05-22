@@ -154,6 +154,16 @@ export default function SettingsScreen() {
   const [workAddress, setWorkAddress]               = useState('');
   const [workAddressLoading, setWorkAddressLoading] = useState(false);
 
+  // 2026-05-22 — F2g Phase 2. Per-user channel preferences for self-alerts.
+  // The 5 channels mirror evaluate-rules + check-reminders fan-out: SMS,
+  // WhatsApp, Email, Push, Voice Call. DB enforces an at-least-one floor
+  // via CHECK (array_length >= 1) — mobile mirrors the floor so the user
+  // can't toggle the last channel off (the toggle is greyed out instead).
+  type AlertChannel = 'sms' | 'whatsapp' | 'email' | 'push' | 'voice_call';
+  const DEFAULT_CHANNELS: AlertChannel[] = ['sms', 'whatsapp', 'email', 'push', 'voice_call'];
+  const [alertChannels, setAlertChannels] = useState<AlertChannel[]>(DEFAULT_CHANNELS);
+  const [alertChannelsLoading, setAlertChannelsLoading] = useState(false);
+
   // Provider selections — all default to Google for Phase 7
   const [calendarProvider, setCalendarProvider] =
     useState<UserProfile['defaultCalendarProvider']>('google');
@@ -211,7 +221,7 @@ export default function SettingsScreen() {
         const { data } = await queryWithTimeout(
           supabase
             .from('user_settings')
-            .select('name, morning_call_enabled, morning_call_time, phone, phone_numbers, home_address, work_address, voice_pin_set_at')
+            .select('name, morning_call_enabled, morning_call_time, phone, phone_numbers, home_address, work_address, voice_pin_set_at, alert_channels_enabled')
             .eq('user_id', user.id)
             .maybeSingle(),
           15_000,
@@ -246,6 +256,18 @@ export default function SettingsScreen() {
           if (data.work_address) setWorkAddress(String(data.work_address));
           // Voice PIN — null when no PIN set, ISO string when set.
           setPinSetAt(data.voice_pin_set_at ? String(data.voice_pin_set_at) : null);
+          // 2026-05-22 — F2g Phase 2. Load saved channel preferences. The
+          // DB default (set by migration) is all 5 channels enabled, so
+          // any existing user gets the all-on baseline until they touch
+          // a toggle.
+          if (Array.isArray((data as any).alert_channels_enabled)) {
+            const valid: AlertChannel[] = ['sms', 'whatsapp', 'email', 'push', 'voice_call'];
+            const saved = ((data as any).alert_channels_enabled as string[])
+              .filter((c): c is AlertChannel => valid.includes(c as AlertChannel));
+            if (saved.length >= 1) {
+              setAlertChannels(saved);
+            }
+          }
         }
       })();
     }
@@ -300,6 +322,45 @@ export default function SettingsScreen() {
       Alert.alert('Error', 'Could not save morning call settings.');
     }
     setMorningCallLoading(false);
+  }
+
+  // 2026-05-22 — F2g Phase 2. Toggle a single channel on/off and persist
+  // to user_settings.alert_channels_enabled. Enforces the at-least-one
+  // floor on the client side (matches the DB CHECK constraint) — the last
+  // enabled channel's toggle silently no-ops with a friendly alert.
+  async function toggleAlertChannel(channel: AlertChannel) {
+    const isOn = alertChannels.includes(channel);
+    if (isOn && alertChannels.length === 1) {
+      Alert.alert(
+        'Keep at least one channel on',
+        "You need at least one alert channel enabled so Naavi can reach you. Turn another channel on first, then you can switch this one off.",
+      );
+      return;
+    }
+    const next = isOn
+      ? alertChannels.filter(c => c !== channel)
+      : [...alertChannels, channel];
+    setAlertChannels(next);
+    if (!supabase) return;
+    setAlertChannelsLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setAlertChannelsLoading(false); return; }
+      await queryWithTimeout(
+        supabase.from('user_settings').upsert({
+          user_id: user.id,
+          alert_channels_enabled: next,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' }),
+        15_000,
+        'upsert-alert-channels',
+      );
+    } catch (err) {
+      // Revert the optimistic update on error.
+      setAlertChannels(alertChannels);
+      Alert.alert('Error', 'Could not save your alert channel choice.');
+    }
+    setAlertChannelsLoading(false);
   }
 
   // E.164 validator — plus, country code, 10-15 digits total.
@@ -1110,6 +1171,56 @@ export default function SettingsScreen() {
 
         <View style={styles.divider} />
 
+        {/* F2g Phase 2 (2026-05-22) — Per-user alert channel preferences */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Alert channels</Text>
+          <Text style={styles.sectionNote}>
+            Choose how Naavi reaches you when your alerts fire. Defaults to all five so you never miss an important alert. At least one channel must stay on.
+          </Text>
+
+          {([
+            { key: 'sms',        label: 'Text message (SMS)',      detail: 'Standard text to your phone.' },
+            { key: 'whatsapp',   label: 'WhatsApp',                detail: 'WhatsApp message (works on Wi-Fi).' },
+            { key: 'email',      label: 'Email',                   detail: 'Email to your account.' },
+            { key: 'push',       label: 'Push notification',       detail: 'Pop-up on this phone.' },
+            { key: 'voice_call', label: 'Voice call',              detail: 'Naavi calls you and speaks the alert.' },
+          ] as Array<{ key: AlertChannel; label: string; detail: string }>).map(({ key, label, detail }) => {
+            const isOn = alertChannels.includes(key);
+            const isLastOn = isOn && alertChannels.length === 1;
+            return (
+              <View key={key} style={styles.toolRow}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={styles.toolLabel}>{label}</Text>
+                  <Text style={styles.toolStatus}>{detail}</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.connectBtn, isOn && styles.connectBtnActive, isLastOn && { opacity: 0.6 }]}
+                  onPress={() => toggleAlertChannel(key)}
+                  disabled={alertChannelsLoading}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${label}: ${isOn ? 'on' : 'off'} ${isLastOn ? '(last enabled channel, cannot turn off)' : ''}`}
+                >
+                  <Text style={[styles.connectBtnText, isOn && styles.connectBtnTextActive]}>
+                    {isOn ? 'On' : 'Off'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+
+          <Text style={[styles.sectionNote, { marginTop: 10, fontStyle: 'italic' }]}>
+            You'll receive alerts on: {alertChannels.map(c =>
+              c === 'sms' ? 'SMS'
+              : c === 'whatsapp' ? 'WhatsApp'
+              : c === 'email' ? 'Email'
+              : c === 'push' ? 'Push'
+              : 'Voice Call'
+            ).join(', ')}.
+          </Text>
+        </View>
+
+        <View style={styles.divider} />
+
         {/* Location alerts (Phase 2) */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Location alerts</Text>
@@ -1186,7 +1297,7 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V57.20.1 (build 194)</Text>
+        <Text style={styles.version}>MyNaavi — V57.21.0 (build 195)</Text>
 
       </ScrollView>
       </KeyboardAvoidingView>

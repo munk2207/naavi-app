@@ -598,11 +598,26 @@ async function fireAction(
   // Look up the user's own contact info for self-alert detection.
   const { data: settings } = await adminClient
     .from('user_settings')
-    .select('phone, name')
+    .select('phone, name, alert_channels_enabled')
     .eq('user_id', rule.user_id)
     .maybeSingle();
   const userPhone = settings?.phone ?? null;
   const userName  = settings?.name  ?? null;
+
+  // 2026-05-21 (F2g Phase 1) — per-user alert channel preferences.
+  // Self-alerts only fire on channels the user has enabled in Settings.
+  // Falls back to all-on for any user_settings row missing the column
+  // (defensive — shouldn't happen post-migration). Third-party alerts
+  // (toPhone/toEmail set to someone other than the user) bypass this —
+  // user prefs apply to alerts about THEMSELVES, not alerts they're
+  // sending to others.
+  const ALL_CHANNELS = ['sms', 'whatsapp', 'email', 'push', 'voice_call'] as const;
+  const enabledChannels = new Set<string>(
+    Array.isArray(settings?.alert_channels_enabled) && settings.alert_channels_enabled.length > 0
+      ? settings.alert_channels_enabled
+      : ALL_CHANNELS,
+  );
+  const channelEnabled = (c: string): boolean => enabledChannels.has(c);
 
   const { data: authData } = await adminClient.auth.admin.getUserById(rule.user_id);
   const userEmail = authData?.user?.email ?? null;
@@ -694,17 +709,20 @@ async function fireAction(
   const sends: Promise<{ channel: string; ok: boolean }>[] = [];
 
   if (isSelfAlert) {
-    // Quadruple-channel: SMS + WhatsApp + Email + Push.
-    // Gracefully skip channels where the user has no destination.
+    // 2026-05-21 (F2g Phase 1) — each channel gated by the user's
+    // alert_channels_enabled preference. Default is all 5 on
+    // (no behavior change for users who haven't customized).
     if (userPhone) {
-      sends.push(callSMS('sms', userPhone));
-      sends.push(callSMS('whatsapp', userPhone));
+      if (channelEnabled('sms'))      sends.push(callSMS('sms', userPhone));
+      if (channelEnabled('whatsapp')) sends.push(callSMS('whatsapp', userPhone));
     }
-    if (userEmail) {
+    if (userEmail && channelEnabled('email')) {
       sends.push(callEmail(userEmail));
     }
-    // Push — function looks up tokens itself; attempt regardless.
-    sends.push(callPush());
+    if (channelEnabled('push')) {
+      // Push — function looks up tokens itself; attempt regardless of token presence.
+      sends.push(callPush());
+    }
 
     // S12 — fifth channel: outbound voice call, ONLY for location arrival
     // alerts. Visual channels don't reach a driver parking at Costco; the
@@ -713,7 +731,7 @@ async function fireAction(
     // noise for a 7 AM rain heads-up.
     const triggerConfig = rule.trigger_config ?? {} as Record<string, unknown>;
     const direction     = String((triggerConfig as any).direction ?? 'arrive');
-    if (userPhone && rule.trigger_type === 'location' && direction === 'arrive') {
+    if (userPhone && rule.trigger_type === 'location' && direction === 'arrive' && channelEnabled('voice_call')) {
       sends.push(callVoice(userPhone));
     }
   } else if (toPhone) {

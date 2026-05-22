@@ -32,6 +32,11 @@ import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from '@/li
 import { remoteLog } from '@/lib/remoteLog';
 import { getLifecycleSession } from '@/lib/appLifecycle';
 import { disconnectEntityById } from '@/lib/list_connections';
+// 2026-05-22 — B4n. Subscribe to geofencing sync status so a red banner
+// renders when registered=0 (permission revoked, SDK threw, etc.).
+import { getLastSyncStatus, subscribeLastSyncStatus, type LastSyncStatus } from '@/hooks/useGeofencing';
+import { Linking } from 'react-native';
+import * as Location from 'expo-location';
 
 // V57.10.2 — Wael 2026-05-01 saw "[object Object]" in the orange error
 // banner. Root cause: Supabase / Edge Function error responses are plain
@@ -67,6 +72,10 @@ type ActionRule = {
   label:          string | null;
   one_shot:       boolean | null;
   enabled:        boolean | null;
+  // 2026-05-22 — added by manage-rules list op for F2e. Disabled rules
+  // (enabled=false) carry the fire time so the UI can label "Fired May 22"
+  // on the greyed-out row above the Reactivate button.
+  last_fired_at:  string | null;
   created_at:     string | null;
 };
 
@@ -311,6 +320,69 @@ export default function AlertsScreen() {
   // "Naavi sends a contact a text message" — incorrect and confusing.
   const [userPhone, setUserPhone] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  // 2026-05-22 — B4n. Live geofence sync status for the warning banner.
+  const [syncStatus, setSyncStatus] = useState<LastSyncStatus>(() => getLastSyncStatus());
+  useEffect(() => {
+    return subscribeLastSyncStatus(setSyncStatus);
+  }, []);
+  // 2026-05-22 — F2e. Per-row pending reactivate flag for spinner state.
+  const [reactivatingId, setReactivatingId] = useState<string | null>(null);
+
+  // 2026-05-22 — F2e Reactivate handler. Flips enabled=true on the rule via
+  // manage-rules reactivate op, clears last_fired_at server-side, then
+  // syncs Transistorsoft so the geofence is re-registered for location
+  // rules.
+  const onReactivate = async (rule: ActionRule) => {
+    setReactivatingId(rule.id);
+    try {
+      if (!supabase) throw new Error('No Supabase client');
+      const { error: err } = await invokeWithTimeout('manage-rules', {
+        body: { op: 'reactivate', rule_id: rule.id },
+      }, 15_000);
+      if (err) throw err;
+      // Optimistic update — flip the local row to enabled, clear fire time.
+      setRules(prev => prev.map(r => r.id === rule.id ? { ...r, enabled: true, last_fired_at: null } : r));
+      // Re-sync the SDK so the geofence is re-armed for location rules.
+      if (rule.trigger_type === 'location') {
+        getSessionWithTimeout()
+          .then(session => {
+            if (!session?.user?.id) return;
+            return import('@/hooks/useGeofencing').then(({ syncGeofencesForUser }) =>
+              syncGeofencesForUser(session.user.id),
+            );
+          })
+          .catch(err => console.error('[alerts] sync after reactivate failed:', err));
+      }
+    } catch (e: unknown) {
+      setError(formatErrorForUser(e));
+    } finally {
+      setReactivatingId(null);
+    }
+  };
+
+  // 2026-05-22 — B4n banner action. If the OS permission is recoverable,
+  // surface the prompt; if denied permanently, deep-link to app settings.
+  const onBannerTap = async () => {
+    try {
+      const fg = await Location.requestForegroundPermissionsAsync();
+      if (fg.status === 'granted') {
+        const bg = await Location.requestBackgroundPermissionsAsync();
+        if (bg.status === 'granted') {
+          // Both granted — trigger a sync.
+          const session = await getSessionWithTimeout();
+          if (session?.user?.id) {
+            const { syncGeofencesForUser } = await import('@/hooks/useGeofencing');
+            syncGeofencesForUser(session.user.id).catch(() => {});
+          }
+          return;
+        }
+      }
+      // Permission still missing — open OS settings so user can flip it manually.
+      Linking.openSettings();
+    } catch {
+      Linking.openSettings();
+    }
+  };
 
   const load = useCallback(async () => {
     // V57.10.5 — UI freeze instrumentation. Wael 2026-05-03 saw the app
@@ -535,6 +607,35 @@ export default function AlertsScreen() {
           </View>
         )}
 
+        {/* 2026-05-22 — B4n. Location-permission / sync-health banner.
+            Visible whenever the SDK is NOT registered for every location
+            rule the user has. Tappable: re-prompts permission, or opens
+            Settings if user denied with "don't ask again". */}
+        {(() => {
+          const hasLocationRules = rules.some(r => r.trigger_type === 'location' && r.enabled !== false);
+          if (!hasLocationRules) return null;
+          const lastReason = syncStatus.reason;
+          const lastReg    = syncStatus.registered;
+          const banner = lastReason === 'permission-prompt-denied'
+            ? "Location alerts aren't armed — MyNaavi needs location permission. Tap to fix."
+            : lastReason === 'threw'
+              ? "Location alerts had a sync error. Tap to retry."
+              : lastReason === 'foreground-not-granted' || lastReason === 'background-not-granted'
+                ? "Location alerts aren't armed — grant location permission. Tap to fix."
+                : (lastReg === 0 && lastReason === 'ok')
+                  ? null
+                  : (syncStatus.expectedCount != null && lastReg < syncStatus.expectedCount)
+                    ? `Only ${lastReg} of ${syncStatus.expectedCount} location alerts armed. Tap to refresh.`
+                    : null;
+          if (!banner) return null;
+          return (
+            <TouchableOpacity style={styles.banner} onPress={onBannerTap} activeOpacity={0.85}>
+              <Ionicons name="warning" size={20} color="#fff" style={{ marginRight: 10 }} />
+              <Text style={styles.bannerText}>{banner}</Text>
+            </TouchableOpacity>
+          );
+        })()}
+
         {!loading && rules.length === 0 && (
           <View style={styles.emptyWrap}>
             <Ionicons name="notifications-off" size={36} color={Colors.textMuted} />
@@ -548,8 +649,12 @@ export default function AlertsScreen() {
             <Text style={styles.groupTitle}>{groupLabel(type)}</Text>
             {groupRules.map(rule => {
               const isOpen = !!expanded[rule.id];
+              // 2026-05-22 — F2e. Disabled rules render greyed-out with
+              // an "Expired" pill in the header. The expanded box adds a
+              // Reactivate button alongside Delete.
+              const isDisabled = rule.enabled === false;
               return (
-                <View key={rule.id} style={styles.row}>
+                <View key={rule.id} style={[styles.row, isDisabled && styles.rowDisabled]}>
                   <TouchableOpacity
                     style={styles.rowHeader}
                     onPress={() => setExpanded(prev => ({ ...prev, [rule.id]: !prev[rule.id] }))}
@@ -558,13 +663,18 @@ export default function AlertsScreen() {
                     <Ionicons
                       name={iconFor(type) as React.ComponentProps<typeof Ionicons>['name']}
                       size={22}
-                      color={Colors.accent}
+                      color={isDisabled ? Colors.textMuted : Colors.accent}
                       style={{ marginRight: 12 }}
                     />
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.rowTitle} numberOfLines={1}>{formatTriggerSummary(rule)}</Text>
-                      <Text style={styles.rowSub}   numberOfLines={1}>{formatActionSummary(rule, userPhone, userEmail)}</Text>
+                      <Text style={[styles.rowTitle, isDisabled && styles.rowTitleDisabled]} numberOfLines={1}>{formatTriggerSummary(rule)}</Text>
+                      <Text style={[styles.rowSub, isDisabled && styles.rowSubDisabled]}   numberOfLines={1}>{formatActionSummary(rule, userPhone, userEmail)}</Text>
                     </View>
+                    {isDisabled && (
+                      <View style={styles.expiredPill}>
+                        <Text style={styles.expiredPillText}>Expired</Text>
+                      </View>
+                    )}
                     <Ionicons
                       name={isOpen ? 'chevron-up' : 'chevron-down'}
                       size={18}
@@ -622,13 +732,32 @@ export default function AlertsScreen() {
                         <Text style={styles.detailMeta}>
                           {rule.one_shot ? 'Fires once, then stops.' : 'Repeats until you delete it.'}
                         </Text>
-                        <TouchableOpacity
-                          style={styles.deleteBtn}
-                          onPress={() => setPendingDelete(rule)}
-                        >
-                          <Ionicons name="trash" size={16} color="#fff" />
-                          <Text style={styles.deleteBtnText}>Delete alert</Text>
-                        </TouchableOpacity>
+                        {/* 2026-05-22 — F2e. Disabled (already-fired) rule:
+                            show Reactivate + Delete side by side. Active rule:
+                            show Delete only. */}
+                        <View style={styles.actionBtnRow}>
+                          {isDisabled && (
+                            <TouchableOpacity
+                              style={[styles.actionBtn, styles.reactivateBtn]}
+                              onPress={() => onReactivate(rule)}
+                              disabled={reactivatingId === rule.id}
+                            >
+                              {reactivatingId === rule.id
+                                ? <ActivityIndicator size="small" color="#fff" />
+                                : (<>
+                                    <Ionicons name="refresh" size={16} color="#fff" />
+                                    <Text style={styles.reactivateBtnText}>Reactivate</Text>
+                                  </>)}
+                            </TouchableOpacity>
+                          )}
+                          <TouchableOpacity
+                            style={[styles.actionBtn, styles.deleteBtn]}
+                            onPress={() => setPendingDelete(rule)}
+                          >
+                            <Ionicons name="trash" size={16} color="#fff" />
+                            <Text style={styles.deleteBtnText}>Delete alert</Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
                     );
                   })()}
@@ -829,11 +958,8 @@ const styles = StyleSheet.create({
     padding: 6,
   },
   deleteBtn: {
-    marginTop: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+    // 2026-05-22 — F2e: layout (flex, padding, gap, alignment) now provided
+    // by actionBtn + actionBtnRow. deleteBtn only carries the color now.
     backgroundColor: Colors.alert,
     paddingVertical: 10,
     borderRadius: 8,
@@ -898,6 +1024,70 @@ const styles = StyleSheet.create({
   modalBtnDangerText: {
     color: '#fff',
     fontSize: 15,
+    fontWeight: '600',
+  },
+  // 2026-05-22 — B4n banner
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.alert,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    marginHorizontal: 12,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  bannerText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+  },
+  // 2026-05-22 — F2e disabled row + Reactivate button
+  rowDisabled: {
+    opacity: 0.55,
+  },
+  rowTitleDisabled: {
+    color: Colors.textMuted,
+  },
+  rowSubDisabled: {
+    color: Colors.textMuted,
+  },
+  expiredPill: {
+    backgroundColor: Colors.bgElevated,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  expiredPillText: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  actionBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    gap: 6,
+  },
+  reactivateBtn: {
+    backgroundColor: Colors.accent,
+  },
+  reactivateBtnText: {
+    color: '#fff',
+    fontSize: 14,
     fontWeight: '600',
   },
 });
