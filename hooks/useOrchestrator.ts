@@ -1275,6 +1275,11 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       const searchQuery = userMessage
         .replace(/^\s*(can you\s+)?(please\s+)?(find|look\s*up|search\s+(for)?|show\s*me|tell\s*me\s*(about)?|what\s+do\s+(we|you|i)\s+have\s+(on|about)?|what\s+do\s+you\s+know\s+about|do\s+(we|you|i)\s+have|is\s+there|information\s+on|anything\s+(about|on))\s+/i, '')
         .replace(/^(?:my\s+)?(contact|contacts|email|emails|message|messages|note|notes|reminder|reminders|alert|alerts|memory|memories|document|documents|file|files)\s+(?:for\s+|of\s+|about\s+|named\s+|called\s+|with\s+)?(?=\S)/i, '')
+        // 2026-05-22 (Wael) \u2014 also strip a TRAILING "in/from my <type>" or
+        // "in <type>s" suffix. "find bob in my contact" was leaving
+        // "bob in my" as query because the existing trailing-noun strip
+        // only handled "<X> contact" not "<X> in my contact".
+        .replace(/\s+(?:in|from)\s+(?:my\s+)?(contact|contacts|email|emails|message|messages|note|notes|reminder|reminders|alert|alerts|memory|memories|document|documents|file|files)s?\s*$/i, '')
         .replace(/['\u2019]s\s+(phone|email|number|address|contact|info|information|details?)\s*$/i, '')
         .replace(/\s+(phone|email|number|address|contact|info|information|details?)\s*$/i, '')
         .replace(/[?.!,;]+\s*$/, '')
