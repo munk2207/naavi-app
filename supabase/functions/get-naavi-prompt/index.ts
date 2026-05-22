@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-22-v85-possessive-contact-address-is-verified';
+const PROMPT_VERSION = '2026-05-22-v86-preserve-literal-name-phrasing';
 
 /**
  * Cache-boundary marker.
@@ -832,13 +832,23 @@ Speech: brief acknowledgment, no clarification request. Example: "I'll alert you
 
 If the contact has no matching address on their card, the server surfaces a clear "I don't have <Name>'s home address — open their contact card and add it" reply. ${userName} doesn't need you to predict that case; emit the action and let the server check.
 
-Examples:
-- "Alert me when I arrive at Bob's home" → SET_ACTION_RULE, place_name="Bob's home", direction="arrive", one_shot=true. Speech: "I'll alert you when you arrive at Bob's home."
-- "Tell me when I get to Sarah's office" → SET_ACTION_RULE, place_name="Sarah's office", direction="arrive", one_shot=true. Speech: "I'll let you know when you arrive at Sarah's office."
-- "Every time I leave John's place, remind me to text him" → SET_ACTION_RULE, place_name="John's place", direction="leave", one_shot=false. Speech: "I'll remind you to text John every time you leave his place."
-- "When I get to Mom's house, remind me to take my umbrella" → SET_ACTION_RULE, place_name="Mom's house", direction="arrive", tasks=["take umbrella"], one_shot=true. Speech: "I'll remind you when you get to Mom's house."
+PRESERVE THE LITERAL PHRASING (${userName} 2026-05-22 v86):
+${userName} often speaks naturally without the apostrophe-s: "I'm going to Sam home" / "alert me at Leo home" / "remind me at Mom house". This is correct conversational English. NEVER:
+- Add an apostrophe-s that the user did not speak ("Sam home" stays "Sam home", NOT "Sam's home").
+- Resolve the literal name to a different contact you think you recognize ("Leo" stays "Leo", NOT "Leo Lax", even if you see Leo Lax in another context).
+- Drop or substitute the name in any way.
 
-This rule OVERRIDES the verified-address-required default for possessive contact references — the verification has ALREADY happened (the user put the address on the contact card; that's the verification).
+The voice server resolves both phrasings (with-'s and without-'s) by matching the literal place_name against Google Contacts. Your job is to pass the user's exact words through. Server handles disambiguation; you don't.
+
+Examples (both possessive and non-possessive — preserve what the user said):
+- "Alert me when I arrive at Bob's home" → SET_ACTION_RULE, place_name="Bob's home", direction="arrive", one_shot=true. Speech: "I'll alert you when you arrive at Bob's home."
+- "Alert me at Bob home" → SET_ACTION_RULE, place_name="Bob home", direction="arrive", one_shot=true. Speech: "I'll alert you at Bob home." (Preserve the missing 's.)
+- "Tell me when I get to Sarah's office" → SET_ACTION_RULE, place_name="Sarah's office", direction="arrive", one_shot=true. Speech: "I'll let you know when you arrive at Sarah's office."
+- "When I get to Sam office" → SET_ACTION_RULE, place_name="Sam office", direction="arrive", one_shot=true. Speech: "I'll let you know when you get to Sam office."
+- "Every time I leave John's place, remind me to text him" → SET_ACTION_RULE, place_name="John's place", direction="leave", one_shot=false. Speech: "I'll remind you to text John every time you leave his place."
+- "When I get to Mom house, remind me to take my umbrella" → SET_ACTION_RULE, place_name="Mom house", direction="arrive", tasks=["take umbrella"], one_shot=true. Speech: "I'll remind you when you get to Mom house."
+
+This rule OVERRIDES the verified-address-required default for possessive contact references — the verification has ALREADY happened (the user put the address on the contact card; that's the verification). It ALSO overrides any urge to "clean up" the user's phrasing — the literal name is what the server needs.
 
 CRITICAL — NEVER READ RAW SEARCH METADATA ALOUD:
 - NEVER read filenames verbatim, file extensions (".pdf"), Drive file IDs, numeric document codes, or raw document titles aloud${channel === 'voice' ? ' — the user is on a phone call and hears every character you emit.' : '.'}

@@ -2267,7 +2267,9 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                 // user's own contact card is authoritative (verified-address
                 // rule satisfied: they put it there themselves).
                 let possessiveContactSource: { name: string; kind: 'home' | 'office' } | null = null;
-                const possessive = placeName.match(/^([A-Za-z][A-Za-z'\-]+(?:\s+[A-Za-z][A-Za-z'\-]+)?)['’]s\s+(home|house|place|office|work)\s*$/i);
+                // 2026-05-22 v86 — apostrophe-s is OPTIONAL (Wael feedback:
+                // "people say 'Sam home' not 'Sam's home'"). Voice parity.
+                const possessive = placeName.match(/^([A-Za-z][A-Za-z'\-]+(?:\s+[A-Za-z][A-Za-z'\-]+)?)(?:['’]s)?\s+(home|house|place|office|work)\s*$/i);
                 if (possessive) {
                   const cName = possessive[1].trim();
                   const cKind = possessive[2].toLowerCase();
