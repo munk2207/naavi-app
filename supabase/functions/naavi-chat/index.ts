@@ -786,7 +786,35 @@ async function assembleSystemPromptServerSide(
   const healthSuffix    = opts.healthContext    ? `\n\n${opts.healthContext}`    : '';
   const knowledgeSuffix = opts.knowledgeContext ? `\n\n${opts.knowledgeContext}` : '';
 
-  return base + languageNote + userRefSection + briefContext + healthSuffix + knowledgeSuffix;
+  // 2026-05-23 (Wael) — inject the user's lists by name. Without this,
+  // Claude saw the assembled prompt (home/work address + brief items
+  // + health + knowledge) and concluded "no shopping list is mentioned
+  // in this user's profile" — then HALLUCINATED "I don't have a shopping
+  // list" without calling list_read at all (verified live for Wael's
+  // user_id 788fe85c on V57.22.1 build 197). Adding the actual list names
+  // gives Claude direct evidence so it either correctly calls list_read
+  // OR honestly reports it has no list of that name.
+  let listsContext = '';
+  try {
+    const { data: listRows } = await supabase
+      .from('lists')
+      .select('name, category')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (Array.isArray(listRows) && listRows.length > 0) {
+      const listLines = listRows.map((r: any) =>
+        `- ${r.name}${r.category ? ` (${r.category})` : ''}`
+      );
+      listsContext =
+        `\n\n## ${userName}'s lists (when asked to read/add to/remove from a list, call the matching list_* tool — do NOT answer from this section alone, the items are in Drive)\n` +
+        listLines.join('\n');
+    }
+  } catch (err) {
+    console.warn('[assembleSystemPrompt] lists lookup failed:', (err as Error)?.message);
+  }
+
+  return base + languageNote + userRefSection + briefContext + listsContext + healthSuffix + knowledgeSuffix;
 }
 
 // ── Resolve user ID ───────────────────────────────────────────────────────────

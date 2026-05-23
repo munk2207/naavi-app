@@ -201,7 +201,7 @@ export default function ListsScreen() {
           <TouchableOpacity
             key={l.id}
             style={styles.row}
-            onPress={() => router.push({ pathname: '/lists/[id]', params: { id: l.id } })}
+            onPress={() => router.push(`/lists/${l.id}`)}
             activeOpacity={0.75}
           >
             <Ionicons name="list" size={22} color={Colors.accent} style={{ marginRight: 12 }} />

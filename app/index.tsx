@@ -1933,7 +1933,7 @@ export default function HomeScreen() {
                         lists.map((l: any) => (
                           <TouchableOpacity
                             key={String(l.id)}
-                            onPress={() => router.push({ pathname: '/lists/[id]', params: { id: String(l.id) } })}
+                            onPress={() => router.push(`/lists/${String(l.id)}`)}
                             style={styles.listTapRow}
                             accessibilityLabel={`Open ${l.name} list`}
                           >
