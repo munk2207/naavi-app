@@ -343,7 +343,7 @@ Canonical list of pending work, organized by what's blocking each. Mirror in `do
 9. Voice name-search phonetic fallback ("Hussein" STT failure)
 10. Voice migration to Anthropic Structured Outputs (~200 lines drift vs mobile)
 11. Inbound SMS/WhatsApp queryability (outbound covered; inbound has no capture path)
-12. Spend summary Edge Function (approved 2026-04-30, not built — `naavi-spend-summary`)
+12. ~~Spend summary Edge Function~~ — **CLOSED 2026-05-23.** Already shipped — `naavi-spend-summary` deployed 2026-04-30 (Edge Function version 8, 442 lines), orchestrator handler at `useOrchestrator.ts:1613`, prompt RULE 19a routes "how much did X charge me" → SPEND_SUMMARY action. Verified live on Wael's phone 2026-05-23: returns dollar amount end-to-end. Holding-list entry was stale.
 13. LIST_RULES synthesize-action backstop in orchestrator
 14. Demo line "remind me" time-extraction loop fix
 15. ~~**F1d live tests 3 + 4**~~ — **CLOSED 2026-05-13.** Both PASS live on Twilio call. Test 3 (recursive mute, offer stays pending) + Test 4 (30-sec silence, no false-positive delivery). 4 voice-server fixes derived from the live test (regex relaxed for Deepgram confusables, aggregated-text check at UtteranceEnd, SMS confirmation TTS clearer, idle-prompt suppressed during quiet window). Commits `4eef2da` `2b86391` `01d4f72` `1f14748`.
