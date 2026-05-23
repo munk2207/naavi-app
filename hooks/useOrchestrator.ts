@@ -1101,11 +1101,17 @@ const oneShot = pending.originalAction?.one_shot ?? true;
             return;
           }
 
-          // not_found or error — ask for different input, include tries-left + escape.
-          const triesLeft = 3 - pending.attempts;
-          const escape = triesLeft > 0
-            ? ` Tell me a different street or neighborhood, or say cancel to stop. (${triesLeft} ${triesLeft === 1 ? 'try' : 'tries'} left.)`
-            : '';
+          // not_found or error — ask for different input. 2026-05-23 (Wael):
+          // remove the "(N tries left)" counter — the count felt like a
+          // test/punishment to the user. The 3-attempt cap is still enforced
+          // silently by the caller of this branch; on the 3rd failed attempt
+          // surface the CLAUDE.md LOCATION TRIGGER spec fallback ("please
+          // check the exact location and call me back") instead of leaving
+          // the message bare with no guidance.
+          const remaining = 3 - pending.attempts;
+          const escape = remaining > 0
+            ? ' Tell me a different street or neighborhood, or say cancel to stop.'
+            : ' Please check the exact location and try again later.';
           emitPendingTurn(`I couldn't find "${combinedQuery}" near you.${escape}`);
           return;
         } catch (err) {
