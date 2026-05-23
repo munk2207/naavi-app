@@ -681,7 +681,40 @@ async function fireAction(
       return { channel: 'voice-call', ok: false };
     }
     try {
-      const twiUrl = `${voiceBase}/speak-alert?body=${encodeURIComponent(body)}&user_id=${encodeURIComponent(rule.user_id)}`;
+      // 2026-05-23 (Wael) — pre-generate the TTS MP3 BEFORE asking Twilio to
+      // dial. Without this, /tts-play synthesizes on demand AFTER the user
+      // answers, producing 2-4s of silence that made Wael think it was the
+      // wrong call. /prepare-alert calls Deepgram, caches the MP3 keyed by
+      // the returned token, and we pass that token to /speak-alert so the
+      // playback path is instant. Fail-open: if pre-gen fails for any
+      // reason, fall back to the legacy body-as-query path.
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+      let preToken: string | null = null;
+      try {
+        const prepRes = await fetch(`${voiceBase}/prepare-alert`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${serviceKey}`,
+          },
+          body: JSON.stringify({ body, user_id: rule.user_id, voice: 'aura-hera-en' }),
+        });
+        if (prepRes.ok) {
+          const prepData = await prepRes.json();
+          if (typeof prepData?.token === 'string' && prepData.token.length > 0) {
+            preToken = prepData.token;
+            console.log(`[evaluate-rules] callVoice pre-gen ok token=${preToken.slice(0,8)}… prepared=${prepData.prepared} dg_ms=${prepData.dg_ms ?? '-'}`);
+          }
+        } else {
+          console.warn(`[evaluate-rules] callVoice pre-gen failed status=${prepRes.status} — using legacy body path`);
+        }
+      } catch (prepErr) {
+        console.warn('[evaluate-rules] callVoice pre-gen threw:', prepErr instanceof Error ? prepErr.message : String(prepErr));
+      }
+
+      const twiUrl = preToken
+        ? `${voiceBase}/speak-alert?token=${encodeURIComponent(preToken)}&user_id=${encodeURIComponent(rule.user_id)}`
+        : `${voiceBase}/speak-alert?body=${encodeURIComponent(body)}&user_id=${encodeURIComponent(rule.user_id)}`;
       const form = new URLSearchParams();
       form.append('To',    toNumber);
       form.append('From',  twilioFrom);
