@@ -1290,6 +1290,29 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         .replace(/\s+(phone|email|number|address|contact|info|information|details?)\s*$/i, '')
         .trim() || userMessage.trim();
 
+      // Wael 2026-05-22 — detect source intent from the RAW user message
+      // before the strip above removes the source noun ("contact", "email",
+      // etc.). Pass it as source_hint so global-search restricts adapters
+      // server-side (truth-at-user-layer for the visual results panel).
+      //
+      // Mirrors detectSourceIntent + sourceHintToAdapterNames in
+      // supabase/functions/global-search/index.ts. Returns null for
+      // open-ended phrasings so they keep fanning out to every adapter.
+      const preSearchSourceHint: string | undefined = (() => {
+        const lower = userMessage.toLowerCase();
+        const OPEN_ENDED =
+          /(?:what do (?:we|you) know|tell me about|anything (?:about|on)|what do you have on|do you know|stored about|find anything|search for|what(?:'s|\s+is)\s+stored)/i;
+        if (OPEN_ENDED.test(lower)) return undefined;
+        if (/\bcontacts?\b/.test(lower)) return 'contacts';
+        if (/\b(?:emails?|inbox|gmail|mailbox|mail)\b/.test(lower)) return 'gmail';
+        if (/\b(?:calendars?|meetings?|appointments?|events?)\b/.test(lower)) return 'calendar';
+        if (/\b(?:notes?|memor(?:y|ies))\b/.test(lower)) return 'notes';
+        if (/\b(?:drives?|documents?|files?|pdfs?|attachments?)\b/.test(lower)) return 'drive';
+        if (/\blists?\b/.test(lower)) return 'lists';
+        if (/\b(?:reminders?|alerts?|rules?)\b/.test(lower)) return 'reminders';
+        return undefined;
+      })();
+
       let preSearchResults: GlobalSearchResult[] = [];
       if (isRetrievalQuery && supabase) {
         remoteLog(diagSession, 'pre-search-branch-start');
@@ -1302,8 +1325,14 @@ const oneShot = pending.originalAction?.one_shot ?? true;
             // we proceed without pre-search results rather than freezing the
             // whole send pipeline.
             remoteLog(diagSession, 'pre-search-invoke-start');
+            const preSearchBody: Record<string, unknown> = {
+              query: searchQuery,
+              user_id: session.user.id,
+              limit: 8,
+            };
+            if (preSearchSourceHint) preSearchBody.source_hint = preSearchSourceHint;
             const searchPromise = supabase.functions.invoke('global-search', {
-              body: { query: searchQuery, user_id: session.user.id, limit: 8 },
+              body: preSearchBody,
             });
             const timeoutPromise = new Promise<{ data: any; error: any }>((resolve) => {
               setTimeout(() => {
@@ -1547,13 +1576,24 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           // Cross-source search: calls global-search Edge Function, which
           // fans out to knowledge, rules, sent_messages, contacts, lists,
           // calendar, and gmail adapters and returns a ranked list.
+          //
+          // Wael 2026-05-22 — when Claude populated source_hint (because
+          // the user named a source), forward it so global-search runs
+          // only that adapter. Without this, the visual results panel
+          // shows unrelated sources even when Naavi's spoken reply is
+          // correctly scoped (truth-at-user-layer violation in the UI).
           const query = String(action.query ?? '').trim();
+          const sourceHint = typeof action.source_hint === 'string'
+            ? action.source_hint.trim()
+            : undefined;
           if (query && supabase) {
             try {
               const session = await getSessionWithTimeout();
               if (session?.user) {
+                const body: Record<string, unknown> = { query, user_id: session.user.id, limit: 8 };
+                if (sourceHint) body.source_hint = sourceHint;
                 const { data, error } = await invokeWithTimeout('global-search', {
-                  body: { query, user_id: session.user.id, limit: 8 },
+                  body,
                 }, 15_000);
                 if (error) {
                   console.error('[Orchestrator] GLOBAL_SEARCH failed:', error.message);

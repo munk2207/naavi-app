@@ -34,6 +34,37 @@ const OTHER_CONTACTS_API     = 'https://people.googleapis.com/v1/otherContacts';
 // would slow the search and the marginal hit rate is low.
 const MAX_CONTACTS_PER_SOURCE = 500;
 
+// Words that should never be treated as part of a contact name when the
+// query is tokenized. Wael 2026-05-22 — when Claude passed query="name Bob"
+// the adapter searched 731 contacts for the literal substring "name bob"
+// and returned 0, even though Bob was a contact. Tokenizing the variants
+// and dropping these stopwords lets "name Bob" / "contact named Bob" /
+// "the contact Bob" all match a contact whose displayName contains "Bob".
+const CONTACT_STOPWORDS = new Set<string>([
+  'i', 'me', 'my', 'mine', 'the', 'a', 'an', 'is', 'are', 'it',
+  'and', 'or', 'do', 'does', 'did', 'have', 'has', 'had',
+  'any', 'some', 'this', 'that',
+  'name', 'named', 'called', 'contact', 'contacts',
+  'phone', 'number', 'numbers', 'email', 'emails', 'address', 'addresses',
+  'with', 'for', 'about', 'on', 'in', 'from', 'to', 'of',
+]);
+
+// Tokenize variants into search tokens — words ≥ 2 chars, not stopwords.
+// Returns a deduped set across all variants so the contacts loop can do a
+// simple any-token-in-name check.
+function tokensFromVariants(variants: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const v of variants) {
+    for (const w of v.split(/\s+/)) {
+      const t = w.trim();
+      if (t.length < 2) continue;
+      if (CONTACT_STOPWORDS.has(t)) continue;
+      out.add(t);
+    }
+  }
+  return out;
+}
+
 type PersonName  = { displayName?: string; givenName?: string; familyName?: string };
 type PersonEmail = { value?: string; type?: string };
 type PersonPhone = { value?: string; type?: string };
@@ -151,6 +182,7 @@ export const contactsAdapter: SearchAdapter = {
     if (!q) return [];
 
     const variants = ctx.queryVariants;
+    const tokens = tokensFromVariants(variants);
     const qDigits = normalizePhone(q);
     const isPhoneLike = qDigits.length >= 7;
 
@@ -190,7 +222,7 @@ export const contactsAdapter: SearchAdapter = {
       all.push(p);
     }
 
-    console.log(`[contacts-adapter] searching ${all.length} contacts for "${q}"`);
+    console.log(`[contacts-adapter] searching ${all.length} contacts for "${q}" (tokens: ${[...tokens].join(',') || '∅'})`);
 
     // ── 3. Score every contact, keep anything with a real match ────────────
     // Score: name 1.0, phone 0.85, email 0.7. Same weights as the old
@@ -209,14 +241,24 @@ export const contactsAdapter: SearchAdapter = {
 
       let score = 0;
 
-      if (variants.some(v => v.length > 0 && nameLower.includes(v))) {
+      // Match against tokens (e.g. "Bob" from "name Bob"), then fall back
+      // to whole-variant substring match for legacy callers that pass an
+      // already-clean query. Tokens win because they survive noise like
+      // "contact named X" that the whole-variant match would miss.
+      const nameTokenMatch =
+        (tokens.size > 0 && [...tokens].some(t => nameLower.includes(t))) ||
+        variants.some(v => v.length > 0 && nameLower.includes(v));
+      const emailTokenMatch = emails.some(e => {
+        const el = e.toLowerCase();
+        return (tokens.size > 0 && [...tokens].some(t => el.includes(t))) ||
+               variants.some(v => el.includes(v));
+      });
+
+      if (nameTokenMatch) {
         score = 1.0;
       } else if (isPhoneLike && phones.some(ph => normalizePhone(ph).includes(qDigits))) {
         score = 0.85;
-      } else if (emails.some(e => {
-        const el = e.toLowerCase();
-        return variants.some(v => el.includes(v));
-      })) {
+      } else if (emailTokenMatch) {
         score = 0.7;
       }
 

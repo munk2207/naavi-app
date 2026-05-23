@@ -112,6 +112,23 @@ async function runAdapter(
 //
 // Open-ended phrasings ALWAYS take precedence — even if they also contain
 // a source noun. *"What do we know about my email"* → run all (open intent).
+// Wael 2026-05-22 — map the user-facing source word Claude's tool
+// emits (gmail / calendar / contacts / drive / notes / lists /
+// reminders) to the internal adapter names. Returns null for
+// unknown values so the caller falls back to regex detection.
+function sourceHintToAdapterNames(hint: string): string[] | null {
+  switch (hint.toLowerCase()) {
+    case 'gmail':     return ['gmail', 'email_actions'];
+    case 'calendar':  return ['calendar'];
+    case 'contacts':  return ['contacts'];
+    case 'drive':     return ['drive'];
+    case 'notes':     return ['knowledge'];
+    case 'lists':     return ['lists'];
+    case 'reminders': return ['rules', 'reminders'];
+    default:          return null;
+  }
+}
+
 function detectSourceIntent(query: string): string[] | null {
   const lower = query.toLowerCase();
 
@@ -153,8 +170,8 @@ Deno.serve(async (req) => {
   const t0 = Date.now();
 
   try {
-    const { query, user_id: bodyUserId, limit } =
-      (await req.json()) as { query?: string; user_id?: string; limit?: number };
+    const { query, user_id: bodyUserId, limit, source_hint } =
+      (await req.json()) as { query?: string; user_id?: string; limit?: number; source_hint?: string };
 
     if (!query || typeof query !== 'string' || query.trim().length === 0) {
       return json({ error: 'query is required' }, 400);
@@ -188,13 +205,22 @@ Deno.serve(async (req) => {
     // Wael 2026-05-10: detect source intent. When user names a source
     // ("email about X"), only run that adapter — the rest are irrelevant
     // and only confuse Claude's reply (truth-at-user-layer principle).
-    const allowedSources = detectSourceIntent(trimmedQuery);
+    //
+    // Wael 2026-05-22: a typed `source_hint` from the caller (Claude's
+    // global_search tool input) takes precedence over the regex
+    // detection. The regex sees only the query string Claude passes,
+    // which may have already had the source noun stripped — so a
+    // contact query like "Do I have contact named Bob" arrives as
+    // query="name Bob" and the regex misses the contacts intent.
+    // The typed hint comes straight from Claude and is reliable.
+    const hintedSources = source_hint ? sourceHintToAdapterNames(source_hint) : null;
+    const allowedSources = hintedSources ?? detectSourceIntent(trimmedQuery);
     const adaptersToRun = allowedSources
       ? adapters.filter((a) => allowedSources.includes(a.name))
       : adapters;
 
     console.log(
-      `[global-search] user=${userId} query="${ctx.query}" variants=${JSON.stringify(queryVariants)} adapters=${adaptersToRun.length}/${adapters.length}${allowedSources ? ` (source-intent: ${allowedSources.join(',')})` : ' (open-ended)'}`,
+      `[global-search] user=${userId} query="${ctx.query}" variants=${JSON.stringify(queryVariants)} adapters=${adaptersToRun.length}/${adapters.length}${allowedSources ? ` (source-intent: ${allowedSources.join(',')}${hintedSources ? ' via hint' : ''})` : ' (open-ended)'}`,
     );
 
     // Run filtered adapters in parallel. Each adapter is isolated — its

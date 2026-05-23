@@ -639,11 +639,20 @@ export const NAAVI_TOOLS: NaaviTool[] = [
   {
     name: 'global_search',
     description:
-      "Search across all of user's stored data (knowledge, rules, contacts, lists, calendar, gmail, drive, reminders).",
+      "Search across all of user's stored data (knowledge, rules, contacts, lists, calendar, gmail, drive, reminders). " +
+      "When the user explicitly names a source ('do I have a CONTACT named …', 'any EMAIL about …', 'on my CALENDAR …', etc.), set source_hint to that source so results are restricted to it. Omit source_hint for open-ended asks ('what do we know about …').",
     input_schema: {
       type: 'object',
       properties: {
         query: { type: 'string', minLength: 1 },
+        // Wael 2026-05-22 — when the user names a source, force the
+        // server-side adapter filter to that source. The query-string
+        // regex in global-search/index.ts can't see what Claude stripped
+        // out, so a typed hint is the reliable channel.
+        source_hint: {
+          type: 'string',
+          enum: ['gmail', 'calendar', 'contacts', 'drive', 'notes', 'lists', 'reminders'],
+        },
       },
       required: ['query'],
       additionalProperties: false,

@@ -104,7 +104,12 @@ serve(async (req) => {
 
     const url = new URL(PEOPLE_API);
     url.searchParams.set('query', name.trim());
-    url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers');
+    // 2026-05-22 (Wael) — added 'addresses' to readMask so the voice server
+    // can resolve "Alert me when I arrive at Bob's home" without an extra
+    // Places lookup. People API returns addresses[] with type (home/work/
+    // other) and formattedValue. Backwards compatible: callers that only
+    // read name/email/phone keep working.
+    url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers,addresses');
     url.searchParams.set('pageSize', '5');
 
     const res = await fetch(url.toString(), {
@@ -126,6 +131,9 @@ serve(async (req) => {
     if (results.length === 0) {
       const url2 = new URL('https://people.googleapis.com/v1/otherContacts:search');
       url2.searchParams.set('query', name.trim());
+      // otherContacts readMask does NOT support 'addresses' (returns 400 if
+      // included) — those entries are auto-saved from email and never have
+      // addresses anyway. Only myContacts (above) supports addresses.
       url2.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers');
       url2.searchParams.set('pageSize', '5');
       const res2 = await fetch(url2.toString(), {
@@ -148,12 +156,23 @@ serve(async (req) => {
     // Map all matches into Contact shape. Caller picks best (single match) or
     // shows a picker (multi). Used by the recipient-resolution chain in
     // Session 26 — DraftCard needs every match for the picker UI.
+    //
+    // 2026-05-22 (Wael) — addresses[] now included. Each entry has
+    // { type: 'home'|'work'|'other'|string, formatted: string }. Voice
+    // server uses this to resolve "Alert me at Bob's home" without a
+    // separate Places lookup. Empty array if the contact has no addresses
+    // (most do not).
     const contacts = results.map((r: any) => {
       const person = r.person ?? {};
+      const addrs = Array.isArray(person.addresses) ? person.addresses : [];
       return {
         name:  person.names?.[0]?.displayName ?? name,
         email: person.emailAddresses?.[0]?.value ?? null,
         phone: person.phoneNumbers?.[0]?.value ?? null,
+        addresses: addrs.map((a: any) => ({
+          type: String(a?.type || a?.formattedType || 'other').toLowerCase(),
+          formatted: String(a?.formattedValue || '').trim(),
+        })).filter((a: any) => a.formatted.length > 0),
       };
     });
 

@@ -165,6 +165,44 @@ export const searchNormalizationTests: TestCase[] = [
   },
 
   // ──────────────────────────────────────────────────────────────────────
+  // Wael 2026-05-22 — "Do I have contact name Bob" failure case. Claude
+  // passed query="name Bob" to global_search; the contacts adapter did
+  // a literal substring match on "name bob" against every contact name
+  // and returned 0 hits while Bob was in Google Contacts. The fix is in
+  // CONTACT_NOISE_PREFIX_RE — "name <X>" / "contact named <X>" /
+  // "the contact <X>" must all yield bare "<X>" as a variant.
+  //
+  // We assert via the GMAIL adapter (the only adapter the test runner
+  // can seed). Gmail uses the same expandQuery variants, so if the
+  // noise prefix is stripped the variant "bob <tag>" reaches the
+  // ILIKE clause and matches the seeded subject.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'search-normalization.contact-name-prefix-strip',
+    category: 'search-normalization',
+    description: '2026-05-22 — "contact name <X>" / "name <X>" reaches adapters (contact-shaped prefix stripped)',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const tag = uniqueTag();
+      const subject = `Bob ${tag}`;
+      const gmailMessageId = `test-${tag}`;
+      await insertTestEmail(ctx, { subject, gmailMessageId });
+      try {
+        const { status, data } = await adapters.globalSearch(ctx, `contact name Bob ${tag}`);
+        expect2xx(status, 'global-search');
+        const ranked = (data as any)?.ranked;
+        ctx.log(`ranked count=${Array.isArray(ranked) ? ranked.length : 'n/a'}`);
+        expectTruthy(
+          gmailHitTitleMatches(ranked, subject),
+          `expected ≥1 gmail hit with subject "${subject}" — "contact name" prefix must strip so "Bob ${tag}" matches subject`,
+        );
+      } finally {
+        await deleteTestEmail(ctx, gmailMessageId);
+      }
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
   // Negative case — a query that already lacks the prefix must still
   // match. Guards against an over-eager strip that mangles clean queries.
   // ──────────────────────────────────────────────────────────────────────

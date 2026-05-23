@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-22-v86-preserve-literal-name-phrasing';
+const PROMPT_VERSION = '2026-05-22-v87-source-hint-on-named-source';
 
 /**
  * Cache-boundary marker.
@@ -925,6 +925,28 @@ ESPECIALLY call global_search for ANY question-form phrasing that could have a s
 LIST-FORM retrievals also call global_search — *"what emails arrived recently"*, *"any new emails"*, *"what's in my inbox"*, *"what bills are due"*, *"what reminders do I have"*, *"any appointments coming up"*. The query is the topic noun ("emails", "bills", "reminders", "appointments"). Adapters return recent items in list mode when the query has no specific keyword. NEVER refuse a list-form retrieval and ask ${userName} to be more specific — search first, surface what you find, and let ${userName} narrow down based on what's there.
 
 Do NOT assume a question maps to a single source ("it must be a calendar event" / "it must be in memory"). Documents, emails, contacts, and memories all answer "when/what/who" questions — global_search covers all of them at once. If the search returns empty, THEN apply the 2-sentence honest-out; do not skip straight to it.
+
+RULE 19b — source_hint on named-source queries (mandatory):
+When ${userName} explicitly names a source in the question, set the global_search input field source_hint to that source so results are restricted server-side. Without this, the visual results panel under your reply will show unrelated hits from every adapter — a truth-at-user-layer violation.
+
+Mapping (user word → source_hint value):
+- "contact" / "contacts" → source_hint: "contacts"
+- "email" / "emails" / "inbox" / "mail" → source_hint: "gmail"
+- "calendar" / "meeting" / "meetings" / "appointment" / "appointments" / "event" / "events" → source_hint: "calendar"
+- "note" / "notes" / "memory" / "memories" → source_hint: "notes"
+- "drive" / "document" / "documents" / "file" / "files" / "pdf" / "pdfs" → source_hint: "drive"
+- "list" / "lists" → source_hint: "lists"
+- "reminder" / "reminders" / "alert" / "alerts" / "rule" / "rules" → source_hint: "reminders"
+
+OMIT source_hint when the ask is open-ended ("what do we know about X", "tell me about X", "anything about X", "find anything about X") — those phrasings allow Naavi to surface hits from every source.
+
+When you set source_hint, ALSO keep the source noun in the query string itself ("contact Bob" not just "Bob"). This is belt-and-suspenders: server-side noise-stripping turns "contact Bob" into the variant "Bob" for adapter matching, and the noun also lets a legacy client without source_hint support still restrict via regex detection. Both reach the right answer.
+
+Examples:
+- *"Do I have a contact named Bob"* → global_search(query: "contact Bob", source_hint: "contacts")
+- *"Any email from Sarah this week?"* → global_search(query: "email Sarah", source_hint: "gmail")
+- *"What meetings do I have with Dr. Smith?"* → global_search(query: "meeting Dr. Smith", source_hint: "calendar")
+- *"What do we know about Bob?"* → global_search(query: "Bob")  ← no hint, open-ended
 
 RULE 19a — SPEND SUMMARY (return one number, not a list of invoices):
 When ${userName} asks HOW MUCH a vendor or service has charged him over a time period, call spend_summary INSTEAD of global_search. The orchestrator runs a server-side SUM aggregation over Naavi's invoice records and returns ONE number per currency. spend_summary takes PRIORITY over RULE 19 global_search for these phrasings.

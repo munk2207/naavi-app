@@ -55,6 +55,16 @@ function stemWord(word: string): string {
 const NOISE_PREFIX_RE =
   /^(?:any|an?|the|some|my)?\s*(?:emails?|messages?|mails?|inbox)\s+(?:about|on|from|regarding|re|with|mentioning|saying|involving)\s+/i;
 
+// Contact-shaped noise prefix (Wael 2026-05-22). The user typed "Do I have
+// contact name Bob"; Claude passed query="name Bob" to global_search; the
+// contacts adapter searched 731 contacts for the substring "name bob" → 0
+// hits → Naavi falsely reported "no contact named Bob" while Bob was in
+// Google Contacts. Strip the contact-shaped prefix the same way we strip
+// "email about X" so "name Bob" / "contact named Bob" / "the contact Bob"
+// all yield the bare name "Bob" as a variant.
+const CONTACT_NOISE_PREFIX_RE =
+  /^(?:(?:any|an?|the|some|my)\s+)?contacts?(?:\s+(?:named?|called))?\s+|^(?:named?|called)\s+/i;
+
 export function expandQuery(raw: string): string[] {
   const lower = raw.toLowerCase().trim();
   if (!lower) return [];
@@ -63,6 +73,9 @@ export function expandQuery(raw: string): string[] {
 
   const stripped = lower.replace(NOISE_PREFIX_RE, '').trim();
   if (stripped && stripped !== lower) variants.add(stripped);
+
+  const strippedContact = lower.replace(CONTACT_NOISE_PREFIX_RE, '').trim();
+  if (strippedContact && strippedContact !== lower) variants.add(strippedContact);
 
   const words = lower.split(/\s+/).filter(Boolean);
   const stems = words.map(stemWord);
