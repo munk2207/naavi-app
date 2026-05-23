@@ -123,7 +123,6 @@ function sourceHintToAdapterNames(hint: string): string[] | null {
     case 'contacts':  return ['contacts'];
     case 'drive':     return ['drive'];
     case 'notes':     return ['knowledge'];
-    case 'lists':     return ['lists'];
     case 'reminders': return ['rules', 'reminders'];
     default:          return null;
   }

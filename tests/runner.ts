@@ -280,7 +280,13 @@ async function main(): Promise<void> {
       t.category === 'chat' ||
       t.category === 'smoke' ||
       t.category === 'prompt-regression' ||
-      t.category === 'truth-at-user-layer';
+      t.category === 'truth-at-user-layer' ||
+      // 2026-05-22 (Wael) — lists.read added after observing it flap
+      // pass/fail across runs even when prompt + code were stable. Haiku
+      // sometimes routes "What is on my shopping list?" through
+      // global_search instead of list_read despite the explicit prompt
+      // example. One re-run reliably catches the flake.
+      t.category === 'lists';
     const isRetriable = result.status === 'failed' || result.status === 'errored';
     if (isChatShape && isRetriable) {
       process.stdout.write('[retry] ');

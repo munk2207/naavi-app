@@ -88,6 +88,10 @@ export const ticketsTests: TestCase[] = [
         subject: SMOKE_PREFIX + 'internal',
         body: 'Internal-relay smoke test from automated suite.',
         reporter_name: 'Auto Tester',
+        // 2026-05-22 (Wael) — reporter_email gate added in ingest-ticket on
+        // 2026-05-20 ("every ticket MUST carry a reporter email"). Test
+        // updated to pass a dummy auto-tester address.
+        reporter_email: 'autotester@example.com',
       });
       expect2xx(r.status, 'ingest-ticket');
       expectEqual(r.data?.success, true, `expected success=true, got ${JSON.stringify(r.data)}`);
@@ -191,6 +195,7 @@ export const ticketsTests: TestCase[] = [
         source_channel: 'internal-relay',
         subject: SMOKE_PREFIX + 'status-test',
         body: 'status validation test',
+        reporter_email: 'autotester@example.com',
       });
       expect2xx(ingest.status, 'ingest-ticket');
       const ticketId = ingest.data.ticket_id;
@@ -223,11 +228,13 @@ export const ticketsTests: TestCase[] = [
         source_channel: 'internal-relay',
         subject: SMOKE_PREFIX + 'monotonic-1',
         body: 'first',
+        reporter_email: 'autotester@example.com',
       });
       const r2 = await callIngest(ctx, {
         source_channel: 'internal-relay',
         subject: SMOKE_PREFIX + 'monotonic-2',
         body: 'second',
+        reporter_email: 'autotester@example.com',
       });
       expect2xx(r1.status, 'first');
       expect2xx(r2.status, 'second');

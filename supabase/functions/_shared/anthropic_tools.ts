@@ -651,7 +651,14 @@ export const NAAVI_TOOLS: NaaviTool[] = [
         // out, so a typed hint is the reliable channel.
         source_hint: {
           type: 'string',
-          enum: ['gmail', 'calendar', 'contacts', 'drive', 'notes', 'lists', 'reminders'],
+          // Wael 2026-05-22 — "lists" removed: list operations have
+          // dedicated list_read/list_create/list_add/list_remove tools,
+          // and including "lists" in this enum confused Claude into
+          // picking global_search over list_read for "what is on my
+          // shopping list" (regressed lists.read test). Drive kept
+          // because drive_search is narrower and global_search with
+          // source_hint=drive remains valid for cross-source asks.
+          enum: ['gmail', 'calendar', 'contacts', 'drive', 'notes', 'reminders'],
         },
       },
       required: ['query'],

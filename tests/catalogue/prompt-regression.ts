@@ -316,7 +316,7 @@ export const promptRegressionTests: TestCase[] = [
   {
     id: 'prompt-regression.list-disconnect-basic',
     category: 'prompt-regression',
-    description: 'F1a — "Disconnect my groceries list from my Costco alert" → LIST_DISCONNECT',
+    description: 'F1a — "Disconnect my groceries list from my Costco alert" speaks the confirmation phrase first AND does NOT emit LIST_DISCONNECT on first turn (per spec — every connect/disconnect/delete-list confirms before firing, prompt v90 made the "say yes to confirm" gate mandatory)',
     timeoutMs: 30_000,
     async run(ctx) {
       const { status, data } = await adapters.naaviChat(ctx, {
@@ -326,10 +326,23 @@ export const promptRegressionTests: TestCase[] = [
       expect2xx(status, 'naavi-chat');
       ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
 
+      const speech = extractSpeech(data?.rawText ?? '');
+      // Claude must demonstrate it understood: speech mentions the action
+      // (detach/disconnect) AND the entities (groceries + costco).
+      expectTruthy(/detach|disconnect/i.test(speech),
+        `expected speech to mention detach/disconnect; got: "${speech.slice(0,200)}"`);
+      expectTruthy(/groceries/i.test(speech),
+        `expected speech to mention "groceries"; got: "${speech.slice(0,200)}"`);
+      expectTruthy(/costco/i.test(speech),
+        `expected speech to mention "Costco"; got: "${speech.slice(0,200)}"`);
+      // Standard 3-option confirmation phrase must be present.
+      expectTruthy(/say yes to confirm/i.test(speech),
+        `expected confirmation phrase; got: "${speech.slice(0,200)}"`);
+      // Per spec, NO list_disconnect action on first turn — Claude waits for "yes".
       const action = findActionInRawText(data?.rawText ?? '', 'LIST_DISCONNECT');
-      expectTruthy(action, 'LIST_DISCONNECT action');
-      expectTruthy(/costco/i.test(String(action.entityRef ?? '')),
-        `expected entityRef containing "Costco", got: ${JSON.stringify(action.entityRef)}`);
+      if (action) {
+        throw new Error(`LIST_DISCONNECT must NOT be emitted on first turn — Claude must wait for user confirmation (got: ${JSON.stringify(action)})`);
+      }
     },
   },
 

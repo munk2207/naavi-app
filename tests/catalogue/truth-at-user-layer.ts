@@ -39,7 +39,16 @@ import { expect2xx, expectMatch, expectTruthy, extractSpeech } from '../lib/asse
 import type { TestCase } from '../lib/types';
 
 function uniqueTag(): string {
-  return `truthuserlayer${Date.now()}${Math.floor(Math.random() * 10000)}`;
+  // 2026-05-22 (Wael) — natural-language tag (spaces, no hyphens, small
+  // number). Haiku's garbled-text guard (prompt rule line 101) trips on
+  // hyphen-digit patterns like "birthday-cake-1234" — it pattern-matches
+  // to "looks like a test fixture" and short-circuits to "I didn't
+  // quite catch that, <name>." Using a plain phrase with a small
+  // trailing number ("birthday cake number 1234") looks like normal
+  // English so Claude runs global_search and produces the honest-out
+  // reply the test expects. Uniqueness is still good (1 in 10K) for
+  // test isolation.
+  return `birthday cake number ${Math.floor(Math.random() * 10000)}`;
 }
 
 export const truthAtUserLayerTests: TestCase[] = [
@@ -64,7 +73,26 @@ export const truthAtUserLayerTests: TestCase[] = [
       // Brief wait for embedding.
       await new Promise((r) => setTimeout(r, 1500));
 
-      const userMessage = `Do I have email about ${tag}?`;
+      // 2026-05-22 (Wael) — mirror the mobile orchestrator's pre-search
+      // injection. Production never sends Claude a bare retrieval query;
+      // it runs global_search FIRST, then appends a "## Live search
+      // results" block to the user message so Claude has the data in
+      // hand when it formulates the reply. Without this, the prompt's
+      // "always search first" rule (line 907) tells Claude to emit
+      // "Let me check..." + a global_search action instead of the
+      // honest-out reply the test verifies. The test was structurally
+      // broken — Option 3 from tonight's decision tree restores it to
+      // match the production shape.
+      //
+      // The injected block uses the SAME format the orchestrator emits
+      // (useOrchestrator.ts line ~1328): "## Live search results for
+      // the user's question..." then "- [source] title — snippet".
+      // Only the knowledge hit is included — that's exactly what global
+      // search would return for this seeded scenario.
+      const liveSearchBlock =
+        `\n\n## Live search results for the user's question (these are authoritative — use them to answer; do NOT say "I couldn't find" if results are listed here)\n` +
+        `- [knowledge] ${noteText}`;
+      const userMessage = `Do I have email about ${tag}?${liveSearchBlock}`;
       const { status, data } = await adapters.naaviChat(ctx, {
         messages: [{ role: 'user', content: userMessage }],
         max_tokens: 1024,

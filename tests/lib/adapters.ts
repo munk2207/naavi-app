@@ -62,7 +62,33 @@ export const adapters = {
   _promptCache: null as string | null,
   async _fetchPrompt(ctx: TestContext, channel: 'app' | 'voice' = 'app'): Promise<string> {
     if (this._promptCache) return this._promptCache;
-    const res = await callEdgeFunction(ctx, 'get-naavi-prompt', { channel }, { timeoutMs: 15_000 });
+    // 2026-05-22 (Wael) — look up user_settings.name and pass it as
+    // userName so the prompt template renders the real test-user name
+    // ("Mynaavi") instead of the get-naavi-prompt default "the user".
+    // Without this, Claude's prompt-rule-101 garbled fallback emits
+    // "I didn't quite catch that, the user." and several test regexes
+    // never match. Also pass userPhone for completeness — some prompt
+    // rules reference it.
+    let userName: string | undefined;
+    let userPhone: string | undefined;
+    try {
+      const r = await fetch(
+        `${ctx.supabaseUrl}/rest/v1/user_settings?user_id=eq.${ctx.testUserId}&select=name,phone`,
+        { headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}` } },
+      );
+      if (r.ok) {
+        const rows = await r.json();
+        const row = Array.isArray(rows) && rows[0] ? rows[0] : null;
+        userName = row?.name ?? undefined;
+        userPhone = row?.phone ?? undefined;
+      }
+    } catch (_) { /* fall through with undefined */ }
+    const res = await callEdgeFunction(
+      ctx,
+      'get-naavi-prompt',
+      { channel, userName, userPhone },
+      { timeoutMs: 15_000 },
+    );
     if (res.status !== 200 || !res.data?.prompt) {
       throw new Error(`get-naavi-prompt failed: status=${res.status} data=${JSON.stringify(res.data).slice(0, 200)}`);
     }

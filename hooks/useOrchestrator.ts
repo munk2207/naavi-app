@@ -1308,7 +1308,9 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         if (/\b(?:calendars?|meetings?|appointments?|events?)\b/.test(lower)) return 'calendar';
         if (/\b(?:notes?|memor(?:y|ies))\b/.test(lower)) return 'notes';
         if (/\b(?:drives?|documents?|files?|pdfs?|attachments?)\b/.test(lower)) return 'drive';
-        if (/\blists?\b/.test(lower)) return 'lists';
+        // 'lists' deliberately omitted — list operations route through
+        // the dedicated list_read/list_create/list_add/list_remove tools,
+        // not through global_search source_hint (Wael 2026-05-22).
         if (/\b(?:reminders?|alerts?|rules?)\b/.test(lower)) return 'reminders';
         return undefined;
       })();

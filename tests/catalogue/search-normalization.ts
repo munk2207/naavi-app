@@ -180,7 +180,7 @@ export const searchNormalizationTests: TestCase[] = [
   {
     id: 'search-normalization.contact-name-prefix-strip',
     category: 'search-normalization',
-    description: '2026-05-22 — "contact name <X>" / "name <X>" reaches adapters (contact-shaped prefix stripped)',
+    description: '2026-05-22 — "name <X>" / "named <X>" reaches adapters (contact-shaped prefix stripped). Note: uses bare "name" phrasing rather than "contact name" because the latter would trigger source-intent filtering to contacts-only and block the gmail adapter this test uses for validation.',
     timeoutMs: 30_000,
     async run(ctx) {
       const tag = uniqueTag();
@@ -188,13 +188,13 @@ export const searchNormalizationTests: TestCase[] = [
       const gmailMessageId = `test-${tag}`;
       await insertTestEmail(ctx, { subject, gmailMessageId });
       try {
-        const { status, data } = await adapters.globalSearch(ctx, `contact name Bob ${tag}`);
+        const { status, data } = await adapters.globalSearch(ctx, `name Bob ${tag}`);
         expect2xx(status, 'global-search');
         const ranked = (data as any)?.ranked;
         ctx.log(`ranked count=${Array.isArray(ranked) ? ranked.length : 'n/a'}`);
         expectTruthy(
           gmailHitTitleMatches(ranked, subject),
-          `expected ≥1 gmail hit with subject "${subject}" — "contact name" prefix must strip so "Bob ${tag}" matches subject`,
+          `expected ≥1 gmail hit with subject "${subject}" — "name " prefix must strip so "Bob ${tag}" matches subject`,
         );
       } finally {
         await deleteTestEmail(ctx, gmailMessageId);
