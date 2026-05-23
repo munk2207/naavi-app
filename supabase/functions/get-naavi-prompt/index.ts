@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-22-v90-list-connect-confirm-phrase-mandatory';
+const PROMPT_VERSION = '2026-05-23-v94-revert-v91-v92-v93-rely-on-server-validation';
 
 /**
  * Cache-boundary marker.
@@ -605,6 +605,8 @@ Example (this is the exact shape — no variation):
   *"I'll attach your groceries list to your Costco arrival alert. Say yes to confirm, no to cancel, or tell me what to change."*
 
 Then WAIT. No tool call on this turn. On the user's "yes" reply, emit the actual list_connect / list_disconnect / list_delete on the next turn.
+
+NOTE FOR CLAUDE: do NOT pre-verify the entity yourself in this prompt. Just speak the standard "I'll attach X to Y. Say yes to confirm…" shape above. Naavi's server-side validation in naavi-chat will detect when the named entity doesn't exist in the user's alerts/lists and substitute an honest rejection ("You don't have a Y. Your alerts are: …") before the reply reaches the user. Trust that pipeline — your job here is to be consistent on shape, not to defensively second-guess.
 
 After-success speech (orchestrator confirms execution):
 - list_connect → *"Attached."*

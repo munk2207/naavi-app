@@ -814,7 +814,62 @@ async function assembleSystemPromptServerSide(
     console.warn('[assembleSystemPrompt] lists lookup failed:', (err as Error)?.message);
   }
 
-  return base + languageNote + userRefSection + briefContext + listsContext + healthSuffix + knowledgeSuffix;
+  // 2026-05-23 (Wael) — inject the user's active alerts (action_rules) by
+  // label. Without this, Claude saw NO alerts in context and HALLUCINATED
+  // agreement with "attach my list to Costco alert" (verified live on
+  // V57.22.2 build 198 — Naavi replied "I'll attach…", user said yes,
+  // Naavi said "Got it", then the LIST_CONNECT execution returned
+  // "entity not found" via error card). With alerts in context, Naavi
+  // sees the real names and either matches directly OR honestly reports
+  // "I don't have a Costco alert. You have Loblaws, No Frills, …".
+  // RLS lockdown: action_rules is service-role-only for writes; this
+  // is a service-role SELECT so it's allowed.
+  let alertsContext = '';
+  try {
+    const { data: alertRows } = await supabase
+      .from('action_rules')
+      .select('label, trigger_type, trigger_config')
+      .eq('user_id', userId)
+      .eq('enabled', true)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (Array.isArray(alertRows) && alertRows.length > 0) {
+      const alertLines = alertRows.map((r: any) => {
+        const label = r.label || `${r.trigger_type} alert`;
+        // For location alerts, include the place name as a friendly hint so
+        // Claude can match "Loblaws alert" / "Loblaws arrival" / etc.
+        const place = r.trigger_config?.place_name || '';
+        return place && !label.includes(place)
+          ? `- ${label} (at ${place})`
+          : `- ${label}`;
+      });
+      alertsContext =
+        `\n\n## ${userName}'s active alerts (when ${userName} references "the X alert", match against this list — NEVER agree to attach/disconnect/change an alert that isn't here. If no match, say plainly "I don't have a [name] alert" and offer the closest ones from this list.)\n` +
+        alertLines.join('\n');
+    }
+  } catch (err) {
+    console.warn('[assembleSystemPrompt] alerts lookup failed:', (err as Error)?.message);
+  }
+
+  return base + languageNote + userRefSection + briefContext + listsContext + alertsContext + healthSuffix + knowledgeSuffix;
+}
+
+// 2026-05-23 (Wael) — normalize a string for entity-existence matching.
+// Used by naavi-chat's server-side validation to compare user-spoken
+// entity names against the user's actual alerts/lists. Strips:
+//   - case (lowercase)
+//   - apostrophes (curly + straight + backtick), because Deepgram STT
+//     sometimes transcribes "Loblaws" as "Loblaw's" and naive substring
+//     comparison fails
+//   - hyphens, dots, slashes (other punctuation Deepgram or typing
+//     variation may introduce)
+//   - extra whitespace
+function normalizeForEntityMatch(s: string): string {
+  return String(s ?? '')
+    .toLowerCase()
+    .replace(/[''`'.\-/]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // ── Resolve user ID ───────────────────────────────────────────────────────────
@@ -1236,7 +1291,7 @@ Deno.serve(async (req) => {
       .join('');
     const toolUseBlocks = response.content.filter((b: any) => b.type === 'tool_use');
 
-    const actions = toolUseBlocks.map((b: any) => {
+    let actions = toolUseBlocks.map((b: any) => {
       const actionType = TOOL_NAME_TO_ACTION_TYPE[b.name];
       if (!actionType) {
         console.warn(`[naavi-chat] Unknown tool name from Claude: ${b.name}`);
@@ -1251,14 +1306,218 @@ Deno.serve(async (req) => {
       return { type: actionType, ...(b.input ?? {}) };
     }).filter((a: any) => a !== null);
 
+    // 2026-05-23 (Wael) — server-side entity-existence validation for
+    // list_connect / list_disconnect / list_connection_query actions
+    // targeting action_rule entities. Haiku has repeatedly ignored prompt
+    // rules instructing it to verify the entity exists before agreeing
+    // (v90/v91/v92 prompt strengthening all failed). Code-layer validation
+    // is deterministic: we check Claude's emitted entityRef against the
+    // user's actual action_rules; if no match, we drop the action and
+    // override Claude's speech with an honest rejection that names the
+    // user's real alerts. This prevents the "I'll attach to your Costco
+    // alert" → user says yes → "entity not found" error-card sequence
+    // that broke trust on V57.22.2 build 198 live testing.
+    let serverRejectionMessage: string | null = null;
+    if (userId && actions.some((a: any) =>
+      (a.type === 'LIST_CONNECT' || a.type === 'LIST_DISCONNECT' || a.type === 'LIST_CONNECTION_QUERY')
+      && a.entityType === 'action_rule'
+      && typeof a.entityRef === 'string'
+    )) {
+      try {
+        const { data: alertRows } = await supabase
+          .from('action_rules')
+          .select('label, trigger_config')
+          .eq('user_id', userId)
+          .eq('enabled', true)
+          .limit(50);
+        const alerts = (alertRows ?? []).map((r: any) => ({
+          label: String(r.label || ''),
+          place: String(r.trigger_config?.place_name || ''),
+        }));
+        const filtered: any[] = [];
+        for (const a of actions) {
+          const isEntityAction =
+            (a.type === 'LIST_CONNECT' || a.type === 'LIST_DISCONNECT' || a.type === 'LIST_CONNECTION_QUERY')
+            && a.entityType === 'action_rule'
+            && typeof a.entityRef === 'string';
+          if (isEntityAction) {
+            const refLower = a.entityRef.toLowerCase();
+            // Strip noise words to get the core keyword for matching
+            const core = refLower
+              .replace(/\b(alert|alerts|notification|arrival|reminder)\b/g, '')
+              .trim();
+            // 2026-05-23 (Wael) — normalize apostrophes/hyphens/etc. on
+            // BOTH sides before substring match. Deepgram STT sometimes
+            // adds an apostrophe (transcribes "Loblaws" as "Loblaw's")
+            // that breaks naive substring comparison against the user's
+            // real alert label "Loblaws Gloucestershire". Forgiving
+            // normalization restores the match for STT and typo variants.
+            const normCore = normalizeForEntityMatch(core);
+            const matched = alerts.some(al =>
+              normalizeForEntityMatch(al.label).includes(normCore) ||
+              (al.place && normalizeForEntityMatch(al.place).includes(normCore))
+            );
+            if (!matched && core.length >= 2) {
+              // Build a friendly list of the user's actual alerts.
+              // 2026-05-23 (Wael) — concise rejection shape: don't dump
+              // the full alerts list. Just confirm "no" + ask intent.
+              // User can ask "what alerts do I have?" separately if they
+              // want the list. Listing all alerts becomes noise when
+              // there are 5+ of them.
+              if (!serverRejectionMessage) {
+                serverRejectionMessage =
+                  `You don't have a ${a.entityRef}. Want to create one, or attach to a different alert?`;
+              }
+              console.warn(`[naavi-chat] entity-validation: dropping ${a.type} for non-existent entityRef="${a.entityRef}" (core="${core}")`);
+              continue; // drop this action
+            }
+          }
+          filtered.push(a);
+        }
+        actions = filtered;
+      } catch (err) {
+        console.warn('[naavi-chat] entity validation failed (proceeding without override):', (err as Error)?.message);
+      }
+    }
+
+    // 2026-05-23 (Wael, second pass) — USER-MESSAGE-pattern validation.
+    // Live mobile test 12:25 PM showed Haiku producing contradictory
+    // replies like "You have one Costco alert: 'Alert when arriving at
+    // No Frills'. I don't have a Costco alert — …" — Claude fuzzy-matched
+    // Costco to No Frills, then self-corrected. The earlier speech-pattern
+    // validator only fires on "say yes to confirm" so it missed this shape.
+    // This pre-check parses the user's message for connect/disconnect/query
+    // intent + an "X alert" entity reference. If X doesn't exist in the
+    // user's alerts, we override with a clean rejection — regardless of
+    // what Claude said. Catches ALL malformed Claude replies for non-
+    // existent entities, not just the "say yes" pattern.
+    if (serverRejectionMessage === null && userId && messages?.length > 0) {
+      const lastUserMsg = [...messages].reverse().find((m: any) => m.role === 'user');
+      const userText = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : '';
+      const CONNECT_INTENT_RE = /\b(attach|connect|detach|disconnect|what\s+lists?\s+(?:is|are)\s+on|where\s+is\s+(?:my|the))\b/i;
+      if (CONNECT_INTENT_RE.test(userText)) {
+        // Extract entity name: "[X] alert" — require a preposition prefix
+        // (to/from/on/of) so we don't pick up "list to my Costco" as the
+        // entity. Capture 1-3 short words (no embedded spaces in any
+        // single word) before "alert".
+        const m = userText.match(
+          /\b(?:to|from|on|of)\s+(?:my|the|your)?\s*([\w'\-]+(?:\s+[\w'\-]+){0,3})\s+alert\b/i,
+        );
+        if (m && m[1]) {
+          const entityName = m[1].trim();
+          const entityLower = entityName.toLowerCase();
+          const SKIP_WORDS = new Set(['arrival', 'arriving', 'location', 'new']);
+          if (entityLower.length >= 2 && !SKIP_WORDS.has(entityLower)) {
+            try {
+              const { data: alertRows } = await supabase
+                .from('action_rules')
+                .select('label, trigger_config')
+                .eq('user_id', userId)
+                .eq('enabled', true)
+                .limit(50);
+              const alerts = (alertRows ?? []).map((r: any) => ({
+                label: String(r.label || ''),
+                place: String(r.trigger_config?.place_name || ''),
+              }));
+              const normEntity = normalizeForEntityMatch(entityLower);
+              const matched = alerts.some(al =>
+                normalizeForEntityMatch(al.label).includes(normEntity) ||
+                (al.place && normalizeForEntityMatch(al.place).includes(normEntity))
+              );
+              if (!matched && alerts.length > 0) {
+                serverRejectionMessage =
+                  `You don't have a ${entityName} alert. Want to create one, or attach to a different alert?`;
+                console.warn(`[naavi-chat] user-intent-validation: override — user referenced non-existent entity "${entityName}" with connect-intent`);
+                // Also drop any list_connect/disconnect/connection_query actions Claude emitted for this non-existent entity.
+                actions = actions.filter((a: any) => {
+                  if (
+                    (a.type === 'LIST_CONNECT' || a.type === 'LIST_DISCONNECT' || a.type === 'LIST_CONNECTION_QUERY')
+                    && typeof a.entityRef === 'string'
+                    && a.entityRef.toLowerCase().includes(entityLower)
+                  ) return false;
+                  return true;
+                });
+              }
+            } catch (err) {
+              console.warn('[naavi-chat] user-intent validation failed:', (err as Error)?.message);
+            }
+          }
+        }
+      }
+    }
+
+    // 2026-05-23 (Wael) — SPEECH-pattern validation for the wait-for-yes
+    // pattern. The action-validator above only catches when Claude emits
+    // a LIST_CONNECT/DISCONNECT/DELETE action. But the confirmation
+    // pattern is "speech-only first turn, action on second turn" — so
+    // when Claude says "I'll attach to your Costco alert. Say yes to
+    // confirm…" without emitting an action, the action-validator never
+    // fires. The lie persists until the user says yes and the action
+    // executes (then errors). This block parses the speech for the
+    // entity reference and validates against the user's actual alerts.
+    if (
+      serverRejectionMessage === null
+      && userId
+      && speechBlocks
+      && /\bsay yes to confirm\b/i.test(speechBlocks)
+    ) {
+      // Match "(attach|connect|detach|disconnect|delete) ... to|from <entity>" pattern.
+      // Anchored on the confirmation-phrase neighborhood — captures the
+      // entity word(s) right before the period or the "say yes" phrase.
+      const m = speechBlocks.match(
+        /\b(?:attach|connect|detach|disconnect|delete)[^.,!?]*?\s+(?:to|from|of)\s+(?:your |the )?([^.,!?]+?)(?=\s*[.,?!]|\s+say yes)/i,
+      );
+      if (m) {
+        const refRaw = m[1].trim();
+        const refLower = refRaw.toLowerCase();
+        const core = refLower
+          .replace(/\b(alert|alerts|notification|notifications|arrival|reminder|reminders)\b/g, '')
+          .trim();
+        if (core.length >= 2) {
+          try {
+            const { data: alertRows } = await supabase
+              .from('action_rules')
+              .select('label, trigger_config')
+              .eq('user_id', userId)
+              .eq('enabled', true)
+              .limit(50);
+            const alerts = (alertRows ?? []).map((r: any) => ({
+              label: String(r.label || ''),
+              place: String(r.trigger_config?.place_name || ''),
+            }));
+            const normCore = normalizeForEntityMatch(core);
+            const matched = alerts.some(al =>
+              normalizeForEntityMatch(al.label).includes(normCore) ||
+              (al.place && normalizeForEntityMatch(al.place).includes(normCore))
+            );
+            if (!matched) {
+              // 2026-05-23 (Wael) — concise rejection shape: don't dump
+              // the full alerts list. Just confirm "no" + ask intent.
+              // User can ask "what alerts do I have?" separately if they
+              // want the list. Listing all alerts becomes noise when
+              // there are 5+ of them.
+              serverRejectionMessage =
+                `You don't have a ${refRaw}. Want to create one, or attach to a different alert?`;
+              console.warn(`[naavi-chat] speech-validation: override — speech mentioned non-existent entity "${refRaw}" (core="${core}")`);
+            }
+          } catch (err) {
+            console.warn('[naavi-chat] speech validation failed:', (err as Error)?.message);
+          }
+        }
+      }
+    }
+
     // V57.12.1 Bug E fix — Haiku occasionally emits tool_use without a
     // companion text block, leaving speech empty and the chat blank.
     // When that happens, synthesize a short action-specific confirmation
     // so the user always gets feedback. Doesn't override Claude's own
     // narration when present.
-    const speech = (speechBlocks && speechBlocks.trim().length > 0)
-      ? speechBlocks
-      : buildFallbackSpeech(actions);
+    // 2026-05-23 — server-side rejection overrides Claude's speech when
+    // an action was dropped due to entity-validation failure (see above).
+    let speech = serverRejectionMessage
+      ?? ((speechBlocks && speechBlocks.trim().length > 0)
+            ? speechBlocks
+            : buildFallbackSpeech(actions));
     if (!speechBlocks.trim() && actions.length > 0) {
       console.log(
         `[naavi-chat] Bug E fallback fired — empty speech, ${actions.length} actions, ` +

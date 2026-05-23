@@ -19,7 +19,7 @@
  * or refined before deploy. Run via `npm run test:auto`.
  */
 
-import { adapters } from '../lib/adapters';
+import { adapters, db } from '../lib/adapters';
 import {
   expect2xx,
   expectTruthy,
@@ -29,7 +29,81 @@ import {
   expectSpeechNotMatch,
   TestSkippedError,
 } from '../lib/assertions';
-import type { TestCase } from '../lib/types';
+import type { TestCase, TestContext } from '../lib/types';
+
+// 2026-05-23 (Wael) — seed helpers for the entity-existence world.
+// naavi-chat now validates that list_connect/disconnect/connection_query
+// targets actually exist in the user's data. Before this, these prompt-
+// regression tests assumed Claude would emit the right action regardless
+// of data — but now the server intercepts and overrides if the entity
+// doesn't exist. So every test that references "Costco alert" /
+// "groceries list" / "688 Bayview office" must seed those entities up
+// front and clean up after.
+async function seedCostcoAlert(ctx: TestContext): Promise<void> {
+  await db.insert(ctx, 'action_rules', {
+    user_id:        ctx.testUserId,
+    trigger_type:   'location',
+    trigger_config: {
+      place_name:    'Costco',
+      direction:     'arrive',
+      resolved_lat:  0,
+      resolved_lng:  0,
+      radius_meters: 300,
+    },
+    action_type:   'sms',
+    action_config: { to_phone: '+10000000000', body: 'prompt-regression seed' },
+    label:         'Alert when arriving at Costco',
+    one_shot:      false,
+    enabled:       true,
+  });
+}
+async function deleteCostcoAlert(ctx: TestContext): Promise<void> {
+  await db.delete(
+    ctx,
+    'action_rules',
+    `user_id=eq.${ctx.testUserId}&label=eq.${encodeURIComponent('Alert when arriving at Costco')}`,
+  );
+}
+async function seedGroceriesList(ctx: TestContext): Promise<void> {
+  await db.insert(ctx, 'lists', {
+    user_id:       ctx.testUserId,
+    name:          'groceries',
+    category:      'shopping',
+    drive_file_id: 'prompt-regression-seed-groceries',
+  });
+}
+async function deleteGroceriesList(ctx: TestContext): Promise<void> {
+  await db.delete(
+    ctx,
+    'lists',
+    `user_id=eq.${ctx.testUserId}&name=eq.groceries`,
+  );
+}
+async function seedBayviewOfficeAlert(ctx: TestContext): Promise<void> {
+  await db.insert(ctx, 'action_rules', {
+    user_id:        ctx.testUserId,
+    trigger_type:   'location',
+    trigger_config: {
+      place_name:    '688 Bayview office',
+      direction:     'arrive',
+      resolved_lat:  0,
+      resolved_lng:  0,
+      radius_meters: 300,
+    },
+    action_type:   'sms',
+    action_config: { to_phone: '+10000000000', body: 'prompt-regression seed' },
+    label:         'Alert when arriving at 688 Bayview office',
+    one_shot:      false,
+    enabled:       true,
+  });
+}
+async function deleteBayviewOfficeAlert(ctx: TestContext): Promise<void> {
+  await db.delete(
+    ctx,
+    'action_rules',
+    `user_id=eq.${ctx.testUserId}&label=eq.${encodeURIComponent('Alert when arriving at 688 Bayview office')}`,
+  );
+}
 
 export const promptRegressionTests: TestCase[] = [
   // ──────────────────────────────────────────────────────────────────────
@@ -256,8 +330,10 @@ export const promptRegressionTests: TestCase[] = [
   {
     id: 'prompt-regression.list-connect-basic',
     category: 'prompt-regression',
-    description: 'F1a — "Connect my groceries list to my Costco alert" speaks the confirmation phrase first AND does NOT emit LIST_CONNECT on first turn (per spec — Claude waits for "yes" before firing)',
+    description: 'F1a — "Connect my groceries list to my Costco alert" speaks the confirmation phrase first AND does NOT emit LIST_CONNECT on first turn (per spec — Claude waits for "yes" before firing). Seeds groceries list + Costco alert so naavi-chat\'s server-side entity-existence validation accepts the intent.',
     timeoutMs: 30_000,
+    async setup(ctx)    { await seedGroceriesList(ctx); await seedCostcoAlert(ctx); },
+    async teardown(ctx) { await deleteCostcoAlert(ctx); await deleteGroceriesList(ctx); },
     async run(ctx) {
       const { status, data } = await adapters.naaviChat(ctx, {
         messages: [{ role: 'user', content: 'Connect my groceries list to my Costco alert' }],
@@ -316,8 +392,10 @@ export const promptRegressionTests: TestCase[] = [
   {
     id: 'prompt-regression.list-disconnect-basic',
     category: 'prompt-regression',
-    description: 'F1a — "Disconnect my groceries list from my Costco alert" speaks the confirmation phrase first AND does NOT emit LIST_DISCONNECT on first turn (per spec — every connect/disconnect/delete-list confirms before firing, prompt v90 made the "say yes to confirm" gate mandatory)',
+    description: 'F1a — "Disconnect my groceries list from my Costco alert" speaks the confirmation phrase first AND does NOT emit LIST_DISCONNECT on first turn (per spec — every connect/disconnect/delete-list confirms before firing, prompt v90 made the "say yes to confirm" gate mandatory). Seeds groceries + Costco for entity-existence validation.',
     timeoutMs: 30_000,
+    async setup(ctx)    { await seedGroceriesList(ctx); await seedCostcoAlert(ctx); },
+    async teardown(ctx) { await deleteCostcoAlert(ctx); await deleteGroceriesList(ctx); },
     async run(ctx) {
       const { status, data } = await adapters.naaviChat(ctx, {
         messages: [{ role: 'user', content: 'Disconnect my groceries list from my Costco alert' }],
@@ -393,8 +471,10 @@ export const promptRegressionTests: TestCase[] = [
   {
     id: 'prompt-regression.list-connection-query-what',
     category: 'prompt-regression',
-    description: 'F1a — "What list is on my Costco alert?" → LIST_CONNECTION_QUERY mode=what_list_is_on with entityRef + entityType',
+    description: 'F1a — "What list is on my Costco alert?" → LIST_CONNECTION_QUERY mode=what_list_is_on with entityRef + entityType. Seeds Costco alert so naavi-chat entity-existence validation accepts the query.',
     timeoutMs: 30_000,
+    async setup(ctx)    { await seedCostcoAlert(ctx); },
+    async teardown(ctx) { await deleteCostcoAlert(ctx); },
     async run(ctx) {
       const { status, data } = await adapters.naaviChat(ctx, {
         messages: [{ role: 'user', content: 'What list is on my Costco alert?' }],
@@ -426,8 +506,10 @@ export const promptRegressionTests: TestCase[] = [
   {
     id: 'prompt-regression.list-connection-query-address-must-have-entitytype',
     category: 'prompt-regression',
-    description: 'V57.15.4 regression — address-style entityRef must still carry entityType',
+    description: 'V57.15.4 regression — address-style entityRef must still carry entityType. Seeds 688 Bayview office alert so naavi-chat entity-existence validation accepts the query.',
     timeoutMs: 30_000,
+    async setup(ctx)    { await seedBayviewOfficeAlert(ctx); },
+    async teardown(ctx) { await deleteBayviewOfficeAlert(ctx); },
     async run(ctx) {
       const { status, data } = await adapters.naaviChat(ctx, {
         messages: [{ role: 'user', content: 'What lists are on 688 Bayview office?' }],

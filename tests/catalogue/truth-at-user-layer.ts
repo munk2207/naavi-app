@@ -34,9 +34,9 @@
  *     the named-source case.
  */
 
-import { adapters } from '../lib/adapters';
-import { expect2xx, expectMatch, expectTruthy, extractSpeech } from '../lib/assertions';
-import type { TestCase } from '../lib/types';
+import { adapters, db } from '../lib/adapters';
+import { expect2xx, expectMatch, expectTruthy, extractSpeech, findActionInRawText } from '../lib/assertions';
+import type { TestCase, TestContext } from '../lib/types';
 
 function uniqueTag(): string {
   // 2026-05-22 (Wael) — natural-language tag (spaces, no hyphens, small
@@ -140,6 +140,159 @@ export const truthAtUserLayerTests: TestCase[] = [
         !mentionsNonEmailSource,
         `speech MUST NOT mention non-email sources when ${''}${''}user asked about email. Got: "${speech.slice(0, 300)}"`,
       );
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 2026-05-23 (Wael) — entity-existence validation for list_connect.
+  // Locks in the server-side speech-pattern + action validation in
+  // supabase/functions/naavi-chat/index.ts that catches "I'll attach
+  // your shopping list to your Costco alert" when Costco doesn't exist.
+  // Before this validation, Naavi would agree to attach to non-existent
+  // entities, the user would say "yes", then the orchestrator would
+  // surface a "List action error — entity not found" card. Trust break.
+  //
+  // The validation has two layers: action-level (catches LIST_CONNECT
+  // with non-matching entityRef) AND speech-level (catches "say yes to
+  // confirm" with non-matching entity reference even when no action was
+  // emitted on the wait-for-yes first turn).
+  // ──────────────────────────────────────────────────────────────────────
+
+  {
+    id: 'truth-at-user-layer.list-connect-rejects-non-existent-alert',
+    category: 'truth-at-user-layer',
+    description: '2026-05-23 — "Attach my shopping list to my Costco alert" must be REJECTED when the user has no Costco alert. Server-side speech-pattern validation overrides Claude with an honest "you don\'t have a Costco alert" reply.',
+    timeoutMs: 60_000,
+    async run(ctx) {
+      // Seed: one list + one alert with a recognizable non-Costco name.
+      const alertLabel = 'Alert when arriving at TestLocaleTownYZ';
+      const listName   = 'shopping';
+      try {
+        await db.insert(ctx, 'lists', {
+          user_id:       ctx.testUserId,
+          name:          listName,
+          category:      'shopping',
+          drive_file_id: 'truth-test-entity-existence-stub',
+        });
+        await db.insert(ctx, 'action_rules', {
+          user_id:        ctx.testUserId,
+          trigger_type:   'location',
+          trigger_config: {
+            place_name:     'TestLocaleTownYZ',
+            direction:      'arrive',
+            resolved_lat:   0,
+            resolved_lng:   0,
+            radius_meters:  300,
+          },
+          action_type:   'sms',
+          action_config: { to_phone: '+10000000000', body: 'truth test seed alert' },
+          label:         alertLabel,
+          one_shot:      false,
+          enabled:       true,
+        });
+
+        const { status, data } = await adapters.naaviChat(ctx, {
+          messages: [{ role: 'user', content: 'Attach my shopping list to my Costco alert' }],
+          max_tokens: 1024,
+        });
+        expect2xx(status, 'naavi-chat');
+        const speech = extractSpeech(data?.rawText ?? '');
+        ctx.log(`speech: ${speech.slice(0, 300)}`);
+
+        // Rejection signal: speech must indicate the alert doesn't exist.
+        // Accept any of these phrasings (the override message uses "don't
+        // have"; Claude on its own may use "no Costco alert" or similar).
+        const REJECTION =
+          /\b(?:don'?t have|do not have|no\s+costco)\b/i;
+        expectMatch(
+          speech,
+          REJECTION,
+          'speech must reject the non-existent Costco alert (e.g. "you don\'t have a Costco alert")',
+        );
+
+        // The reply MUST offer a next step (create or reroute) so the
+        // user knows their options. 2026-05-23 (Wael UX call): the
+        // rejection no longer dumps the full alerts list — too noisy
+        // for users with 5+ alerts. Instead it asks intent.
+        expectTruthy(
+          /create one|different alert|set (?:one|it) up/i.test(speech),
+          `speech should offer a next step (create one / different alert); got: "${speech.slice(0, 300)}"`,
+        );
+
+        // CRITICAL: no LIST_CONNECT action emitted for the non-existent
+        // entity. If one slipped through, the "yes" turn would silently
+        // execute against a missing target and surface an error card.
+        const action = findActionInRawText(data?.rawText ?? '', 'LIST_CONNECT');
+        expectTruthy(
+          !action,
+          `LIST_CONNECT MUST NOT be emitted for non-existent alert. Got: ${JSON.stringify(action)}`,
+        );
+      } finally {
+        await db.delete(ctx, 'action_rules', `user_id=eq.${ctx.testUserId}&label=eq.${encodeURIComponent(alertLabel)}`);
+        await db.delete(ctx, 'lists', `user_id=eq.${ctx.testUserId}&name=eq.${encodeURIComponent(listName)}`);
+      }
+    },
+  },
+
+  {
+    id: 'truth-at-user-layer.list-connect-accepts-existing-alert',
+    category: 'truth-at-user-layer',
+    description: '2026-05-23 — "Attach my shopping list to my TestLocaleTownYZ alert" must be ACCEPTED with the confirmation phrase when the alert exists. Server-side validation must NOT override valid intents.',
+    timeoutMs: 60_000,
+    async run(ctx) {
+      const alertLabel = 'Alert when arriving at TestLocaleTownYZ';
+      const listName   = 'shopping';
+      try {
+        await db.insert(ctx, 'lists', {
+          user_id:       ctx.testUserId,
+          name:          listName,
+          category:      'shopping',
+          drive_file_id: 'truth-test-entity-existence-stub',
+        });
+        await db.insert(ctx, 'action_rules', {
+          user_id:        ctx.testUserId,
+          trigger_type:   'location',
+          trigger_config: {
+            place_name:     'TestLocaleTownYZ',
+            direction:      'arrive',
+            resolved_lat:   0,
+            resolved_lng:   0,
+            radius_meters:  300,
+          },
+          action_type:   'sms',
+          action_config: { to_phone: '+10000000000', body: 'truth test seed alert' },
+          label:         alertLabel,
+          one_shot:      false,
+          enabled:       true,
+        });
+
+        const { status, data } = await adapters.naaviChat(ctx, {
+          messages: [{ role: 'user', content: 'Attach my shopping list to my TestLocaleTownYZ alert' }],
+          max_tokens: 1024,
+        });
+        expect2xx(status, 'naavi-chat');
+        const speech = extractSpeech(data?.rawText ?? '');
+        ctx.log(`speech: ${speech.slice(0, 300)}`);
+
+        // Acceptance signal: speech must include the literal confirmation
+        // phrase (per v90 prompt rule + entity-gate from v93).
+        expectMatch(
+          speech,
+          /\bsay yes to confirm\b/i,
+          'speech must include the literal confirmation phrase when the alert exists',
+        );
+
+        // The wait-for-yes pattern: no LIST_CONNECT on the first turn —
+        // Claude must wait for the user's "yes" before firing.
+        const action = findActionInRawText(data?.rawText ?? '', 'LIST_CONNECT');
+        expectTruthy(
+          !action,
+          `LIST_CONNECT MUST NOT be emitted on the first turn — wait for "yes". Got: ${JSON.stringify(action)}`,
+        );
+      } finally {
+        await db.delete(ctx, 'action_rules', `user_id=eq.${ctx.testUserId}&label=eq.${encodeURIComponent(alertLabel)}`);
+        await db.delete(ctx, 'lists', `user_id=eq.${ctx.testUserId}&name=eq.${encodeURIComponent(listName)}`);
+      }
     },
   },
 ];
