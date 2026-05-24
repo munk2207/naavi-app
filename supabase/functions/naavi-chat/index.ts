@@ -1659,15 +1659,18 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 2026-05-24 (Wael) — B4y. Action-intent validator for SET_EMAIL_ALERT
-    // and SET_ACTION_RULE(trigger_type='email'). Drops the action when
-    // the user's latest message lacks an explicit create-intent phrase.
-    // Defends against Claude/Haiku fabricating rules on search-shape
-    // utterances ("Find McDonald alert" → unauthorized email rule with
-    // keyword "you" landed in Wael's DB 2026-05-24 15:32 EST). Same
-    // HAS_CREATE_INTENT pattern as detectEmailAlert above; single source
-    // of truth in spirit, duplicated here because this runs after Claude
-    // emission whereas detectEmailAlert runs before Claude.
+    // 2026-05-24 (Wael) — B4y Phase 1. Action-intent validator for
+    // SET_EMAIL_ALERT and SET_ACTION_RULE(trigger_type='email'). Drops
+    // the action when the user's latest message lacks an explicit
+    // create-intent phrase. Defends against Claude/Haiku fabricating
+    // rules on search-shape utterances ("Find McDonald alert" →
+    // unauthorized email rule with keyword "you" landed in Wael's DB
+    // 2026-05-24 15:32 EST). Phase 2 (universal confirm-then-act gate
+    // across all state-changing actions per new CLAUDE.md Rule 12)
+    // attempted 2026-05-24 evening but REVERTED — required broader
+    // prompt-harmonization work + ~14 test rewrites. Phase 2 properly
+    // scheduled as a dedicated focused session. Phase 1 stays as the
+    // narrow defense for the demonstrated bug class.
     if (
       userId
       && actions.some((a: any) =>

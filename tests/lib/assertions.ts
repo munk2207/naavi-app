@@ -116,3 +116,47 @@ export function expectSpeechNotMatch(rawText: string, pattern: RegExp, label: st
     throw new Error(`${label}: speech should NOT match ${pattern}, but got: "${speech.slice(0, 200)}"`);
   }
 }
+
+/**
+ * B4y Phase 2 (Wael 2026-05-24) — drive a confirm-then-act 2-turn flow.
+ * Per new CLAUDE.md Rule 12 + prompt RULE 23, EVERY state-changing action
+ * (SET_ACTION_RULE, REMEMBER, CREATE_EVENT, LIST_*, etc.) now requires
+ * the user to confirm before Naavi commits. The server-side gate in
+ * naavi-chat drops state-changing actions on turn 1 (no prior confirm
+ * + user-yes). This helper drives the 2 turns and returns both responses
+ * so tests can assert: turn 1 should ask for confirm; turn 2 (after user
+ * says yes) should emit the action.
+ *
+ * Usage:
+ *   const { turn1, turn2 } = await chatWithConfirm(ctx, 'alert me at Walmart');
+ *   const action = findActionInRawText(turn2.data?.rawText ?? '', 'SET_ACTION_RULE');
+ *   expectTruthy(action, 'SET_ACTION_RULE on turn 2');
+ *
+ * Reuses adapters.naaviChat for both turns. The "yes" reply is hardcoded —
+ * if Claude's confirm-shape ask uses a different acceptable affirmative
+ * (e.g., "approved"), pass it via `confirmReply`.
+ *
+ * Imports from tests/lib/adapters.ts are circular-safe via dynamic import
+ * to keep this helper standalone.
+ */
+export async function chatWithConfirm(
+  ctx: any,
+  userMessage: string,
+  confirmReply: string = 'yes',
+): Promise<{ turn1: { status: number; data: any }; turn2: { status: number; data: any } }> {
+  const { adapters } = await import('./adapters');
+  const r1 = await adapters.naaviChat(ctx, {
+    messages: [{ role: 'user', content: userMessage }],
+    max_tokens: 1024,
+  });
+  const r1Speech = extractSpeech(r1.data?.rawText ?? '');
+  const r2 = await adapters.naaviChat(ctx, {
+    messages: [
+      { role: 'user',      content: userMessage },
+      { role: 'assistant', content: r1Speech },
+      { role: 'user',      content: confirmReply },
+    ],
+    max_tokens: 1024,
+  });
+  return { turn1: r1, turn2: r2 };
+}
