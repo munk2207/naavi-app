@@ -248,6 +248,21 @@ function speechResponse(speech: string, extra: Record<string, unknown> = {}) {
 // ── Email alert detection ─────────────────────────────────────────────────────
 
 function detectEmailAlert(msg: string): { fromName: string | null; subjectKeyword: string | null } | null {
+  // 2026-05-24 (Wael) — B4y. Hard create-intent gate. The legacy isAlert
+  // regex below requires "alert" + "email" within 80 chars; that's far too
+  // permissive — it can fire on benign sentences that happen to contain
+  // both words ("Find McDonald alert" + a prior turn mentioning email
+  // would NOT match — but a longer dictation could). Worse, the mobile
+  // SET_EMAIL_ALERT path (Claude-emitted action in useOrchestrator.ts:2226)
+  // has the SAME no-confirmation gap, so a Haiku misclassification was
+  // enough to land a fabricated rule on Wael's account 2026-05-24 15:32
+  // EST. The HAS_CREATE_INTENT gate requires an EXPLICIT command-shape
+  // phrase ("alert me", "notify me", "let me know", "remind me",
+  // "set up an alert", "create an alert") before any write-bypass fires.
+  // See holding-list B4y for the full incident + fix history.
+  const HAS_CREATE_INTENT = /\b(alert|notify|tell|let|remind|text|email|message|ping)\s+me\b|\b(set\s+up|create|make)\s+(an?\s+)?alert\b|\blet\s+me\s+know\b/i;
+  if (!HAS_CREATE_INTENT.test(msg)) return null;
+
   const isAlert = /\b(alert|notify|text|sms|let me know|send me)\b.{0,80}\bemail/i.test(msg);
   if (!isAlert) return null;
 
@@ -1640,6 +1655,39 @@ Deno.serve(async (req) => {
           } catch (err) {
             console.warn('[naavi-chat] speech validation failed:', (err as Error)?.message);
           }
+        }
+      }
+    }
+
+    // 2026-05-24 (Wael) — B4y. Action-intent validator for SET_EMAIL_ALERT
+    // and SET_ACTION_RULE(trigger_type='email'). Drops the action when
+    // the user's latest message lacks an explicit create-intent phrase.
+    // Defends against Claude/Haiku fabricating rules on search-shape
+    // utterances ("Find McDonald alert" → unauthorized email rule with
+    // keyword "you" landed in Wael's DB 2026-05-24 15:32 EST). Same
+    // HAS_CREATE_INTENT pattern as detectEmailAlert above; single source
+    // of truth in spirit, duplicated here because this runs after Claude
+    // emission whereas detectEmailAlert runs before Claude.
+    if (
+      userId
+      && actions.some((a: any) =>
+        a.type === 'SET_EMAIL_ALERT'
+        || (a.type === 'SET_ACTION_RULE' && a.trigger_type === 'email'))
+    ) {
+      const HAS_CREATE_INTENT_POST = /\b(alert|notify|tell|let|remind|text|email|message|ping)\s+me\b|\b(set\s+up|create|make)\s+(an?\s+)?alert\b|\blet\s+me\s+know\b/i;
+      const lastUserMsgB4y = [...messages].reverse().find((m: any) => m.role === 'user');
+      const userTextB4y = typeof lastUserMsgB4y?.content === 'string' ? lastUserMsgB4y.content : '';
+      if (!HAS_CREATE_INTENT_POST.test(userTextB4y)) {
+        const droppedCount = actions.filter((a: any) =>
+          a.type === 'SET_EMAIL_ALERT'
+          || (a.type === 'SET_ACTION_RULE' && a.trigger_type === 'email')).length;
+        actions = actions.filter((a: any) =>
+          !(a.type === 'SET_EMAIL_ALERT'
+            || (a.type === 'SET_ACTION_RULE' && a.trigger_type === 'email')));
+        console.warn(`[naavi-chat] B4y: dropping ${droppedCount} email-rule action(s) — user message lacks create-intent: "${userTextB4y.slice(0, 80)}"`);
+        if (!serverRejectionMessage) {
+          serverRejectionMessage =
+            `I read that as a question, not an alert request. If you want an email alert, say something like: "Alert me when an email arrives about X."`;
         }
       }
     }
