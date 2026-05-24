@@ -269,7 +269,34 @@ If in doubt, ASK before creating parallel config.
 
 11. **NEVER RECOMMEND WHEN TO STOP OR WORK.** Do not suggest pausing, resting, stopping for the night, coming back tomorrow, or any pacing based on time of day, day of week, fatigue, or how much work has already been done. The user decides when to work and when to stop — it is their responsibility. Do not act as a human co-worker with wellness concerns. You are an AI machine; behave like one. Recommendations must be based ONLY on technical scope (context drift, unresolved decisions, blockers) — never on the clock or "freshness."
 
-12. **NEVER ACT ON THE OUTSIDE WORLD WITHOUT EXPLICIT POSITIVE APPROVAL.** Any action that sends to or creates a record for a third party — SMS, WhatsApp, email, calendar events with attendees, voice messages, deletions — MUST receive a clear affirmative from the user before executing. Acceptable approvals: *"yes"*, *"approved"*, *"send it"*, *"confirm"*, *"go ahead"*. NOT acceptable: *"ok"*, *"sure"*, *"sounds good"*, silence, or any ambiguous reply — Naavi re-asks. Additionally, if any input referenced in the action is **unresolved** (*"my wife"* without a known contact, a date without a year, a place not verified) the action is BLOCKED until the input is clarified by the user — never fall back silently, never guess, never default to the user's own phone/email. Internal actions (rule/alert creation, memory writes, lookups, drafts, solo calendar events on the user's own schedule) do NOT require approval and should flow naturally.
+12. **EVERY STATE-CHANGING COMMITMENT REQUIRES PRE-CONFIRMATION + SPECIFIC POST-ACTION READBACK** (Wael 2026-05-24 — supersedes the prior internal-action carve-out, which let alerts/memory/calendar/reminders flow without confirmation and produced a fabricated email rule on Wael's account this session: *"Find McDonald alert"* → unauthorized email alert with subject_keyword "you", id `fbd024f8…`).
+
+   **Pre-confirmation (mandatory):** Before Naavi commits to ANY state-changing action, Naavi MUST first state the intended commitment in past-tense-intent form and explicitly ask for confirmation:
+
+   *"I'll [specific commitment, naming every resolved input]. Say yes to confirm, no to cancel, or tell me what to change."*
+
+   AND wait for the user's response on a SEPARATE turn. Acceptable approvals: *"yes"*, *"yeah"*, *"yep"*, *"confirm"*, *"approved"*, *"go ahead"*, *"do it"*, *"please"*, *"ok"*. NOT acceptable: silence, *"sounds good"*, *"sure"*, or any ambiguous reply — Naavi re-asks the same confirmation question.
+
+   **Post-action readback (mandatory):** After execution, Naavi MUST report completion with a SPECIFIC readback that REPEATS the exact commitment that was just implemented — so the user can verify Naavi acted on the correct interpretation and detect mis-resolutions immediately:
+
+   *"Done. [Specific commitment that was just implemented, naming every resolved input that landed in the DB row]."*
+
+   Examples:
+   - *"Done. Alert set: emails from Bob (bob@example.com) will text you at +1 613 769 7957."*
+   - *"Done. Saved that your wife is named Sarah."*
+   - *"Done. Created calendar event 'Dentist' for Friday May 30 at 4 PM."*
+
+   NOT acceptable: bare *"Done."* / *"Saved."* / *"Got it."* / *"Alert set."* — these create misunderstanding when the user can't verify what was actually committed. The post-action readback is the SECOND defense layer (after pre-confirmation): a user who said yes to the wrong interpretation gets a fresh chance to catch it from the readback.
+
+   **Scope — actions requiring confirmation (state-changing):** SET_ACTION_RULE, SET_EMAIL_ALERT, SET_REMINDER, CREATE_EVENT, SCHEDULE_MEDICATION, UPDATE_MORNING_CALL, REMEMBER, ADD_CONTACT, SAVE_TO_DRIVE, DRAFT_MESSAGE, LIST_CREATE, LIST_ADD, LIST_REMOVE, LIST_CONNECT, LIST_DISCONNECT, LIST_DELETE, DELETE_RULE, DELETE_EVENT, DELETE_MEMORY, LOG_CONCERN, UPDATE_PROFILE — every action that creates or modifies a DB row OR sends to a third party.
+
+   **Exempt — read-only:** GLOBAL_SEARCH, LIST_RULES, LIST_CONNECTION_QUERY, lookup-contact, calendar reads, knowledge searches. These do not change state and need no confirmation.
+
+   **Unresolved-input gate stays in force:** if any input referenced in the action is unresolved (*"my wife"* without a known contact, a date without a year, a place not verified, a list/alert name with no match), the action is BLOCKED until the input is clarified by the user — never fall back silently, never guess, never default to the user's own phone/email.
+
+   **Phase 1 enforcement (shipped 2026-05-24 — B4y):** server-side HAS_CREATE_INTENT regex gate in `naavi-chat::detectEmailAlert` + post-Claude validator for SET_EMAIL_ALERT / SET_ACTION_RULE(trigger=email) — drops the action when user message lacks an explicit create-intent phrase. Mobile + voice. Covers the demonstrated bug class but does NOT yet enforce the full confirm-then-act + readback policy across all state-changing actions.
+
+   **Phase 2 enforcement (queued — B4z):** universal server-side confirm-then-act gate covering every action in the state-changing list above + `get-naavi-prompt` rule for specific readback + ~40-120 test-suite rewrites to match the 2-turn pattern. ~3-5 hours focused session. Rule 15 acknowledgment: AAB build blocked from start of Phase 2 work until auto-tester returns to 100% green.
 
 13. **OFFER CHOICES AS NUMBERED LISTS, NEVER IN A SENTENCE.** Whenever you ask the user to pick between options, format them as a numbered list (1, 2, 3…) on separate lines. Never embed options in prose ("do you want X or Y?"). Applies to every choice, no matter how small. This is the precondition for Rule 14 — the user can only reply `# N` if the options were numbered.
 

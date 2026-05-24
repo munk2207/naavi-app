@@ -2703,11 +2703,54 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               // attach a list_connection if action_config carries a
               // list_name reference. Switched from no-return insert to
               // .select('id').single() for the rule id.
+              //
+              // 2026-05-24 (Wael, B4y) — defensively normalize
+              // trigger_config: Haiku occasionally emits this field as a
+              // JSON STRING (instead of an object) when the schema is
+              // `oneOf` of multiple sub-schemas. Postgres JSONB accepts
+              // strings as valid JSON values, so the rule lands with
+              // trigger_config stored as a string — `app/alerts.tsx:134`
+              // reads `c.from_name` on a string → undefined → renders
+              // "Email from anyone" (the fallback). Live evidence: Bob
+              // email rule today (deleted) stored as string. Parse here
+              // so the insert always gets an object.
+              let normalizedTriggerConfig: any = action.trigger_config ?? {};
+              if (typeof normalizedTriggerConfig === 'string') {
+                try {
+                  normalizedTriggerConfig = JSON.parse(normalizedTriggerConfig);
+                  console.log('[Orchestrator] B4y: parsed trigger_config from JSON string');
+                } catch (err) {
+                  console.warn('[Orchestrator] B4y: failed to parse trigger_config string, using empty object:', err);
+                  normalizedTriggerConfig = {};
+                }
+              }
+              // 2026-05-24 (Wael, B4y) — default to_phone from
+              // user_settings.phone when action_type='sms'/'whatsapp'
+              // and no to_phone resolved. SET_EMAIL_ALERT handler at
+              // line 2226 already had this default (via getUserPhone);
+              // SET_ACTION_RULE didn't, so rules with action_type='sms'
+              // and no explicit `to` field landed with no destination
+              // phone — silent fail at evaluate-rules fire time.
+              if ((actionType === 'sms' || actionType === 'whatsapp') && !actionConfig.to_phone) {
+                const { data: settings } = await queryWithTimeout(
+                  supabase
+                    .from('user_settings')
+                    .select('phone')
+                    .eq('user_id', session.user.id)
+                    .single(),
+                  15_000,
+                  'select-user-phone-for-set-action-rule',
+                );
+                if ((settings as any)?.phone) {
+                  actionConfig.to_phone = (settings as any).phone;
+                  console.log('[Orchestrator] B4y: defaulted to_phone from user_settings:', actionConfig.to_phone);
+                }
+              }
               const { data: insertedRow, error } = await queryWithTimeout(
                 supabase.from('action_rules').insert({
                   user_id:        session.user.id,
                   trigger_type:   triggerType,
-                  trigger_config: action.trigger_config ?? {},
+                  trigger_config: normalizedTriggerConfig,
                   action_type:    actionType,
                   action_config:  actionConfig,
                   label:          String(action.label ?? 'Action rule'),
