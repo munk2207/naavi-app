@@ -814,38 +814,53 @@ async function assembleSystemPromptServerSide(
     console.warn('[assembleSystemPrompt] lists lookup failed:', (err as Error)?.message);
   }
 
-  // 2026-05-23 (Wael) — inject the user's active alerts (action_rules) by
-  // label. Without this, Claude saw NO alerts in context and HALLUCINATED
-  // agreement with "attach my list to Costco alert" (verified live on
-  // V57.22.2 build 198 — Naavi replied "I'll attach…", user said yes,
-  // Naavi said "Got it", then the LIST_CONNECT execution returned
-  // "entity not found" via error card). With alerts in context, Naavi
-  // sees the real names and either matches directly OR honestly reports
-  // "I don't have a Costco alert. You have Loblaws, No Frills, …".
-  // RLS lockdown: action_rules is service-role-only for writes; this
-  // is a service-role SELECT so it's allowed.
+  // 2026-05-24 (Wael) — B4x. Inject BOTH active and disabled alerts.
+  // The prior version (2026-05-23) showed only enabled=true rows; this
+  // hid disabled alerts from Claude entirely and caused a Rule 18
+  // violation: a user with a disabled "McDonald's" alert visible on
+  // their Alerts screen (greyed-out / Expired per F2e closure 2026-05-23)
+  // asked to attach a list, and Naavi replied "I don't have a McDonald's
+  // alert" — false from the user's perspective. With both lists in
+  // context, Naavi can offer reactivation when the only match is in
+  // the disabled list. RLS lockdown: action_rules is service-role-only
+  // for writes; this is a service-role SELECT so it's allowed.
   let alertsContext = '';
   try {
     const { data: alertRows } = await supabase
       .from('action_rules')
-      .select('label, trigger_type, trigger_config')
+      .select('label, trigger_type, trigger_config, enabled')
       .eq('user_id', userId)
-      .eq('enabled', true)
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(100);
     if (Array.isArray(alertRows) && alertRows.length > 0) {
-      const alertLines = alertRows.map((r: any) => {
+      const formatRow = (r: any) => {
         const label = r.label || `${r.trigger_type} alert`;
-        // For location alerts, include the place name as a friendly hint so
-        // Claude can match "Loblaws alert" / "Loblaws arrival" / etc.
         const place = r.trigger_config?.place_name || '';
         return place && !label.includes(place)
           ? `- ${label} (at ${place})`
           : `- ${label}`;
-      });
-      alertsContext =
-        `\n\n## ${userName}'s active alerts (when ${userName} references "the X alert", match against this list — NEVER agree to attach/disconnect/change an alert that isn't here. If no match, say plainly "I don't have a [name] alert" and offer the closest ones from this list.)\n` +
-        alertLines.join('\n');
+      };
+      const enabledRows = (alertRows as any[]).filter((r) => r.enabled);
+      const disabledRows = (alertRows as any[]).filter((r) => !r.enabled);
+      if (enabledRows.length > 0 || disabledRows.length > 0) {
+        let sections = '';
+        if (enabledRows.length > 0) {
+          sections += `\nACTIVE:\n` + enabledRows.map(formatRow).join('\n');
+        }
+        if (disabledRows.length > 0) {
+          sections += `\n\nDISABLED (can be reactivated):\n` + disabledRows.map(formatRow).join('\n');
+        }
+        alertsContext =
+          `\n\n## ${userName}'s alerts (active + disabled)\n` +
+          `When ${userName} references "the X alert", match against BOTH lists below. Reply rules:\n` +
+          `- Match in ACTIVE only → proceed as normal (use the standard "I'll … Say yes to confirm" shape for connect/disconnect).\n` +
+          `- Match in DISABLED only (exactly 1 row) → say "You have a disabled X alert at Y. Want me to reactivate it and [original intent]? Say yes to confirm, no to cancel, or tell me what to change." Do NOT emit a connect/disconnect action on this turn — wait for the user's yes/no.\n` +
+          `- Match in multiple DISABLED rows → ask "You have N disabled X alerts — at A, B, …. Which one?" Wait for the answer.\n` +
+          `- Match in BOTH ACTIVE and DISABLED → ask "You have an active X alert at A. You also have a disabled one at B. Which one?" Wait for the answer.\n` +
+          `- No match in either list → say plainly "I don't have a [name] alert" and offer to create one.\n` +
+          `NEVER agree to attach/disconnect/change an alert that isn't in either list.\n` +
+          sections;
+      }
     }
   } catch (err) {
     console.warn('[assembleSystemPrompt] alerts lookup failed:', (err as Error)?.message);
@@ -870,6 +885,113 @@ function normalizeForEntityMatch(s: string): string {
     .replace(/[''`'.\-/]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+// 2026-05-24 (Wael) — B4x. Look up action_rules by name, partitioned
+// into enabled + disabled matches. Used by alerts context injection,
+// 3 validators, and the auto-reactivate preprocessor.
+//
+// Background: when the user references a disabled alert by name
+// (e.g., "attach my list to McDonald's alert" where the McDonald's
+// alert is in their Alerts UI as greyed-out / Expired), Naavi must
+// surface the disabled match — not deny the alert exists. Denial
+// violates CLAUDE.md Rule 18 (truth-at-user-layer): the user can see
+// the alert on their Alerts screen, so Naavi cannot say "I don't have
+// one." The lookup includes both enabled and disabled rows; callers
+// decide the reply shape via buildAlertMatchMessage below.
+type AlertRow = {
+  id: string;
+  label: string;
+  place: string;
+  enabled: boolean;
+  last_fired_at: string | null;
+};
+
+async function matchAlertByName(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  ref: string,
+): Promise<{ enabledMatches: AlertRow[]; disabledMatches: AlertRow[] }> {
+  const refLower = ref.toLowerCase();
+  const core = refLower
+    .replace(/\b(alert|alerts|notification|notifications|arrival|reminder|reminders)\b/g, '')
+    .trim();
+  const normCore = normalizeForEntityMatch(core);
+  if (normCore.length < 2) {
+    return { enabledMatches: [], disabledMatches: [] };
+  }
+  const { data: rows } = await supabase
+    .from('action_rules')
+    .select('id, label, trigger_config, enabled, last_fired_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(100);
+  const all: AlertRow[] = ((rows ?? []) as any[]).map((r) => ({
+    id: String(r.id),
+    label: String(r.label || ''),
+    place: String(r.trigger_config?.place_name || ''),
+    enabled: !!r.enabled,
+    last_fired_at: r.last_fired_at ?? null,
+  }));
+  const matched = all.filter((r) =>
+    normalizeForEntityMatch(r.label).includes(normCore) ||
+    (r.place && normalizeForEntityMatch(r.place).includes(normCore))
+  );
+  return {
+    enabledMatches: matched.filter((m) => m.enabled),
+    disabledMatches: matched.filter((m) => !m.enabled),
+  };
+}
+
+// 2026-05-24 (Wael) — B4x. Build the standardized server-override
+// message for the alert-name-match result. Returns null when the
+// match is "enabled only" — caller should proceed as normal.
+//
+// originalIntent is a short verb phrase ("attach your list",
+// "disconnect your list", "show what's attached") used to compose
+// the combined reactivate-and-do-X ask for single-disabled matches.
+function buildAlertMatchMessage(
+  entityRef: string,
+  result: { enabledMatches: AlertRow[]; disabledMatches: AlertRow[] },
+  originalIntent: string,
+): string | null {
+  const { enabledMatches, disabledMatches } = result;
+  // Match in ACTIVE only — proceed as normal.
+  if (enabledMatches.length > 0 && disabledMatches.length === 0) {
+    return null;
+  }
+  // Single disabled match — combined ask (Decision 1 — Option A).
+  if (enabledMatches.length === 0 && disabledMatches.length === 1) {
+    const d = disabledMatches[0];
+    const where = d.place || d.label;
+    return `You have a disabled ${entityRef} at ${where}. Want me to reactivate it and ${originalIntent}? Say yes to confirm, no to cancel, or tell me what to change.`;
+  }
+  // Multiple disabled matches — disambiguation (Decision 2 — Option A).
+  if (enabledMatches.length === 0 && disabledMatches.length > 1) {
+    const items = disabledMatches.map((m) => m.place || m.label).join(', ');
+    return `You have ${disabledMatches.length} disabled ${entityRef}s — at ${items}. Which one?`;
+  }
+  // Both active and disabled match — mention both (Decision 3 — Option B).
+  if (enabledMatches.length > 0 && disabledMatches.length > 0) {
+    const activeWhere = enabledMatches[0].place || enabledMatches[0].label;
+    const disabledWhere = disabledMatches[0].place || disabledMatches[0].label;
+    return `You have an active ${entityRef} at ${activeWhere}. You also have a disabled one at ${disabledWhere}. Which one?`;
+  }
+  // No match anywhere — existing rejection shape.
+  return `You don't have a ${entityRef}. Want to create one, or attach to a different alert?`;
+}
+
+// 2026-05-24 (Wael) — B4x. Detect confirmation turns ("yes" / "confirm"
+// / etc.) so the auto-reactivate preprocessor only fires when the user
+// is responding to a previous combined-ask, NEVER on a fresh request
+// (where Haiku might emit LIST_CONNECT on turn 1 ignoring the prompt
+// rule — that case must still show the combined ask, not silently
+// reactivate). Conservative match: only accept clean affirmatives at
+// the start of the message.
+function isAffirmativeConfirmTurn(userText: string): boolean {
+  const t = String(userText || '').trim().toLowerCase();
+  if (!t) return false;
+  return /^(yes|yeah|yep|yup|confirm|confirmed|sure|please|go ahead|do it|ok|okay)\b/.test(t);
 }
 
 // ── Resolve user ID ───────────────────────────────────────────────────────────
@@ -1318,66 +1440,98 @@ Deno.serve(async (req) => {
     // alert" → user says yes → "entity not found" error-card sequence
     // that broke trust on V57.22.2 build 198 live testing.
     let serverRejectionMessage: string | null = null;
+
+    // 2026-05-24 (Wael) — B4x. Auto-reactivate preprocessor for the
+    // SECOND turn of the combined reactivate-and-attach flow. When the
+    // user replies "yes" to a prior B4x ask, Claude emits LIST_CONNECT
+    // / LIST_DISCONNECT targeting the disabled rule. We reactivate it
+    // here BEFORE the entity-existence validator runs, so the validator
+    // sees the rule as enabled and lets the action proceed. Gated by
+    // isAffirmativeConfirmTurn so a fresh turn-1 request (where Haiku
+    // wrongly emits the action ignoring the prompt rule) still falls
+    // through to the validator and gets the combined ask shown.
+    {
+      const lastUserMsg = [...(messages ?? [])].reverse().find((m: any) => m.role === 'user');
+      const lastUserText = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : '';
+      if (
+        userId
+        && isAffirmativeConfirmTurn(lastUserText)
+        && actions.some((a: any) =>
+          (a.type === 'LIST_CONNECT' || a.type === 'LIST_DISCONNECT')
+          && a.entityType === 'action_rule'
+          && typeof a.entityRef === 'string')
+      ) {
+        for (const action of actions) {
+          if (
+            (action.type !== 'LIST_CONNECT' && action.type !== 'LIST_DISCONNECT')
+            || action.entityType !== 'action_rule'
+            || typeof action.entityRef !== 'string'
+          ) continue;
+          try {
+            const result = await matchAlertByName(supabase, userId, action.entityRef);
+            if (result.disabledMatches.length === 1 && result.enabledMatches.length === 0) {
+              const target = result.disabledMatches[0];
+              const { error: upErr } = await supabase
+                .from('action_rules')
+                .update({ enabled: true, last_fired_at: null })
+                .eq('id', target.id);
+              if (upErr) {
+                console.warn(`[naavi-chat] B4x auto-reactivate failed for "${action.entityRef}":`, upErr.message);
+              } else {
+                console.log(`[naavi-chat] B4x auto-reactivated disabled rule "${target.label}" (id=${target.id}) for ${action.type}`);
+              }
+            }
+          } catch (err) {
+            console.warn(`[naavi-chat] B4x auto-reactivate exception for "${action.entityRef}":`, (err as Error)?.message);
+          }
+        }
+      }
+    }
+
+    // 2026-05-24 (Wael) — B4x. Entity-existence validator updated to
+    // surface disabled-only matches as a combined reactivate-and-do-X
+    // ask, multiple-disabled as disambiguation, and active+disabled
+    // as disambiguation. See matchAlertByName + buildAlertMatchMessage.
+    // Original 2026-05-23 logic (drop action when no enabled match)
+    // is preserved as the no-match-anywhere fall-through.
     if (userId && actions.some((a: any) =>
       (a.type === 'LIST_CONNECT' || a.type === 'LIST_DISCONNECT' || a.type === 'LIST_CONNECTION_QUERY')
       && a.entityType === 'action_rule'
       && typeof a.entityRef === 'string'
     )) {
-      try {
-        const { data: alertRows } = await supabase
-          .from('action_rules')
-          .select('label, trigger_config')
-          .eq('user_id', userId)
-          .eq('enabled', true)
-          .limit(50);
-        const alerts = (alertRows ?? []).map((r: any) => ({
-          label: String(r.label || ''),
-          place: String(r.trigger_config?.place_name || ''),
-        }));
-        const filtered: any[] = [];
-        for (const a of actions) {
-          const isEntityAction =
-            (a.type === 'LIST_CONNECT' || a.type === 'LIST_DISCONNECT' || a.type === 'LIST_CONNECTION_QUERY')
-            && a.entityType === 'action_rule'
-            && typeof a.entityRef === 'string';
-          if (isEntityAction) {
-            const refLower = a.entityRef.toLowerCase();
-            // Strip noise words to get the core keyword for matching
-            const core = refLower
-              .replace(/\b(alert|alerts|notification|arrival|reminder)\b/g, '')
-              .trim();
-            // 2026-05-23 (Wael) — normalize apostrophes/hyphens/etc. on
-            // BOTH sides before substring match. Deepgram STT sometimes
-            // adds an apostrophe (transcribes "Loblaws" as "Loblaw's")
-            // that breaks naive substring comparison against the user's
-            // real alert label "Loblaws Gloucestershire". Forgiving
-            // normalization restores the match for STT and typo variants.
-            const normCore = normalizeForEntityMatch(core);
-            const matched = alerts.some(al =>
-              normalizeForEntityMatch(al.label).includes(normCore) ||
-              (al.place && normalizeForEntityMatch(al.place).includes(normCore))
-            );
-            if (!matched && core.length >= 2) {
-              // Build a friendly list of the user's actual alerts.
-              // 2026-05-23 (Wael) — concise rejection shape: don't dump
-              // the full alerts list. Just confirm "no" + ask intent.
-              // User can ask "what alerts do I have?" separately if they
-              // want the list. Listing all alerts becomes noise when
-              // there are 5+ of them.
-              if (!serverRejectionMessage) {
-                serverRejectionMessage =
-                  `You don't have a ${a.entityRef}. Want to create one, or attach to a different alert?`;
-              }
-              console.warn(`[naavi-chat] entity-validation: dropping ${a.type} for non-existent entityRef="${a.entityRef}" (core="${core}")`);
-              continue; // drop this action
+      const filtered: any[] = [];
+      for (const a of actions) {
+        const isEntityAction =
+          (a.type === 'LIST_CONNECT' || a.type === 'LIST_DISCONNECT' || a.type === 'LIST_CONNECTION_QUERY')
+          && a.entityType === 'action_rule'
+          && typeof a.entityRef === 'string';
+        if (isEntityAction) {
+          try {
+            const result = await matchAlertByName(supabase, userId, a.entityRef);
+            const intentVerb = a.type === 'LIST_CONNECT' ? 'attach your list'
+              : a.type === 'LIST_DISCONNECT' ? 'disconnect your list'
+              : 'show what\'s attached';
+            const msg = buildAlertMatchMessage(a.entityRef, result, intentVerb);
+            if (msg === null) {
+              // Match in ACTIVE only — proceed.
+              filtered.push(a);
+              continue;
             }
+            // Disabled-only / multi-disabled / both-states / no-match —
+            // override speech and drop the action.
+            if (!serverRejectionMessage) serverRejectionMessage = msg;
+            console.warn(`[naavi-chat] B4x entity-validation: dropping ${a.type} for entityRef="${a.entityRef}" (enabled=${result.enabledMatches.length}, disabled=${result.disabledMatches.length})`);
+            continue;
+          } catch (err) {
+            console.warn('[naavi-chat] entity validation failed:', (err as Error)?.message);
+            // Conservative: pass through on validation failure to avoid blocking the user.
+            filtered.push(a);
+            continue;
           }
-          filtered.push(a);
         }
-        actions = filtered;
-      } catch (err) {
-        console.warn('[naavi-chat] entity validation failed (proceeding without override):', (err as Error)?.message);
+        filtered.push(a);
       }
+      actions = filtered;
     }
 
     // 2026-05-23 (Wael, second pass) — USER-MESSAGE-pattern validation.
@@ -1409,26 +1563,21 @@ Deno.serve(async (req) => {
           const SKIP_WORDS = new Set(['arrival', 'arriving', 'location', 'new']);
           if (entityLower.length >= 2 && !SKIP_WORDS.has(entityLower)) {
             try {
-              const { data: alertRows } = await supabase
-                .from('action_rules')
-                .select('label, trigger_config')
-                .eq('user_id', userId)
-                .eq('enabled', true)
-                .limit(50);
-              const alerts = (alertRows ?? []).map((r: any) => ({
-                label: String(r.label || ''),
-                place: String(r.trigger_config?.place_name || ''),
-              }));
-              const normEntity = normalizeForEntityMatch(entityLower);
-              const matched = alerts.some(al =>
-                normalizeForEntityMatch(al.label).includes(normEntity) ||
-                (al.place && normalizeForEntityMatch(al.place).includes(normEntity))
-              );
-              if (!matched && alerts.length > 0) {
-                serverRejectionMessage =
-                  `You don't have a ${entityName} alert. Want to create one, or attach to a different alert?`;
-                console.warn(`[naavi-chat] user-intent-validation: override — user referenced non-existent entity "${entityName}" with connect-intent`);
-                // Also drop any list_connect/disconnect/connection_query actions Claude emitted for this non-existent entity.
+              // 2026-05-24 (Wael) — B4x. Look up against both active +
+              // disabled rules. If only-disabled / multi-disabled /
+              // active+disabled match → override speech with combined ask
+              // or disambiguation. If no match at all → existing rejection.
+              const refLabel = `${entityName} alert`;
+              const result = await matchAlertByName(supabase, userId, refLabel);
+              const intentVerb = /\b(disconnect|detach)\b/i.test(userText) ? 'disconnect your list'
+                : /\b(what\s+lists?\s+(?:is|are)\s+on|where\s+is)\b/i.test(userText) ? 'show what\'s attached'
+                : 'attach your list';
+              const msg = buildAlertMatchMessage(refLabel, result, intentVerb);
+              if (msg !== null) {
+                serverRejectionMessage = msg;
+                console.warn(`[naavi-chat] B4x user-intent-validation: override for "${entityName}" (enabled=${result.enabledMatches.length}, disabled=${result.disabledMatches.length})`);
+                // Drop any list_connect/disconnect/connection_query actions
+                // Claude emitted for this entity — server-side ask supersedes.
                 actions = actions.filter((a: any) => {
                   if (
                     (a.type === 'LIST_CONNECT' || a.type === 'LIST_DISCONNECT' || a.type === 'LIST_CONNECTION_QUERY')
@@ -1475,30 +1624,16 @@ Deno.serve(async (req) => {
           .trim();
         if (core.length >= 2) {
           try {
-            const { data: alertRows } = await supabase
-              .from('action_rules')
-              .select('label, trigger_config')
-              .eq('user_id', userId)
-              .eq('enabled', true)
-              .limit(50);
-            const alerts = (alertRows ?? []).map((r: any) => ({
-              label: String(r.label || ''),
-              place: String(r.trigger_config?.place_name || ''),
-            }));
-            const normCore = normalizeForEntityMatch(core);
-            const matched = alerts.some(al =>
-              normalizeForEntityMatch(al.label).includes(normCore) ||
-              (al.place && normalizeForEntityMatch(al.place).includes(normCore))
-            );
-            if (!matched) {
-              // 2026-05-23 (Wael) — concise rejection shape: don't dump
-              // the full alerts list. Just confirm "no" + ask intent.
-              // User can ask "what alerts do I have?" separately if they
-              // want the list. Listing all alerts becomes noise when
-              // there are 5+ of them.
-              serverRejectionMessage =
-                `You don't have a ${refRaw}. Want to create one, or attach to a different alert?`;
-              console.warn(`[naavi-chat] speech-validation: override — speech mentioned non-existent entity "${refRaw}" (core="${core}")`);
+            // 2026-05-24 (Wael) — B4x. Look up against both active +
+            // disabled. If Claude said "I'll attach to your <X> alert"
+            // but X is only in the disabled list (or multiple disabled,
+            // or both states), override with the appropriate B4x reply.
+            const result = await matchAlertByName(supabase, userId, refRaw);
+            const intentVerb = 'attach your list';
+            const msg = buildAlertMatchMessage(refRaw, result, intentVerb);
+            if (msg !== null) {
+              serverRejectionMessage = msg;
+              console.warn(`[naavi-chat] B4x speech-validation: override for "${refRaw}" (enabled=${result.enabledMatches.length}, disabled=${result.disabledMatches.length})`);
             }
           } catch (err) {
             console.warn('[naavi-chat] speech validation failed:', (err as Error)?.message);

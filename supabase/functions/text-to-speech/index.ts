@@ -182,6 +182,77 @@ function expandAddressAbbreviations(text: string): string {
   return text.replace(pattern, (_m, name, abbrev, dot) => `${name} ${SUFFIX_MAP[abbrev]}${dot || ''}`);
 }
 
+// 2026-05-24 (Wael) — B4f. Canadian postal code phonetic expansion.
+// Without this, Deepgram (and any neural TTS) reads "5M3" as "5 meter 3"
+// because `M` between digits is interpreted as the SI unit. Voice server
+// has the same fix at `naavi-voice-server/src/index.js::normalizeAbbrevForTTS`
+// lines 3996-4005 since 2026-05-16; this is the mobile parity port.
+//
+// Strategy: spell tricky letters as their phonetic letter-names so Aura
+// reads them as letters not unit abbreviations or words:
+//   M → em (not meter)
+//   N → en (not Newton)
+//   S → ess (not seconds)
+//   W → double u (not Watt)
+// Other letters (K, A, P, B, etc.) read correctly as letter names by
+// default, so we leave them alone.
+//
+// Matches Canadian postal-code shape: Letter-Digit-Letter [space] Digit-Letter-Digit.
+function normalizePostalCodeForTTS(text: string): string {
+  if (!text) return text;
+  const fix = (l: string) => {
+    if (l === 'M') return 'em';
+    if (l === 'N') return 'en';
+    if (l === 'S') return 'ess';
+    if (l === 'W') return 'double u';
+    return l;
+  };
+  // 1) Full postal code: L-D-L [space] D-L-D (e.g., "K1A 0B1" / "K1A0B1")
+  text = text.replace(
+    /\b([A-Z])(\d)([A-Z])\s?(\d)([A-Z])(\d)\b/g,
+    (_m, l1, d1, l2, d2, l3, d3) =>
+      `${fix(l1)} ${d1} ${fix(l2)}, ${d2} ${fix(l3)} ${d3}`,
+  );
+  // 2) 2026-05-24 (Wael) — partial postal-code fragment: D-L-D where
+  // the letter is one of M/N/S/W (the only letters that get
+  // misinterpreted as units/words). Covers cases where Naavi quotes
+  // just the second half of a Canadian postal code ("5M3", "9N2",
+  // "4W7") in a reply. Restricted to M/N/S/W to avoid over-matching:
+  // patterns like "3K4" or "7P2" read correctly as letter-names by
+  // default and don't need spelling-out. Order matters — run AFTER
+  // the full-postal-code rule above so we don't double-process the
+  // D-L-D suffix of a full match.
+  text = text.replace(
+    /\b(\d)([MNSW])(\d)\b/g,
+    (_m, d1, l, d2) => `${d1} ${fix(l)} ${d2}`,
+  );
+  return text;
+}
+
+// 2026-05-24 (Wael) — B4f. Canadian province code expansion. Mirrors
+// voice server's `normalizeAbbrevForTTS` province lines 3987-3990.
+// Pattern requires "<comma> <ON|QC|BC|AB>" so "Ontario" reads naturally
+// in an address context like "Ottawa, ON" → "Ottawa, Ontario". Doesn't
+// touch "ON" used as a preposition ("turn ON the light") because it
+// requires the leading comma.
+function expandProvinceCodesForTTS(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(/,\s*ON\b/g, ', Ontario')
+    .replace(/,\s*QC\b/g, ', Quebec')
+    .replace(/,\s*BC\b/g, ', British Columbia')
+    .replace(/,\s*AB\b/g, ', Alberta')
+    .replace(/,\s*MB\b/g, ', Manitoba')
+    .replace(/,\s*SK\b/g, ', Saskatchewan')
+    .replace(/,\s*NS\b/g, ', Nova Scotia')
+    .replace(/,\s*NB\b/g, ', New Brunswick')
+    .replace(/,\s*NL\b/g, ', Newfoundland and Labrador')
+    .replace(/,\s*PE\b/g, ', Prince Edward Island')
+    .replace(/,\s*YT\b/g, ', Yukon')
+    .replace(/,\s*NT\b/g, ', Northwest Territories')
+    .replace(/,\s*NU\b/g, ', Nunavut');
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -223,7 +294,28 @@ serve(async (req) => {
       ? requestedVoice
       : 'aura-hera-en';
 
-    const normalised = expandAddressAbbreviations(normalizeOrdinalsForTTS(normalizePhoneForTTS(normalizeListsForTTS(text))));
+    // 2026-05-24 (Wael) — B4f. Pipeline order matters:
+    //   1. lists (collapse bullets to prose)
+    //   2. phone (group digits)
+    //   3. ordinals (strip "th"/"nd")
+    //   4. street abbrevs (Dr → Drive)
+    //   5. postal-code phonetic (5M3 → 5 em 3) — NEW
+    //   6. province codes (ON → Ontario) — NEW
+    // Postal-code transform runs BEFORE province codes so the M-between-digits
+    // case is caught while postal codes still look like "K1A 0B1". Province
+    // codes need to run last because the comma+space pattern they require
+    // is preserved through all earlier transforms.
+    const normalised = expandProvinceCodesForTTS(
+      normalizePostalCodeForTTS(
+        expandAddressAbbreviations(
+          normalizeOrdinalsForTTS(
+            normalizePhoneForTTS(
+              normalizeListsForTTS(text)
+            )
+          )
+        )
+      )
+    );
     console.log('[text-to-speech] voice:', model, 'text length:', text.length, 'normalised length:', normalised.length);
 
     const res = await fetch(`https://api.deepgram.com/v1/speak?model=${model}&encoding=mp3`, {

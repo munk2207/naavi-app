@@ -3260,6 +3260,44 @@ const oneShot = pending.originalAction?.one_shot ?? true;
 // "aggan2207" → "aggan 2 2 0 7"   |   "test123" → "test 1 2 3"
 
 function sanitiseForSpeech(text: string): string {
+  // 2026-05-24 (Wael) — B4f. Normalize Canadian postal codes BEFORE the
+  // character-splitter below. Without this, "K1C5M3" gets split into
+  // "K 1 C 5 M 3", and the standalone M/N/S/W between digits is then
+  // pronounced by Deepgram as the SI unit (meters/newtons/seconds/watts).
+  // The downstream text-to-speech Edge Function has the same normalizer
+  // but never sees the unsplit form because we mangle it here first.
+  // Mirrors text-to-speech/index.ts:200-254.
+  const fixPostalLetter = (l: string) => {
+    if (l === 'M') return 'em';
+    if (l === 'N') return 'en';
+    if (l === 'S') return 'ess';
+    if (l === 'W') return 'double u';
+    return l;
+  };
+  text = text
+    // Full Canadian postal code (L-D-L [optional space] D-L-D).
+    .replace(
+      /\b([A-Z])(\d)([A-Z])\s?(\d)([A-Z])(\d)\b/g,
+      (_m, l1, d1, l2, d2, l3, d3) =>
+        `${fixPostalLetter(l1)} ${d1} ${fixPostalLetter(l2)}, ${d2} ${fixPostalLetter(l3)} ${d3}`,
+    )
+    // Partial postal-code fragment (D-L-D where L ∈ M/N/S/W).
+    .replace(/\b(\d)([MNSW])(\d)\b/g, (_m, d1, l, d2) => `${d1} ${fixPostalLetter(l)} ${d2}`)
+    // Province codes (require leading comma so "ON the light" stays intact).
+    .replace(/,\s*ON\b/g, ', Ontario')
+    .replace(/,\s*QC\b/g, ', Quebec')
+    .replace(/,\s*BC\b/g, ', British Columbia')
+    .replace(/,\s*AB\b/g, ', Alberta')
+    .replace(/,\s*MB\b/g, ', Manitoba')
+    .replace(/,\s*SK\b/g, ', Saskatchewan')
+    .replace(/,\s*NS\b/g, ', Nova Scotia')
+    .replace(/,\s*NB\b/g, ', New Brunswick')
+    .replace(/,\s*NL\b/g, ', Newfoundland and Labrador')
+    .replace(/,\s*PE\b/g, ', Prince Edward Island')
+    .replace(/,\s*YT\b/g, ', Yukon')
+    .replace(/,\s*NT\b/g, ', Northwest Territories')
+    .replace(/,\s*NU\b/g, ', Nunavut');
+
   return text
     // Strip markdown bold/italic (**text**, *text*, __text__, _text_)
     .replace(/\*\*(.+?)\*\*/g, '$1')
@@ -3699,6 +3737,9 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
     });
     endDiagSession(ttsSession);
     await Speech.stop();
+    // 2026-05-24 (Wael) — B4f. Postal-code + province normalization
+    // happens upstream in sanitiseForSpeech (called by speakResponse)
+    // so `text` here is already normalized. Pass it through directly.
     return new Promise((resolve) => {
       Speech.speak(text, {
         language: language === 'fr' ? 'fr-CA' : 'en-CA',
