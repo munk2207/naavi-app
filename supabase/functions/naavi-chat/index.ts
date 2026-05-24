@@ -854,7 +854,9 @@ async function assembleSystemPromptServerSide(
           `\n\n## ${userName}'s alerts (active + disabled)\n` +
           `When ${userName} references "the X alert", match against BOTH lists below. Reply rules:\n` +
           `- Match in ACTIVE only → proceed as normal (use the standard "I'll … Say yes to confirm" shape for connect/disconnect).\n` +
-          `- Match in DISABLED only (exactly 1 row) → say "You have a disabled X alert at Y. Want me to reactivate it and [original intent]? Say yes to confirm, no to cancel, or tell me what to change." Do NOT emit a connect/disconnect action on this turn — wait for the user's yes/no.\n` +
+          `- Match in DISABLED only (exactly 1 row). Two-turn flow:\n` +
+          `    (a) If your IMMEDIATELY PREVIOUS reply did NOT contain "Want me to reactivate it and" for this alert → say "You have a disabled X alert at Y. Want me to reactivate it and [original intent]? Say yes to confirm, no to cancel, or tell me what to change." Do NOT emit a connect/disconnect action this turn. Wait for the user's yes/no.\n` +
+          `    (b) If your IMMEDIATELY PREVIOUS reply DID contain "Want me to reactivate it and" for this alert AND the user just replied with yes/yeah/yep/confirm/sure/ok/please → EMIT the LIST_CONNECT (or LIST_DISCONNECT) action NOW with this disabled rule as entityRef. The server auto-reactivates the rule before executing the connect. Do NOT repeat the combined ask — that's an infinite loop.\n` +
           `- Match in multiple DISABLED rows → ask "You have N disabled X alerts — at A, B, …. Which one?" Wait for the answer.\n` +
           `- Match in BOTH ACTIVE and DISABLED → ask "You have an active X alert at A. You also have a disabled one at B. Which one?" Wait for the answer.\n` +
           `- No match in either list → say plainly "I don't have a [name] alert" and offer to create one.\n` +
