@@ -232,7 +232,7 @@ export const session20260525Tests: TestCase[] = [
       const CORRECTION_RE = /^\s*(?:no[,.]?\s+)?(?:i\s+(?:meant|said|mean)|actually[,.]?\s+\S|correction[:.]\s*\S)/i;
 
       const shouldMatch = [
-        'I meant Farida',
+        'I meant Fatma',
         'i meant groceries',
         'I said Ahmed',
         'No, I meant Fatma',
@@ -281,10 +281,10 @@ export const session20260525Tests: TestCase[] = [
     async run(ctx) {
       const url = `${ctx.supabaseUrl}/functions/v1/naavi-chat`;
 
-      // Simulate: Naavi failed to find "Fatima" → user corrects to "Farida".
+      // Simulate: Naavi failed to find "Fatma" → user corrects to "Fatma".
       const messages = [
-        { role: 'user', content: 'What is Fatima\'s phone number?' },
-        { role: 'assistant', content: 'I couldn\'t find Fatima in your contacts.' },
+        { role: 'user', content: 'What is Fatma\'s phone number?' },
+        { role: 'assistant', content: 'I couldn\'t find Fatma in your contacts.' },
       ];
 
       const res = await fetch(url, {
@@ -296,7 +296,7 @@ export const session20260525Tests: TestCase[] = [
         },
         body: JSON.stringify({
           user_id:  ctx.testUserId,
-          message:  'I meant Farida',
+          message:  'I meant Fatma',
           messages,
         }),
       });
@@ -318,7 +318,7 @@ export const session20260525Tests: TestCase[] = [
       const isRejected = /didn.*t quite catch|garbled|didn.*t understand/i.test(speech);
       if (isRejected) {
         throw new Error(
-          `"I meant Farida" was treated as garbled input instead of a correction. ` +
+          `"I meant Fatma" was treated as garbled input instead of a correction. ` +
           `speech="${speech}"`,
         );
       }
@@ -328,7 +328,7 @@ export const session20260525Tests: TestCase[] = [
       // Empty speech is only acceptable when rawText is also empty (unexpected).
       const hasResponse = speech.trim().length > 0 || (data?.rawText ?? '').length > 0;
       if (!hasResponse) {
-        throw new Error('"I meant Farida" produced an empty response (no rawText, no speech).');
+        throw new Error('"I meant Fatma" produced an empty response (no rawText, no speech).');
       }
       ctx.log('Correction command handled correctly — PASS');
     },
