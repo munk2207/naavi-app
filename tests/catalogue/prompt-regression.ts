@@ -302,6 +302,47 @@ export const promptRegressionTests: TestCase[] = [
   },
 
   // ──────────────────────────────────────────────────────────────────────
+  // CONTACT POSSESSIVE ADDRESS — "alert me when I arrive to [Name] office"
+  // must emit SET_ACTION_RULE immediately. Must NOT ask for the address
+  // (the address is on the contact card — server resolves via Google Contacts).
+  // Regression for live bug caught 2026-05-25: Naavi asked "I need the address
+  // of Dr. Ashraf Younan's office before I can set the alert."
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'prompt-regression.contact-possessive-no-address-question',
+    category: 'prompt-regression',
+    description: '"alert me when I arrive to dr. Ashraf Younan office" must emit SET_ACTION_RULE immediately — must NOT ask for the address',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'alert me when I arrive to dr. Ashraf Younan office' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      const rawText = data?.rawText ?? '';
+      ctx.log(`rawText: ${rawText.slice(0, 300)}…`);
+
+      // Must emit action immediately — no address question, no confirm ask.
+      const action = findActionInRawText(rawText, 'SET_ACTION_RULE');
+      expectTruthy(action, 'SET_ACTION_RULE must be emitted immediately for contact possessive address');
+
+      // Must NOT ask for the address.
+      expectSpeechNotMatch(
+        rawText,
+        /i need the address|what.?s the (street )?address|give me the address|what is the address/i,
+        'contact-possessive-address-question',
+      );
+
+      // Must NOT apply RULE 23 confirm gate (location alerts are exempt).
+      expectSpeechNotMatch(
+        rawText,
+        /say yes to confirm/i,
+        'contact-possessive-no-rule23-confirm',
+      );
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
   // REMEMBER — "remember that I take Lipitor at 8 AM" must emit REMEMBER
   // (regression baseline for memory write).
   // ──────────────────────────────────────────────────────────────────────
