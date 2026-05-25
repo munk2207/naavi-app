@@ -247,6 +247,7 @@ export const gmailAdapter: SearchAdapter = {
         snippet: raw,
         score,
         createdAt: r.received_at ?? undefined,
+        url: `https://mail.google.com/mail/u/0/#all/${r.gmail_message_id}`,
         metadata: {
           message_id: r.gmail_message_id,
           sender_name: r.sender_name,

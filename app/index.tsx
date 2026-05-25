@@ -1803,30 +1803,52 @@ export default function HomeScreen() {
                     const isExpanded = expandedSearchGroups.has(groupKey);
                     const visibleHits = isExpanded ? hits : hits.slice(0, 3);
                     const hiddenCount = hits.length - 3;
+                    // Email sources use a compact list format (title + date per row).
+                    const isEmailSource = source === 'email_actions' || source === 'gmail';
                     return (
                       <View key={source} style={styles.globalSearchGroup}>
                         <Text style={styles.globalSearchGroupLabel}>
-                          {source === 'calendar' ? '📅 Calendar' :
-                           source === 'contacts' ? '👤 Contacts' :
-                           source === 'lists' ? '📝 Lists' :
-                           source === 'gmail' ? '✉ Email' :
+                          {source === 'calendar'      ? '📅 Calendar' :
+                           source === 'contacts'      ? '👤 Contacts' :
+                           source === 'lists'         ? '📝 Lists' :
+                           source === 'gmail'         ? '✉ Email' :
+                           source === 'email_actions' ? '📧 Emails' :
                            source === 'sent_messages' ? '📤 Sent messages' :
-                           source === 'rules' ? '⚡ Automations' :
-                           source === 'knowledge' ? '🧠 Memory' :
+                           source === 'rules'         ? '⚡ Automations' :
+                           source === 'reminders'     ? '⏰ Reminders' :
+                           source === 'knowledge'     ? '🧠 Memory' :
                            source}
                           {' · '}{hits.length}
                         </Text>
                         {visibleHits.map((hit, i) => (
                           <TouchableOpacity
                             key={i}
-                            style={styles.globalSearchHit}
+                            style={isEmailSource ? styles.globalSearchListItem : styles.globalSearchHit}
                             onPress={() => hit.url && Linking.openURL(hit.url)}
                             disabled={!hit.url}
                           >
-                            <Text style={styles.globalSearchHitTitle} numberOfLines={2}>{hit.title}</Text>
-                            {hit.snippet ? (
-                              <Text style={styles.globalSearchHitMeta} numberOfLines={2}>{hit.snippet}</Text>
-                            ) : null}
+                            {isEmailSource ? (
+                              <>
+                                <View style={styles.globalSearchListRow}>
+                                  <Text style={[styles.globalSearchHitTitle, { flex: 1 }]} numberOfLines={1}>{hit.title}</Text>
+                                  {hit.createdAt ? (
+                                    <Text style={styles.globalSearchListDate}>
+                                      {new Date(hit.createdAt).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', timeZone: 'America/Toronto' })}
+                                    </Text>
+                                  ) : null}
+                                </View>
+                                {hit.snippet ? (
+                                  <Text style={styles.globalSearchHitMeta} numberOfLines={1}>{hit.snippet}</Text>
+                                ) : null}
+                              </>
+                            ) : (
+                              <>
+                                <Text style={styles.globalSearchHitTitle} numberOfLines={2}>{hit.title}</Text>
+                                {hit.snippet ? (
+                                  <Text style={styles.globalSearchHitMeta} numberOfLines={2}>{hit.snippet}</Text>
+                                ) : null}
+                              </>
+                            )}
                           </TouchableOpacity>
                         ))}
                         {hits.length > 3 && (
@@ -3009,6 +3031,25 @@ const styles = StyleSheet.create({
     fontWeight: Typography.semibold,
     textAlign: 'center',
     paddingVertical: 4,
+  },
+  // Compact list-item style used for email_actions + gmail groups.
+  globalSearchListItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border ?? '#2a2a2a',
+    gap: 2,
+  },
+  globalSearchListRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  globalSearchListDate: {
+    fontSize: Typography.xs ?? 11,
+    color: Colors.textMuted,
+    flexShrink: 0,
   },
   driveCard: {
     backgroundColor: Colors.bgCard,

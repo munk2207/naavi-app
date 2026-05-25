@@ -95,6 +95,20 @@ export const emailActionsAdapter: SearchAdapter = {
 
     const rows = (data ?? []) as ActionRow[];
 
+    // Fetch actual email receipt dates from gmail_messages so the UI can show
+    // "received May 23" rather than the extraction timestamp.
+    const msgIds = rows.map(r => r.gmail_message_id).filter(Boolean);
+    const receivedAtMap: Record<string, string | null> = {};
+    if (msgIds.length > 0) {
+      const { data: gmailRows } = await ctx.supabase
+        .from('gmail_messages')
+        .select('gmail_message_id, received_at')
+        .in('gmail_message_id', msgIds);
+      for (const gm of (gmailRows ?? []) as { gmail_message_id: string; received_at: string | null }[]) {
+        receivedAtMap[gm.gmail_message_id] = gm.received_at;
+      }
+    }
+
     const hits: SearchResult[] = [];
     for (const r of rows) {
       const title = (r.title ?? '').toLowerCase();
@@ -121,12 +135,16 @@ export const emailActionsAdapter: SearchAdapter = {
           : 'Email action';
       const snippet = (r.summary?.trim() || displayTitle).slice(0, 200);
 
+      // Use actual email receipt date; fall back to extraction timestamp.
+      const receivedAt = receivedAtMap[r.gmail_message_id] ?? r.extracted_at ?? undefined;
+
       hits.push({
         source: 'email_actions',
         title: displayTitle,
         snippet,
         score,
-        createdAt: r.extracted_at ?? undefined,
+        createdAt: receivedAt,
+        url: `https://mail.google.com/mail/u/0/#all/${r.gmail_message_id}`,
         metadata: {
           action_id: r.id,
           gmail_message_id: r.gmail_message_id,
