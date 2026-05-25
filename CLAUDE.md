@@ -245,6 +245,25 @@ If in doubt, ASK before creating parallel config.
 
 **The user_places table was DROPPED in V57.13.3.** It existed as a place-cache for resolve-place but produced more bugs than performance. The "saved places" feature is now absorbed by `action_rules` — if a user wants to be reminded at a place repeatedly, they create one recurring rule. See "FOUNDATIONAL PRINCIPLE — NO CACHE, FRESH ALWAYS, USER PICKS" at the top of this file.
 
+### AI CODING DISCIPLINE (Wael 2026-05-25)
+
+Rules that are already covered elsewhere are NOT duplicated here — see CONFIGURATION DISCIPLINE (no duplicate config), CLAUDE PROMPT — SHARED SOURCE OF TRUTH (prompts in one place), and ABSOLUTE RULES 1–5 (explain before acting, stability over cost). This section adds what those don't cover.
+
+**19. REFACTOR OVER LAYER.** When a fix or feature can be done by improving an existing file, do that — do not wrap it in a new service, helper, or abstraction layer. New abstractions must justify their existence. If the justification is "cleaner code" without a concrete problem it solves, the abstraction is not justified.
+
+**20. REMOVE DEAD CODE.** Unused files, obsolete Edge Functions, retired tables, and commented-out logic must be deleted — not left "just in case." Dead code is maintenance cost with no upside. When retiring something, delete it and note the deletion in the commit message.
+
+**21. NO SILENT FAILURES.** Every catch block must log enough context to diagnose the failure: which function, which input, what the error was. A bare `catch { /* ignore */ }` is only acceptable for non-critical teardown paths (tests, best-effort cleanup). Anywhere Naavi could silently stop working for a user — log it.
+
+**22. FILES STAY FOCUSED.** If a file is doing two unrelated jobs, split it. If a function is longer than can be understood in one read, break it up. The test for "focused": can you describe what this file does in one sentence? If not, it needs splitting.
+
+**23. COMPLEXITY TAX.** Before adding a feature that significantly increases system complexity (new table, new Edge Function, new background job, new dependency), explicitly state: what simpler alternative was considered and why it was ruled out. This is not a blocker — it is a forcing function to confirm the complexity is earned.
+
+**What this section does NOT change:**
+- Naavi is built on Anthropic Claude specifically. No provider-agnostic naming is required — `naavi-chat`, `get-naavi-prompt`, and `ANTHROPIC_API_KEY` are correct. Abstracting the AI layer would add complexity with no current benefit.
+- Prompt management is already governed by CLAUDE PROMPT — SHARED SOURCE OF TRUTH.
+- "Check before creating" is already in the CONFIGURATION DISCIPLINE checks table.
+
 ### ABSOLUTE RULES — NEVER BREAK THESE
 
 1. **NO ACTION WITHOUT EXPLICIT APPROVAL.** Do not edit files, run commands, commit, push, build, or take any action until the user says "yes" or "go ahead." Even if the user provides a detailed plan, that is context — NOT permission to execute.
@@ -324,98 +343,47 @@ A short-lived 2026-05-16 suspension related to an Expo build error was removed 2
 
 ### WHERE TO START
 
-**Most recent handoff:** `docs/SESSION_HANDOFF_2026-05-20_HUBSPOT_GMAIL_BLOCKER.md` — **READ THIS FIRST.** Two top-priority blockers carry into the next session: (1) EAS AAB build regression on Hermes / `otelModulePromise` import — confirmed via bisect NOT our code, 5 builds attempted today, Windows Task Scheduler armed for autonomous hourly retries until EAS clears; V57.20.1 build 194 ready to ship with B2l (orphan SDK geofence) + B3i (mobile lib) + AppState listener leak + B4j eager-create fix. (2) HubSpot Service Hub migration shipped + verified end-to-end (tickets #1037-#1041 in portal 343125145), BUT auto-acknowledgment email reaches non-gmail domains and never reaches gmail.com addresses (4 gmail sends → 0 received; 3 non-gmail sends → 3 received; verified data, not hypothesis). HubSpot reports "Sent to 1, delivered to 1" yet Gmail Inbox/Spam/Promotions all empty. NOT yet checked: HubSpot's per-recipient Recipients tab + workflow enrollment history — those logs are the next-session starting point. Prior handoff: `docs/SESSION_HANDOFF_2026-05-16_GEOFENCE_TESTING.md` — V57.16.0 AAB 185 with Transistorsoft licensed integration in flight, two drives produced T1→T4 chains, Phone 1 delivered all 4 channels for 500 Bayview, open: Phone 2 fan-out re-test, 962 Terranova home-arrival miss. Auto-tester DISABLED + Rule 15 SUSPENDED until destructive-write audit completes.
+**Read first:** latest handoff in `docs/` (highest date in filename), then `MEMORY.md` index.
 
-**Top of next session — PRIORITY ORDER (Wael 2026-05-20):**
+**Prompt-regression:** `tests/catalogue/prompt-regression.ts` locks in known-good Claude action emissions. Future prompt edits MUST keep this suite green. Never add a prompt rule without a corresponding regression test.
 
-1. **⭐⭐ Check EAS AAB build status.** The Windows Task Scheduler has been retrying hourly. First-thing checks:
-   - `ls C:\Users\waela\naavi-mobile\.eas-retry-success` — if it exists, the AAB queued + submitted; verify in Play Console.
-   - `cat C:\Users\waela\naavi-mobile\eas-retry.log | tail -40` — if `.eas-retry-success` doesn't exist, look at what EAS is still returning.
-   - V57.20.1 build 194 includes: B2l orphan SDK geofence (4 delete paths in `app/alerts.tsx` + `hooks/useOrchestrator.ts`), B3i `react-native-background-geolocation` mobile lib, AppState listener leak fix, B4j eager-create fix for legacy `action_config.list_name` references.
+**Do NOT promote V57.x to Robert** until geofence reliability is solved.
 
-2. **⭐⭐ Diagnose HubSpot's gmail.com deliverability gap — read the logs FIRST.** Don't speculate. The next-session starting points:
-   - **HubSpot per-recipient delivery log.** Marketing → Email → click "Ticket received" row → Recipients tab. Shows exact Sent/Delivered/Opened/Bounced/Filtered status per recipient. Couldn't navigate to it cleanly today; try again.
-   - **Workflow enrollment history.** Automation → Workflows → "Auto-acknowledge new ticket" → Performance history → Enrollment history. Confirms the workflow actually enrolled the gmail.com tickets and whether Send Email fired.
-   - **Verified facts today:** 4 gmail.com sends → 0 received; 3 non-gmail sends → 3 received instantly. All 3 contacts have identical `hs_marketable_status=false`. HubSpot reports "delivered" for the gmail sends. So contact marketing status isn't the differentiator; somewhere between HubSpot's MTA and Gmail's inbox is the gap.
-   - **If logs show "Sent" but Gmail dropped silently** → likely DMARC alignment; fix is to connect mynaavi.com as Email Sending Domain in HubSpot (free, DNS only).
-   - **If logs show "Bounced/Filtered"** → different fix path (sender warm-up, Transactional Email add-on, or vendor switch).
-   - **Vendor alternatives if HubSpot can't be made to reach gmail.com:** Zendesk Suite Team ($55/seat/mo, native SMS via Talk) or Plain (~$60/seat/mo, modern dev-friendly, no SMS). DB schema + ingest-ticket skeleton are vendor-agnostic; switch cost ~2-3 hours.
-   - HubSpot Sales Hub Professional trial expires **2026-06-03** — there's time, but don't drift.
-
-3. **Server-side fast wins (always available, no AAB needed):** `naavi-spend-summary` Edge Function (~1 hour, approved 2026-04-30 but never built) + Voice live-calendar fetch (~30 min, voice still on stale snapshot vs mobile V57.11.6) + `resolve-place` radius 100→500 + address routing fix (~30 min).
-
-4. **Optional polish:** add `isValidE164` strict 10-digit-after-+1 enforcement (~15 min, deferred from V57.15.6).
-
-The previous Voice Completion Roadmap (S1–S8 from 2026-05-04 / 2026-05-07) remains the broader plan after the items above land. Roadmap source: `docs/VOICE_COMPLETION_ROADMAP_2026-05-04.docx` (superseded but kept for history).
-
-**Last AAB on Wael's phone:** V57.15.6 build 179 APK (commit `751fbd7`), sideloaded + verified live 2026-05-15. AAB also built (sitting as DRAFT in Play Console). Second phone (mynaavi2207) — state from prior session (V57.16.0-trial Transistorsoft AAB if promoted, otherwise V57.15.5 AAB).
-**Last AAB on Robert's phone:** V56.6 (build 115), installed 2026-04-28. **Do NOT promote V57.x to Robert until geofence reliability is solved (Transistorsoft trial failed; revisit per priority #2).**
-
-**Auto-tester (latest):** 108 ✓ / 0 ✗ / 0 errored / 0 skipped. Run with `npm run test:auto`. Includes `prompt-regression` (15), `truth-at-user-layer` (1, retry-on-flake), `list-connections` (10), `hosted-replies` (5), `pending-dwell` (5), `data-integrity` (3), `source-intent` (5), `brief-unread` (2), `search-normalization` (4), `gmail-freshness` (1), `lists` (4), `voice-pin` (7), `multi-phone` (4), `lists-reconcile` (2), `multiuser` (20). Re-confirmed green at V57.15.6 build 179 commit. Retry-on-flake covers `chat`, `smoke`, `prompt-regression`, `truth-at-user-layer` (all Haiku-driven categories).
-
-**Current Claude prompt version:** `2026-05-13-v74-list-connection-query-required-fields` (via `get-naavi-prompt` Edge Function). 2026-05-13 shipped v73 → v74 (CRITICAL FIELD REQUIREMENT block + address-style entityRef → action_rule example; fixes F1a item 16a entityType inconsistency).
-
-**Prompt-regression test suite:** `tests/catalogue/prompt-regression.ts` locks in known-good Claude action emissions. **Future prompt edits MUST keep this suite green.** Don't add a prompt rule without a corresponding regression test — that's how the v57→v58→v59 cycle started.
-
-**Strategic positioning** (Wael 2026-05-05): "senior" / "caregiver" / "elderly" / "active aging" are BANNED across all surfaces (code, prompts, docs, memory). The app is for EVERYONE. Use "user" by default; "older healthy independent adult" only when context demands. See top of this file.
+Memory folder: `C:\Users\waela\.claude\projects\C--Users-waela-OneDrive-Desktop-Naavi\memory\`
 
 ### HOLDING LIST — services/features in queue
 
-Canonical list of pending work, organized by what's blocking each. Mirror in `docs/SESSION_HANDOFF_2026-05-07_V57.13.7_BUILD_165.md`. Add to / remove from this list as work moves.
+Canonical source: `docs/HOLDING_LIST_CLASSIFICATION_2026-05-08.md`. Closed items are in the history section at the bottom of that doc. Edit items there, not here.
 
 **Blocked on external approvals:**
-1. ~~Picovoice Eagle voice biometric~~ — **CLOSED 2026-05-13.** Picovoice approval queue sat 2 weeks. Wael chose 4-digit PIN over voice biometric for off-phone caller verification — industry-standard pattern, no vendor dependency, ~1 hour to build. Picovoice fully dropped (audit confirmed no other feature depended on them). Memory: `project_naavi_caller_pin_chosen_over_biometric.md`. PIN-flow build is now queued server-side below.
 2. AWS Polly (voice unification mobile→Polly Joanna) — needs AWS account setup
 3. Maestro full-suite — needs emulator Internal Testing install
-4. **Geofence reliability — TRANSISTORSOFT TRIAL FAILED 2026-05-15.** Drove with two phones (APK DEBUG + AAB unlicensed RELEASE) to identical geofence target (841 Balsam Dr, coords verified IDENTICAL in DB). Neither fired. Phone 1 (APK) had no Android FG-service notification; Phone 2 (AAB) did. Postmortem (Explore agent, evidence-based) attributes most likely root cause to: (a) notification icon path `'mipmap/ic_launcher'` may not resolve in Expo prebuild → Android refuses to start FG service without valid notification → SDK silently dies in DEBUG; (b) Transistorsoft v5 in unlicensed DEBUG may suppress FG service entirely. Trial branch `claude/transistorsoft-trial` (commit `7c5605a`) preserved on origin for future retry. Decision parked: (a) retry Transistorsoft with the 4 postmortem fixes, (b) try Radar (still no sales reply), or (c) accept Samsung-geofencing-unsolved. **Wael's strategic call next session.** Full postmortem: `docs/SESSION_HANDOFF_2026-05-15_V57.15.6_BUILD_179_TRANSISTORSOFT_TRIAL.md`.
+4. **Geofence reliability — TRANSISTORSOFT TRIAL FAILED 2026-05-15.** Trial branch `claude/transistorsoft-trial` preserved. Decision: (a) retry with 4 postmortem fixes, (b) try Radar, (c) accept Samsung-geofencing-unsolved. Full postmortem: `docs/SESSION_HANDOFF_2026-05-15_V57.15.6_BUILD_179_TRANSISTORSOFT_TRIAL.md`.
 
 **Server-side queue (no AAB needed):**
-4a. **Caller PIN for off-phone verification (Wael 2026-05-13).** New `user_settings.voice_pin_hash` (bcrypt/argon2) + voice-server prompt flow when caller phone doesn't resolve to a known user. Mobile Settings UI for set/change (small AAB-side piece). 3-attempt lockout. Replaces voice-biometric plan. Full design in `project_naavi_caller_pin_chosen_over_biometric.md`. ~1 hour build.
-5. Voice live-calendar fetch (mobile shipped V57.11.6, voice still on stale snapshot)
+4a. Caller PIN for off-phone verification — design in `project_naavi_caller_pin_chosen_over_biometric.md`
+5. Voice live-calendar fetch
 6. Voice action parity — DELETE_EVENT, LIST_RULES, DELETE_MEMORY, SCHEDULE_MEDICATION
 7. Voice stop-word interrupt regression
 8. Voice Deepgram first-word truncation on barge-in
-9. Voice name-search phonetic fallback ("Hussein" STT failure)
-10. Voice migration to Anthropic Structured Outputs (~200 lines drift vs mobile)
-11. Inbound SMS/WhatsApp queryability (outbound covered; inbound has no capture path)
-12. ~~Spend summary Edge Function~~ — **CLOSED 2026-05-23.** Already shipped — `naavi-spend-summary` deployed 2026-04-30 (Edge Function version 8, 442 lines), orchestrator handler at `useOrchestrator.ts:1613`, prompt RULE 19a routes "how much did X charge me" → SPEND_SUMMARY action. Verified live on Wael's phone 2026-05-23: returns dollar amount end-to-end. Holding-list entry was stale.
-13. LIST_RULES synthesize-action backstop in orchestrator
+9. Voice name-search phonetic fallback
+10. Voice migration to Anthropic Structured Outputs
+11. Inbound SMS/WhatsApp queryability
+13. LIST_RULES synthesize-action backstop
 14. Demo line "remind me" time-extraction loop fix
-15. ~~**F1d live tests 3 + 4**~~ — **CLOSED 2026-05-13.** Both PASS live on Twilio call. Test 3 (recursive mute, offer stays pending) + Test 4 (30-sec silence, no false-positive delivery). 4 voice-server fixes derived from the live test (regex relaxed for Deepgram confusables, aggregated-text check at UtteranceEnd, SMS confirmation TTS clearer, idle-prompt suppressed during quiet window). Commits `4eef2da` `2b86391` `01d4f72` `1f14748`.
-16. **`resolve-place` default radius 100 → 500** + **address-vs-business routing fix** (use Google geocode API for queries that start with a number; textsearch for business names). Today's 1026/1200 test exposed both: new rules created via voice still default to 100m, and 1200 Terranova mis-resolved to the same coords as 1038 because textsearch fell back to a Terranova centroid.
-
-16a. ~~**F1a voice — `entityType` inconsistency on `list_connect`**~~ — **CLOSED 2026-05-13** via prompt v74 (commit `b9e56ca`). New CRITICAL FIELD REQUIREMENT block in RULE 8b + entityType-inference rules per phrasing pattern + new prompt-regression test `list-connection-query-address-must-have-entitytype` locking in the live-bug phrasing ("What lists are on 688 Bayview office?"). Live verified on Wael's phone V57.15.4 after deploy.
+16. `resolve-place` radius 100→500 + address-vs-business routing fix
 
 **AAB-required queue:**
-17. ~~**Manual geofencing switch (V57.14.4)**~~ — **CLOSED 2026-05-12.** Disproven by V57.14.4 heartbeat diagnostic — FG service receives zero location updates from Android after backgrounding AND cannot be restarted from background per Android 12+. Plan replaced with **third-party SDK evaluation (Transistorsoft vs Radar) — see "Blocked on external approvals" item 4 above + 2026-05-12 handoff**.
-18. ~~**F1a Session 2 — Wave 1 (server)**~~ — **DONE 2026-05-12.** Voice surface end-to-end shipped (commits `d49be81`, `8f5b083`, `84b1894`, `6bdc2f6`, `c52e948`, `5212676`, `6d78a0e`, `9cb2fb1`, `4c4a507`). Verified live on Twilio call.
-18a. ~~**F1a Wave 2 (V57.15.0)**~~ — **SHIPPED 2026-05-12 (V57.15.0) + follow-ups 2026-05-13 (V57.15.4).** All 4 phases shipped in V57.15.0 build 171 (commit `a705196`). V57.15.4 build 175 (commit `a9603bd`) added newline formatter + tappable list rows.
-18b. ~~**V57.15.5 build 176 + 177 (Caller PIN + Lists testIDs + multi-phone refinements + verified-address naming)**~~ — **SHIPPED 2026-05-14.** Builds 176 (`fae265c`) + 177 (`5ce56ad`). Caller PIN mobile-complete end-to-end. Auto-tester 108/108 green. Live test on Wael's phone: T1/T2/T5/T7 PASS clean; T3/T4 PASS via blind-type workaround (PIN modal keyboard fix moved to build 178). Memory: `project_naavi_caller_pin_chosen_over_biometric.md`. Handoff: `docs/SESSION_HANDOFF_2026-05-14_V57.15.5_BUILDS_176_177.md`.
-18c. ~~**V57.15.6 build 179 (5 polish fixes — section header + X icons + PIN modal + Primary edit + multi-phone auto-persist)**~~ — **SHIPPED 2026-05-15.** All 5 fixes verified live on Wael's phone end-to-end. Branch `claude/v57.15.6-polish-fixes` (commit `751fbd7`) merged to main via `d63b6b3`; feature branch deleted. Auto-tester 108/108 green. AAB sits in Play Console as DRAFT awaiting Wael's manual promotion to Internal Testing (priority #1 next session). Handoff: `docs/SESSION_HANDOFF_2026-05-15_V57.15.6_BUILD_179_TRANSISTORSOFT_TRIAL.md`.
-18d. **`isValidE164` strict 10-digit-after-+1 enforcement** — low-priority polish caught during V57.15.6 Test 4 false-alarm. Currently `+1234567891` (only 9 digits after +1) passes validation and pretty-prints as `+123 4567891` (greedy regex matches +123 as country code). Fix: tighten validator to require exactly 10 digits when number starts with +1. ~15 min code; can bundle with next AAB. Rare typo case in production.
-19. ~~Multi-phone identity (`phone_numbers[]` schema + Settings UI)~~ — **CLOSED 2026-05-15.** Auto-persist redesign shipped in V57.15.6 build 179. Save phones button removed entirely.
-20. Demo line maturity (richer scenarios + conversion path + telemetry)
-21. ~~**Cosmetic ruler leak fix**~~ — **CLOSED 2026-05-13.** Shipped via V57.15.3 space-ruler approach (`NAAVI_INVISIBLE_RULER = ' '.repeat(50)`) commit `8751a38`.
-22. ~~Haptic VIBRATE permission + duration~~ — **CLOSED 2026-05-14** as phantom; already shipped in V57.11.7 (long-press mic vibration at 150ms, app.json:31 has VIBRATE permission). Audit was wrong on the 2026-05-13 holding list.
-23. ~~Mobile-side todo-list-per-alert~~ — **SUPERSEDED BY F1a** (item 18). F1a's list_connections IS the todo-list-per-alert pattern, generalised across all entity types.
-24. ~~Verified-address rejection — name the address~~ — **CLOSED 2026-05-14** via build 177. 2 sites in `hooks/useOrchestrator.ts` now name the place: `:830` and `:924`. Calendar variant at `:1419` was already named.
-25. Voice privacy UX (4-piece feature, not started)
-26. Blog age reframe (2 articles still on age framing)
-27. ~~In-app Battery Optimization prompt~~ — **CLOSED 2026-05-11.** Shipped V57.14.2 build 168 (commit ccf53f8). Memory: `project_naavi_battery_opt_inapp_prompt.md`.
+18d. `isValidE164` strict 10-digit-after-+1 enforcement
+20. Demo line maturity
+25. Voice privacy UX (4-piece, not started)
+26. Blog age reframe (2 articles)
 
 **Deferred by design (open questions before code):**
 28. `list_change` trigger (7 design questions — see `project_naavi_list_change_trigger_deferred.md`)
 29. Health trigger (Epic integration required)
 30. Price trigger (scraping complexity)
 31. Phase 2 demo data
-
-Prior handoffs for context: `docs/SESSION_HANDOFF_2026-05-06_STRUCTURED_OUTPUTS_V57.12.md`, `docs/SESSION_HANDOFF_2026-05-06_FIX_AAB.md`, `docs/SESSION_HANDOFF_CONTINUOUS_FIX_V57.8.md`.
-
-**Then read memory files listed in the MEMORY.md index** — the short list that future sessions need (alert fan-out rule, verified-address rule, context fields pattern, location-trigger plan, feedback/test discipline).
-
-**Older background:** `docs/SESSION_8_DETAILED_REPORT.md` for the early Twilio voice architecture; most of 9-19 are also in `docs/` for context.
-
-Memory folder: `C:\Users\waela\.claude\projects\C--Users-waela-OneDrive-Desktop-Naavi\memory\`
 
 ### THE PROJECT — TWO PARTS
 
