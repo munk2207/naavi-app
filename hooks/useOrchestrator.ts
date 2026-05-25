@@ -59,6 +59,15 @@ const AFFIRMATIVE_RE = /^(yes|yeah|yep|yup|sure|confirm|confirmed|correct|ok|oka
 // input variants kept missing the regex.
 const NEGATIVE_RE    = /^\s*(?:please\s+)?(no|nope|cancel|never ?mind|stop|forget it|don[']?t)\b/i;
 
+// Correction pattern — fired when the user wants to fix a mishear:
+//   "I meant Fatma", "I said Ahmed", "No, I meant Fatma", "Actually Costco",
+//   "Correction: Lila", "I mean Leila".
+// MUST be tested BEFORE NEGATIVE_RE so "No, I meant X" isn't swallowed as a
+// bare cancel when a pending action is active. When matched with a pending
+// action, we clear the action and pass the full message through to Claude
+// for re-processing with the corrected text.
+const CORRECTION_RE = /^\s*(?:no[,.]?\s+)?(?:i\s+(?:meant|said|mean)|actually[,.]?\s+\S|correction[:.]\s*\S)/i;
+
 // Fresh-command pattern — detects when the user has clearly started a NEW
 // rule-creation command rather than clarifying the pending one. Prevents
 // the "home + Alert me when I arrive to my office" concatenation bug.
@@ -533,7 +542,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         setStatus('idle');
         return;
       }
-      if (NEGATIVE_RE.test(trimmedMsg)) {
+      if (CORRECTION_RE.test(trimmedMsg)) {
+        // Correction ("I meant X", "No, I meant X"): clear the pending
+        // action and fall through to Claude with the full message so Claude
+        // can re-process using the corrected text. Must be tested BEFORE
+        // NEGATIVE_RE to prevent "No, I meant X" from being swallowed as
+        // a bare cancel.
+        pendingActionRef.current = null;
+        setPendingAction(null);
+        // fall through to Claude round-trip
+      } else if (NEGATIVE_RE.test(trimmedMsg)) {
         // Inline cancel: discard the pending action without routing to Claude.
         pendingActionRef.current = null;
         setPendingAction(null);
@@ -541,11 +559,12 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         await speakResponse(SPEECH.CANCELLED, language);
         setStatus('idle');
         return;
+      } else {
+        // Fresh command (edit / new question) — clear the pending action and
+        // let Claude handle the message normally (edit flow).
+        pendingActionRef.current = null;
+        setPendingAction(null);
       }
-      // Fresh command (edit / new question) — clear the pending action and
-      // let Claude handle the message normally (edit flow).
-      pendingActionRef.current = null;
-      setPendingAction(null);
     }
 
     // Capture this turn's id. If Robert taps orange Stop during thinking,

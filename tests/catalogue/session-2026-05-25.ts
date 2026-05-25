@@ -217,6 +217,123 @@ export const session20260525Tests: TestCase[] = [
     },
   },
 
+  // ─── Correction command (2026-05-25 B4z+) ────────────────────────────────
+
+  {
+    id: 'correction-command.regex-matches-expected-patterns',
+    category: 'correction',
+    description:
+      'CORRECTION_RE must match the canonical correction phrases and NOT match ' +
+      'bare cancel/yes phrases so the routing in send() stays correct.',
+    timeoutMs: 5_000,
+    async run(ctx) {
+      // Mirror of the CORRECTION_RE from hooks/useOrchestrator.ts.
+      // Any change there must be reflected here to keep the test honest.
+      const CORRECTION_RE = /^\s*(?:no[,.]?\s+)?(?:i\s+(?:meant|said|mean)|actually[,.]?\s+\S|correction[:.]\s*\S)/i;
+
+      const shouldMatch = [
+        'I meant Farida',
+        'i meant groceries',
+        'I said Ahmed',
+        'No, I meant Fatma',
+        'No, I said Friday',
+        'No. I meant groceries',
+        'Actually, Costco',
+        'Actually Costco',
+        'Correction: Lila',
+        'Correction: the grocery list',
+        'I mean the blue one',
+      ];
+
+      const shouldNotMatch = [
+        'yes',
+        'Yes',
+        'send',
+        'no',
+        'no thanks',
+        'cancel',
+        'cancel that',
+        'go ahead',
+        'ok',
+      ];
+
+      for (const phrase of shouldMatch) {
+        if (!CORRECTION_RE.test(phrase)) {
+          throw new Error(`CORRECTION_RE should match "${phrase}" but did not.`);
+        }
+      }
+      for (const phrase of shouldNotMatch) {
+        if (CORRECTION_RE.test(phrase)) {
+          throw new Error(`CORRECTION_RE should NOT match "${phrase}" but did.`);
+        }
+      }
+      ctx.log(`All ${shouldMatch.length} positive + ${shouldNotMatch.length} negative cases passed.`);
+    },
+  },
+
+  {
+    id: 'correction-command.naavi-chat-does-not-reject-i-meant-x',
+    category: 'correction',
+    description:
+      '"I meant X" after a failed lookup must produce a real response from naavi-chat ' +
+      '(not "I didn\'t quite catch that") — verifies the correction rule in get-naavi-prompt.',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const url = `${ctx.supabaseUrl}/functions/v1/naavi-chat`;
+
+      // Simulate: Naavi failed to find "Fatima" → user corrects to "Farida".
+      const messages = [
+        { role: 'user', content: 'What is Fatima\'s phone number?' },
+        { role: 'assistant', content: 'I couldn\'t find Fatima in your contacts.' },
+      ];
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${ctx.serviceRoleKey}`,
+          apikey: ctx.serviceRoleKey,
+        },
+        body: JSON.stringify({
+          user_id:  ctx.testUserId,
+          message:  'I meant Farida',
+          messages,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      // naavi-chat returns { rawText: "<JSON string with speech field>" }
+      let speech = '';
+      try {
+        const raw = String(data?.rawText ?? '');
+        const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+        speech = String(JSON.parse(cleaned)?.speech ?? '');
+      } catch {
+        // fallback: some turn structures return a top-level speech key directly
+        speech = String(data?.speech ?? '');
+      }
+      ctx.log(`status=${res.status} speech="${speech.slice(0, 120)}"`);
+
+      // The response must not be the generic garbled-input fallback.
+      const isRejected = /didn.*t quite catch|garbled|didn.*t understand/i.test(speech);
+      if (isRejected) {
+        throw new Error(
+          `"I meant Farida" was treated as garbled input instead of a correction. ` +
+          `speech="${speech}"`,
+        );
+      }
+
+      // Accept any non-empty non-fallback response — Naavi may acknowledge the
+      // correction, attempt a contact lookup, or ask a clarifying question.
+      // Empty speech is only acceptable when rawText is also empty (unexpected).
+      const hasResponse = speech.trim().length > 0 || (data?.rawText ?? '').length > 0;
+      if (!hasResponse) {
+        throw new Error('"I meant Farida" produced an empty response (no rawText, no speech).');
+      }
+      ctx.log('Correction command handled correctly — PASS');
+    },
+  },
+
   // ─── B4z-adjacent: "send" accepted as email-alert confirm word ────────────
   {
     id: 'b4z.send-word-accepted-as-confirm',
