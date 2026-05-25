@@ -150,11 +150,26 @@ export async function disconnectGoogleCalendar(): Promise<void> {
 export async function captureAndStoreGoogleToken(): Promise<void> {
   if (!supabase) return;
 
-  // Only capture token after an intentional OAuth connect — not on every page load
-  if (typeof sessionStorage !== 'undefined' && !sessionStorage.getItem('naavi_google_oauth_pending')) {
-    console.log('[Calendar] Skipping token capture — no pending OAuth flow');
-    return;
-  }
+  // 2026-05-24 (Wael) — REMOVED the naavi_google_oauth_pending gate.
+  // Previously this function only stored the refresh_token when the
+  // gate was set (intentional Connect-Google flow). On every other
+  // SIGNED_IN event (mobile native sign-in, Supabase session restore,
+  // deep-link auth/callback) it returned early and the new token was
+  // discarded — even though Google can rotate the refresh_token at
+  // any time (max-tokens-per-user limit, password change, security
+  // event). Result: user_tokens.refresh_token went stale, server-side
+  // OAuth (Edge Functions, cron, voice server, auto-tester) failed
+  // with invalid_grant despite the Google app grant being active.
+  // Caller (app/index.tsx:743) already gates on session.provider_refresh_token
+  // being present, so removing the gate here doesn't add spurious
+  // writes. The store-google-token Edge Function is idempotent — same
+  // token overwrites same token, no harm. This closes the architectural
+  // gap discovered when mynaavi2207's auto-tester started failing
+  // 2026-05-24 with invalid_grant. Companion code: app/_layout.tsx
+  // ::handleAuthCallback already lacked this gate (auto-recovery path
+  // Wael noticed as "intermittent disconnect + reconnect a few minutes
+  // later" — that path's behavior is now universal across all sign-in
+  // event sources).
 
   const session = await getSessionWithTimeout();
   const refreshToken = session?.provider_refresh_token;
