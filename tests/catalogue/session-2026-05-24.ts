@@ -25,8 +25,10 @@ import { join } from 'node:path';
 import { adapters, db } from '../lib/adapters';
 import {
   expect2xx,
+  expectTruthy,
   findActionInRawText,
   extractSpeech,
+  chatWithConfirm,
 } from '../lib/assertions';
 import type { TestCase } from '../lib/types';
 
@@ -77,39 +79,13 @@ export const session20260524Tests: TestCase[] = [
     id: 'b4y.create-intent-allows-email-rule',
     category: 'b4y',
     description:
-      'B4y Phase 1 positive control: "Alert me when an email arrives from Bob" ' +
-      'must STILL emit a rule-creation action (SET_EMAIL_ALERT or ' +
-      'SET_ACTION_RULE(trigger_type=email)). HAS_CREATE_INTENT gate must not ' +
-      'over-block — explicit create-intent verbs ("alert me", "notify me", ' +
-      '"let me know", "remind me") must pass through.',
-    timeoutMs: 30_000,
+      'B4y/B4z positive control: "Alert me when an email arrives from Bob" must use ' +
+      'RULE 23 confirm-then-act. Turn 1: no action, must have "say yes to confirm". ' +
+      'Turn 2 (after "yes"): must emit SET_ACTION_RULE(trigger_type=email). ' +
+      'HAS_CREATE_INTENT gate + confirm-turn detection must not over-block.',
+    timeoutMs: 60_000,
     async run(ctx) {
       // Pre-clean any prior test rule so the assertion is deterministic.
-      try {
-        await db.delete(
-          ctx,
-          'action_rules',
-          `user_id=eq.${ctx.testUserId}&trigger_type=eq.email&label=ilike.${encodeURIComponent('%Bob%')}`,
-        );
-      } catch { /* ignore pre-clean errors */ }
-
-      const { status, data } = await adapters.naaviChat(ctx, {
-        messages: [
-          { role: 'user', content: 'Alert me when an email arrives from Bob' },
-        ],
-        max_tokens: 1024,
-      });
-      expect2xx(status, 'naavi-chat');
-      const rawText = data?.rawText ?? '';
-      ctx.log(`rawText: ${rawText.slice(0, 250)}…`);
-
-      const setEmail = findActionInRawText(rawText, 'SET_EMAIL_ALERT');
-      const setAction = findActionInRawText(rawText, 'SET_ACTION_RULE');
-      const setActionIsEmail =
-        setAction && (setAction as any).trigger_type === 'email' ? setAction : null;
-
-      // Best-effort teardown — clean up any rule this test wrote so the
-      // next run starts from a known state.
       const cleanup = async () => {
         try {
           await db.delete(
@@ -119,27 +95,44 @@ export const session20260524Tests: TestCase[] = [
           );
         } catch { /* ignore teardown errors */ }
       };
+      await cleanup();
 
-      if (!setEmail && !setActionIsEmail) {
-        // Path A (naavi-chat::detectEmailAlert regex bypass) writes the
-        // rule directly via saveAlertRule and returns success speech
-        // without emitting a Claude action. That's a valid success path —
-        // verify by inspecting speech for the canonical success indicator.
-        const speech = extractSpeech(rawText);
-        const indicatesSuccess = /\b(i'?ll text you|alert set|done|i'?ll let you know|i'?ll notify)\b/i.test(speech);
-        if (!indicatesSuccess) {
-          await cleanup();
-          throw new Error(
-            `B4y Phase 1 over-blocking: valid create-intent message ` +
-            `"Alert me when an email arrives from Bob" produced no ` +
-            `rule-creation action AND no success speech. Either ` +
-            `HAS_CREATE_INTENT gate is too strict, or Claude failed to ` +
-            `emit the expected action and the regex bypass also missed. ` +
-            `rawText: ${rawText.slice(0, 300)}`,
-          );
-        }
-        ctx.log(`b4y: rule created via path A (server-side regex bypass), speech: "${speech.slice(0, 120)}"`);
+      const { turn1, turn2 } = await chatWithConfirm(ctx, 'Alert me when an email arrives from Bob');
+      expect2xx(turn1.status, 'naavi-chat turn 1');
+      expect2xx(turn2.status, 'naavi-chat turn 2');
+      ctx.log(`turn1: ${turn1.data?.rawText?.slice(0, 250)}…`);
+      ctx.log(`turn2: ${turn2.data?.rawText?.slice(0, 250)}…`);
+
+      // Turn 1: Claude must ask for confirmation, no rule action.
+      const turn1Email = findActionInRawText(turn1.data?.rawText ?? '', 'SET_EMAIL_ALERT');
+      const turn1Rule  = findActionInRawText(turn1.data?.rawText ?? '', 'SET_ACTION_RULE');
+      const turn1IsEmail = turn1Rule && (turn1Rule as any).trigger_type === 'email' ? turn1Rule : null;
+      if (turn1Email || turn1IsEmail) {
+        await cleanup();
+        throw new Error(
+          `RULE 23 violation on turn 1: email rule action emitted before user confirmed. ` +
+          `Must ask "say yes to confirm" first. Action: ${JSON.stringify(turn1Email ?? turn1IsEmail)}`,
+        );
       }
+      const turn1Speech = extractSpeech(turn1.data?.rawText ?? '');
+      expectTruthy(
+        /say yes to confirm/i.test(turn1Speech),
+        `turn 1 must contain "say yes to confirm" phrase. Speech: "${turn1Speech.slice(0,200)}"`,
+      );
+
+      // Turn 2: email rule action must be emitted after confirmation.
+      const turn2Email  = findActionInRawText(turn2.data?.rawText ?? '', 'SET_EMAIL_ALERT');
+      const turn2Rule   = findActionInRawText(turn2.data?.rawText ?? '', 'SET_ACTION_RULE');
+      const turn2IsEmail = turn2Rule && (turn2Rule as any).trigger_type === 'email' ? turn2Rule : null;
+      if (!turn2Email && !turn2IsEmail) {
+        await cleanup();
+        throw new Error(
+          `B4y/B4z: turn 2 "yes" did not produce an email rule action. ` +
+          `HAS_CREATE_INTENT + confirm-turn gate may be over-blocking. ` +
+          `rawText: ${turn2.data?.rawText?.slice(0, 300)}`,
+        );
+      }
+      ctx.log(`b4z: email rule created on turn 2 as expected`);
       await cleanup();
     },
   },

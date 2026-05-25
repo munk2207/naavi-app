@@ -27,6 +27,7 @@ import {
   findActionInRawText,
   extractSpeech,
   expectSpeechNotMatch,
+  chatWithConfirm,
   TestSkippedError,
 } from '../lib/assertions';
 import type { TestCase, TestContext } from '../lib/types';
@@ -189,21 +190,30 @@ export const promptRegressionTests: TestCase[] = [
   {
     id: 'prompt-regression.calendar-no-auto-invite',
     category: 'prompt-regression',
-    description: 'V57.11.6 regression — "schedule a meeting with Bob tomorrow at 9 AM" must emit CREATE_EVENT with empty attendees (no auto-invite). 2026-05-15: date phrasing made wall-clock-agnostic — original "Friday at 4 PM" became ambiguous when run after 4 PM Eastern on a Friday.',
-    timeoutMs: 30_000,
+    description: 'V57.11.6 regression — "schedule a meeting with Bob tomorrow at 9 AM" must emit CREATE_EVENT with empty attendees (no auto-invite). 2026-05-15: date phrasing wall-clock-agnostic. B4z 2026-05-25: updated to 2-turn confirm-then-act (RULE 23).',
+    timeoutMs: 60_000,
     async run(ctx) {
-      const { status, data } = await adapters.naaviChat(ctx, {
-        messages: [{ role: 'user', content: 'schedule a meeting with Bob tomorrow at 9 AM' }],
-        max_tokens: 1024,
-      });
-      expect2xx(status, 'naavi-chat');
-      ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
+      const { turn1, turn2 } = await chatWithConfirm(ctx, 'schedule a meeting with Bob tomorrow at 9 AM');
+      expect2xx(turn1.status, 'naavi-chat turn 1');
+      expect2xx(turn2.status, 'naavi-chat turn 2');
 
-      const action = findActionInRawText(data?.rawText ?? '', 'CREATE_EVENT');
-      expectTruthy(action, 'CREATE_EVENT action');
+      ctx.log(`turn1 rawText: ${turn1.data?.rawText?.slice(0, 250)}…`);
+      ctx.log(`turn2 rawText: ${turn2.data?.rawText?.slice(0, 300)}…`);
 
-      // attendees should be empty OR absent. "with Bob" is descriptive,
-      // not a directive to invite.
+      // Turn 1: Claude must ask for confirmation, no action emitted.
+      const turn1Action = findActionInRawText(turn1.data?.rawText ?? '', 'CREATE_EVENT');
+      if (turn1Action) {
+        throw new Error(`RULE 23 violation: CREATE_EVENT emitted on turn 1 (must wait for confirm). Action: ${JSON.stringify(turn1Action)}`);
+      }
+      const turn1Speech = extractSpeech(turn1.data?.rawText ?? '');
+      expectTruthy(/say yes to confirm/i.test(turn1Speech),
+        `turn 1 must contain "say yes to confirm" phrase. Speech: "${turn1Speech.slice(0,200)}"`);
+
+      // Turn 2: CREATE_EVENT must be emitted.
+      const action = findActionInRawText(turn2.data?.rawText ?? '', 'CREATE_EVENT');
+      expectTruthy(action, 'CREATE_EVENT action on turn 2 (after yes)');
+
+      // attendees should be empty OR absent. "with Bob" is descriptive, not a directive to invite.
       const attendees = action.attendees;
       if (Array.isArray(attendees) && attendees.length > 0) {
         throw new Error(
@@ -541,25 +551,33 @@ export const promptRegressionTests: TestCase[] = [
   {
     id: 'prompt-regression.all-day-holiday-date-only-format',
     category: 'prompt-regression',
-    description: 'V57 prompt v77 — holiday name + date must emit CREATE_EVENT with date-only start (YYYY-MM-DD), NEVER T00:00:00',
-    timeoutMs: 30_000,
+    description: 'V57 prompt v77 — holiday name + date must emit CREATE_EVENT with date-only start (YYYY-MM-DD), NEVER T00:00:00. B4z 2026-05-25: updated to 2-turn confirm-then-act (RULE 23).',
+    timeoutMs: 60_000,
     async run(ctx) {
-      const { status, data } = await adapters.naaviChat(ctx, {
-        messages: [{ role: 'user', content: 'Add Victoria Day to my calendar on May 18' }],
-        max_tokens: 1024,
-      });
-      expect2xx(status, 'naavi-chat');
-      ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
+      const { turn1, turn2 } = await chatWithConfirm(ctx, 'Add Victoria Day to my calendar on May 18');
+      expect2xx(turn1.status, 'naavi-chat turn 1');
+      expect2xx(turn2.status, 'naavi-chat turn 2');
+      ctx.log(`turn1: ${turn1.data?.rawText?.slice(0, 250)}…`);
+      ctx.log(`turn2: ${turn2.data?.rawText?.slice(0, 300)}…`);
 
-      const action = findActionInRawText(data?.rawText ?? '', 'CREATE_EVENT');
-      expectTruthy(action, 'CREATE_EVENT action — holiday must create an event');
+      // Turn 1: no action, must have confirm phrase.
+      const turn1Action = findActionInRawText(turn1.data?.rawText ?? '', 'CREATE_EVENT');
+      if (turn1Action) {
+        throw new Error(`RULE 23 violation: CREATE_EVENT emitted on turn 1. Action: ${JSON.stringify(turn1Action)}`);
+      }
+      const turn1Speech = extractSpeech(turn1.data?.rawText ?? '');
+      expectTruthy(/say yes to confirm/i.test(turn1Speech),
+        `turn 1 must contain "say yes to confirm". Speech: "${turn1Speech.slice(0,200)}"`);
+
+      // Turn 2: CREATE_EVENT must use date-only format.
+      const action = findActionInRawText(turn2.data?.rawText ?? '', 'CREATE_EVENT');
+      expectTruthy(action, 'CREATE_EVENT action on turn 2 — holiday must create an event');
       expectActionType(action, 'CREATE_EVENT');
 
       const start = String(action.start ?? '');
       const end   = String(action.end ?? '');
       ctx.log(`start=${start}  end=${end}`);
 
-      // The whole point — date-only string, no time, no timezone suffix.
       expectTruthy(
         /^\d{4}-\d{2}-\d{2}$/.test(start),
         `start must be date-only "YYYY-MM-DD" for all-day holiday, got: ${JSON.stringify(start)}`,
@@ -568,7 +586,6 @@ export const promptRegressionTests: TestCase[] = [
         /^\d{4}-\d{2}-\d{2}$/.test(end),
         `end must be date-only "YYYY-MM-DD" for all-day holiday, got: ${JSON.stringify(end)}`,
       );
-      // Reject the exact failure shape that bit Huss
       expectTruthy(
         !/T00:00:00/i.test(start),
         `start must NOT contain T00:00:00 (renders as 8 PM EDT prior day): ${JSON.stringify(start)}`,
@@ -578,18 +595,27 @@ export const promptRegressionTests: TestCase[] = [
   {
     id: 'prompt-regression.all-day-explicit-phrasing-date-only-format',
     category: 'prompt-regression',
-    description: 'V57 prompt v77 — user explicitly says "all day" → CREATE_EVENT must use date-only format, never T00:00:00',
-    timeoutMs: 30_000,
+    description: 'V57 prompt v77 — user explicitly says "all day" → CREATE_EVENT must use date-only format, never T00:00:00. B4z 2026-05-25: updated to 2-turn confirm-then-act (RULE 23).',
+    timeoutMs: 60_000,
     async run(ctx) {
-      const { status, data } = await adapters.naaviChat(ctx, {
-        messages: [{ role: 'user', content: 'Schedule a vacation day all day on Friday' }],
-        max_tokens: 1024,
-      });
-      expect2xx(status, 'naavi-chat');
-      ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
+      const { turn1, turn2 } = await chatWithConfirm(ctx, 'Schedule a vacation day all day on Friday');
+      expect2xx(turn1.status, 'naavi-chat turn 1');
+      expect2xx(turn2.status, 'naavi-chat turn 2');
+      ctx.log(`turn1: ${turn1.data?.rawText?.slice(0, 250)}…`);
+      ctx.log(`turn2: ${turn2.data?.rawText?.slice(0, 300)}…`);
 
-      const action = findActionInRawText(data?.rawText ?? '', 'CREATE_EVENT');
-      expectTruthy(action, 'CREATE_EVENT action — explicit "all day" must create an event');
+      // Turn 1: no action, must have confirm phrase.
+      const turn1Action = findActionInRawText(turn1.data?.rawText ?? '', 'CREATE_EVENT');
+      if (turn1Action) {
+        throw new Error(`RULE 23 violation: CREATE_EVENT emitted on turn 1. Action: ${JSON.stringify(turn1Action)}`);
+      }
+      const turn1Speech = extractSpeech(turn1.data?.rawText ?? '');
+      expectTruthy(/say yes to confirm/i.test(turn1Speech),
+        `turn 1 must contain "say yes to confirm". Speech: "${turn1Speech.slice(0,200)}"`);
+
+      // Turn 2: CREATE_EVENT with date-only format.
+      const action = findActionInRawText(turn2.data?.rawText ?? '', 'CREATE_EVENT');
+      expectTruthy(action, 'CREATE_EVENT action on turn 2 — explicit "all day" must create an event');
       expectActionType(action, 'CREATE_EVENT');
 
       const start = String(action.start ?? '');

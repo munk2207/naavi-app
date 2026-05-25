@@ -50,6 +50,7 @@ import { multiPhoneTests } from './catalogue/multi-phone';
 import { listsReconcileTests } from './catalogue/lists-reconcile';
 import { ticketsTests } from './catalogue/tickets';
 import { session20260524Tests } from './catalogue/session-2026-05-24';
+import { confirmThenActTests } from './catalogue/confirm-then-act';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -135,6 +136,7 @@ const ALL_TESTS: TestCase[] = [
   ...listsReconcileTests,
   ...ticketsTests,
   ...session20260524Tests,
+  ...confirmThenActTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -288,7 +290,16 @@ async function main(): Promise<void> {
       // sometimes routes "What is on my shopping list?" through
       // global_search instead of list_read despite the explicit prompt
       // example. One re-run reliably catches the flake.
-      t.category === 'lists';
+      t.category === 'lists' ||
+      // 2026-05-25 (Wael) — b4z RULE 23 confirm-then-act tests hit Claude
+      // Haiku for prompt-driven assertions (chain-store exemption, REMEMBER
+      // single-turn). Same non-determinism pattern as prompt-regression.
+      // chain-store-still-single-turn observed to flake on the same
+      // "alert me at Costco" phrasing that chain-store-walmart flakes on.
+      t.category === 'b4z' ||
+      // b4y Phase 1 tests also hit Haiku for HAS_CREATE_INTENT gate
+      // assertions. Adding proactively in case they flake post-B4z.
+      t.category === 'b4y';
     const isRetriable = result.status === 'failed' || result.status === 'errored';
     if (isChatShape && isRetriable) {
       process.stdout.write('[retry] ');

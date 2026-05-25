@@ -1198,66 +1198,13 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Step 2: detect new email alert intent ─────────────────────────────────
-    const alertRule = detectEmailAlert(userText);
-    console.log(`[timing] ${elapsed()} | detectEmailAlert done | alert=${alertRule ? 'yes' : 'no'}`);
-
-    if (alertRule && userId) {
-      let fromName  = alertRule.fromName;
-      let fromEmail: string | null = null;
-
-      // Contact lookup via Google Contacts when a name was given
-      if (fromName) {
-        const contacts = await lookupContactsByName(supabase, userId, fromName);
-
-        if (contacts.length === 1) {
-          const c = contacts[0];
-          // Only accept the resolved email if the contact name or email actually contains
-          // the search term — prevents false positives from Google's fuzzy matching
-          const isGenuineMatch =
-            c.name.toLowerCase().includes(fromName.toLowerCase()) ||
-            c.email.toLowerCase().includes(fromName.toLowerCase());
-          if (isGenuineMatch) {
-            fromEmail = c.email;
-            console.log('[naavi-chat] Contact resolved:', c.name, fromEmail);
-          } else {
-            console.log('[naavi-chat] Contact fuzzy match rejected:', c.name, c.email, '— saving name-only rule');
-          }
-
-        } else if (contacts.length > 1) {
-          // Multiple matches — ask Robert to pick
-          const nameList = contacts.map(c => c.name).join(', or ');
-
-          await supabase.from('pending_disambig').insert({
-            user_id: userId,
-            action:  'email_alert',
-            payload: { fromName, options: contacts },
-          });
-
-          const numberedList = contacts.map((c, i) => `${i + 1}. ${c.name}`).join('\n');
-          return speechResponse(
-            `I found ${contacts.length} contacts named ${fromName}:\n${numberedList}\n\nJust say the number.`
-          );
-        }
-        // 0 matches → fall through, save with from_name only (broad match)
-      }
-
-      const userPhone = await getUserPhone(supabase, userId);
-      await saveAlertRule(supabase, userId, userPhone, {
-        fromName:       fromName,
-        fromEmail:      fromEmail,
-        subjectKeyword: alertRule.subjectKeyword,
-      });
-
-      const confirmLabel = fromName
-        ? `an email from ${fromName}`
-        : `an email with "${alertRule.subjectKeyword}" in the subject`;
-
-      const phoneSpeak = userPhone ? ` at ${formatPhoneForSpeech(userPhone)}` : '';
-      return speechResponse(
-        `Done — I'll text you${phoneSpeak} as soon as ${confirmLabel} arrives.`
-      );
-    }
+    // ── Step 2 (B4z 2026-05-25): server-side email-alert bypass REMOVED ─────────
+    // The old detectEmailAlert → saveAlertRule path was a single-turn write
+    // that bypassed Claude entirely. B4z replaces it with RULE 23 confirm-
+    // then-act: Claude asks for confirmation on turn 1, emits the action on
+    // turn 2 after the user says "yes". The post-Claude validator (Step 4
+    // below) enforces create-intent OR confirm-turn before allowing email-
+    // rule actions to pass through. See RULE 23 in get-naavi-prompt.
 
     // ── Step 3: forward to Claude ─────────────────────────────────────────────
 
@@ -1659,18 +1606,19 @@ Deno.serve(async (req) => {
       }
     }
 
-    // 2026-05-24 (Wael) — B4y Phase 1. Action-intent validator for
-    // SET_EMAIL_ALERT and SET_ACTION_RULE(trigger_type='email'). Drops
-    // the action when the user's latest message lacks an explicit
-    // create-intent phrase. Defends against Claude/Haiku fabricating
-    // rules on search-shape utterances ("Find McDonald alert" →
-    // unauthorized email rule with keyword "you" landed in Wael's DB
-    // 2026-05-24 15:32 EST). Phase 2 (universal confirm-then-act gate
-    // across all state-changing actions per new CLAUDE.md Rule 12)
-    // attempted 2026-05-24 evening but REVERTED — required broader
-    // prompt-harmonization work + ~14 test rewrites. Phase 2 properly
-    // scheduled as a dedicated focused session. Phase 1 stays as the
-    // narrow defense for the demonstrated bug class.
+    // 2026-05-24 (Wael) — B4y Phase 1. Updated 2026-05-25 B4z Phase 2.
+    // Action-intent validator for SET_EMAIL_ALERT and
+    // SET_ACTION_RULE(trigger_type='email'). Drops the action when the
+    // user's latest message lacks an explicit create-intent phrase AND
+    // this is not a turn-2 confirmation response following a prior
+    // "say yes to confirm" ask (RULE 23 two-turn flow).
+    //
+    // Phase 1 defended against Claude fabricating rules on search-shape
+    // utterances ("Find McDonald alert" → unauthorized email rule).
+    // Phase 2 extends: the server-side email-bypass (Step 2) was removed;
+    // Claude now handles email rules via RULE 23 confirm-then-act. On
+    // turn-2 "yes" responses, the prior assistant message contains "say
+    // yes to confirm" — that is a valid confirmation path and must pass.
     if (
       userId
       && actions.some((a: any) =>
@@ -1680,14 +1628,25 @@ Deno.serve(async (req) => {
       const HAS_CREATE_INTENT_POST = /\b(alert|notify|tell|let|remind|text|email|message|ping)\s+me\b|\b(set\s+up|create|make)\s+(an?\s+)?alert\b|\blet\s+me\s+know\b/i;
       const lastUserMsgB4y = [...messages].reverse().find((m: any) => m.role === 'user');
       const userTextB4y = typeof lastUserMsgB4y?.content === 'string' ? lastUserMsgB4y.content : '';
-      if (!HAS_CREATE_INTENT_POST.test(userTextB4y)) {
+      const hasCreateIntent = HAS_CREATE_INTENT_POST.test(userTextB4y);
+
+      // B4z Phase 2: also allow action through when this is a turn-2 confirm
+      // response (user said "yes" after a prior "say yes to confirm" ask).
+      const IS_CONFIRM_REPLY = /^(yes|yeah|yep|confirm|approved|go\s+ahead|do\s+it|please|ok|okay)[\s\W]*$/i;
+      const isConfirmReply = IS_CONFIRM_REPLY.test(userTextB4y.trim());
+      const lastAssistantMsg = [...messages].reverse().find((m: any) => m.role === 'assistant');
+      const assistantText = typeof lastAssistantMsg?.content === 'string' ? lastAssistantMsg.content : '';
+      const priorTurnHadConfirmAsk = /say yes to confirm/i.test(assistantText);
+      const isValidConfirmTurn = isConfirmReply && priorTurnHadConfirmAsk;
+
+      if (!hasCreateIntent && !isValidConfirmTurn) {
         const droppedCount = actions.filter((a: any) =>
           a.type === 'SET_EMAIL_ALERT'
           || (a.type === 'SET_ACTION_RULE' && a.trigger_type === 'email')).length;
         actions = actions.filter((a: any) =>
           !(a.type === 'SET_EMAIL_ALERT'
             || (a.type === 'SET_ACTION_RULE' && a.trigger_type === 'email')));
-        console.warn(`[naavi-chat] B4y: dropping ${droppedCount} email-rule action(s) — user message lacks create-intent: "${userTextB4y.slice(0, 80)}"`);
+        console.warn(`[naavi-chat] B4y/B4z: dropping ${droppedCount} email-rule action(s) — user message lacks create-intent and is not a valid confirm-turn: "${userTextB4y.slice(0, 80)}"`);
         if (!serverRejectionMessage) {
           serverRejectionMessage =
             `I read that as a question, not an alert request. If you want an email alert, say something like: "Alert me when an email arrives about X."`;

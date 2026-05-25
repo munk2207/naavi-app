@@ -3,7 +3,7 @@
  */
 
 import { adapters } from '../lib/adapters';
-import { expect2xx, expectTruthy, findActionInRawText } from '../lib/assertions';
+import { expect2xx, expectTruthy, findActionInRawText, extractSpeech, chatWithConfirm } from '../lib/assertions';
 import type { TestCase } from '../lib/types';
 
 export const chatTests: TestCase[] = [
@@ -61,17 +61,27 @@ export const chatTests: TestCase[] = [
   {
     id: 'chat.priority-flag-critical',
     category: 'chat',
-    description: 'TEST_PLAN C2 — "Schedule a critical doctor call tomorrow 4pm" sets is_priority=true',
-    timeoutMs: 30_000,
+    description: 'TEST_PLAN C2 — "Schedule a critical doctor call tomorrow 4pm" sets is_priority=true. B4z 2026-05-25: 2-turn confirm-then-act (RULE 23).',
+    timeoutMs: 60_000,
     async run(ctx) {
-      const { status, data } = await adapters.naaviChat(ctx, {
-        messages: [{ role: 'user', content: 'Schedule a critical doctor call tomorrow at 4 PM' }],
-        max_tokens: 1024,
-      });
-      expect2xx(status, 'naavi-chat');
-      ctx.log(`rawText: ${data?.rawText?.slice(0, 250)}…`);
-      const action = findActionInRawText(data?.rawText ?? '', 'CREATE_EVENT');
-      expectTruthy(action, 'CREATE_EVENT action');
+      const { turn1, turn2 } = await chatWithConfirm(ctx, 'Schedule a critical doctor call tomorrow at 4 PM');
+      expect2xx(turn1.status, 'naavi-chat turn 1');
+      expect2xx(turn2.status, 'naavi-chat turn 2');
+      ctx.log(`turn1: ${turn1.data?.rawText?.slice(0, 250)}…`);
+      ctx.log(`turn2: ${turn2.data?.rawText?.slice(0, 250)}…`);
+
+      // Turn 1: no action, must have confirm phrase.
+      const turn1Action = findActionInRawText(turn1.data?.rawText ?? '', 'CREATE_EVENT');
+      if (turn1Action) {
+        throw new Error(`RULE 23 violation: CREATE_EVENT emitted on turn 1. Action: ${JSON.stringify(turn1Action)}`);
+      }
+      const turn1Speech = extractSpeech(turn1.data?.rawText ?? '');
+      expectTruthy(/say yes to confirm/i.test(turn1Speech),
+        `turn 1 must contain "say yes to confirm". Speech: "${turn1Speech.slice(0,200)}"`);
+
+      // Turn 2: CREATE_EVENT with is_priority=true.
+      const action = findActionInRawText(turn2.data?.rawText ?? '', 'CREATE_EVENT');
+      expectTruthy(action, 'CREATE_EVENT action on turn 2');
       if (action.is_priority !== true) {
         throw new Error(`expected is_priority=true (RULE 16), got ${JSON.stringify(action.is_priority)}`);
       }

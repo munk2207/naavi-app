@@ -11,7 +11,7 @@
  */
 
 import { adapters, db } from '../lib/adapters';
-import { expect2xx, expectTruthy, findActionInRawText } from '../lib/assertions';
+import { expect2xx, expectTruthy, findActionInRawText, extractSpeech, chatWithConfirm } from '../lib/assertions';
 import type { TestCase } from '../lib/types';
 
 export const waelTests: TestCase[] = [
@@ -87,74 +87,59 @@ export const waelTests: TestCase[] = [
   },
 
   // ─────────────────────────────────────────────────────────────────────
-  // 4. "Alert me when I receive email from OCLCC" → an email rule is
-  //    created. naavi-chat handles "alert me" intents via a server-side
-  //    pipeline (saveAlertRule), not via Claude. So we verify the rule
-  //    landed in the DB rather than expecting a SET_ACTION_RULE action.
+  // 4. "Alert me when I receive email from OCLCC" → B4z 2026-05-25:
+  //    RULE 23 confirm-then-act. Turn 1 must ask for confirmation;
+  //    turn 2 (after "yes") must emit SET_ACTION_RULE(email).
+  //    The old server-side bypass (saveAlertRule path A) was removed in B4z.
   // ─────────────────────────────────────────────────────────────────────
   {
     id: 'chat.email-alert-rule-from-oclcc',
     category: 'chat',
-    description: '"alert me when I receive email from OCLCC" creates an email rule in action_rules',
-    timeoutMs: 30_000,
+    description: '"alert me when I receive email from OCLCC" — B4z RULE 23 confirm-then-act: turn 1 asks confirm, turn 2 emits SET_ACTION_RULE(email)',
+    timeoutMs: 60_000,
     async run(ctx) {
-      // Capture the count BEFORE the chat call so we can detect a new row.
-      const before = await db.select<any[]>(ctx, 'action_rules',
-        `user_id=eq.${ctx.testUserId}&trigger_type=eq.email&select=id,trigger_config`);
-      const beforeCount = Array.isArray(before) ? before.length : 0;
+      const cleanup = async () => {
+        try {
+          await db.delete(ctx, 'action_rules',
+            `user_id=eq.${ctx.testUserId}&trigger_type=eq.email&label=ilike.${encodeURIComponent('%OCLCC%')}`);
+        } catch { /* ignore */ }
+      };
+      await cleanup();
 
-      const { status, data } = await adapters.naaviChat(ctx, {
-        messages: [{ role: 'user', content: 'Alert me when I receive email from OCLCC' }],
-        max_tokens: 1024,
-      });
-      expect2xx(status, 'naavi-chat');
-      ctx.log(`rawText: ${data?.rawText?.slice(0, 500)}…`);
+      const { turn1, turn2 } = await chatWithConfirm(ctx, 'Alert me when I receive email from OCLCC');
+      expect2xx(turn1.status, 'naavi-chat turn 1');
+      expect2xx(turn2.status, 'naavi-chat turn 2');
+      ctx.log(`turn1: ${turn1.data?.rawText?.slice(0, 250)}…`);
+      ctx.log(`turn2: ${turn2.data?.rawText?.slice(0, 250)}…`);
 
-      // Either path is acceptable:
-      //   (a) naavi-chat handled it server-side and inserted a row directly.
-      //   (b) Claude emitted SET_ACTION_RULE which the orchestrator would have inserted.
-      // For (a), check the DB directly. For (b), the rule wouldn't be in DB
-      // yet because the orchestrator runs in the mobile app, not the test.
-      const action = findActionInRawText(data?.rawText ?? '', 'SET_ACTION_RULE');
-
-      // Wait briefly for the server-side insert to land.
-      await new Promise(r => setTimeout(r, 1_000));
-      const after = await db.select<any[]>(ctx, 'action_rules',
-        `user_id=eq.${ctx.testUserId}&trigger_type=eq.email&select=id,trigger_config`);
-      const afterCount = Array.isArray(after) ? after.length : 0;
-
-      const newRows = afterCount - beforeCount;
-      ctx.log(`action_rules email count: ${beforeCount} → ${afterCount} (delta=${newRows})`);
-
-      // PASS if EITHER a row was added OR a SET_ACTION_RULE action came back.
-      if (newRows > 0) {
-        const newest = (after as any[]).find(r => !(before as any[]).some(b => b.id === r.id));
-        if (newest) {
-          const tcStr = JSON.stringify(newest.trigger_config ?? {}).toLowerCase();
-          if (!tcStr.includes('oclcc')) {
-            throw new Error(`new row's trigger_config doesn't mention OCLCC: ${JSON.stringify(newest.trigger_config)}`);
-          }
-        }
-        return; // pass via DB path
+      // Turn 1: no email rule action, must have confirm phrase.
+      const turn1Rule = findActionInRawText(turn1.data?.rawText ?? '', 'SET_ACTION_RULE');
+      const turn1IsEmail = turn1Rule && (turn1Rule as any).trigger_type === 'email';
+      if (turn1IsEmail) {
+        await cleanup();
+        throw new Error(`RULE 23 violation: email rule emitted on turn 1 before confirm. Action: ${JSON.stringify(turn1Rule)}`);
       }
+      const turn1Speech = extractSpeech(turn1.data?.rawText ?? '');
+      expectTruthy(/say yes to confirm/i.test(turn1Speech),
+        `turn 1 must have "say yes to confirm". Speech: "${turn1Speech.slice(0,200)}"`);
 
-      if (action) {
-        ctx.log(`action: ${JSON.stringify(action)}`);
-        if (action.trigger_type !== 'email') {
-          throw new Error(`expected trigger_type='email', got '${action.trigger_type}'`);
-        }
-        const tcAny = JSON.stringify(action.trigger_config ?? {}).toLowerCase();
-        if (!tcAny.includes('oclcc')) {
-          throw new Error(`expected trigger_config to mention OCLCC, got ${JSON.stringify(action.trigger_config)}`);
-        }
-        return; // pass via Claude path
+      // Turn 2: SET_ACTION_RULE(trigger_type=email) referencing OCLCC.
+      const turn2Rule = findActionInRawText(turn2.data?.rawText ?? '', 'SET_ACTION_RULE');
+      const turn2IsEmail = turn2Rule && (turn2Rule as any).trigger_type === 'email';
+      if (!turn2IsEmail) {
+        await cleanup();
+        throw new Error(
+          `No email rule on turn 2. B4z confirm-turn detection may be broken. ` +
+          `turn2 rawText: ${turn2.data?.rawText?.slice(0, 300)}`,
+        );
       }
-
-      // Neither path produced a rule.
-      throw new Error(
-        `No rule created. Speech said: ${JSON.stringify((data?.rawText ?? '').slice(0, 200))}. ` +
-        `No new row in action_rules. No SET_ACTION_RULE in response. Phantom-action bug.`,
-      );
+      const tcStr = JSON.stringify((turn2Rule as any).trigger_config ?? {}).toLowerCase();
+      if (!tcStr.includes('oclcc')) {
+        await cleanup();
+        throw new Error(`trigger_config doesn't mention OCLCC: ${JSON.stringify((turn2Rule as any).trigger_config)}`);
+      }
+      ctx.log(`b4z: email alert confirmed on turn 2: ${JSON.stringify((turn2Rule as any).trigger_config)}`);
+      await cleanup();
     },
   },
 ];
