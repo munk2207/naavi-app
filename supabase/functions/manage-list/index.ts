@@ -80,11 +80,16 @@ async function getGoogleAccessToken(supabase: ReturnType<typeof createClient>, u
 }
 
 async function findList(supabase: ReturnType<typeof createClient>, userId: string, name: string) {
+  // Only returns ENABLED lists. Disabled lists are invisible to normal ops
+  // (LIST_ADD / LIST_REMOVE / LIST_READ). LIST_CREATE uses findDisabledList
+  // separately to detect and re-enable a previous soft-deleted list.
+
   // Try exact match first
   const { data: exact } = await supabase
     .from('lists')
     .select('id, name, category, drive_file_id, web_view_link')
     .eq('user_id', userId)
+    .eq('enabled', true)
     .ilike('name', name)
     .maybeSingle();
   if (exact) return exact;
@@ -97,6 +102,33 @@ async function findList(supabase: ReturnType<typeof createClient>, userId: strin
       .from('lists')
       .select('id, name, category, drive_file_id, web_view_link')
       .eq('user_id', userId)
+      .eq('enabled', true)
+      .ilike('name', stripped)
+      .maybeSingle();
+    if (strippedMatch) return strippedMatch;
+  }
+
+  return null;
+}
+
+// Find a DISABLED list by name — used by LIST_CREATE to detect soft-deleted dupes.
+async function findDisabledList(supabase: ReturnType<typeof createClient>, userId: string, name: string) {
+  const { data: exact } = await supabase
+    .from('lists')
+    .select('id, name, category, drive_file_id, web_view_link')
+    .eq('user_id', userId)
+    .eq('enabled', false)
+    .ilike('name', name)
+    .maybeSingle();
+  if (exact) return exact;
+
+  const stripped = name.replace(/\s+lists?$/i, '').trim();
+  if (stripped && stripped !== name) {
+    const { data: strippedMatch } = await supabase
+      .from('lists')
+      .select('id, name, category, drive_file_id, web_view_link')
+      .eq('user_id', userId)
+      .eq('enabled', false)
       .ilike('name', stripped)
       .maybeSingle();
     if (strippedMatch) return strippedMatch;
@@ -239,7 +271,7 @@ Deno.serve(async (req) => {
       const name = String(action.name ?? 'My List');
       const category = String(action.category ?? 'other');
 
-      // Check if already exists
+      // Check if already exists (enabled only)
       const existing = await findList(supabase, userId, name);
       if (existing) {
         const alive = await isDriveDocAlive(accessToken, existing.drive_file_id);
@@ -247,9 +279,7 @@ Deno.serve(async (req) => {
 
         // Existing row points to a Drive file that's trashed or 404 — treat
         // as deleted by the user, create a fresh Doc, update the existing
-        // row in place so list_connections stay valid. The old trashed Doc
-        // stays in trash and auto-deletes in 30 days (recoverable in that
-        // window if the user changes their mind).
+        // row in place so list_connections stay valid.
         const doc = await createDriveDoc(accessToken, name);
         if (!doc) return jsonResponse({ success: false, error: 'Failed to create Drive doc' }, 500);
         await supabase.from('lists').update({
@@ -258,6 +288,29 @@ Deno.serve(async (req) => {
         }).eq('id', existing.id);
         console.log(`[manage-list] Re-created Drive doc for "${name}" — old ${existing.drive_file_id} gone, new ${doc.fileId}`);
         return jsonResponse({ success: true, list: { ...existing, drive_file_id: doc.fileId, web_view_link: doc.webViewLink } });
+      }
+
+      // Check for a DISABLED list with the same name — soft-delete parity.
+      // Re-enable in-place rather than creating a duplicate row. This preserves
+      // list_connections (attachments) and the Drive Doc contents.
+      const disabledDupe = await findDisabledList(supabase, userId, name);
+      if (disabledDupe) {
+        const alive = await isDriveDocAlive(accessToken, (disabledDupe as any).drive_file_id);
+        if (alive) {
+          await supabase.from('lists').update({ enabled: true }).eq('id', (disabledDupe as any).id);
+          console.log(`[manage-list] Re-enabled disabled list "${name}" (${(disabledDupe as any).id})`);
+          return jsonResponse({ success: true, list: { ...(disabledDupe as any), enabled: true }, reactivated: true });
+        }
+        // Drive file gone — create a fresh doc, update the row, re-enable.
+        const doc = await createDriveDoc(accessToken, name);
+        if (!doc) return jsonResponse({ success: false, error: 'Failed to create Drive doc' }, 500);
+        await supabase.from('lists').update({
+          enabled: true,
+          drive_file_id: doc.fileId,
+          web_view_link: doc.webViewLink,
+        }).eq('id', (disabledDupe as any).id);
+        console.log(`[manage-list] Re-enabled disabled list "${name}" with new Drive doc ${doc.fileId}`);
+        return jsonResponse({ success: true, list: { ...(disabledDupe as any), enabled: true, drive_file_id: doc.fileId, web_view_link: doc.webViewLink }, reactivated: true });
       }
 
       // Create Google Doc

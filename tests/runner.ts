@@ -50,6 +50,7 @@ import { multiPhoneTests } from './catalogue/multi-phone';
 import { listsReconcileTests } from './catalogue/lists-reconcile';
 import { ticketsTests } from './catalogue/tickets';
 import { session20260524Tests } from './catalogue/session-2026-05-24';
+import { session20260525Tests } from './catalogue/session-2026-05-25';
 import { confirmThenActTests } from './catalogue/confirm-then-act';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -136,6 +137,7 @@ const ALL_TESTS: TestCase[] = [
   ...listsReconcileTests,
   ...ticketsTests,
   ...session20260524Tests,
+  ...session20260525Tests,
   ...confirmThenActTests,
 ];
 

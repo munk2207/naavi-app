@@ -49,7 +49,7 @@ const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 // Affirmative / negative patterns for the pending-location confirmation turn.
 // Kept tight so ambiguous replies fall through to the clarification branch.
-const AFFIRMATIVE_RE = /^(yes|yeah|yep|yup|sure|confirm|confirmed|correct|ok|okay|alright|do it|go ahead|set it|please|please do)[.!?]*$/i;
+const AFFIRMATIVE_RE = /^(yes|yeah|yep|yup|sure|confirm|confirmed|correct|ok|okay|alright|do it|go ahead|set it|please|please do|send)[.!?]*$/i;
 // V57.12.1 Bug D fix — relaxed from strict-anchor to leading-word match
 // with optional "please" prefix. Previous regex required the message to be
 // EXACTLY one of the negative words (or that word + punctuation). That
@@ -494,7 +494,56 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     // accumulating across turns now that the speak-phase no longer
     // auto-clears (DraftCard Send fix). Cancel teardown is handled by
     // the user via the DraftCard's Discard button.
+    //
+    // 2026-05-25 BUG FIX: before clearing, intercept yes/no/send so the
+    // user can confirm or cancel a pending draft by typing rather than
+    // only by tapping the DraftCard buttons. Previously "Send." was
+    // cleared here then sent to Claude, which did nothing with it.
     if (pendingActionRef.current) {
+      const trimmedMsg = userMessage.trim();
+      if (AFFIRMATIVE_RE.test(trimmedMsg)) {
+        // Inline confirm: execute the pending action without routing to Claude.
+        const pending = pendingActionRef.current;
+        pendingActionRef.current = null;
+        setPendingAction(null);
+        setStatus('speaking');
+        try {
+          const result = await pending.execute();
+          if (result.ok) {
+            setTurns(prev => {
+              const updated = [...prev];
+              const turn = updated[pending.turnIndex];
+              if (turn) {
+                const draftIndex = turn.drafts.indexOf(pending.action);
+                if (draftIndex >= 0) {
+                  const updatedDraft = { ...turn.drafts[draftIndex], _voiceConfirmed: true };
+                  const updatedDrafts = [...turn.drafts];
+                  updatedDrafts[draftIndex] = updatedDraft;
+                  updated[pending.turnIndex] = { ...turn, drafts: updatedDrafts };
+                }
+              }
+              return updated;
+            });
+          }
+          await speakResponse(result.speech, language);
+        } catch (e) {
+          console.error('[send] inline confirmPending error:', e);
+          await speakResponse(SPEECH.GENERIC_ERROR, language);
+        }
+        setStatus('idle');
+        return;
+      }
+      if (NEGATIVE_RE.test(trimmedMsg)) {
+        // Inline cancel: discard the pending action without routing to Claude.
+        pendingActionRef.current = null;
+        setPendingAction(null);
+        setStatus('speaking');
+        await speakResponse(SPEECH.CANCELLED, language);
+        setStatus('idle');
+        return;
+      }
+      // Fresh command (edit / new question) — clear the pending action and
+      // let Claude handle the message normally (edit flow).
       pendingActionRef.current = null;
       setPendingAction(null);
     }
@@ -1768,7 +1817,15 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           try {
             const result = await createList(name, category);
             if (result.success && result.list) {
-              turnLists.push({ action: 'created', listName: name, webViewLink: result.list.web_view_link ?? undefined });
+              if (result.reactivated) {
+                // Disabled list found — re-enabled in-place. Override Claude's
+                // speech so the user knows what happened (same pattern as the
+                // alert re-enable readback in commitPending).
+                turnSpeechOverride = `Your previous ${name} list was re-enabled.`;
+                turnLists.push({ action: 'reactivated', listName: name, webViewLink: result.list.web_view_link ?? undefined });
+              } else {
+                turnLists.push({ action: 'created', listName: name, webViewLink: result.list.web_view_link ?? undefined });
+              }
             } else {
               console.error('[Orchestrator] LIST_CREATE failed:', result.error);
             }

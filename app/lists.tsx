@@ -39,6 +39,8 @@ type ListRow = {
   drive_file_id:   string;
   web_view_link:   string | null;
   attachmentCount: number;
+  /** false = soft-disabled (grayed out, Reactivate available in detail screen) */
+  enabled:         boolean;
 };
 
 type TabKey = 'all' | 'attached' | 'standalone';
@@ -85,9 +87,12 @@ export default function ListsScreen() {
         queryWithTimeout(
           supabase
             .from('lists')
-            .select('id, name, category, drive_file_id, web_view_link')
+            // Fetch all lists — enabled AND disabled. Disabled ones render
+            // grayed out with an "Expired" pill so the user can tap → Reactivate.
+            .select('id, name, category, drive_file_id, web_view_link, enabled')
             .eq('user_id', session.user.id)
-            .order('name', { ascending: true }),
+            .order('enabled', { ascending: false })   // enabled first
+            .order('name',    { ascending: true }),
           15_000,
           'lists-load',
         ),
@@ -120,6 +125,7 @@ export default function ListsScreen() {
         drive_file_id:   String(r.drive_file_id ?? ''),
         web_view_link:   r.web_view_link ?? null,
         attachmentCount: counts[String(r.id)] ?? 0,
+        enabled:         r.enabled !== false,  // default true for rows without the column yet
       }));
       setLists(rows);
     } catch (e: any) {
@@ -197,26 +203,39 @@ export default function ListsScreen() {
           </View>
         )}
 
-        {filtered.map(l => (
-          <TouchableOpacity
-            key={l.id}
-            style={styles.row}
-            onPress={() => router.push(`/lists/${l.id}`)}
-            activeOpacity={0.75}
-          >
-            <Ionicons name="list" size={22} color={Colors.accent} style={{ marginRight: 12 }} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle} numberOfLines={1}>{l.name}</Text>
-              <Text style={styles.rowSub} numberOfLines={1}>
-                {l.attachmentCount > 0
-                  ? `Attached to ${l.attachmentCount} ${l.attachmentCount === 1 ? 'item' : 'items'}`
-                  : 'Standalone'}
-                {l.category && l.category !== 'other' ? ` · ${l.category}` : ''}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-          </TouchableOpacity>
-        ))}
+        {filtered.map(l => {
+          const isDisabled = !l.enabled;
+          return (
+            <TouchableOpacity
+              key={l.id}
+              style={[styles.row, isDisabled && styles.rowDisabled]}
+              onPress={() => router.push(`/lists/${l.id}`)}
+              activeOpacity={0.75}
+            >
+              <Ionicons
+                name="list"
+                size={22}
+                color={isDisabled ? Colors.textMuted : Colors.accent}
+                style={{ marginRight: 12 }}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.rowTitle, isDisabled && styles.rowTitleDisabled]} numberOfLines={1}>{l.name}</Text>
+                <Text style={[styles.rowSub, isDisabled && styles.rowSubDisabled]} numberOfLines={1}>
+                  {l.attachmentCount > 0
+                    ? `Attached to ${l.attachmentCount} ${l.attachmentCount === 1 ? 'item' : 'items'}`
+                    : 'Standalone'}
+                  {l.category && l.category !== 'other' ? ` · ${l.category}` : ''}
+                </Text>
+              </View>
+              {isDisabled && (
+                <View style={styles.expiredPill}>
+                  <Text style={styles.expiredPillText}>Expired</Text>
+                </View>
+              )}
+              <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
     </SafeAreaView>
   );
@@ -282,4 +301,21 @@ const styles = StyleSheet.create({
   },
   rowTitle: { color: Colors.textPrimary, fontSize: 16, fontWeight: '600' },
   rowSub:   { color: Colors.textMuted, fontSize: 13, marginTop: 2 },
+  // Soft-disable styles — mirrors alerts.tsx F2e disabled row
+  rowDisabled:      { opacity: 0.55 },
+  rowTitleDisabled: { color: Colors.textMuted },
+  rowSubDisabled:   { color: Colors.textMuted },
+  expiredPill: {
+    backgroundColor: Colors.bgApp,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  expiredPillText: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
 });

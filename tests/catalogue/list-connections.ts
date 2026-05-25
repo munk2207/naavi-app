@@ -11,7 +11,7 @@
  *   - RLS lockdown: anon cannot INSERT/UPDATE/DELETE; only service role.
  *   - Behavior: CONNECT replaces prior row on same entity; DISCONNECT
  *     removes; LIST_CONNECTIONS_FOR_LIST returns wirings;
- *     DELETE_LIST_AND_CONNECTIONS cascades and reports prior wirings.
+ *     DELETE_LIST_AND_CONNECTIONS soft-disables and preserves connections (2026-05-25).
  *
  * Spec: docs/F1A_LISTS_AND_CONNECTIONS_SPEC.md.
  */
@@ -385,12 +385,16 @@ export const listConnectionsTests: TestCase[] = [
   },
 
   // ──────────────────────────────────────────────────────────────────────
-  // DELETE_LIST_AND_CONNECTIONS cascades + reports prior wirings.
+  // DELETE_LIST_AND_CONNECTIONS soft-disables the list and PRESERVES
+  // connections (so Reactivate can restore full wiring).
+  // Updated 2026-05-25 — old hard-delete → soft-disable parity with alerts.
   // ──────────────────────────────────────────────────────────────────────
   {
-    id: 'list-connections.delete-list-cascades',
+    id: 'list-connections.delete-list-disables',
     category: 'list-connections',
-    description: 'F1a — deleting a list cascades its connections and reports them',
+    description:
+      'F1a — DELETE_LIST_AND_CONNECTIONS soft-disables the list (enabled=false) ' +
+      'and preserves connections so Reactivate can restore them',
     timeoutMs: 15_000,
     async run(ctx) {
       const marker = uniqueTag();
@@ -407,14 +411,64 @@ export const listConnectionsTests: TestCase[] = [
         const delRes = await callDeleteList(ctx, listId);
         expect2xx(delRes.status, 'DELETE_LIST_AND_CONNECTIONS');
         expectEqual((delRes.data as any)?.success, true, 'success=true');
+        // Response must carry the connection list (may be under cascaded_connections).
+        const reported = (delRes.data as any)?.cascaded_connections;
+        expectTruthy(Array.isArray(reported), 'cascaded_connections array in response');
+
+        // Soft-disable: connections are PRESERVED (not cascaded-deleted).
+        const readRes = await callListForList(ctx, listId);
+        expect2xx(readRes.status, 'read after soft-disable');
+        const remaining = ((readRes.data as any)?.connections ?? []).length;
+        expectEqual(remaining, 2, `connections must be preserved after soft-disable; got ${remaining}`);
+      } finally {
+        await deleteTestLists(ctx, marker);
+      }
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // PERMANENTLY_DELETE_LIST hard-deletes the row and cascades connections.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'list-connections.permanently-delete-list-cascades',
+    category: 'list-connections',
+    description:
+      'F1a — PERMANENTLY_DELETE_LIST removes the list row from DB and ' +
+      'cascades (removes) all its list_connections rows',
+    timeoutMs: 15_000,
+    async run(ctx) {
+      const marker = uniqueTag();
+      try {
+        const listId = await createTestList(ctx, marker);
+        for (const suffix of ['a', 'b']) {
+          await callConnect(ctx, {
+            list_id: listId,
+            entity_type: 'action_rule',
+            entity_id: `fake-rule-${marker}-${suffix}`,
+          });
+        }
+
+        const delRes = await adapters.call(ctx, 'manage-list-connections', {
+          type: 'PERMANENTLY_DELETE_LIST',
+          user_id: ctx.testUserId,
+          list_id: listId,
+        }, { asService: true });
+        expect2xx(delRes.status, 'PERMANENTLY_DELETE_LIST');
+        expectEqual((delRes.data as any)?.success, true, 'success=true');
         const cascaded = (delRes.data as any)?.cascaded_connections;
         expectTruthy(Array.isArray(cascaded), 'cascaded_connections array');
         expectEqual(cascaded.length, 2, `expected 2 cascaded, got ${cascaded.length}`);
 
-        // After cascade, the underlying connections are gone.
-        const readRes = await callListForList(ctx, listId);
-        expect2xx(readRes.status, 'read after delete');
-        expectEqual(((readRes.data as any)?.connections ?? []).length, 0, 'no connections remain');
+        // Hard delete: the list row itself must be gone from the DB.
+        const rows = await fetch(
+          `${ctx.supabaseUrl}/rest/v1/lists?id=eq.${listId}&user_id=eq.${ctx.testUserId}`,
+          { headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}` } },
+        ).then(r => r.json());
+        expectEqual(
+          Array.isArray(rows) ? rows.length : -1,
+          0,
+          'list row must be gone after PERMANENTLY_DELETE_LIST',
+        );
       } finally {
         await deleteTestLists(ctx, marker);
       }

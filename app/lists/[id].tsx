@@ -37,8 +37,8 @@ import {
   queryWithTimeout,
   getSessionWithTimeout,
 } from '@/lib/invokeWithTimeout';
-import { readList } from '@/lib/lists';
-import { disconnectEntityById, deleteListWithConnections } from '@/lib/list_connections';
+import { readList, disableList, reactivateList } from '@/lib/lists';
+import { disconnectEntityById, permanentlyDeleteListById } from '@/lib/list_connections';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -48,6 +48,8 @@ type ListDetail = {
   category:      string;
   drive_file_id: string;
   web_view_link: string | null;
+  /** false = soft-disabled; shows Reactivate + Delete permanently buttons */
+  enabled:       boolean;
 };
 
 type Attachment = {
@@ -68,8 +70,13 @@ export default function ListDetailScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError]           = useState<string | null>(null);
   const [busyKey, setBusyKey]       = useState<string | null>(null);     // entity_id being detached
+  // Two modal modes:
+  //   'disable'  — soft-disable an enabled list (preserves Drive + connections)
+  //   'delete'   — permanently delete an already-disabled list (Drive trash + hard delete)
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleting, setDeleting]     = useState(false);
+  const [deleteMode, setDeleteMode]           = useState<'disable' | 'delete'>('disable');
+  const [deleting, setDeleting]               = useState(false);
+  const [reactivating, setReactivating]       = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -82,7 +89,7 @@ export default function ListDetailScreen() {
       const { data: listRow, error: listErr } = await queryWithTimeout(
         supabase
           .from('lists')
-          .select('id, name, category, drive_file_id, web_view_link')
+          .select('id, name, category, drive_file_id, web_view_link, enabled')
           .eq('user_id', session.user.id)
           .eq('id', String(id))
           .maybeSingle(),
@@ -97,6 +104,7 @@ export default function ListDetailScreen() {
         category:      String((listRow as any).category ?? 'other'),
         drive_file_id: String((listRow as any).drive_file_id ?? ''),
         web_view_link: (listRow as any).web_view_link ?? null,
+        enabled:       (listRow as any).enabled !== false,
       };
       setList(detail);
 
@@ -175,20 +183,52 @@ export default function ListDetailScreen() {
     }
   };
 
+  // onReactivate — re-enable a disabled list via lib/lists.ts helper.
+  const onReactivate = async () => {
+    if (!list) return;
+    setReactivating(true);
+    try {
+      const result = await reactivateList(list.id);
+      if (result.success) {
+        // Optimistic: flip enabled in local state, no need to reload
+        setList(prev => prev ? { ...prev, enabled: true } : prev);
+      } else {
+        setError(`Couldn't reactivate: ${result.error}`);
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Reactivate failed');
+    } finally {
+      setReactivating(false);
+    }
+  };
+
   const onConfirmDelete = async () => {
     if (!list) return;
     setDeleting(true);
     try {
-      const result = await deleteListWithConnections(list.name);
-      if (result.success) {
-        setShowDeleteModal(false);
-        router.back();
+      if (deleteMode === 'disable') {
+        // Soft-disable an ENABLED list — preserves Drive Doc and connections.
+        const result = await disableList(list.id);
+        if (result.success) {
+          setShowDeleteModal(false);
+          router.back();
+        } else {
+          setError(`Couldn't disable: ${result.error}`);
+          setShowDeleteModal(false);
+        }
       } else {
-        setError(`Couldn't delete: ${result.error}`);
-        setShowDeleteModal(false);
+        // Permanent delete on an already-DISABLED list — trashes Drive + hard deletes.
+        const result = await permanentlyDeleteListById(list.id);
+        if (result.success) {
+          setShowDeleteModal(false);
+          router.back();
+        } else {
+          setError(`Couldn't delete: ${result.error}`);
+          setShowDeleteModal(false);
+        }
       }
     } catch (e: any) {
-      setError(e?.message || 'Delete failed');
+      setError(e?.message || 'Operation failed');
       setShowDeleteModal(false);
     } finally {
       setDeleting(false);
@@ -283,19 +323,41 @@ export default function ListDetailScreen() {
           </View>
         )}
 
-        {/* Delete list button — opens cascade-warning modal */}
+        {/* Action buttons — layout mirrors the alerts.tsx disabled/active pattern */}
         {list && (
-          <TouchableOpacity
-            style={styles.deleteBtn}
-            onPress={() => setShowDeleteModal(true)}
-          >
-            <Ionicons name="trash" size={16} color="#fff" />
-            <Text style={styles.deleteBtnText}>Delete list</Text>
-          </TouchableOpacity>
+          <View style={styles.actionBtnRow}>
+            {!list.enabled && (
+              // Disabled list: Reactivate (accent) + Delete permanently (red)
+              <TouchableOpacity
+                style={[styles.actionBtn, styles.reactivateBtn]}
+                onPress={onReactivate}
+                disabled={reactivating}
+              >
+                {reactivating
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : (<>
+                      <Ionicons name="refresh" size={16} color="#fff" />
+                      <Text style={styles.reactivateBtnText}>Reactivate</Text>
+                    </>)}
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.deleteBtn]}
+              onPress={() => {
+                setDeleteMode(list.enabled ? 'disable' : 'delete');
+                setShowDeleteModal(true);
+              }}
+            >
+              <Ionicons name="trash" size={16} color="#fff" />
+              <Text style={styles.deleteBtnText}>
+                {list.enabled ? 'Delete list' : 'Delete permanently'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
       </ScrollView>
 
-      {/* Cascade-warning modal */}
+      {/* Modal — two modes: soft-disable (enabled list) vs permanent delete (disabled list) */}
       <Modal
         visible={showDeleteModal}
         transparent
@@ -304,24 +366,41 @@ export default function ListDetailScreen() {
       >
         <Pressable style={styles.modalBackdrop} onPress={() => !deleting && setShowDeleteModal(false)}>
           <Pressable style={styles.modalCard} onPress={e => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Delete "{list?.name}"?</Text>
-            {attachments.length > 0 ? (
+            {deleteMode === 'disable' ? (
+              // Soft-disable: Drive Doc + connections preserved; reversible.
               <>
-                <Text style={styles.modalBody}>
-                  This list is attached to {attachments.length}{' '}
-                  {attachments.length === 1 ? 'item' : 'items'}:
-                </Text>
-                {attachments.map(a => (
-                  <Text key={`${a.entity_type}:${a.entity_id}`} style={styles.modalBullet}>
-                    • {a.label} ({humanEntityType(a.entity_type)})
+                <Text style={styles.modalTitle}>Disable "{list?.name}"?</Text>
+                {attachments.length > 0 ? (
+                  <>
+                    <Text style={styles.modalBody}>
+                      This list is attached to {attachments.length}{' '}
+                      {attachments.length === 1 ? 'item' : 'items'}:
+                    </Text>
+                    {attachments.map(a => (
+                      <Text key={`${a.entity_type}:${a.entity_id}`} style={styles.modalBullet}>
+                        • {a.label} ({humanEntityType(a.entity_type)})
+                      </Text>
+                    ))}
+                    <Text style={styles.modalSub}>
+                      The list will be hidden but your attachments and items are preserved.
+                      You can reactivate it from the Lists screen.
+                    </Text>
+                  </>
+                ) : (
+                  <Text style={styles.modalSub}>
+                    The list will be hidden. You can reactivate it from the Lists screen.
                   </Text>
-                ))}
-                <Text style={styles.modalSub}>
-                  Deleting the list will also remove every attachment. The items themselves stay.
-                </Text>
+                )}
               </>
             ) : (
-              <Text style={styles.modalSub}>This can't be undone.</Text>
+              // Permanent delete: Drive Doc trashed; not recoverable from app.
+              <>
+                <Text style={styles.modalTitle}>Permanently delete "{list?.name}"?</Text>
+                <Text style={styles.modalSub}>
+                  This will permanently delete the list and its Drive document.
+                  This can't be undone.
+                </Text>
+              </>
             )}
             <View style={styles.modalBtnRow}>
               <TouchableOpacity
@@ -338,7 +417,9 @@ export default function ListDetailScreen() {
               >
                 {deleting
                   ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={styles.modalBtnDangerText}>Delete</Text>}
+                  : <Text style={styles.modalBtnDangerText}>
+                      {deleteMode === 'disable' ? 'Disable' : 'Delete'}
+                    </Text>}
               </TouchableOpacity>
             </View>
           </Pressable>
@@ -436,17 +517,26 @@ const styles = StyleSheet.create({
   },
   itemLine: { color: Colors.textPrimary, fontSize: 15, lineHeight: 22 },
 
-  deleteBtn: {
+  // Action button row — mirrors alerts.tsx F2e actionBtnRow pattern
+  actionBtnRow: {
     marginTop: 24,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  actionBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    backgroundColor: Colors.alert,
     paddingVertical: 12,
+    paddingHorizontal: 14,
     borderRadius: 10,
+    gap: 8,
   },
-  deleteBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  reactivateBtn:     { backgroundColor: Colors.accent },
+  reactivateBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  deleteBtn:         { backgroundColor: Colors.alert },
+  deleteBtnText:     { color: '#fff', fontSize: 15, fontWeight: '600' },
 
   modalBackdrop: {
     flex: 1,

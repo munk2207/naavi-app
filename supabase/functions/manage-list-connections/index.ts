@@ -168,6 +168,7 @@ Deno.serve(async (req) => {
       case 'LIST_CONNECTIONS_FOR_LIST':     return await handleListForList(supabase, userId, body);
       case 'LIST_CONNECTIONS_FOR_ENTITY':   return await handleListForEntity(supabase, userId, body);
       case 'DELETE_LIST_AND_CONNECTIONS':   return await handleDeleteList(supabase, userId, body);
+      case 'PERMANENTLY_DELETE_LIST':       return await handlePermanentDeleteList(supabase, userId, body);
       default:
         return jsonResponse({ error: `unknown operation: ${op}` }, 400);
     }
@@ -366,6 +367,14 @@ async function handleListForEntity(
   });
 }
 
+// handleDeleteList — SOFT DISABLE (2026-05-25 B4z parity with action_rules).
+//
+// Sets enabled=false on the list row. Drive Doc and list_connections are
+// preserved so the user can Reactivate later. This matches the lifecycle of
+// disabled action_rules (fired one-shot alerts that are grayed out until
+// Reactivated).
+//
+// For permanent deletion of an already-disabled list use PERMANENTLY_DELETE_LIST.
 async function handleDeleteList(
   supabase: ReturnType<typeof createClient>,
   userId: string,
@@ -374,9 +383,6 @@ async function handleDeleteList(
   const listId = String(body?.list_id ?? '').trim();
   if (!listId) return jsonResponse({ error: 'list_id required' }, 400);
 
-  // Fetch the row first — we need drive_file_id for the Drive-side
-  // trash. Same query also verifies ownership so we don't trash a
-  // Drive file the user doesn't own.
   const { data: listRow, error: lookupErr } = await supabase
     .from('lists')
     .select('id, name, drive_file_id')
@@ -386,25 +392,67 @@ async function handleDeleteList(
   if (lookupErr) return jsonResponse({ error: lookupErr.message }, 500);
   if (!listRow)  return jsonResponse({ error: 'list not found or not owned by user' }, 404);
 
-  // Capture connected entities BEFORE the cascade — return them so the
-  // orchestrator's confirmation message can list them to the user even
-  // though the cascade DELETE removes them at the DB layer.
+  // Capture connections for the informational return. They are NOT deleted —
+  // preserved so Reactivate restores the full list + attachments.
   const { data: connections } = await supabase
     .from('list_connections')
     .select('entity_type, entity_id')
     .eq('user_id', userId)
     .eq('list_id', listId);
 
-  // Wave 2.6 — trash the Drive Doc FIRST. If this fails, we abort the
-  // whole operation so DB and Drive stay aligned. (drive_file_id of "",
-  // null, or pointing to an already-deleted file all return ok: true.)
-  const driveResult = await trashDriveFile(
-    supabase,
-    userId,
-    String((listRow as any).drive_file_id ?? ''),
-  );
+  // Soft-disable — flip enabled=false. No Drive trash. No cascade delete.
+  const { error: updateErr } = await supabase
+    .from('lists')
+    .update({ enabled: false })
+    .eq('id',      listId)
+    .eq('user_id', userId);
+  if (updateErr) {
+    console.error(`[manage-list-connections] DELETE_LIST soft-disable error: ${updateErr.message}`);
+    return jsonResponse({ success: false, error: updateErr.message }, 500);
+  }
+
+  console.log(`[manage-list-connections] Soft-disabled list "${(listRow as any).name}" (${listId}); ${(connections ?? []).length} connections preserved`);
+  return jsonResponse({
+    success: true,
+    // Back-compat: callers that read deleted_list keep working.
+    deleted_list:         listRow,
+    disabled_list:        listRow,
+    // Connections preserved (not cascaded) but returned for display.
+    cascaded_connections: connections ?? [],
+  });
+}
+
+// handlePermanentDeleteList — HARD DELETE (Drive trash + DB row + cascade).
+//
+// Called only when the user explicitly taps "Delete permanently" on an already-
+// disabled list. Mirrors the old handleDeleteList behavior.
+async function handlePermanentDeleteList(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  body: any,
+) {
+  const listId = String(body?.list_id ?? '').trim();
+  if (!listId) return jsonResponse({ error: 'list_id required' }, 400);
+
+  const { data: listRow, error: lookupErr } = await supabase
+    .from('lists')
+    .select('id, name, drive_file_id')
+    .eq('id',      listId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (lookupErr) return jsonResponse({ error: lookupErr.message }, 500);
+  if (!listRow)  return jsonResponse({ error: 'list not found or not owned by user' }, 404);
+
+  const { data: connections } = await supabase
+    .from('list_connections')
+    .select('entity_type, entity_id')
+    .eq('user_id', userId)
+    .eq('list_id', listId);
+
+  // Trash the Drive Doc first so DB and Drive stay aligned.
+  const driveResult = await trashDriveFile(supabase, userId, String((listRow as any).drive_file_id ?? ''));
   if (!driveResult.ok) {
-    console.error(`[manage-list-connections] DELETE_LIST aborted — drive trash failed: ${driveResult.reason}`);
+    console.error(`[manage-list-connections] PERMANENTLY_DELETE_LIST aborted — drive trash failed: ${driveResult.reason}`);
     return jsonResponse({
       success: false,
       error:   'drive_trash_failed',
@@ -413,8 +461,7 @@ async function handleDeleteList(
     }, 500);
   }
 
-  // Delete the list. FK ON DELETE CASCADE on list_connections drops every
-  // wiring for this list_id automatically.
+  // Hard delete. FK ON DELETE CASCADE removes list_connections.
   const { error: deleteErr, data: deleted } = await supabase
     .from('lists')
     .delete()
@@ -422,25 +469,17 @@ async function handleDeleteList(
     .eq('user_id', userId)
     .select('id, name');
   if (deleteErr) {
-    // Drive is already trashed but the DB delete failed — we now have
-    // an orphan in the opposite direction. The user-facing message
-    // names this so support can recover. The reverse-sync sweep (Wave
-    // 2.6 Phase G) will normally heal it on the next Lists-screen load
-    // by removing the orphan list_connections rows pointing here.
-    console.error(`[manage-list-connections] DELETE_LIST DB error after Drive trash: ${deleteErr.message}`);
-    return jsonResponse({
-      success: false,
-      error:   'db_delete_failed_after_drive_trash',
-      reason:  deleteErr.message,
-    }, 500);
+    console.error(`[manage-list-connections] PERMANENTLY_DELETE_LIST DB error after Drive trash: ${deleteErr.message}`);
+    return jsonResponse({ success: false, error: 'db_delete_failed_after_drive_trash', reason: deleteErr.message }, 500);
   }
   if (!Array.isArray(deleted) || deleted.length === 0) {
     return jsonResponse({ error: 'list not found or not owned by user' }, 404);
   }
 
+  console.log(`[manage-list-connections] Permanently deleted list "${(deleted[0] as any).name}" (${listId})`);
   return jsonResponse({
     success: true,
-    deleted_list: deleted[0],
+    deleted_list:         deleted[0],
     cascaded_connections: connections ?? [],
   });
 }

@@ -1632,7 +1632,7 @@ Deno.serve(async (req) => {
 
       // B4z Phase 2: also allow action through when this is a turn-2 confirm
       // response (user said "yes" after a prior "say yes to confirm" ask).
-      const IS_CONFIRM_REPLY = /^(yes|yeah|yep|confirm|approved|go\s+ahead|do\s+it|please|ok|okay)[\s\W]*$/i;
+      const IS_CONFIRM_REPLY = /^(yes|yeah|yep|confirm|approved|go\s+ahead|do\s+it|please|ok|okay|send)[\s\W]*$/i;
       const isConfirmReply = IS_CONFIRM_REPLY.test(userTextB4y.trim());
       const lastAssistantMsg = [...messages].reverse().find((m: any) => m.role === 'assistant');
       const assistantText = typeof lastAssistantMsg?.content === 'string' ? lastAssistantMsg.content : '';

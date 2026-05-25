@@ -17,6 +17,7 @@ export interface ListRecord {
   category: string;
   drive_file_id: string;
   web_view_link: string | null;
+  enabled?: boolean;
 }
 
 export interface ListResult {
@@ -24,6 +25,8 @@ export interface ListResult {
   list?: ListRecord;
   items?: string[];
   error?: string;
+  /** true when LIST_CREATE found a disabled list and re-enabled it instead of creating a new one */
+  reactivated?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -34,6 +37,8 @@ async function getUserId(): Promise<string | null> {
   return session?.user?.id ?? null;
 }
 
+// Only finds ENABLED lists. Used by LIST_ADD / LIST_REMOVE / LIST_READ and
+// the createList duplicate-check. Disabled lists are invisible to these ops.
 async function findListByName(userId: string, name: string): Promise<ListRecord | null> {
   if (!supabase) return null;
   const { data, error } = await queryWithTimeout(
@@ -41,12 +46,32 @@ async function findListByName(userId: string, name: string): Promise<ListRecord 
       .from('lists')
       .select('id, name, category, drive_file_id, web_view_link')
       .eq('user_id', userId)
+      .eq('enabled', true)
       .ilike('name', name)
       .maybeSingle(),
     15_000,
     'select-list-by-name',
   );
   if (error) { console.error('[Lists] Lookup failed:', error.message); return null; }
+  return data;
+}
+
+// Find a DISABLED list with the given name. Used only by createList to
+// detect soft-deleted dupes and re-enable them instead of creating a new row.
+async function findDisabledListByName(userId: string, name: string): Promise<ListRecord | null> {
+  if (!supabase) return null;
+  const { data, error } = await queryWithTimeout(
+    supabase
+      .from('lists')
+      .select('id, name, category, drive_file_id, web_view_link')
+      .eq('user_id', userId)
+      .eq('enabled', false)
+      .ilike('name', name)
+      .maybeSingle(),
+    15_000,
+    'select-disabled-list-by-name',
+  );
+  if (error) { console.error('[Lists] Disabled lookup failed:', error.message); return null; }
   return data;
 }
 
@@ -74,9 +99,27 @@ export async function createList(name: string, category: string = 'other'): Prom
   const userId = await getUserId();
   if (!userId || !supabase) return { success: false, error: 'No user session' };
 
-  // Check if list already exists
+  // Check if enabled list already exists
   const existing = await findListByName(userId, name);
   if (existing) return { success: true, list: existing };
+
+  // Check for a DISABLED list with the same name (soft-delete parity with action_rules).
+  // Re-enable in-place so list_connections (attachments) and Drive Doc contents are
+  // preserved. This matches the alert lifecycle: grayed-out → re-enable on request.
+  const disabledDupe = await findDisabledListByName(userId, name);
+  if (disabledDupe) {
+    const { error: reEnableErr } = await queryWithTimeout(
+      supabase.from('lists').update({ enabled: true }).eq('id', disabledDupe.id),
+      15_000,
+      'reactivate-list-by-name',
+    );
+    if (reEnableErr) {
+      console.error('[Lists] Re-enable failed:', reEnableErr.message);
+      return { success: false, error: reEnableErr.message };
+    }
+    console.log(`[Lists] Re-enabled disabled list "${name}" (${disabledDupe.id})`);
+    return { success: true, list: { ...disabledDupe, enabled: true }, reactivated: true };
+  }
 
   // Create a Google Doc via save-to-drive. category='list' routes the new
   // Doc into MyNaavi/Lists/ instead of the MyNaavi root; save-to-drive
@@ -227,6 +270,7 @@ export async function getAllLists(): Promise<ListRecord[]> {
       .from('lists')
       .select('id, name, category, drive_file_id, web_view_link')
       .eq('user_id', userId)
+      .eq('enabled', true)
       .order('created_at', { ascending: true }),
     15_000,
     'select-all-lists',
@@ -234,4 +278,32 @@ export async function getAllLists(): Promise<ListRecord[]> {
 
   if (error) { console.error('[Lists] Fetch all failed:', error.message); return []; }
   return data ?? [];
+}
+
+// ─── Soft-disable / Reactivate ───────────────────────────────────────────────
+
+/** Soft-disable a list (enabled=false). Drive Doc and connections preserved. */
+export async function disableList(listId: string): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) return { success: false, error: 'No Supabase client' };
+  const { error } = await queryWithTimeout(
+    supabase.from('lists').update({ enabled: false }).eq('id', listId),
+    15_000,
+    'disable-list-by-id',
+  );
+  if (error) { console.error('[Lists] Disable failed:', error.message); return { success: false, error: error.message }; }
+  console.log(`[Lists] Disabled list ${listId}`);
+  return { success: true };
+}
+
+/** Re-enable a previously disabled list (enabled=true). */
+export async function reactivateList(listId: string): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) return { success: false, error: 'No Supabase client' };
+  const { error } = await queryWithTimeout(
+    supabase.from('lists').update({ enabled: true }).eq('id', listId),
+    15_000,
+    'reactivate-list-by-id',
+  );
+  if (error) { console.error('[Lists] Reactivate failed:', error.message); return { success: false, error: error.message }; }
+  console.log(`[Lists] Reactivated list ${listId}`);
+  return { success: true };
 }

@@ -343,6 +343,32 @@ export async function deleteListWithConnections(listName: string): Promise<Delet
   };
 }
 
+// permanentlyDeleteListById — UI path for hard-deleting an already-disabled
+// list. Called from the "Delete permanently" button on a disabled list's
+// detail screen. Calls the PERMANENTLY_DELETE_LIST op which:
+//   - Trashes the Drive Doc
+//   - Hard-deletes the lists row (FK cascade removes list_connections)
+export interface PermanentDeleteResult {
+  success:        boolean;
+  error?:         string;
+  listLabel?:     string;
+  cascadedCount?: number;
+}
+
+export async function permanentlyDeleteListById(listId: string): Promise<PermanentDeleteResult> {
+  if (!listId) return { success: false, error: 'listId required' };
+  const data = await manageConnections({
+    type:    'PERMANENTLY_DELETE_LIST',
+    list_id: listId,
+  });
+  if (!data?.success) return { success: false, error: data?.error || 'manage_connections_failed' };
+  return {
+    success:       true,
+    listLabel:     (data.deleted_list as any)?.name,
+    cascadedCount: Array.isArray(data.cascaded_connections) ? data.cascaded_connections.length : 0,
+  };
+}
+
 // 2026-05-20 (Wael / B4j fix) — eager list + connection creation for the
 // legacy `action_config.list_name` pattern.
 //
