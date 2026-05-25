@@ -681,7 +681,8 @@ async function fetchLiveRecentEmails(
           snippet: String(msg?.snippet ?? '').slice(0, 200),
           receivedAt: dateHdr,
         };
-      } catch {
+      } catch (msgErr) {
+        console.warn('[fetchLiveRecentEmails] per-message fetch failed:', (msgErr as Error)?.message ?? msgErr);
         return null;
       }
     }));

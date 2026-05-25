@@ -282,28 +282,34 @@ export async function getAllLists(): Promise<ListRecord[]> {
 
 // ─── Soft-disable / Reactivate ───────────────────────────────────────────────
 
-/** Soft-disable a list (enabled=false). Drive Doc and connections preserved. */
+/** Soft-disable a list (enabled=false). Drive Doc and connections preserved.
+ *  Routed through the manage-list Edge Function (Rule 2 — single write entry point). */
 export async function disableList(listId: string): Promise<{ success: boolean; error?: string }> {
   if (!supabase) return { success: false, error: 'No Supabase client' };
-  const { error } = await queryWithTimeout(
-    supabase.from('lists').update({ enabled: false }).eq('id', listId),
-    15_000,
-    'disable-list-by-id',
-  );
-  if (error) { console.error('[Lists] Disable failed:', error.message); return { success: false, error: error.message }; }
+  const { data, error } = await invokeWithTimeout('manage-list', {
+    body: { type: 'DISABLE_LIST', list_id: listId },
+  }, 15_000);
+  if (error || !data?.success) {
+    const msg = error?.message ?? data?.error ?? 'manage-list DISABLE_LIST failed';
+    console.error('[Lists] Disable failed:', msg);
+    return { success: false, error: msg };
+  }
   console.log(`[Lists] Disabled list ${listId}`);
   return { success: true };
 }
 
-/** Re-enable a previously disabled list (enabled=true). */
+/** Re-enable a previously disabled list (enabled=true).
+ *  Routed through the manage-list Edge Function (Rule 2 — single write entry point). */
 export async function reactivateList(listId: string): Promise<{ success: boolean; error?: string }> {
   if (!supabase) return { success: false, error: 'No Supabase client' };
-  const { error } = await queryWithTimeout(
-    supabase.from('lists').update({ enabled: true }).eq('id', listId),
-    15_000,
-    'reactivate-list-by-id',
-  );
-  if (error) { console.error('[Lists] Reactivate failed:', error.message); return { success: false, error: error.message }; }
+  const { data, error } = await invokeWithTimeout('manage-list', {
+    body: { type: 'REACTIVATE_LIST', list_id: listId },
+  }, 15_000);
+  if (error || !data?.success) {
+    const msg = error?.message ?? data?.error ?? 'manage-list REACTIVATE_LIST failed';
+    console.error('[Lists] Reactivate failed:', msg);
+    return { success: false, error: msg };
+  }
   console.log(`[Lists] Reactivated list ${listId}`);
   return { success: true };
 }

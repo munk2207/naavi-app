@@ -407,6 +407,46 @@ Deno.serve(async (req) => {
       return jsonResponse({ success: true, items });
     }
 
+    // ── DISABLE_LIST ─────────────────────────────────────────────────────────
+    // Soft-disable a list by id (enabled=false). Drive Doc and list_connections
+    // are preserved so the list can be reactivated later. This is the server-
+    // side entry point that lib/lists.ts routes through (Rule 2 compliance).
+    if (type === 'DISABLE_LIST') {
+      const listId = String(action.list_id ?? '');
+      if (!listId) return jsonResponse({ success: false, error: 'list_id required' }, 400);
+
+      const { error: updateErr } = await supabase
+        .from('lists')
+        .update({ enabled: false })
+        .eq('id', listId)
+        .eq('user_id', userId);
+      if (updateErr) {
+        console.error(`[manage-list] DISABLE_LIST failed:`, updateErr.message);
+        return jsonResponse({ success: false, error: updateErr.message }, 500);
+      }
+      console.log(`[manage-list] Disabled list ${listId}`);
+      return jsonResponse({ success: true, list_id: listId });
+    }
+
+    // ── REACTIVATE_LIST ───────────────────────────────────────────────────────
+    // Re-enable a previously soft-disabled list (enabled=true).
+    if (type === 'REACTIVATE_LIST') {
+      const listId = String(action.list_id ?? '');
+      if (!listId) return jsonResponse({ success: false, error: 'list_id required' }, 400);
+
+      const { error: updateErr } = await supabase
+        .from('lists')
+        .update({ enabled: true })
+        .eq('id', listId)
+        .eq('user_id', userId);
+      if (updateErr) {
+        console.error(`[manage-list] REACTIVATE_LIST failed:`, updateErr.message);
+        return jsonResponse({ success: false, error: updateErr.message }, 500);
+      }
+      console.log(`[manage-list] Reactivated list ${listId}`);
+      return jsonResponse({ success: true, list_id: listId });
+    }
+
     return jsonResponse({ success: false, error: `Unknown action type: ${type}` }, 400);
 
   } catch (err) {
