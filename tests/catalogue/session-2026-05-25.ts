@@ -386,4 +386,66 @@ export const session20260525Tests: TestCase[] = [
       ctx.log('"send" accepted as confirm — PASS');
     },
   },
+
+  // ─── B5a: email date filter ───────────────────────────────────────────────
+
+  {
+    id: 'email-date-filter.this-month-excludes-prior-months',
+    category: 'email-date-filter',
+    description:
+      'global-search email_actions adapter must apply a date filter when the query ' +
+      'contains "this month" — results must NOT include rows with extracted_at ' +
+      'in a prior month, confirming the temporal bounds are wired correctly.',
+    timeoutMs: 20_000,
+    async run(ctx) {
+      const url = `${ctx.supabaseUrl}/functions/v1/global-search`;
+
+      // Query that explicitly asks for "this month" — should trigger temporal bounds.
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${ctx.serviceRoleKey}`,
+          apikey: ctx.serviceRoleKey,
+        },
+        body: JSON.stringify({
+          user_id: ctx.testUserId,
+          query:   'receipts and invoices this month',
+          limit:   20,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      ctx.log(`status=${res.status} ranked=${Array.isArray(data?.ranked) ? data.ranked.length : 'n/a'}`);
+
+      if (res.status !== 200) {
+        throw new Error(`global-search returned ${res.status}: ${JSON.stringify(data).slice(0, 300)}`);
+      }
+
+      // Compute the start of the current month in ISO format (YYYY-MM).
+      const now = new Date();
+      const thisMonthPrefix = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+      ctx.log(`Expecting all email_actions results to have extracted_at >= ${thisMonthPrefix}`);
+
+      const emailActionResults = (data?.ranked ?? []).filter(
+        (r: any) => r.source === 'email_actions',
+      );
+      ctx.log(`email_actions results in ranked: ${emailActionResults.length}`);
+
+      // For every email_actions result, verify createdAt (= extracted_at) is
+      // within the current month. If it's empty that's fine — no emails this
+      // month for the test user, filter worked (returned 0 instead of old rows).
+      for (const r of emailActionResults) {
+        const at = String(r.createdAt ?? '');
+        if (at && !at.startsWith(thisMonthPrefix)) {
+          throw new Error(
+            `email_actions result "${r.title}" has createdAt=${at} which is NOT in ` +
+            `the current month (${thisMonthPrefix}). Date filter is not working.`,
+          );
+        }
+      }
+
+      ctx.log('All email_actions results are within the current month — PASS');
+    },
+  },
 ];

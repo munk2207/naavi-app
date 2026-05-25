@@ -1442,7 +1442,24 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         }
 
         if (preSearchResults.length > 0) {
-          const lines = preSearchResults.map(r => `- [${r.source}] ${r.title}${r.snippet ? ' — ' + r.snippet : ''}`);
+          // Map internal adapter names to readable labels so Claude doesn't echo
+          // "In email_actions: …" in its spoken response (B5a fix, 2026-05-25).
+          const SOURCE_LABELS: Record<string, string> = {
+            email_actions: 'Email',
+            gmail:         'Email',
+            calendar:      'Calendar',
+            knowledge:     'Notes',
+            drive:         'Drive',
+            contacts:      'Contacts',
+            lists:         'Lists',
+            rules:         'Alerts',
+            reminders:     'Reminders',
+            sent_messages: 'Sent Messages',
+          };
+          const lines = preSearchResults.map(r => {
+            const label = SOURCE_LABELS[r.source] ?? r.source;
+            return `- [${label}] ${r.title}${r.snippet ? ' — ' + r.snippet : ''}`;
+          });
           enrichedMessage = `${enrichedMessage}\n\n## Live search results for the user's question (these are authoritative — use them to answer; do NOT say "I couldn't find" if results are listed here)\n${lines.join('\n')}`;
           turnGlobalSearch = { query: userMessage, results: preSearchResults, origin: 'pre-search' };
         } else {

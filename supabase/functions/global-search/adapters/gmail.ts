@@ -149,6 +149,16 @@ export const gmailAdapter: SearchAdapter = {
       // morning brief — just not here.
       .in('signal_strength', ['personal', 'institutional']);
 
+    // Temporal window — applied when the user asked about a specific period
+    // ("this month", "last week", etc.). Filter on received_at (when the
+    // email arrived), not on any action/due date.
+    if (ctx.dateFrom) {
+      queryBuilder = queryBuilder.gte('received_at', `${ctx.dateFrom}T00:00:00.000Z`);
+    }
+    if (ctx.dateTo) {
+      queryBuilder = queryBuilder.lte('received_at', `${ctx.dateTo}T23:59:59.999Z`);
+    }
+
     if (!generic) {
       const orClauses: string[] = [];
       for (const v of variants) {

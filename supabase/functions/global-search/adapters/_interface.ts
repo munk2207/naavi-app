@@ -31,6 +31,16 @@ export interface SearchContext {
   supabase: SupabaseClient;
   // Individual adapters that need Google APIs, Epic, etc. fetch their own
   // access tokens via user_tokens / user connections inside the adapter.
+
+  /** ISO date string (YYYY-MM-DD) — start of the temporal window the user
+   *  is asking about ("this month", "last week", "today", etc.).
+   *  Set by the handler when a temporal keyword is detected in the query.
+   *  Adapters that have a receivedAt / extractedAt column SHOULD apply
+   *  .gte(column, dateFrom) when this is present. */
+  dateFrom?: string;
+  /** ISO date string (YYYY-MM-DD) — end of the temporal window (inclusive).
+   *  Adapters should apply .lte(column, dateTo + 'T23:59:59.999Z'). */
+  dateTo?: string;
 }
 
 export interface SearchResult {

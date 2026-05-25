@@ -148,6 +148,63 @@ function detectSourceIntent(query: string): string[] | null {
   return null;
 }
 
+// ── Temporal bounds detection ─────────────────────────────────────────────────
+//
+// When the user says "this month", "last week", "today", etc., detect it and
+// return ISO date strings (YYYY-MM-DD) for the start and end of that window.
+// Adapters then apply date filters so results stay within the asked period.
+// Only "this month", "last month", "this week", "last week", "today",
+// "yesterday" are handled — anything else returns empty bounds (no filter).
+//
+// All arithmetic is in UTC so the bounds are timezone-neutral at the date level;
+// edge-function deployment is UTC, and the DB timestamps are UTC.
+function detectTemporalBounds(query: string): { dateFrom?: string; dateTo?: string } {
+  const lower = query.toLowerCase();
+  const now   = new Date();
+  const y     = now.getUTCFullYear();
+  const m     = now.getUTCMonth();   // 0-indexed
+  const d     = now.getUTCDate();
+
+  const iso = (date: Date) => date.toISOString().slice(0, 10);
+
+  if (/\bthis\s+month\b/.test(lower)) {
+    return {
+      dateFrom: iso(new Date(Date.UTC(y, m, 1))),
+      dateTo:   iso(new Date(Date.UTC(y, m + 1, 0))),
+    };
+  }
+  if (/\blast\s+month\b/.test(lower)) {
+    const pm = m === 0 ? 11 : m - 1;
+    const py = m === 0 ? y - 1 : y;
+    return {
+      dateFrom: iso(new Date(Date.UTC(py, pm, 1))),
+      dateTo:   iso(new Date(Date.UTC(py, pm + 1, 0))),
+    };
+  }
+  if (/\bthis\s+week\b/.test(lower)) {
+    const dow     = now.getUTCDay(); // 0=Sun
+    const monday  = new Date(Date.UTC(y, m, d - (dow === 0 ? 6 : dow - 1)));
+    const sunday  = new Date(Date.UTC(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate() + 6));
+    return { dateFrom: iso(monday), dateTo: iso(sunday) };
+  }
+  if (/\blast\s+week\b/.test(lower)) {
+    const dow        = now.getUTCDay();
+    const thisMonday = new Date(Date.UTC(y, m, d - (dow === 0 ? 6 : dow - 1)));
+    const lastMonday = new Date(Date.UTC(thisMonday.getUTCFullYear(), thisMonday.getUTCMonth(), thisMonday.getUTCDate() - 7));
+    const lastSunday = new Date(Date.UTC(lastMonday.getUTCFullYear(), lastMonday.getUTCMonth(), lastMonday.getUTCDate() + 6));
+    return { dateFrom: iso(lastMonday), dateTo: iso(lastSunday) };
+  }
+  if (/\btoday\b/.test(lower)) {
+    const today = iso(new Date(Date.UTC(y, m, d)));
+    return { dateFrom: today, dateTo: today };
+  }
+  if (/\byesterday\b/.test(lower)) {
+    const yesterday = iso(new Date(Date.UTC(y, m, d - 1)));
+    return { dateFrom: yesterday, dateTo: yesterday };
+  }
+  return {};
+}
+
 // ── Merge + rank ─────────────────────────────────────────────────────────────
 
 function mergeAndRank(allResults: SearchResult[]): SearchResult[] {
@@ -192,6 +249,7 @@ Deno.serve(async (req) => {
 
     const trimmedQuery = query.trim();
     const queryVariants = expandQuery(trimmedQuery);
+    const temporalBounds = detectTemporalBounds(trimmedQuery);
 
     const ctx: SearchContext = {
       userId,
@@ -199,7 +257,12 @@ Deno.serve(async (req) => {
       queryVariants,
       limit: perSourceLimit,
       supabase,
+      ...temporalBounds,
     };
+
+    if (temporalBounds.dateFrom) {
+      console.log(`[global-search] temporal bounds: ${temporalBounds.dateFrom} → ${temporalBounds.dateTo}`);
+    }
 
     // Wael 2026-05-10: detect source intent. When user names a source
     // ("email about X"), only run that adapter — the rest are irrelevant

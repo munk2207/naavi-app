@@ -63,14 +63,28 @@ export const emailActionsAdapter: SearchAdapter = {
       );
     }
 
-    const { data, error } = await ctx.supabase
+    // Build query — start with mandatory filters, then optionally gate by the
+    // temporal window the user asked about ("this month", "last week", etc.).
+    // We filter on `extracted_at` (when the email arrived in Naavi's cache)
+    // NOT on `due_date` — the user asked about emails *received* this period,
+    // not about which bills happen to be due this period.
+    let query = ctx.supabase
       .from('email_actions')
       .select(
         'id, gmail_message_id, action_type, title, vendor, amount_cents, currency, due_date, urgency, summary, extracted_at, document_type, reference, expiry_date',
       )
       .eq('user_id', ctx.userId)
       .eq('dismissed', false)
-      .or(orClauses.join(','))
+      .or(orClauses.join(','));
+
+    if (ctx.dateFrom) {
+      query = query.gte('extracted_at', `${ctx.dateFrom}T00:00:00.000Z`);
+    }
+    if (ctx.dateTo) {
+      query = query.lte('extracted_at', `${ctx.dateTo}T23:59:59.999Z`);
+    }
+
+    const { data, error } = await query
       .order('due_date', { ascending: true, nullsFirst: false })
       .limit(ctx.limit);
 
