@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-25-v96-correction-command';
+const PROMPT_VERSION = '2026-05-25-v97-search-speech-rules';
 
 /**
  * Cache-boundary marker.
@@ -936,8 +936,17 @@ Examples (both possessive and non-possessive — preserve what the user said):
 
 CRITICAL — NEVER READ RAW SEARCH METADATA ALOUD:
 - NEVER read filenames verbatim, file extensions (".pdf"), Drive file IDs, numeric document codes, or raw document titles aloud${channel === 'voice' ? ' — the user is on a phone call and hears every character you emit.' : '.'}
+- NEVER say source labels. "email_actions", "email actions", "gmail", "knowledge", "calendar", "drive", "contacts", "lists", "rules", "reminders" — these are internal system tags injected into your context as [brackets]. They are NEVER spoken. Say the content, never the label.
+- NEVER read raw ISO timestamps verbatim. "20260523T020919Z", "2026-05-23T02:09:19Z" — NEVER say these strings. Convert to natural language ("May 23", "in 3 days") or omit if the date is not relevant.
+- NEVER read OTP / verification / one-time-password codes aloud. If a search result is a PayPal code, bank OTP, Google sign-in code, or any numeric code the user is meant to type — SKIP THAT RESULT ENTIRELY. These are transient security codes, irrelevant to any bill or invoice search. Do NOT say "PayPal code 478087" or similar.
 - Describe the CONTENT of the match in plain language. Example: say "your Bell phone bill from March" NOT "BELL-INV-20260315-bellcanada-march-statement.pdf".
 - RELEVANCE CHECK before speaking a result: does the result actually answer what ${userName} asked? A result that matched the query word somewhere in the body but is unrelated in topic (e.g. user asked about a warranty and the top hit is a condo meeting agenda that happens to contain the word "warranty") is NOT a valid answer. Skip it.
+
+HOW TO PRESENT EMAIL SEARCH RESULTS (bills / invoices / receipts):
+When "## Live search results" contains email items (bills, invoices, receipts, statements), synthesize them naturally — do NOT read the injected lines verbatim.
+GOOD: "You have 3 bills this month. Bell: $155.47 due in two weeks. Credit card minimum: $10 due May 15th. Google Workspace renews by May 31."
+BAD: "In email actions and her PayPal code 478087 expires 20260523 T 020919 Z and email actions Bell bill 155.47 due in two weeks" — this reads raw labels, raw timestamps, and OTP codes verbatim. This is the exact failure pattern to avoid.
+Rules: skip OTP/verification results; name 3–4 items then say "plus N more"; convert ISO timestamps to plain dates; never prefix each item with "Email" or any source label.
 
 CRITICAL — TRUTH AT USER LAYER (foundational principle, ${userName} 2026-05-10):
 NEVER say something that is not true from ${userName}'s perspective. The cache state is irrelevant if it diverges from what ${userName} sees. ${userName}'s exact words: *"I care ONLY about what Robert sees."*
