@@ -718,20 +718,19 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       ): Promise<{
         ok: boolean;
         ruleId: string | null;
+        reactivated?: boolean;
         alreadyExists?: { ruleId: string; placeName: string; address: string | null; oneShot: boolean; enabled: boolean };
       }> => {
         if (!pending.resolved) return { ok: false, ruleId: null };
         // V57.13.3 — pre-INSERT duplicate check. Before creating the action_rule,
         // query for any existing location rule at the same rounded coordinates
-        // for this user. If found, render the "you already have an alert at X"
-        // prompt instead of failing the INSERT against the unique constraint.
-        //
-        // 2026-05-22 (Wael) — dedup across fire cycles. The original check only
-        // matched ENABLED rules, so when an alert FIRED (one_shot=true →
-        // enabled=false), a second request to set an alert at the same coords
-        // would create a duplicate row. Now matches ANY rule at the coords;
-        // the consumer branches on `enabled` to render the right message
-        // (existing → "you already have", expired → point user to Reactivate).
+        // for this user. If found:
+        //   ENABLED dupe  → return alreadyExists so consumer says "you already have this"
+        //   DISABLED dupe → re-enable it in-place (2026-05-25 B4z+ fix).
+        //     Previous behavior: told user to "tap Reactivate in the Alerts screen."
+        //     New behavior: UPDATE enabled=true directly in chat when user says
+        //     "alert me at X" and X matches a fired/expired one-shot rule.
+        //     The user's intent is clear — they want an active alert. Re-enable it.
         const epsilon = 0.00001; // 5-decimal rounding tolerance
         const lat = pending.resolved.lat;
         const lng = pending.resolved.lng;
@@ -752,6 +751,27 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
             return Math.abs(rLat - lat) < epsilon && Math.abs(rLng - lng) < epsilon;
           });
           if (dupe) {
+            if (dupe.enabled === false) {
+              // Disabled/expired alert at the same location — re-enable it.
+              // Update one_shot and place_name to match the new request so the
+              // alert card reflects the freshly confirmed details.
+              const newOneShot = pending.originalAction?.one_shot ?? true;
+              const updatedTriggerConfig = {
+                ...dupe.trigger_config,
+                place_name: pending.resolved.place_name,
+                address: pending.resolved.address ?? dupe.trigger_config?.address ?? null,
+              };
+              const { error: reEnableError } = await supabase
+                .from('action_rules')
+                .update({ enabled: true, one_shot: newOneShot, trigger_config: updatedTriggerConfig })
+                .eq('id', dupe.id);
+              if (reEnableError) {
+                console.error('[commitPending] re-enable failed:', reEnableError);
+                return { ok: false, ruleId: null };
+              }
+              return { ok: true, ruleId: String(dupe.id), reactivated: true };
+            }
+            // Enabled dupe — user already has an active alert here.
             return {
               ok: false,
               ruleId: null,
@@ -760,7 +780,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                 placeName: String(dupe.trigger_config?.place_name ?? pending.resolved.place_name),
                 address: (dupe.trigger_config?.address as string | undefined) ?? null,
                 oneShot: !!dupe.one_shot,
-                enabled: dupe.enabled !== false,
+                enabled: true,
               },
             };
           }
@@ -926,23 +946,15 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         } catch (err) {
           console.error('[orch:loc:pending] permission check threw:', err);
         }
-        const { ok, ruleId, alreadyExists } = await commitPending(session.user.id, 'confirmed');
-        // V57.13.3 — duplicate detected. Tell the user instead of silently
-        // failing or creating a second rule. The DB unique constraint would
-        // also reject — this is the gentler UX path.
-        // 2026-05-22 — F2e dedup across fire cycles. If the duplicate is
-        // DISABLED (fired one-shot or manually disabled), point the user to
-        // the Reactivate button rather than just refusing.
+        const { ok, ruleId, reactivated, alreadyExists } = await commitPending(session.user.id, 'confirmed');
+        // Enabled dupe — user already has an active alert here.
         if (alreadyExists) {
           const existingMode = alreadyExists.oneShot ? 'one-time' : 'recurring';
           const addrSuffix = alreadyExists.address
             ? ` at ${String(alreadyExists.address).split(',')[0]?.trim()}`
             : '';
           pendingLocationRef.current = null;
-          const msg = alreadyExists.enabled
-            ? `You already have a ${existingMode} alert for ${alreadyExists.placeName}${addrSuffix}. Say "list my alerts" if you want to change or remove it.`
-            : `Your previous ${existingMode} alert for ${alreadyExists.placeName}${addrSuffix} is expired. Open Alerts and tap Reactivate to re-arm it. Or delete the expired one first if you want me to create a fresh alert.`;
-          emitPendingTurn(msg);
+          emitPendingTurn(`You already have a ${existingMode} alert for ${alreadyExists.placeName}${addrSuffix}. Say "list my alerts" if you want to change or remove it.`);
           return;
         }
         // V57.4 — speech now states one-time vs every-time so Robert always
@@ -958,7 +970,9 @@ const oneShot = pending.originalAction?.one_shot ?? true;
 const oneShot = pending.originalAction?.one_shot ?? true;
         const modeText = oneShot ? 'one time' : 'every time';
         const speech = ok
-          ? `Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.`
+          ? reactivated
+            ? `Your previous alert for ${pending.resolved.place_name} was re-enabled — ${modeText} you arrive.`
+            : `Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.`
           : `Couldn't save the rule — something went wrong. Try again?`;
         // V57.4 Part B — attach the toggle card when the rule was saved.
         // V57.13.4 — also pass address so the card shows the street segment.
@@ -1049,7 +1063,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               } catch (err) {
                 console.error('[orch:loc:clarif-memory] permission check threw:', err);
               }
-              const { ok, ruleId, alreadyExists } = await commitPending(session.user.id, 'confirmed');
+              const { ok, ruleId, reactivated, alreadyExists } = await commitPending(session.user.id, 'confirmed');
               // V57.19 — reverted from V57.18 default flip after the 2026-05-17
 // stationary-re-fire bug. Wael received a phantom "you arrived home" alert
 // while sitting at home (never moved). Root cause: SDK re-fires ENTER
@@ -1061,16 +1075,13 @@ const oneShot = pending.originalAction?.one_shot ?? true;
 const oneShot = pending.originalAction?.one_shot ?? true;
               pendingLocationRef.current = null;
               if (alreadyExists) {
+                // Only enabled dupes reach here — disabled ones are re-enabled
+                // in commitPending and return { ok: true, reactivated: true }.
                 const existingMode = alreadyExists.oneShot ? 'one-time' : 'recurring';
                 const addrSuffix = alreadyExists.address
                   ? ` at ${String(alreadyExists.address).split(',')[0]?.trim()}`
                   : '';
-                // 2026-05-22 — F2e dedup across fire cycles. Same branch as
-                // the yes-confirm path: disabled dupe → point to Reactivate.
-                const msg = alreadyExists.enabled
-                  ? `You already have a ${existingMode} alert for ${alreadyExists.placeName}${addrSuffix}. Say "list my alerts" if you want to change or remove it.`
-                  : `Your previous ${existingMode} alert for ${alreadyExists.placeName}${addrSuffix} is expired. Open Alerts and tap Reactivate to re-arm it. Or delete the expired one first if you want me to create a fresh alert.`;
-                emitPendingTurn(msg);
+                emitPendingTurn(`You already have a ${existingMode} alert for ${alreadyExists.placeName}${addrSuffix}. Say "list my alerts" if you want to change or remove it.`);
                 return;
               }
               // V57.13.3 — sourceText simplified. memory cache removed; only
@@ -1080,7 +1091,9 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                                  '';
               const modeText = oneShot ? 'one time' : 'every time';
               const speech = ok
-                ? `${data.place_name}${sourceText ? ' ' + sourceText : ''} — alert set ${modeText} you arrive.`
+                ? reactivated
+                  ? `Your previous alert for ${data.place_name} was re-enabled — ${modeText} you arrive.`
+                  : `${data.place_name}${sourceText ? ' ' + sourceText : ''} — alert set ${modeText} you arrive.`
                 : `Couldn't save the rule — something went wrong.`;
               const cards = ok && ruleId
                 ? [{ ruleId, placeName: data.place_name, address: data.address ?? null, oneShot }]
