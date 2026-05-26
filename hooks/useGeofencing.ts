@@ -247,22 +247,6 @@ function ensureReady(): Promise<void> {
       // audible confirmation that the native SDK detected the transition.
       debug: false,
 
-      // Disable motion-activity API calls. Required pair with the
-      // `plugins/withRemoveActivityRecognition.js` manifest override that
-      // strips android.permission.ACTIVITY_RECOGNITION from the merged
-      // AndroidManifest for Google Play Health-app-policy compliance.
-      // Without this flag the SDK would still try to call the now-blocked
-      // Motion API and either crash, log noisy SecurityExceptions, or
-      // silently fail. Vendor docs (Config.d.ts:84): "Disable motion-activity
-      // updates… plugin is HIGHLY optimized to use the Motion API for
-      // improved battery performance." Trade-off accepted to clear the
-      // Google Play Health-features blocker. Geofence ENTER/EXIT events
-      // still fire via GPS-based detection; only the "is the user moving?"
-      // pre-wake-up optimization is lost (vendor: ~200-1000m motion-detect
-      // threshold vs accelerometer-instant). Drive test on Wael's Samsung
-      // required before promoting this to production AAB.
-      disableMotionActivityUpdates: true,
-
       // V57.17 — Native HTTP autosync (Config.url). The SDK posts every
       // persisted geofence event directly to our webhook from native code,
       // NOT from JavaScript. This is the architectural fix for the
