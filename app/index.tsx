@@ -75,7 +75,7 @@ import { fetchOttawaWeather } from '@/lib/weather';
 import { sendDriveFileAsEmail } from '@/lib/drive';
 import { lookupContact, type Contact } from '@/lib/contacts';
 import { resolveRecipient } from '@/lib/recipientLookup';
-import { saveContact, loadTodayConversation, signInWithGoogle, signOut, supabase } from '@/lib/supabase';
+import { saveContact, loadTodayConversation, signInWithGoogle, signOut } from '@/lib/supabase';
 import { getBackgroundPermission, getForegroundPermission, requestLocationPermissions } from '@/lib/location';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync, isCalendarConnected } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
