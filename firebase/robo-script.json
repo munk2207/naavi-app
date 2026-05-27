@@ -1,0 +1,11 @@
+[
+  {
+    "eventType": "VIEW_CLICKED",
+    "elementDescriptors": [
+      {
+        "text": "Test Lab Sign In"
+      }
+    ],
+    "delayTime": 4000
+  }
+]
