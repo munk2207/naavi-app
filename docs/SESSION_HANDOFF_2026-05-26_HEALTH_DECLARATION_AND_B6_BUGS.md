@@ -49,25 +49,39 @@
 
 ---
 
-## Uncommitted local code (NOT shipped; in working tree)
+## B6a / B6b shipped late in this session (UPDATE)
 
-Wael said "close issues, not put it on hold" mid-session — implementation was started for B6a / B6b but paused when drive test result re-directed the session. **All these files are in the local working tree on `main`, NOT committed yet:**
+The "uncommitted local" section from the original handoff was acted on before close. Late-session sequence:
 
-| File | Purpose |
-|---|---|
-| `hooks/useOrchestrator.ts` | B6a: new `reArmLocationRule` helper; replaces bail-to-UI at `:2515` (pre-resolve memory-hit) and `:2629` (post-resolve dup-check); also replaces inline re-enable at `commitPending` (line ~822) for consistency |
-| `lib/normalizePlaceName.ts` | NEW. Pure helper. Lowercases, strips apostrophes/punctuation, collapses whitespace — so spelling variants of the same place hit the same rule row |
-| `supabase/migrations/20260526_action_rules_one_row_per_place.sql` | B6b: idempotent cleanup of duplicate disabled location rules + replaces V57.13.3 partial UNIQUE index (drops `WHERE enabled=true` filter so the index applies to all rows) |
-| `tests/catalogue/data-integrity.ts` | Flipped `disabled-rule-allows-new` → `disabled-rule-now-blocks-new` (was: V57.13.3 behavior; now: B6a/B6b behavior). Added `re-arm-update-keeps-one-row` |
-| `tests/catalogue/session-2026-05-26.ts` | NEW. 3 unit tests for `normalizePlaceName` helper (case + comma, apostrophe stripping, defensive empty/null) |
-| `tests/runner.ts` | Registers `session2026_05_26Tests` in the full suite |
+1. Wael approved running the B6b migration against live Supabase.
+2. First `npx supabase db push --linked` attempt failed — `supabase/migrations/20260323_epic_tables.sql` was corrupt (contained the single string `pbut`, latent since commit `6ebae94` on 2026-04-03). Restored from git history `b8b7552` and committed in `ab6b9fb`.
+3. Second push attempt revealed Supabase CLI migration tracking was misaligned with prod (every migration showed as pending). Marked 26 unique-date versions as applied via `supabase migration repair --status applied <version>` calls.
+4. CLI push still blocked by a structural issue with multi-files-per-date filenames (~10 dates have 2-4 files each; CLI can only track one per date). **Logged as B6f for future fix.** Workaround: applied B6b migration via Dashboard SQL Editor (success).
+5. `supabase migration repair --status applied 20260526` marked the new migration tracked.
+6. `npm run test:auto` returned **144 / 144 green**.
+7. B6a + B6b code committed in `318e522`. Holding list updated in `3e6a9c6` (B6b marked CLOSED, B6a status updated, new B6f entry added).
 
-**To ship this work:**
+**Final commit chain on `origin/main`:**
 
-1. Run `npx supabase db push --linked` (applies the new migration to live Supabase project `hhgyppbxgmjrwdpdubcx`). Wael's approval required — destructive (deletes accumulated duplicate disabled rules; drops + recreates an index).
-2. Run `npm run test:auto` — must return 140/140 + new B6a/B6b tests green.
-3. `git add` only the 6 files above; commit with descriptive message; push.
-4. Bump versionCode if combining with other code in the next AAB.
+```
+3e6a9c6  holding-list: close B6b + update B6a status to committed + add B6f
+318e522  B6a + B6b: one row per place — re-arm expired location alerts on confirm
+ab6b9fb  fix: restore corrupted 20260323_epic_tables.sql from git history
+056d2d2  docs: session handoff 2026-05-26 — Health declaration accepted + B6a-B6e
+fb57fdb  holding-list: log B6a-B6e + 2026-05-26 Google Play Health declaration outcome
+2c7f803  Revert: V57.22.5 build 201 — restore ACTIVITY_RECOGNITION
+aedf612  V57.22.4 build 200 — strip ACTIVITY_RECOGNITION from manifest
+```
+
+**What changed since the handoff was first written:**
+- B6a code: was uncommitted → now committed (`318e522`).
+- B6b migration: was un-applied → now applied to live Supabase prod.
+- B6f added to holding list (Supabase migration tracking structural issue).
+- Auto-tester re-run: 144 / 144 green.
+
+**What still awaits next session:**
+- AAB build (V57.22.5 build 201) — gets Build 200 mobile changes + B6a re-arm flow onto the phone via Play.
+- The bugs the next session will focus on per Wael's directive (mobile + voice) — full list still in the section below.
 
 ---
 
