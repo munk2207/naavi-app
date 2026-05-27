@@ -302,6 +302,127 @@ const CALENDAR_INTENT_RE =
 const EMAIL_QUERY_INTENT_RE =
   /\b(email|emails|inbox|new\s*mail|mailbox|did\s+\w+\s+(email|mail|message|write|send)|any\s+(messages?|mail|emails?)|new\s+messages?|unread|just\s+(got|received)|did\s+i\s+(get|receive))\b/i;
 
+// ── B6e — calendar-read pre-Claude bypass ─────────────────────────────────────
+// Discovered 2026-05-26 (Wael) via b6e-diag capture. Haiku at a 111 KB prompt
+// reliably misroutes "what is on my calendar this week?" to LIST_READ /
+// LIST_RULES — diag confirmed three explicit prompt rules (:958, :1012, :1251
+// of get-naavi-prompt) all instructing "calendar queries → read the Schedule
+// section" were ignored when the lists/alerts contexts sit at the tail of the
+// prompt. Two captured reproductions of the same query against the same
+// prompt yielded list_read(naavi) and list_rules(alert) — non-deterministic
+// at temperature=0, classic Haiku attention loss on a long context.
+//
+// Fix: detect list-form calendar-read queries server-side and answer
+// deterministically from fetchLiveCalendarEvents. Same pattern as
+// detectEmailAlert: regex gate + intent-specific bypass. Claude is never
+// called for these queries → impossible to misroute.
+const CALENDAR_READ_INTENT_RE =
+  /\b(?:what(?:'?s| is) (?:on |in )?(?:my|the) (?:calendar|schedule|agenda)|what (?:meetings?|events?|appointments?) do i have|show (?:me )?(?:my|the) (?:calendar|schedule|agenda)|any (?:meetings?|events?|appointments?))/i;
+
+// Negative guard: imperative create/delete/alert verbs at the START of the
+// message mean this is NOT a read intent even if the positive regex matches.
+// Examples: "Schedule a lunch tomorrow", "Add Victoria Day to my calendar",
+// "Delete my dentist meeting", "Alert me before my dentist meeting" — all
+// have a "calendar" or "schedule" word but are not list-reads.
+const CALENDAR_READ_IMPERATIVE_PREFIX_RE =
+  /^(?:please\s+|hey\s+naavi[,\s]+|naavi[,\s]+)?(?:add|create|book|put|schedule\s+(?:a|an|my|the)?|set\s+up|delete|cancel|remove|alert|notify|remind|text|message|invite|forget|drop|clear)\b/i;
+
+function isCalendarReadIntent(text: string): boolean {
+  if (typeof text !== 'string' || text.length === 0) return false;
+  if (!CALENDAR_READ_INTENT_RE.test(text)) return false;
+  if (CALENDAR_READ_IMPERATIVE_PREFIX_RE.test(text)) return false;
+  return true;
+}
+
+type CalendarWindow = 'today' | 'tomorrow' | 'this week' | 'next week' | 'this month' | 'next 7 days';
+
+function detectCalendarWindow(text: string): CalendarWindow {
+  const lower = text.toLowerCase();
+  if (/\btoday\b|\btonight\b/.test(lower))                          return 'today';
+  if (/\btomorrow\b/.test(lower))                                    return 'tomorrow';
+  if (/\bnext\s+week\b/.test(lower))                                 return 'next week';
+  if (/\bthis\s+week\b/.test(lower))                                 return 'this week';
+  if (/\bthis\s+month\b/.test(lower))                                return 'this month';
+  return 'next 7 days';
+}
+
+// Filter calendar items in the brief by the requested window. The brief items
+// already cover next-7-days (fetchLiveCalendarEvents fetches a 7-day window).
+// For "this week" / "this month" / "next 7 days" we return everything (the
+// 7-day window IS "this week" for most users — a Monday→Sunday slice would
+// be more precise but the fetch helper doesn't support it, and the simpler
+// behavior is honest about the window we have data for).
+function filterCalendarBriefByWindow(
+  items: MobileBriefItem[],
+  window: CalendarWindow,
+): MobileBriefItem[] {
+  const cal = items.filter(i => i.category === 'calendar');
+  if (window === 'today' || window === 'tomorrow') {
+    // Brief detail format: "<MMM> <D> [at H:MM AM/PM | all day][ at <address>]"
+    // E.g. "May 27 all day", "May 28 at 11:30 AM at 1053 Carling Avenue ..."
+    // We compare the leading "MMM D" against today's / tomorrow's Toronto date.
+    const now = new Date();
+    const todayStr = now.toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', timeZone: 'America/Toronto',
+    });
+    const tomorrowStr = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+      .toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Toronto' });
+    const target = window === 'today' ? todayStr : tomorrowStr;
+    return cal.filter(item => {
+      const detail = item.detail ?? '';
+      const m = detail.match(/^(\w+\s+\d+)/);
+      return !!m && m[1] === target;
+    });
+  }
+  // 'this week' / 'next week' / 'this month' / 'next 7 days' — return all.
+  // The 7-day fetch window covers "this week" for any day-of-week the user
+  // asks; "next week" / "this month" within 7 days are honestly reported.
+  return cal;
+}
+
+function buildCalendarReadResponse(
+  items: MobileBriefItem[],
+  window: CalendarWindow,
+): { speech: string; display: string; actions: any[] } {
+  if (items.length === 0) {
+    const whenLabel =
+      window === 'today'      ? 'for today'
+    : window === 'tomorrow'   ? 'for tomorrow'
+    : window === 'this week'  ? 'this week'
+    : window === 'next week'  ? 'next week'
+    : window === 'this month' ? 'this month'
+    : 'in the next 7 days';
+    const empty = `Your calendar is clear ${whenLabel}.`;
+    return { speech: empty, display: empty, actions: [] };
+  }
+  const introBase =
+    window === 'today'      ? "Here's your schedule for today"
+  : window === 'tomorrow'   ? "Here's what's on for tomorrow"
+  : window === 'this week'  ? "Here's your schedule for this week"
+  : window === 'next week'  ? "Here's your schedule for the upcoming 7 days"
+  : window === 'this month' ? "Here's your schedule for the upcoming 7 days"
+  : "Here's your schedule for the next 7 days";
+
+  // Per RULE 13 + the "2+ items → numbered list" prompt rule, format as
+  // numbered list. Speech uses ". " separation so TTS pauses; display uses
+  // markdown numbered list.
+  const speechItems = items.map((it, i) => {
+    const title  = (it.title ?? 'Event').trim();
+    const detail = (it.detail ?? '').trim();
+    return detail ? `${i + 1}. ${title}, ${detail}` : `${i + 1}. ${title}`;
+  }).join('. ');
+  const speech = `${introBase}. ${speechItems}.`;
+
+  const displayItems = items.map((it, i) => {
+    const title  = (it.title ?? 'Event').trim();
+    const detail = (it.detail ?? '').trim();
+    return detail ? `${i + 1}. **${title}** — ${detail}` : `${i + 1}. **${title}**`;
+  }).join('\n');
+  const display = `${introBase}:\n\n${displayItems}`;
+
+  return { speech, display, actions: [] };
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const CHUNK = 0x8000;
@@ -1197,6 +1318,28 @@ Deno.serve(async (req) => {
         const names = options.map(o => o.name).join(' or ');
         return speechResponse(`I didn't catch that — which one: ${names}?`);
       }
+    }
+
+    // ── Step 1.5 (B6e 2026-05-26): pre-Claude calendar-read bypass ─────────────
+    // Haiku at the 111 KB assembled prompt misroutes "what is on my calendar
+    // this week?" to LIST_READ / LIST_RULES even when the brief contains the
+    // correct calendar items and three explicit prompt rules say "read the
+    // Schedule section." Bypass returns deterministic brief contents.
+    if (isCalendarReadIntent(userText)) {
+      console.log(`[timing] ${elapsed()} | B6e bypass — calendar-read intent detected`);
+      const liveEvents = await fetchLiveCalendarEvents(supabase, userId);
+      const window     = detectCalendarWindow(userText);
+      const filtered   = filterCalendarBriefByWindow(liveEvents, window);
+      const built      = buildCalendarReadResponse(filtered, window);
+      console.log(`[timing] ${elapsed()} | B6e bypass — events=${liveEvents.length} | filtered=${filtered.length} | window=${window}`);
+      return jsonResponse({
+        rawText: JSON.stringify({
+          speech:         built.speech,
+          display:        built.display,
+          actions:        built.actions,
+          pendingThreads: [],
+        }),
+      });
     }
 
     // ── Step 2 (B4z 2026-05-25): server-side email-alert bypass REMOVED ─────────
