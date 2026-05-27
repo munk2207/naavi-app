@@ -1662,8 +1662,11 @@ Deno.serve(async (req) => {
         // (to/from/on/of) so we don't pick up "list to my Costco" as the
         // entity. Capture 1-3 short words (no embedded spaces in any
         // single word) before "alert".
+        // alerts? — match singular AND plural; \balert\b alone misses
+        // "alerts" because the trailing s is a word char (live caught
+        // 2026-05-27 by Wael's voice test, B4s plural follow-up).
         const m = userText.match(
-          /\b(?:to|from|on|of)\s+(?:my|the|your)?\s*([\w'\-]+(?:\s+[\w'\-]+){0,3})\s+alert\b/i,
+          /\b(?:to|from|on|of)\s+(?:my|the|your)?\s*([\w'\-]+(?:\s+[\w'\-]+){0,3})\s+alerts?\b/i,
         );
         if (m && m[1]) {
           const entityName = m[1].trim();
