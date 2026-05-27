@@ -1,0 +1,112 @@
+[
+  {
+    "_comment": "STEP 1 — App launches. Dwell on the home screen (unauthenticated).",
+    "eventType": "WAIT",
+    "delayTime": 4000
+  },
+
+  {
+    "_comment": "STEP 2 — Sign in. Tap the Test Lab bypass button.",
+    "eventType": "VIEW_CLICKED",
+    "elementDescriptors": [{ "text": "Test Lab Sign In" }],
+    "delayTime": 500
+  },
+
+  {
+    "_comment": "Wait for home screen to fully load after sign-in.",
+    "eventType": "WAIT",
+    "delayTime": 7000
+  },
+
+  {
+    "_comment": "Dwell on home screen — shows today's brief + Ask MyNaavi bar.",
+    "eventType": "WAIT",
+    "delayTime": 5000
+  },
+
+  {
+    "_comment": "STEPS 5-9 — Open 3-dot menu to reach Settings.",
+    "eventType": "VIEW_CLICKED",
+    "elementDescriptors": [{ "contentDescription": "More options" }],
+    "delayTime": 2000
+  },
+
+  {
+    "_comment": "Tap Settings in the dropdown.",
+    "eventType": "VIEW_CLICKED",
+    "elementDescriptors": [{ "text": "Settings" }],
+    "delayTime": 1000
+  },
+
+  {
+    "_comment": "Settings loaded. Dwell on top — Your Name section (Step 5).",
+    "eventType": "WAIT",
+    "delayTime": 5000
+  },
+
+  {
+    "_comment": "Scroll down — Your Phone Numbers section (Step 7).",
+    "eventType": "SWIPE",
+    "xPercent": 50,
+    "yPercent": 70,
+    "endXPercent": 50,
+    "endYPercent": 30,
+    "delayTime": 4000
+  },
+
+  {
+    "_comment": "Scroll down — Voice PIN section (Step 8).",
+    "eventType": "SWIPE",
+    "xPercent": 50,
+    "yPercent": 70,
+    "endXPercent": 50,
+    "endYPercent": 30,
+    "delayTime": 4000
+  },
+
+  {
+    "_comment": "Scroll down — Alert channels section (Step 9).",
+    "eventType": "SWIPE",
+    "xPercent": 50,
+    "yPercent": 70,
+    "endXPercent": 50,
+    "endYPercent": 30,
+    "delayTime": 4000
+  },
+
+  {
+    "_comment": "Scroll down — Home and Work address fields (Step 6).",
+    "eventType": "SWIPE",
+    "xPercent": 50,
+    "yPercent": 70,
+    "endXPercent": 50,
+    "endYPercent": 30,
+    "delayTime": 5000
+  },
+
+  {
+    "_comment": "STEP 10 — Press back to return to home screen.",
+    "eventType": "PRESSED_BACK",
+    "delayTime": 3000
+  },
+
+  {
+    "_comment": "Dwell on home screen — shows the full interface.",
+    "eventType": "WAIT",
+    "delayTime": 4000
+  },
+
+  {
+    "_comment": "STEP 10 — Tap the text input and type the first command.",
+    "eventType": "VIEW_TEXT_CHANGED",
+    "replacementText": "Hi MyNaavi, what's on my calendar today?",
+    "elementDescriptors": [{ "text": "Ask MyNaavi" }],
+    "delayTime": 2000
+  },
+
+  {
+    "_comment": "Dwell on the typed command before Robo continues exploring.",
+    "eventType": "WAIT",
+    "delayTime": 5000
+  }
+]
