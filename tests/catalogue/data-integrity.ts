@@ -134,9 +134,9 @@ export const dataIntegrityTests: TestCase[] = [
   },
 
   {
-    id: 'integrity.action-rules-disabled-rule-allows-new',
+    id: 'integrity.action-rules-disabled-rule-now-blocks-new',
     category: 'integrity',
-    description: 'V57.13.3 — a DISABLED rule at coords X does not block a new enabled rule at same coords (constraint is partial WHERE enabled=true)',
+    description: 'B6a (2026-05-26) — a DISABLED rule at coords X NOW blocks a new INSERT at same coords. The broader partial UNIQUE index applies regardless of enabled state. Replaces the V57.13.3 "disabled allows new" test (which encoded the old behavior that accumulated duplicates).',
     timeoutMs: 15_000,
     async setup(ctx) { await deleteTestRules(ctx); },
     async teardown(ctx) { await deleteTestRules(ctx); },
@@ -154,14 +154,77 @@ export const dataIntegrityTests: TestCase[] = [
       const r1 = await rawInsert(ctx, disabled);
       expectEqual(r1.ok, true, `disabled rule insert (status=${r1.status})`);
 
-      const enabled = {
+      // After B6a: inserting a NEW row at the same coords must FAIL — the
+      // unique constraint applies whether the existing row is enabled or
+      // disabled. The application path is to UPDATE the existing disabled
+      // row (re-arm) instead of INSERTing a fresh one.
+      const newAtSameCoords = {
         ...disabled,
         trigger_config: { ...disabled.trigger_config, place_name: 'New' },
-        label: 'integrity-dedup-test-enabled',
+        label: 'integrity-dedup-test-new-at-same',
         enabled: true,
       };
-      const r2 = await rawInsert(ctx, enabled);
-      expectEqual(r2.ok, true, `enabled rule at same coords (after disabled) should succeed (status=${r2.status} body=${r2.body.slice(0, 200)})`);
+      const r2 = await rawInsert(ctx, newAtSameCoords);
+      expectEqual(r2.ok, false, `new INSERT at same coords (existing disabled) should be REJECTED but got status=${r2.status} body=${r2.body.slice(0, 200)}`);
+      expectTruthy(
+        r2.status === 409 || r2.status === 400 || r2.body.includes('duplicate') || r2.body.includes('unique'),
+        `expected unique-constraint violation, got status=${r2.status} body=${r2.body.slice(0, 200)}`,
+      );
+    },
+  },
+
+  {
+    id: 'integrity.action-rules-re-arm-update-keeps-one-row',
+    category: 'integrity',
+    description: 'B6a (2026-05-26) — when an existing disabled rule exists at coords X, the orchestrator UPDATEs it (enabled=true, last_fired_at=null) instead of INSERTing a new row. Verify exactly one row at those coords after re-arm.',
+    timeoutMs: 15_000,
+    async setup(ctx) { await deleteTestRules(ctx); },
+    async teardown(ctx) { await deleteTestRules(ctx); },
+    async run(ctx) {
+      // 1. Seed a disabled, recently-fired row.
+      const disabled = {
+        user_id: ctx.testUserId,
+        trigger_type: 'location',
+        trigger_config: { place_name: 'Re-arm Test', address: '200', resolved_lat: TEST_LAT, resolved_lng: TEST_LNG, radius_meters: 100 },
+        action_type: 'sms',
+        action_config: { to_phone: '+11234567890', body: 'test' },
+        label: 'integrity-dedup-test-rearm',
+        one_shot: true,
+        enabled: false,
+        last_fired_at: new Date(Date.now() - 60_000).toISOString(),
+      };
+      const r1 = await rawInsert(ctx, disabled);
+      expectEqual(r1.ok, true, `seed disabled rule insert (status=${r1.status})`);
+      const seeded = JSON.parse(r1.body);
+      const seededId = Array.isArray(seeded) ? seeded[0]?.id : seeded?.id;
+      expectTruthy(seededId, 'seeded rule should have an id');
+
+      // 2. Re-arm via UPDATE — same pattern reArmLocationRule() uses.
+      const updateUrl = `${ctx.supabaseUrl}/rest/v1/action_rules?id=eq.${seededId}`;
+      const updateRes = await fetch(updateUrl, {
+        method: 'PATCH',
+        headers: {
+          apikey: ctx.serviceRoleKey,
+          Authorization: `Bearer ${ctx.serviceRoleKey}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=representation',
+        },
+        body: JSON.stringify({ enabled: true, last_fired_at: null }),
+      });
+      expectEqual(updateRes.ok, true, `re-arm UPDATE should succeed (status=${updateRes.status})`);
+
+      // 3. Verify exactly ONE row exists for this user at these coords.
+      const listUrl = `${ctx.supabaseUrl}/rest/v1/action_rules`
+        + `?user_id=eq.${ctx.testUserId}`
+        + `&label=ilike.integrity-dedup-test-rearm*`
+        + `&select=id,enabled,last_fired_at`;
+      const listRes = await fetch(listUrl, {
+        headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}` },
+      });
+      const rows = await listRes.json();
+      expectEqual(Array.isArray(rows) && rows.length, 1, `exactly one row expected, got ${Array.isArray(rows) ? rows.length : 'non-array'} (${JSON.stringify(rows).slice(0, 200)})`);
+      expectEqual(rows[0].enabled, true, `re-armed row should be enabled=true (got ${rows[0].enabled})`);
+      expectEqual(rows[0].last_fired_at, null, `re-armed row should have last_fired_at=null (got ${rows[0].last_fired_at})`);
     },
   },
 ];

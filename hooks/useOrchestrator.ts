@@ -41,6 +41,7 @@ import {
 import type { StorageFile, NavigationResult } from '@/lib/types';
 
 import { isConfirmable, buildActionSummary, SPEECH, type PendingAction } from '@/lib/voice-confirm';
+import { normalizePlaceName } from '@/lib/normalizePlaceName';
 
 // Endpoints for direct Edge Function calls from the orchestrator (location-rule
 // confirmation flow and resolve-place cache writes).
@@ -310,6 +311,84 @@ function formatPeriodPhrase(label: string): string {
   if (k === 'past 30 days') return 'in the past 30 days';
   if (k === 'all time' || k === 'ever' || k === 'all') return 'in total';
   return k || 'recently';
+}
+
+// ── B6a helpers — one row per place ─────────────────────────────────────────
+// 2026-05-26 (Wael, B6a) — Replace the "Open Alerts and tap Reactivate"
+// bail-out with in-chat re-arm of the existing disabled rule. The DB-side
+// pair is migration 20260526_action_rules_one_row_per_place.sql, which
+// broadens the partial UNIQUE index to apply regardless of enabled state —
+// so the same physical place can have at most one row, active or expired.
+// See CLAUDE.md FOUNDATIONAL PRINCIPLE: "alerts ARE the saved-place memory".
+
+/**
+ * Re-arm an existing disabled action_rules location row.
+ *   - Sets enabled=true and clears last_fired_at (so the Alerts UI no longer
+ *     shows "Fired DATE" greyed out).
+ *   - Optionally merges new place_name / address / radius_meters / one_shot
+ *     from a freshly resolved request — falls back to the row's existing
+ *     values otherwise, so user-set recipient / action_config is NEVER
+ *     silently changed by re-arm (Wael 2026-05-26: "never surprises").
+ *   - Returns a readback speech that names the place + mode for Rule 12.
+ */
+async function reArmLocationRule(
+  client: any,
+  existingRule: any,
+  updates?: {
+    place_name?: string;
+    address?: string | null;
+    radius_meters?: number;
+    one_shot?: boolean;
+  },
+): Promise<{ success: boolean; speech: string; ruleId: string | null }> {
+  const baseTriggerConfig = existingRule?.trigger_config ?? {};
+  const mergedTriggerConfig = {
+    ...baseTriggerConfig,
+    ...(updates?.place_name ? { place_name: updates.place_name } : {}),
+    ...(updates?.address !== undefined ? { address: updates.address } : {}),
+    ...(updates?.radius_meters !== undefined ? { radius_meters: updates.radius_meters } : {}),
+  };
+  const newOneShot = updates?.one_shot ?? (existingRule?.one_shot === true);
+  const placeName = String(mergedTriggerConfig.place_name ?? 'that place');
+  const addrSuffix = mergedTriggerConfig.address
+    ? ` at ${String(mergedTriggerConfig.address).split(',')[0]?.trim()}`
+    : '';
+  const modeText = newOneShot ? 'one time' : 'every time';
+  try {
+    const { error } = await queryWithTimeout(
+      client
+        .from('action_rules')
+        .update({
+          enabled:        true,
+          last_fired_at:  null,
+          one_shot:       newOneShot,
+          trigger_config: mergedTriggerConfig,
+        })
+        .eq('id', existingRule.id),
+      10_000,
+      're-arm-existing-location-rule',
+    );
+    if (error) {
+      console.error('[orch:loc:re-arm] update failed:', (error as any)?.message ?? error);
+      return {
+        success: false,
+        speech:  `I couldn't re-arm your alert for ${placeName} — please try again.`,
+        ruleId:  null,
+      };
+    }
+    return {
+      success: true,
+      speech:  `Re-armed your alert — ${modeText} you arrive at ${placeName}${addrSuffix}.`,
+      ruleId:  String(existingRule.id),
+    };
+  } catch (err: any) {
+    console.error('[orch:loc:re-arm] threw:', err?.message ?? err);
+    return {
+      success: false,
+      speech:  `I couldn't re-arm your alert for ${placeName} — please try again.`,
+      ruleId:  null,
+    };
+  }
 }
 
 // V57.11.3 — `isHandsfree` parameter retained for call-site compatibility
@@ -820,24 +899,23 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           });
           if (dupe) {
             if (dupe.enabled === false) {
-              // Disabled/expired alert at the same location — re-enable it.
-              // Update one_shot and place_name to match the new request so the
-              // alert card reflects the freshly confirmed details.
-              const newOneShot = pending.originalAction?.one_shot ?? true;
-              const updatedTriggerConfig = {
-                ...dupe.trigger_config,
-                place_name: pending.resolved.place_name,
-                address: pending.resolved.address ?? dupe.trigger_config?.address ?? null,
-              };
-              const { error: reEnableError } = await supabase
-                .from('action_rules')
-                .update({ enabled: true, one_shot: newOneShot, trigger_config: updatedTriggerConfig })
-                .eq('id', dupe.id);
-              if (reEnableError) {
-                console.error('[commitPending] re-enable failed:', reEnableError);
+              // 2026-05-26 (Wael, B6a) — re-arm via shared helper. Clears
+              // last_fired_at (the prior inline implementation omitted that,
+              // leaving the Alerts UI showing "Fired DATE" on a freshly
+              // re-armed row). All three location re-arm sites now share
+              // the same behavior. Existing action_config preserved.
+              const armResult = await reArmLocationRule(supabase, dupe, {
+                place_name:    pending.resolved.place_name,
+                address:       pending.resolved.address ?? null,
+                radius_meters: pending.resolved.radius_meters
+                  ?? (pending.originalAction?.trigger_config as any)?.radius_meters
+                  ?? 150,
+                one_shot:      pending.originalAction?.one_shot ?? (dupe.one_shot === true),
+              });
+              if (!armResult.success) {
                 return { ok: false, ruleId: null };
               }
-              return { ok: true, ruleId: String(dupe.id), reactivated: true };
+              return { ok: true, ruleId: armResult.ruleId, reactivated: true };
             }
             // Enabled dupe — user already has an active alert here.
             return {
@@ -2498,22 +2576,44 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       10_000,
                       'pre-resolve-memory-hit',
                     );
-                    const spokenLower = placeName.toLowerCase().trim();
+                    // 2026-05-26 (Wael, B6a) — normalized name match.
+                    // "Movati Athletic, Orleans" matches "Movati Athletic
+                    // Orleans" matches "movati athletic orleans" — strips
+                    // commas/punctuation/apostrophes + collapses whitespace.
+                    // Replaces the prior exact-lowercase match that missed
+                    // spelling variants.
+                    const spokenNormalized = normalizePlaceName(placeName);
                     const match = (Array.isArray(existingRows) ? existingRows : []).find((r: any) => {
-                      const rPlace = String(r?.trigger_config?.place_name || '').toLowerCase().trim();
-                      return rPlace.length > 0 && rPlace === spokenLower;
+                      const rPlace = normalizePlaceName(String(r?.trigger_config?.place_name || ''));
+                      return rPlace.length > 0 && rPlace === spokenNormalized;
                     }) as any;
                     if (match) {
-                      const mode = match.one_shot ? 'one-time' : 'recurring';
                       const enabled = match.enabled !== false;
-                      const addrSuffix = (match.trigger_config?.address)
-                        ? ` at ${String(match.trigger_config.address).split(',')[0]?.trim()}`
-                        : '';
                       locationIntercepted = true;
-                      turnSpeechOverride = enabled
-                        ? `You already have a ${mode} alert for ${match.trigger_config?.place_name || placeName}${addrSuffix}. Tap Alerts to change or remove it.`
-                        : `Your previous ${mode} alert for ${match.trigger_config?.place_name || placeName}${addrSuffix} is expired. Open Alerts and tap Reactivate to re-arm it.`;
-                      console.log(`[orch:loc:memory-hit] name-match for "${placeName}" -> rule ${match.id} (enabled=${enabled}, mode=${mode}) — skipping resolve-place`);
+                      if (enabled) {
+                        // Already active — point user at the Alerts UI to
+                        // edit or remove. Same message as before.
+                        const mode = match.one_shot ? 'one-time' : 'recurring';
+                        const addrSuffix = (match.trigger_config?.address)
+                          ? ` at ${String(match.trigger_config.address).split(',')[0]?.trim()}`
+                          : '';
+                        turnSpeechOverride = `You already have a ${mode} alert for ${match.trigger_config?.place_name || placeName}${addrSuffix}. Tap Alerts to change or remove it.`;
+                        console.log(`[orch:loc:memory-hit] name-match for "${placeName}" -> rule ${match.id} already enabled (mode=${mode})`);
+                      } else {
+                        // 2026-05-26 (Wael, B6a) — REPLACED bail-to-UI with
+                        // in-chat re-arm. Existing expired rule is updated
+                        // in place (enabled=true, last_fired_at=null);
+                        // existing action_config preserved so recipient
+                        // doesn't silently change.
+                        const armResult = await reArmLocationRule(supabase!, match);
+                        turnSpeechOverride = armResult.speech;
+                        if (armResult.success) {
+                          import('@/hooks/useGeofencing')
+                            .then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id))
+                            .catch(err => console.error('[Orchestrator] geofence sync after re-arm failed:', err));
+                        }
+                        console.log(`[orch:loc:memory-hit] name-match for "${placeName}" -> rule ${match.id} re-armed (success=${armResult.success})`);
+                      }
                       continue;
                     }
                   } catch (err: any) {
@@ -2618,15 +2718,31 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       }) : null;
                       if (dupe) {
                         const dupEnabled = dupe.enabled !== false;
-                        const dupMode = dupe.one_shot ? 'one-time' : 'recurring';
-                        const dupAddrSuffix = (dupe.trigger_config?.address)
-                          ? ` at ${String(dupe.trigger_config.address).split(',')[0]?.trim()}`
-                          : '';
-                        const dupPlace = String(dupe.trigger_config?.place_name ?? data.place_name);
                         locationIntercepted = true;
-                        turnSpeechOverride = dupEnabled
-                          ? `You already have a ${dupMode} alert for ${dupPlace}${dupAddrSuffix}. Say "list my alerts" if you want to change or remove it.`
-                          : `Your previous ${dupMode} alert for ${dupPlace}${dupAddrSuffix} is expired. Open Alerts and tap Reactivate to re-arm it. Or delete the expired one first if you want me to create a fresh alert.`;
+                        if (dupEnabled) {
+                          const dupMode = dupe.one_shot ? 'one-time' : 'recurring';
+                          const dupAddrSuffix = (dupe.trigger_config?.address)
+                            ? ` at ${String(dupe.trigger_config.address).split(',')[0]?.trim()}`
+                            : '';
+                          const dupPlace = String(dupe.trigger_config?.place_name ?? data.place_name);
+                          turnSpeechOverride = `You already have a ${dupMode} alert for ${dupPlace}${dupAddrSuffix}. Say "list my alerts" if you want to change or remove it.`;
+                        } else {
+                          // 2026-05-26 (Wael, B6a) — REPLACED bail-to-UI with
+                          // in-chat re-arm. Refresh place_name/address from
+                          // the fresh resolve in case canonical names drifted.
+                          const armResult = await reArmLocationRule(supabase!, dupe, {
+                            place_name:    data.place_name,
+                            address:       data.address ?? null,
+                            radius_meters: data.radius_meters ?? (action.trigger_config as any)?.radius_meters ?? 150,
+                            one_shot:      action.one_shot ?? (dupe.one_shot === true),
+                          });
+                          turnSpeechOverride = armResult.speech;
+                          if (armResult.success) {
+                            import('@/hooks/useGeofencing')
+                              .then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id))
+                              .catch(err => console.error('[Orchestrator] geofence sync after re-arm failed:', err));
+                          }
+                        }
                         continue;
                       }
                     }
