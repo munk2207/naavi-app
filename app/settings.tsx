@@ -129,7 +129,7 @@ export default function SettingsScreen() {
   // text. Primary (index 0) is edited via the dedicated TextInput above.
   const [editingPhoneIdx, setEditingPhoneIdx]       = useState<number | null>(null);
   const [editingPhoneValue, setEditingPhoneValue]   = useState('');
-  // V57.15.5 build 177 — Primary phone is now also pretty-printed by default
+  // V57.27.0 build 203 — Primary phone is now also pretty-printed by default
   // and switches to a TextInput only when the user taps it (matches the
   // backup row pattern, fixes Test 5 inconsistency where Primary stayed raw
   // while Backup was pretty).
@@ -147,7 +147,7 @@ export default function SettingsScreen() {
   const [confirmPin, setConfirmPin]                 = useState('');
   const [pinError, setPinError]                     = useState<string | null>(null);
   // Ref so the new-PIN field's keyboard "Done" can focus the confirm field
-  // without the user reaching back to tap it (V57.15.5 build 177 polish).
+  // without the user reaching back to tap it (V57.27.0 build 203 polish).
   const confirmPinInputRef                          = useRef<TextInput>(null);
   const [homeAddress, setHomeAddress]               = useState('');
   const [homeAddressLoading, setHomeAddressLoading] = useState(false);
@@ -391,7 +391,7 @@ export default function SettingsScreen() {
   // both a UX and a verification-cost concern.
   const MAX_PHONES = 5;
 
-  // V57.15.6 build 179 — auto-persist on add. Local state + DB write fire
+  // V57.27.0 build 203 — auto-persist on add. Local state + DB write fire
   // together; "Save phones" button removed.
   function handleAddPhone() {
     const raw = normalizePhone(newPhoneInput);
@@ -452,7 +452,7 @@ export default function SettingsScreen() {
     void persistPhoneNumbers(newNumbers, phone);
   }
 
-  // V57.15.6 build 179 — Primary phone tap-to-edit + auto-persist. Tap row
+  // V57.27.0 build 203 — Primary phone tap-to-edit + auto-persist. Tap row
   // → swap to TextInput + ✓/× buttons. Saving updates local state AND
   // persists to DB immediately (no separate "Save phones" button).
   function handleStartEditPrimary() {
@@ -491,7 +491,7 @@ export default function SettingsScreen() {
     void persistPhoneNumbers(newNumbers, raw);
   }
 
-  // V57.15.6 build 179 — Remove + auto-persist. Primary (index 0) cannot
+  // V57.27.0 build 203 — Remove + auto-persist. Primary (index 0) cannot
   // be removed via this path — user changes primary by tapping the primary
   // row to edit it.
   function handleRemovePhone(idx: number) {
@@ -502,7 +502,7 @@ export default function SettingsScreen() {
     void persistPhoneNumbers(newNumbers, phone);
   }
 
-  // V57.15.6 build 179 — silent auto-persist helper. Replaces the explicit
+  // V57.27.0 build 203 — silent auto-persist helper. Replaces the explicit
   // "Save phones" button. Each phone-list mutation (add / remove / edit)
   // calls this immediately so the entry lands in the DB right away. No
   // success alert — the absence of an error IS the success signal. Errors
@@ -728,7 +728,7 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      {/* V57.15.6 build 179 — wrap ScrollView in KAV so soft keyboard pushes
+      {/* V57.27.0 build 203 — wrap ScrollView in KAV so soft keyboard pushes
           the content up cleanly. Fixes the Primary-edit screen-shift bug
           where tapping ✓ would miss because the button moved when the
           keyboard appeared. KAV applies to ALL inputs in the Settings
@@ -819,7 +819,7 @@ export default function SettingsScreen() {
               : 'Enter your primary phone in international format (e.g. +16135551234). Required for morning calls. You can add backup numbers below after saving.'}
           </Text>
           <Text style={styles.fieldLabel}>Primary</Text>
-          {/* V57.15.5 build 177 — Primary now follows the same tap-to-edit
+          {/* V57.27.0 build 203 — Primary now follows the same tap-to-edit
               pattern as the Backup rows. Display mode shows the pretty-
               printed text + ✏ icon; tap either to enter edit mode (raw
               TextInput + ✓/× buttons). Resolves Test 5 inconsistency where
@@ -976,7 +976,7 @@ export default function SettingsScreen() {
             </>
           )}
 
-          {/* V57.15.6 build 179 — "Save phones" button removed. Each
+          {/* V57.27.0 build 203 — "Save phones" button removed. Each
               add / remove / edit auto-persists to DB immediately. The brief
               `phoneLoading` flicker on the section indicates the in-flight
               upsert. Eliminates the "I added a phone, navigated away, came
@@ -1309,12 +1309,12 @@ export default function SettingsScreen() {
         animationType="fade"
         onRequestClose={() => !pinLoading && setPinModalVisible(false)}
       >
-        {/* V57.15.6 build 179 — KAV restructure. KAV is now the OUTERMOST
+        {/* V57.27.0 build 203 — KAV restructure. KAV is now the OUTERMOST
             child of Modal (was nested inside centered backdrop, which fought
             its layout). Backdrop is now anchored from the top with
             paddingTop:60, so the card sits near the top of the screen
             regardless of keyboard state — bulletproof against any keyboard
-            quirk. Replaces the V57.15.5 build 177 wrap which only hid the
+            quirk. Replaces the V57.27.0 build 203 wrap which only hid the
             title behind the keyboard. */}
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
