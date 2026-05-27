@@ -25,6 +25,9 @@ mynaavi-website/
 # Google Play service account key — used by EAS Submit. NEVER commit.
 google-play-key.json
 
+# Firebase service account key — used by notify-on-test-complete.js. NEVER commit.
+firebase/service-account.json
+
 # Maestro test artifacts at repo root
 /0[0-9]-*.png
 /report.xml
