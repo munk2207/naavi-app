@@ -1355,7 +1355,7 @@ export default function HomeScreen() {
       />
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior="padding"
         keyboardVerticalOffset={90}
       >
         {/* V57.9.7 — stale-auth recovery banner. Shown when we have a
@@ -3349,6 +3349,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.3,
     color: Colors.textPrimary,
+    minHeight: 44,
     maxHeight: 120,
     lineHeight: 20,
   },

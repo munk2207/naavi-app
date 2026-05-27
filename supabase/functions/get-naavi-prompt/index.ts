@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-25-v97-search-speech-rules';
+const PROMPT_VERSION = '2026-05-27-v98-numbered-choices';
 
 /**
  * Cache-boundary marker.
@@ -194,6 +194,28 @@ WRONG — display and speech identical (e.g. both prose, both bullets):
 
 Note on backward compat: a mobile build that doesn't yet read "display" will ignore it and render "speech" as the bubble. So you can safely always emit "display" for lists; older clients fall back to speech harmlessly.`;
 
+  // Choice-numbering rule — applies to both channels.
+  // When Naavi asks the user to pick between options, options MUST be numbered so the user can reply "# N".
+  const choiceFormatRule = `CHOICES MUST BE NUMBERED — NEVER BULLETS (Wael 2026-05-27):
+
+Whenever Naavi offers ${userName} a choice between 2 or more options — disambiguation ("which one?"), multiple contact matches, multiple alert matches, clarifying questions with options — the options MUST be formatted as a NUMBERED list (1. / 2. / 3. …). NEVER use bullet points (• / - / *) or comma-separated prose for a choice.
+
+The user replies with "# N" to pick option N (the chat interface preserves the # prefix so numbers do not get collapsed). This convention only works if options are numbered.
+
+CORRECT (app):
+"I see two Costcos:
+1. your Costco arrival alert
+2. Saturday's calendar event
+Which one do you mean?"
+
+WRONG: "I see two Costcos: • your Costco arrival alert • Saturday's calendar event. Which one?" (bullets — user cannot reply # 2)
+
+ALSO WRONG: "Do you mean your Costco arrival alert or Saturday's calendar event?" (prose — no numbers)
+
+On voice: use spoken numbers — "Option one: your Costco alert. Option two: Saturday's meeting. Which one?"
+
+This rule applies to EVERY choice context: entity disambiguation, multiple-list clarification, multiple-alert matches, multiple-contact matches, any "which X do you mean?" question.`;
+
   // Dynamic prefix — changes per request (minute-accurate time, calendar of upcoming days).
   // The body below is the cacheable stable block; the CACHE_BOUNDARY marker separates them.
   return `
@@ -206,6 +228,8 @@ ${toneRule}
 ${correctionRule}
 
 ${formatRule}
+
+${choiceFormatRule}
 
 ## ACTIONS
 
@@ -639,7 +663,7 @@ Auto-create on missing list:
 - On yes → emit BOTH list_create + list_connect in the same response (orchestrator chains them).
 
 Entity disambiguation:
-- If multiple entities match the user's reference (e.g., two Costcos: one alert + one calendar event), DO NOT call the tool. Instead, ask a numbered-list clarification per RULE 13:
+- If multiple entities match the user's reference (e.g., two Costcos: one alert + one calendar event), DO NOT call the tool. Instead, ask a numbered-list clarification (see CHOICES MUST BE NUMBERED rule):
   *"I see two Costcos: 1. your Costco arrival alert, 2. Saturday's calendar event. Which one do you mean?"*
 - If no match, ask: *"I don't have anything called Costco — did you mean…?"*
 

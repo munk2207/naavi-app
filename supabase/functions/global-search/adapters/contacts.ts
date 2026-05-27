@@ -65,14 +65,16 @@ function tokensFromVariants(variants: string[]): Set<string> {
   return out;
 }
 
-type PersonName  = { displayName?: string; givenName?: string; familyName?: string };
-type PersonEmail = { value?: string; type?: string };
-type PersonPhone = { value?: string; type?: string };
+type PersonName    = { displayName?: string; givenName?: string; familyName?: string };
+type PersonEmail   = { value?: string; type?: string };
+type PersonPhone   = { value?: string; type?: string };
+type PersonAddress = { formattedValue?: string; postalCode?: string; city?: string; type?: string };
 type Person = {
   resourceName?: string;
   names?: PersonName[];
   emailAddresses?: PersonEmail[];
   phoneNumbers?: PersonPhone[];
+  addresses?: PersonAddress[];
 };
 
 function normalizePhone(s: string): string {
@@ -104,7 +106,7 @@ async function fetchConnections(accessToken: string): Promise<Person[]> {
   let pageToken: string | undefined = undefined;
   while (out.length < MAX_CONTACTS_PER_SOURCE) {
     const url = new URL(PEOPLE_CONNECTIONS_API);
-    url.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers');
+    url.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers,addresses');
     url.searchParams.set('pageSize', '1000');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
     try {
@@ -133,7 +135,7 @@ async function fetchOtherContacts(accessToken: string): Promise<Person[]> {
   let pageToken: string | undefined = undefined;
   while (out.length < MAX_CONTACTS_PER_SOURCE) {
     const url = new URL(OTHER_CONTACTS_API);
-    url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers');
+    url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers,addresses');
     url.searchParams.set('pageSize', '1000');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
     try {
@@ -238,6 +240,7 @@ export const contactsAdapter: SearchAdapter = {
       const phones = (p.phoneNumbers ?? [])
         .map(p => p.value ?? '')
         .filter(Boolean);
+      const addresses = (p.addresses ?? []);
 
       let score = 0;
 
@@ -253,11 +256,33 @@ export const contactsAdapter: SearchAdapter = {
         return (tokens.size > 0 && [...tokens].some(t => el.includes(t))) ||
                variants.some(v => el.includes(v));
       });
+      // F2h — address/postal-code matching (Wael 2026-05-27).
+      // Matches formattedValue, postalCode, and city against query tokens.
+      // Postal codes are stripped of spaces before comparison ("K1A 0B1" → "k1a0b1").
+      const addressTokenMatch = addresses.some(a => {
+        const addrLower    = (a.formattedValue ?? '').toLowerCase();
+        const postalNorm   = (a.postalCode     ?? '').replace(/\s+/g, '').toLowerCase();
+        const cityLower    = (a.city           ?? '').toLowerCase();
+        const qNorm        = q.replace(/\s+/g, '').toLowerCase();
+        // Direct postal-code match (strip spaces from both sides).
+        if (postalNorm && qNorm.includes(postalNorm)) return true;
+        if (postalNorm && postalNorm.includes(qNorm)) return true;
+        return (
+          (tokens.size > 0 && [...tokens].some(t =>
+            addrLower.includes(t) || postalNorm.includes(t) || cityLower.includes(t),
+          )) ||
+          variants.some(v =>
+            addrLower.includes(v) || postalNorm.includes(v) || cityLower.includes(v),
+          )
+        );
+      });
 
       if (nameTokenMatch) {
         score = 1.0;
       } else if (isPhoneLike && phones.some(ph => normalizePhone(ph).includes(qDigits))) {
         score = 0.85;
+      } else if (addressTokenMatch) {
+        score = 0.75;
       } else if (emailTokenMatch) {
         score = 0.7;
       }
@@ -266,7 +291,8 @@ export const contactsAdapter: SearchAdapter = {
 
       const primaryEmail = emails[0];
       const primaryPhone = phones[0];
-      const snippetParts = [primaryEmail, primaryPhone].filter(Boolean);
+      const primaryAddress = addresses[0]?.formattedValue ?? null;
+      const snippetParts = [primaryEmail, primaryPhone, primaryAddress].filter(Boolean);
 
       // Give each contact a tap target: tel: to dial, fall back to mailto:.
       // The mobile UI uses Linking.openURL(hit.url), which honors both schemes.
@@ -289,6 +315,12 @@ export const contactsAdapter: SearchAdapter = {
           name: displayName || null,
           emails,
           phones,
+          addresses: addresses.map(a => ({
+            formatted: a.formattedValue ?? null,
+            postal_code: a.postalCode ?? null,
+            city: a.city ?? null,
+            type: a.type ?? null,
+          })).filter(a => a.formatted || a.postal_code),
         },
       });
     }
