@@ -75,7 +75,7 @@ import { fetchOttawaWeather } from '@/lib/weather';
 import { sendDriveFileAsEmail } from '@/lib/drive';
 import { lookupContact, type Contact } from '@/lib/contacts';
 import { resolveRecipient } from '@/lib/recipientLookup';
-import { saveContact, loadTodayConversation, signInWithGoogle, signOut } from '@/lib/supabase';
+import { saveContact, loadTodayConversation, signInWithGoogle, signOut, supabase } from '@/lib/supabase';
 import { getBackgroundPermission, getForegroundPermission, requestLocationPermissions } from '@/lib/location';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync, isCalendarConnected } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
@@ -1564,6 +1564,34 @@ export default function HomeScreen() {
             <Text style={styles.floatingSignInText} numberOfLines={1}>
               {signingIn ? 'Signing in…' : 'Sign in with Google'}
             </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Firebase Test Lab bypass — preview builds only (EXPO_PUBLIC_TEST_LOGIN_ENABLED).
+            Never visible in production. Allows the Robo crawler to reach
+            authenticated screens without Google OAuth. */}
+        {!currentUserId && process.env.EXPO_PUBLIC_TEST_LOGIN_ENABLED === 'true' && (
+          <TouchableOpacity
+            testID="test-lab-sign-in"
+            style={[styles.floatingSignInBanner, { top: 70, backgroundColor: '#555' }]}
+            onPress={async () => {
+              try {
+                setSigningIn(true);
+                await supabase.auth.signInWithPassword({
+                  email:    'firebase-testlab@mynaavi.com',
+                  password: 'TestLabNaavi2026!#',
+                });
+              } catch (e) {
+                console.error('[TestLogin]', e);
+              } finally {
+                setSigningIn(false);
+              }
+            }}
+            disabled={signingIn}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="flask" size={18} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.floatingSignInText} numberOfLines={1}>Test Lab Sign In</Text>
           </TouchableOpacity>
         )}
 
