@@ -347,7 +347,7 @@ A short-lived 2026-05-16 suspension related to an Expo build error was removed 2
 
 **Prompt-regression:** `tests/catalogue/prompt-regression.ts` locks in known-good Claude action emissions. Future prompt edits MUST keep this suite green. Never add a prompt rule without a corresponding regression test.
 
-**Do NOT promote V57.x to Robert** until geofence reliability is solved.
+**Geofence is production-ready.** `android.permission.ACTIVITY_RECOGNITION` (Motion API) is required and confirmed working — Google's Health apps declaration was submitted and accepted 2026-05-26. Drive-tested daily by Wael with no issues. Promote to testers freely.
 
 Memory folder: `C:\Users\waela\.claude\projects\C--Users-waela-OneDrive-Desktop-Naavi\memory\`
 
