@@ -49,9 +49,8 @@ Wael confirmed: Settings shows **V57.27.0 (build 204)** ✅
 
 ## AUTO-TESTER
 
-- 154/154 GREEN before initial builds (all 5 fixes + 10 new regression tests)
-- **Rule 15 VIOLATION**: version string fix (203) and version bump (204) builds ran WITHOUT auto-tester first
-- Next session: run `npm run test:auto` before any build, no exceptions
+- **NO TESTS CONDUCTED THIS SESSION — Rule 15 VIOLATION**
+- Next session MUST start with `npm run test:auto` → 100% green before any build, no exceptions
 
 ---
 
