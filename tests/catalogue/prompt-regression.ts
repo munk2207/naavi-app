@@ -806,4 +806,95 @@ export const promptRegressionTests: TestCase[] = [
       );
     },
   },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // B6d — v99 ALL LISTS AND CHOICES MUST BE NUMBERED.
+  // Wael 2026-05-28: "All lists should be numbered" — expanded from
+  // choices-only (v98) to every multi-item display field. display field
+  // must use 1./2./3. numbering, never bullet glyphs (•/-/*).
+  // Two tests: (1) capabilities query (always multi-item), (2) list-rules
+  // response (multi-item when user has alerts).
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'prompt-regression.b6d-display-uses-numbers-not-bullets',
+    category: 'prompt-regression',
+    description: 'B6d v99 — multi-item reply display field must use numbered list (1./2.) not bullet glyphs (•/-/*)',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'What types of alerts can I set with you? Give me a list.' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      const rawText = data?.rawText ?? '';
+      ctx.log(`rawText: ${rawText.slice(0, 500)}…`);
+
+      // Extract display field using same parse pattern as extractSpeech.
+      let display = '';
+      try {
+        const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+        const parsed = JSON.parse(cleaned);
+        display = typeof parsed.display === 'string' ? parsed.display : '';
+      } catch { /* non-JSON reply — no display field */ }
+
+      if (!display) {
+        ctx.log('No display field in response — single-item reply; skipping numbered-list check');
+        return;
+      }
+      ctx.log(`display: ${JSON.stringify(display.slice(0, 300))}`);
+
+      expectTruthy(
+        !/•/.test(display),
+        `B6d: display field contains bullet glyph "•" — must use numbered list (1./2./3.). display: ${JSON.stringify(display.slice(0, 300))}`,
+      );
+      const hasMarkdownBullet = /(^|\n)\s*[-*]\s+\S/.test(display);
+      expectTruthy(
+        !hasMarkdownBullet,
+        `B6d: display field contains markdown bullet ("- " or "* ") — must use numbered list. display: ${JSON.stringify(display.slice(0, 300))}`,
+      );
+      expectTruthy(
+        /^\d+\./m.test(display),
+        `B6d: display field has no numbered items (no "N." pattern at line start) — expected numbered list. display: ${JSON.stringify(display.slice(0, 300))}`,
+      );
+    },
+  },
+
+  {
+    id: 'prompt-regression.b6d-list-rules-display-numbered',
+    category: 'prompt-regression',
+    description: 'B6d v99 — list_rules response display field must use numbered list, never bullets (when user has 2+ alerts)',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'list my alerts' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      const rawText = data?.rawText ?? '';
+      ctx.log(`rawText: ${rawText.slice(0, 500)}…`);
+
+      let display = '';
+      try {
+        const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+        const parsed = JSON.parse(cleaned);
+        display = typeof parsed.display === 'string' ? parsed.display : '';
+      } catch { /* non-JSON reply — no display field */ }
+
+      if (!display) {
+        ctx.log('No display field — no-alerts reply or single-item; skipping format check');
+        return;
+      }
+      ctx.log(`display: ${JSON.stringify(display.slice(0, 300))}`);
+
+      expectTruthy(
+        !/•/.test(display),
+        `B6d: list_rules display contains bullet glyph "•" — use numbered list. display: ${JSON.stringify(display.slice(0, 300))}`,
+      );
+      const hasMarkdownBullet = /(^|\n)\s*[-*]\s+\S/.test(display);
+      expectTruthy(
+        !hasMarkdownBullet,
+        `B6d: list_rules display contains markdown bullet — use numbered list. display: ${JSON.stringify(display.slice(0, 300))}`,
+      );
+    },
+  },
 ];

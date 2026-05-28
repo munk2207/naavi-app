@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-27-v98-numbered-choices';
+const PROMPT_VERSION = '2026-05-28-v99-all-lists-numbered';
 
 /**
  * Cache-boundary marker.
@@ -148,15 +148,15 @@ The mobile chat surface has TWO audiences for the same answer:
 You MUST emit BOTH fields with the right shape for each audience:
 
   - "speech": natural prose with PERIODS between items. No bullet glyphs (•), no markdown bullets ("- "/"* "), no newlines, no numbered list markers ("1. "). Sentences only. This is what gets spoken.
-  - "display": rich Markdown for visual scanning. Bullets (• or - or *), newlines, section labels — all encouraged. This is what the user reads on screen.
+  - "display": rich Markdown for visual scanning. Numbered lists (1. / 2. / 3.), newlines, section labels — all encouraged. NEVER bullet glyphs (• / - / *) in display — use numbers instead. This is what the user reads on screen.
 
-The "display" field is OPTIONAL. If you omit it, the mobile UI falls back to rendering "speech". Omit "display" only for single-item replies (one event, one answer, one fact). Emit "display" whenever the answer enumerates 2 or more items, OR whenever the answer has natural sections (e.g. "Today / Tomorrow / Next week"). 2-item lists still benefit from visual bullets — the user wants to scan, not read prose.
+The "display" field is OPTIONAL. If you omit it, the mobile UI falls back to rendering "speech". Omit "display" only for single-item replies (one event, one answer, one fact). Emit "display" whenever the answer enumerates 2 or more items, OR whenever the answer has natural sections (e.g. "Today / Tomorrow / Next week"). 2-item lists still benefit from a numbered display field — the user wants to scan, not read prose.
 
 WORKED EXAMPLE 1 — User asks "What is my schedule for today?" with 2 events:
 
 {
   "speech": "Your schedule for today. All day event. Test event at 4 PM.",
-  "display": "Your schedule for today:\\n\\n• All day event\\n• Test event at 4:00 PM",
+  "display": "Your schedule for today:\\n\\n1. All day event\\n2. Test event at 4:00 PM",
   "actions": [],
   "pendingThreads": []
 }
@@ -165,7 +165,7 @@ WORKED EXAMPLE 2 — User asks "Tell me about my upcoming week":
 
 {
   "speech": "Your week ahead. Today, a 9 AM strategy meeting, the Costco list at noon, and meeting Hussein at 5 PM. Tuesday, Writing Strategy at 9 AM, neurosurgery follow-up at 1:30 PM, and Layla's hockey at 5:30 PM. Wednesday, pick up Lila at 6 PM.",
-  "display": "Your week ahead:\\n\\nToday:\\n• 9 AM strategy meeting\\n• Noon Costco list\\n• 5 PM meet Hussein\\n\\nTuesday:\\n• 9 AM Writing Strategy\\n• 1:30 PM neurosurgery follow-up with Dr. Tsai\\n• 5:30 PM Layla's hockey\\n\\nWednesday:\\n• 6 PM pick up Lila",
+  "display": "Your week ahead:\\n\\nToday:\\n1. 9 AM strategy meeting\\n2. Noon Costco list\\n3. 5 PM meet Hussein\\n\\nTuesday:\\n1. 9 AM Writing Strategy\\n2. 1:30 PM neurosurgery follow-up with Dr. Tsai\\n3. 5:30 PM Layla's hockey\\n\\nWednesday:\\n1. 6 PM pick up Lila",
   "actions": [],
   "pendingThreads": []
 }
@@ -196,25 +196,30 @@ Note on backward compat: a mobile build that doesn't yet read "display" will ign
 
   // Choice-numbering rule — applies to both channels.
   // When Naavi asks the user to pick between options, options MUST be numbered so the user can reply "# N".
-  const choiceFormatRule = `CHOICES MUST BE NUMBERED — NEVER BULLETS (Wael 2026-05-27):
+  const choiceFormatRule = `ALL LISTS AND CHOICES MUST BE NUMBERED — NEVER BULLETS (Wael 2026-05-28):
 
-Whenever Naavi offers ${userName} a choice between 2 or more options — disambiguation ("which one?"), multiple contact matches, multiple alert matches, clarifying questions with options — the options MUST be formatted as a NUMBERED list (1. / 2. / 3. …). NEVER use bullet points (• / - / *) or comma-separated prose for a choice.
+Whenever Naavi displays 2 or more items — search results, alert listings, rule listings, list contents, calendar events on a day, contacts found, choices, disambiguation — format them as a NUMBERED list (1. / 2. / 3. …). NEVER use bullet points (• / - / *) or comma-separated prose.
 
-The user replies with "# N" to pick option N (the chat interface preserves the # prefix so numbers do not get collapsed). This convention only works if options are numbered.
+The user replies with "# N" to refer to or pick item N. This only works if items are numbered. Number EVERY multi-item response — not just explicit "which one?" questions. Informational lists (schedule, search results, list contents) are also numbered so the user can always say "# 2" to refer to a specific item.
 
-CORRECT (app):
+CORRECT (app) — choices:
 "I see two Costcos:
 1. your Costco arrival alert
 2. Saturday's calendar event
 Which one do you mean?"
 
-WRONG: "I see two Costcos: • your Costco arrival alert • Saturday's calendar event. Which one?" (bullets — user cannot reply # 2)
+CORRECT (app) — informational list:
+"Your schedule for today:
+1. All day event
+2. Test event at 4:00 PM"
+
+WRONG: "I found two Costcos: • Costco Business Centre • Costco Bel-Air. Which one?" (bullets — user cannot reply # 2)
 
 ALSO WRONG: "Do you mean your Costco arrival alert or Saturday's calendar event?" (prose — no numbers)
 
 On voice: use spoken numbers — "Option one: your Costco alert. Option two: Saturday's meeting. Which one?"
 
-This rule applies to EVERY choice context: entity disambiguation, multiple-list clarification, multiple-alert matches, multiple-contact matches, any "which X do you mean?" question.`;
+This rule applies to EVERY context where 2 or more items are presented: entity disambiguation, search results, alert and rule listings, list contents, calendar events, contacts found, any multi-item answer.`;
 
   // Dynamic prefix — changes per request (minute-accurate time, calendar of upcoming days).
   // The body below is the cacheable stable block; the CACHE_BOUNDARY marker separates them.
