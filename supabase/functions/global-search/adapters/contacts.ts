@@ -29,6 +29,11 @@ import type { SearchAdapter, SearchContext, SearchResult } from './_interface.ts
 const GOOGLE_TOKEN_URL       = 'https://oauth2.googleapis.com/token';
 const PEOPLE_CONNECTIONS_API = 'https://people.googleapis.com/v1/people/me/connections';
 const OTHER_CONTACTS_API     = 'https://people.googleapis.com/v1/otherContacts';
+const CONTACT_GROUPS_API     = 'https://people.googleapis.com/v1/contactGroups';
+
+// The Google Contacts label Robert assigns to his VIP inner circle.
+// Case-insensitive match — "MyNaavi", "mynaavi", "MYNAAVI" all work.
+const COMMUNITY_LABEL = 'mynaavi';
 
 // Cap on contacts fetched per source. Most users have < 500; more than that
 // would slow the search and the marginal hit rate is low.
@@ -65,16 +70,18 @@ function tokensFromVariants(variants: string[]): Set<string> {
   return out;
 }
 
-type PersonName    = { displayName?: string; givenName?: string; familyName?: string };
-type PersonEmail   = { value?: string; type?: string };
-type PersonPhone   = { value?: string; type?: string };
-type PersonAddress = { formattedValue?: string; postalCode?: string; city?: string; type?: string };
+type PersonName       = { displayName?: string; givenName?: string; familyName?: string };
+type PersonEmail      = { value?: string; type?: string };
+type PersonPhone      = { value?: string; type?: string };
+type PersonAddress    = { formattedValue?: string; postalCode?: string; city?: string; type?: string };
+type PersonMembership = { contactGroupMembership?: { contactGroupId?: string; contactGroupResourceName?: string } };
 type Person = {
   resourceName?: string;
   names?: PersonName[];
   emailAddresses?: PersonEmail[];
   phoneNumbers?: PersonPhone[];
   addresses?: PersonAddress[];
+  memberships?: PersonMembership[];
 };
 
 function normalizePhone(s: string): string {
@@ -101,12 +108,32 @@ async function getAccessToken(refreshToken: string): Promise<string | null> {
   }
 }
 
+// Fetch the contact group ID for the "MyNaavi" label.
+// Returns null if the label doesn't exist or the call fails (graceful degradation).
+async function fetchMyNaaviGroupId(accessToken: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${CONTACT_GROUPS_API}?pageSize=200`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const groups = (data?.contactGroups ?? []) as Array<{ resourceName?: string; name?: string }>;
+    const match = groups.find(g => (g.name ?? '').toLowerCase() === COMMUNITY_LABEL);
+    if (!match?.resourceName) return null;
+    // resourceName is "contactGroups/<id>" — extract just the ID for membership comparison.
+    return match.resourceName.split('/').pop() ?? null;
+  } catch (err) {
+    console.warn('[contacts-adapter] fetchMyNaaviGroupId failed:', err);
+    return null;
+  }
+}
+
 async function fetchConnections(accessToken: string): Promise<Person[]> {
   const out: Person[] = [];
   let pageToken: string | undefined = undefined;
   while (out.length < MAX_CONTACTS_PER_SOURCE) {
     const url = new URL(PEOPLE_CONNECTIONS_API);
-    url.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers,addresses');
+    url.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers,addresses,memberships');
     url.searchParams.set('pageSize', '1000');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
     try {
@@ -208,11 +235,15 @@ export const contactsAdapter: SearchAdapter = {
       return [];
     }
 
-    // ── 2. Fetch both sources in parallel ──────────────────────────────────
-    const [connections, otherContacts] = await Promise.all([
+    // ── 2. Fetch both sources + MyNaavi group ID in parallel ───────────────
+    const [connections, otherContacts, myNaaviGroupId] = await Promise.all([
       fetchConnections(accessToken),
       fetchOtherContacts(accessToken),
+      fetchMyNaaviGroupId(accessToken),
     ]);
+    if (myNaaviGroupId) {
+      console.log(`[contacts-adapter] MyNaavi community group ID: ${myNaaviGroupId}`);
+    }
 
     // Dedupe on resourceName.
     const seen = new Set<string>();
@@ -241,6 +272,12 @@ export const contactsAdapter: SearchAdapter = {
         .map(p => p.value ?? '')
         .filter(Boolean);
       const addresses = (p.addresses ?? []);
+
+      // MyNaavi community check — true when this contact has the "MyNaavi" label.
+      // memberships is only present on connections (not otherContacts).
+      const isCommunity = myNaaviGroupId !== null && (p.memberships ?? []).some(
+        m => m.contactGroupMembership?.contactGroupId === myNaaviGroupId,
+      );
 
       let score = 0;
 
@@ -289,6 +326,11 @@ export const contactsAdapter: SearchAdapter = {
 
       if (score === 0) continue;
 
+      // Community boost — multiply by 1.5 so MyNaavi members always rank
+      // above non-community contacts with the same match type. Cap at 1.5
+      // so the sort order is stable (community name=1.5 > non-community name=1.0).
+      if (isCommunity) score = Math.min(score * 1.5, 1.5);
+
       const primaryEmail = emails[0];
       const primaryPhone = phones[0];
       const primaryAddress = addresses[0]?.formattedValue ?? null;
@@ -315,6 +357,7 @@ export const contactsAdapter: SearchAdapter = {
           name: displayName || null,
           emails,
           phones,
+          is_community: isCommunity,
           addresses: addresses.map(a => ({
             formatted: a.formattedValue ?? null,
             postal_code: a.postalCode ?? null,

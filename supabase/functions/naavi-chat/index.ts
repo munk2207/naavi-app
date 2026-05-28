@@ -220,6 +220,7 @@ function buildFallbackSpeech(actions: any[]): string {
     case 'GLOBAL_SEARCH':   return 'Looking that up.';
     case 'DRIVE_SEARCH':    return 'Searching your Drive.';
     case 'SAVE_TO_DRIVE':   return 'Saved to your Drive.';
+    case 'ADD_TO_COMMUNITY': return 'Added to your MyNaavi community.';
     case 'ADD_CONTACT':     return 'Contact added.';
     case 'SCHEDULE_MEDICATION': return 'Medication schedule added.';
     case 'FETCH_TRAVEL_TIME':   return 'Looking up travel time.';
@@ -227,6 +228,103 @@ function buildFallbackSpeech(actions: any[]): string {
     case 'UPDATE_MORNING_CALL': return 'Morning call updated.';
     case 'START_CALL_RECORDING':return 'Recording started.';
     default:                return 'Got it.';
+  }
+}
+
+// ── MyNaavi Community helpers ─────────────────────────────────────────────────
+// ADD_TO_COMMUNITY executes server-side in naavi-chat (not deferred to the
+// mobile orchestrator) because it requires a Google write-scope access token.
+// Pattern mirrors the inline token-refresh blocks elsewhere in this file.
+
+const PEOPLE_GROUPS_API = 'https://people.googleapis.com/v1/contactGroups';
+const COMMUNITY_GROUP_NAME = 'MyNaavi';
+
+async function _communityGetOrCreateGroupId(accessToken: string): Promise<string | null> {
+  try {
+    // 1. List existing groups, look for "MyNaavi".
+    const listRes = await fetch(`${PEOPLE_GROUPS_API}?pageSize=200`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (listRes.ok) {
+      const listData = await listRes.json();
+      const groups = (listData?.contactGroups ?? []) as Array<{ resourceName?: string; name?: string }>;
+      const existing = groups.find(g => (g.name ?? '').toLowerCase() === COMMUNITY_GROUP_NAME.toLowerCase());
+      if (existing?.resourceName) {
+        return existing.resourceName.split('/').pop() ?? null;
+      }
+    }
+    // 2. Group not found — create it.
+    const createRes = await fetch(PEOPLE_GROUPS_API, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contactGroup: { name: COMMUNITY_GROUP_NAME } }),
+    });
+    if (!createRes.ok) {
+      console.warn('[community] create group failed:', createRes.status, await createRes.text());
+      return null;
+    }
+    const created = await createRes.json();
+    return (created?.resourceName as string | undefined)?.split('/')?.pop() ?? null;
+  } catch (err) {
+    console.error('[community] _communityGetOrCreateGroupId error:', err);
+    return null;
+  }
+}
+
+async function executeAddToCommunity(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  contactResourceName: string,
+  contactName: string,
+): Promise<string> {
+  try {
+    // 1. Get refresh token.
+    const { data: tokenRow } = await supabase
+      .from('user_tokens')
+      .select('refresh_token')
+      .eq('user_id', userId)
+      .eq('provider', 'google')
+      .maybeSingle();
+    if (!tokenRow?.refresh_token) return `I couldn't add ${contactName} — Google account not connected.`;
+
+    // 2. Exchange for access token (needs contacts write scope).
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id:     Deno.env.get('GOOGLE_CLIENT_ID')  ?? '',
+        client_secret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '',
+        refresh_token: tokenRow.refresh_token,
+        grant_type:    'refresh_token',
+      }),
+    });
+    const tokenData = await tokenRes.json();
+    const accessToken: string | undefined = tokenData?.access_token;
+    if (!accessToken) return `I couldn't add ${contactName} — token refresh failed.`;
+
+    // 3. Find or create the MyNaavi group.
+    const groupId = await _communityGetOrCreateGroupId(accessToken);
+    if (!groupId) return `I couldn't add ${contactName} — couldn't access the MyNaavi group.`;
+
+    // 4. Add the contact to the group.
+    const modifyRes = await fetch(
+      `${PEOPLE_GROUPS_API}/${groupId}/members:modify`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resourceNamesToAdd: [contactResourceName] }),
+      },
+    );
+    if (!modifyRes.ok) {
+      const errText = await modifyRes.text();
+      console.warn(`[community] modify failed for ${contactResourceName}:`, modifyRes.status, errText);
+      return `I couldn't add ${contactName} to your community — ${modifyRes.status === 403 ? 'contacts write permission not granted yet (sign out and back in)' : 'Google returned an error'}.`;
+    }
+    console.log(`[community] added ${contactResourceName} (${contactName}) to MyNaavi group ${groupId}`);
+    return `Done. ${contactName} is now in your MyNaavi community.`;
+  } catch (err: any) {
+    console.error('[community] executeAddToCommunity error:', err);
+    return `I couldn't add ${contactName} — unexpected error: ${err?.message ?? String(err)}.`;
   }
 }
 
@@ -1874,6 +1972,22 @@ Deno.serve(async (req) => {
         `[naavi-chat] Bug E fallback fired — empty speech, ${actions.length} actions, ` +
         `first=${actions[0]?.type ?? '?'} → "${speech}"`
       );
+    }
+
+    // ── ADD_TO_COMMUNITY — server-side execution ──────────────────────────
+    // Google Contacts write must happen here (needs a server-held access token).
+    // Execute, override speech with specific readback, remove from actions array
+    // so the client doesn't try to handle it again.
+    const communityAction = actions.find((a: any) => a?.type === 'ADD_TO_COMMUNITY');
+    if (communityAction && userId) {
+      const readback = await executeAddToCommunity(
+        supabase,
+        userId,
+        String(communityAction.contact_resource_name ?? ''),
+        String(communityAction.contact_name ?? 'that contact'),
+      );
+      speech = readback;
+      actions = actions.filter((a: any) => a?.type !== 'ADD_TO_COMMUNITY');
     }
 
     // Backward-compat rawText: orchestrator's phantom-action regex still reads

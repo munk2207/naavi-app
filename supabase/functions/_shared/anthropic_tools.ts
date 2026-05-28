@@ -454,6 +454,34 @@ export const NAAVI_TOOLS: NaaviTool[] = [
     },
   },
 
+  // 11a. ADD_TO_COMMUNITY
+  // Adds a contact to the user's MyNaavi community (the "MyNaavi" label in Google
+  // Contacts). Use this when the user explicitly asks to add someone to their
+  // community OR when Naavi offers to flag a non-community contact and the user
+  // confirms. Requires Rule 12 pre-confirmation before emitting.
+  {
+    name: 'add_to_community',
+    description:
+      "Add a contact to the user's MyNaavi community (VIP inner circle). " +
+      "Only emit after explicit user confirmation. Always use the contact's " +
+      "resourceName from a prior contact search result so the correct record is updated.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        contact_resource_name: {
+          type: 'string',
+          description: 'Google Contacts resourceName from search result, e.g. "people/c1234567890"',
+        },
+        contact_name: {
+          type: 'string',
+          description: 'Display name of the contact being added, for readback.',
+        },
+      },
+      required: ['contact_resource_name', 'contact_name'],
+      additionalProperties: false,
+    },
+  },
+
   // 11. ADD_CONTACT
   {
     name: 'add_contact',
@@ -760,6 +788,7 @@ export const TOOL_NAME_TO_ACTION_TYPE: Record<string, string> = {
   draft_message: 'DRAFT_MESSAGE',
   remember: 'REMEMBER',
   delete_memory: 'DELETE_MEMORY',
+  add_to_community: 'ADD_TO_COMMUNITY',
   add_contact: 'ADD_CONTACT',
   list_create: 'LIST_CREATE',
   list_add: 'LIST_ADD',

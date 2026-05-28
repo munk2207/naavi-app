@@ -114,9 +114,9 @@ export const session2026_05_28Tests: TestCase[] = [
   // B6d v99 — ALL lists and choices must be numbered (not bullets)
   // ──────────────────────────────────────────────────────────────────────
   {
-    id: 'session-2026-05-28.b6d-prompt-version-v99',
+    id: 'session-2026-05-28.b6d-prompt-version-v100',
     category: 'session-2026-05-28',
-    description: 'B6d v99 — PROMPT_VERSION must be 2026-05-28-v99-all-lists-numbered',
+    description: 'Community v100 — PROMPT_VERSION must be 2026-05-28-v100-community',
     timeoutMs: 15_000,
     async run(ctx) {
       const { status, data } = await adapters.call(
@@ -126,8 +126,76 @@ export const session2026_05_28Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-05-28-v99-all-lists-numbered',
-        `Expected version "2026-05-28-v99-all-lists-numbered", got "${version}"`,
+        version === '2026-05-28-v100-community',
+        `Expected version "2026-05-28-v100-community", got "${version}"`,
+      );
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // MyNaavi Community — regression tests (2026-05-28)
+  //
+  // The community feature uses Google Contacts label "MyNaavi" to mark VIP
+  // contacts. Community members receive a 1.5x score boost in search results.
+  // ADD_TO_COMMUNITY executes server-side in naavi-chat (requires Google
+  // OAuth write scope: contacts). Voice server has the tool defined but
+  // execution is deferred (voice has no Google write path yet).
+  // ──────────────────────────────────────────────────────────────────────
+
+  {
+    id: 'session-2026-05-28.community-prompt-has-section',
+    category: 'session-2026-05-28',
+    description: 'Community: get-naavi-prompt must contain MYNAAVI COMMUNITY section and add_to_community mention',
+    timeoutMs: 15_000,
+    async run(ctx) {
+      const { status, data } = await adapters.call(
+        ctx, 'get-naavi-prompt', { channel: 'app' }, { timeoutMs: 15_000 },
+      );
+      expect2xx(status, 'get-naavi-prompt');
+      const prompt: string = data?.prompt ?? '';
+      ctx.log(`prompt length: ${prompt.length}`);
+      expectTruthy(
+        prompt.toLowerCase().includes('mynaavi community'),
+        'Prompt must contain "MYNAAVI COMMUNITY" section',
+      );
+      expectTruthy(
+        prompt.includes('add_to_community'),
+        'Prompt must mention the add_to_community tool',
+      );
+    },
+  },
+
+  {
+    id: 'session-2026-05-28.community-no-add-without-resource-name',
+    category: 'session-2026-05-28',
+    description: 'Community: cold "add Bob to community" (no prior search) must NOT emit ADD_TO_COMMUNITY',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      // A cold request with no resource_name available must NOT emit ADD_TO_COMMUNITY.
+      // The prompt rule: "Always use the contact's resourceName from a prior contact search result."
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'Add Bob to my MyNaavi community.' }],
+        max_tokens: 512,
+      });
+      expect2xx(status, 'naavi-chat');
+      const rawText = data?.rawText ?? '';
+      ctx.log(`rawText: ${rawText.slice(0, 400)}…`);
+
+      // Must NOT emit ADD_TO_COMMUNITY — no resource_name is available.
+      const communityAction = findActionInRawText(rawText, 'ADD_TO_COMMUNITY');
+      if (communityAction) {
+        throw new Error(
+          `Community regression: ADD_TO_COMMUNITY emitted without resource_name from prior search. ` +
+          `Action: ${JSON.stringify(communityAction)}`,
+        );
+      }
+
+      // Speech should acknowledge the request but ask to search/find the contact first.
+      const speech = extractSpeech(rawText).toLowerCase();
+      ctx.log(`speech: ${speech.slice(0, 200)}`);
+      expectTruthy(
+        speech.length > 0,
+        'Community: speech must not be empty when ADD_TO_COMMUNITY is blocked',
       );
     },
   },

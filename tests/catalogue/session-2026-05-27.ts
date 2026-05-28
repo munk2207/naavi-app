@@ -81,8 +81,8 @@ export const session2026_05_27Tests: TestCase[] = [
     id: 'b6d.prompt-version-bumped-to-v98',
     category: 'b6d',
     description:
-      'B6d — PROMPT_VERSION must be 2026-05-28-v99-all-lists-numbered (updated from v98 to v99). Confirms the ' +
-      'all-lists-numbered rule is in the live deployed version, not a stale cached copy.',
+      'B6d/Community — PROMPT_VERSION must be 2026-05-28-v100-community (latest live version). ' +
+      'Updated from v99 → v100 when MyNaavi Community section was added (2026-05-28).',
     timeoutMs: 15_000,
     async run(ctx) {
       const { status, data } = await adapters.call(
@@ -92,8 +92,8 @@ export const session2026_05_27Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-05-28-v99-all-lists-numbered',
-        `Expected version "2026-05-28-v99-all-lists-numbered", got "${version}"`,
+        version === '2026-05-28-v100-community',
+        `Expected version "2026-05-28-v100-community", got "${version}"`,
       );
     },
   },
