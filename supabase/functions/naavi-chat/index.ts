@@ -1801,6 +1801,63 @@ Deno.serve(async (req) => {
       }
     }
 
+    // 2026-05-28 (Wael) — B4y Phase 2. Universal RULE 23 gate for all other
+    // scoped state-changing actions. Drops CREATE_EVENT, DELETE_EVENT,
+    // DELETE_RULE, DELETE_MEMORY, UPDATE_MORNING_CALL, SCHEDULE_MEDICATION,
+    // and SET_ACTION_RULE(trigger_type=time/calendar/weather/contact_silence)
+    // when the current turn is NOT a valid confirm response (user said "yes"
+    // after a prior "say yes to confirm" ask). This enforces RULE 23 at the
+    // server layer — even if Claude violates the prompt and emits a scoped
+    // action on turn 1, the gate drops it before it reaches the orchestrator.
+    //
+    // Exempt (no gate): set_location_rule_chain, set_location_rule_address,
+    // list_connect/disconnect/delete (have their own gate in listGate),
+    // list_create/add/remove, remember, save_to_drive, set_reminder,
+    // draft_message, and all read-only tools.
+    {
+      const RULE23_UNIVERSAL_TYPES = new Set([
+        'CREATE_EVENT', 'DELETE_EVENT', 'DELETE_RULE', 'DELETE_MEMORY',
+        'UPDATE_MORNING_CALL', 'SCHEDULE_MEDICATION',
+      ]);
+      const RULE23_NONEMAIL_TRIGGERS = new Set(['time', 'calendar', 'weather', 'contact_silence']);
+
+      const hasUniversalScoped = actions.some((a: any) =>
+        RULE23_UNIVERSAL_TYPES.has(a.type)
+        || (a.type === 'SET_ACTION_RULE' && RULE23_NONEMAIL_TRIGGERS.has(a.trigger_type))
+      );
+
+      if (userId && hasUniversalScoped) {
+        const IS_CONFIRM_P2 = /^(yes|yeah|yep|confirm|approved|go\s+ahead|do\s+it|please|ok|okay|send)[\s\W]*$/i;
+        const lastUserP2 = [...messages].reverse().find((m: any) => m.role === 'user');
+        const userTextP2 = typeof lastUserP2?.content === 'string' ? lastUserP2.content : '';
+        const isConfirmReplyP2 = IS_CONFIRM_P2.test(userTextP2.trim());
+        const lastAsstP2 = [...messages].reverse().find((m: any) => m.role === 'assistant');
+        const asstTextP2 = typeof lastAsstP2?.content === 'string' ? lastAsstP2.content : '';
+        const priorHadConfirmAskP2 = /say yes to confirm/i.test(asstTextP2);
+        const isValidConfirmP2 = isConfirmReplyP2 && priorHadConfirmAskP2;
+
+        if (!isValidConfirmP2) {
+          const droppedP2 = actions
+            .filter((a: any) =>
+              RULE23_UNIVERSAL_TYPES.has(a.type)
+              || (a.type === 'SET_ACTION_RULE' && RULE23_NONEMAIL_TRIGGERS.has(a.trigger_type)))
+            .map((a: any) => a.type);
+          actions = actions.filter((a: any) =>
+            !RULE23_UNIVERSAL_TYPES.has(a.type)
+            && !(a.type === 'SET_ACTION_RULE' && RULE23_NONEMAIL_TRIGGERS.has(a.trigger_type))
+          );
+          console.warn(
+            `[naavi-chat] B4y Phase 2: dropping [${droppedP2.join(', ')}] — ` +
+            `not a valid confirm-turn. userText="${userTextP2.slice(0, 80)}"`
+          );
+          if (!serverRejectionMessage) {
+            serverRejectionMessage =
+              `I need your confirmation before I can make that change. Please say yes to confirm.`;
+          }
+        }
+      }
+    }
+
     // V57.12.1 Bug E fix — Haiku occasionally emits tool_use without a
     // companion text block, leaving speech empty and the chat blank.
     // When that happens, synthesize a short action-specific confirmation
