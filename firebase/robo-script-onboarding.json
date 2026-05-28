@@ -39,49 +39,9 @@
   },
 
   {
-    "_comment": "Settings loaded. Dwell on top — Your Name section (Step 5).",
+    "_comment": "Settings loaded. Dwell — Robo auto-scrolls through the page.",
     "eventType": "WAIT",
-    "delayTime": 5000
-  },
-
-  {
-    "_comment": "Scroll down — Your Phone Numbers section (Step 7).",
-    "eventType": "SWIPE",
-    "xPercent": 50,
-    "yPercent": 70,
-    "endXPercent": 50,
-    "endYPercent": 30,
-    "delayTime": 4000
-  },
-
-  {
-    "_comment": "Scroll down — Voice PIN section (Step 8).",
-    "eventType": "SWIPE",
-    "xPercent": 50,
-    "yPercent": 70,
-    "endXPercent": 50,
-    "endYPercent": 30,
-    "delayTime": 4000
-  },
-
-  {
-    "_comment": "Scroll down — Alert channels section (Step 9).",
-    "eventType": "SWIPE",
-    "xPercent": 50,
-    "yPercent": 70,
-    "endXPercent": 50,
-    "endYPercent": 30,
-    "delayTime": 4000
-  },
-
-  {
-    "_comment": "Scroll down — Home and Work address fields (Step 6).",
-    "eventType": "SWIPE",
-    "xPercent": 50,
-    "yPercent": 70,
-    "endXPercent": 50,
-    "endYPercent": 30,
-    "delayTime": 5000
+    "delayTime": 8000
   },
 
   {
@@ -97,7 +57,7 @@
   },
 
   {
-    "_comment": "STEP 10 — Tap the text input and type the first command.",
+    "_comment": "STEP 11 — Tap the text input and type the first command.",
     "eventType": "VIEW_TEXT_CHANGED",
     "replacementText": "Hi MyNaavi, what's on my calendar today?",
     "elementDescriptors": [{ "text": "Ask MyNaavi" }],
