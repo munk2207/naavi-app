@@ -61,7 +61,7 @@ function tokensFromVariants(variants: string[]): Set<string> {
   const out = new Set<string>();
   for (const v of variants) {
     for (const w of v.split(/\s+/)) {
-      const t = w.trim();
+      const t = w.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '').trim();
       if (t.length < 2) continue;
       if (CONTACT_STOPWORDS.has(t)) continue;
       out.add(t);

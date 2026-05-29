@@ -1,5 +1,14 @@
 /**
- * Session 2026-05-28 — regression coverage for B6d, B6e, B4s, B4y Phase 2.
+ * Session 2026-05-28 — regression coverage for B6d, B6e, B4s, B4y Phase 2, B-NEW-1.
+ *
+ * B-NEW-1: Contact search token punctuation bug — "Find Hussein, spelled h u s s e i n"
+ * produced token "n," (trailing comma, length 2, not filtered). "n," appears as a
+ * substring of "ON, Canada" in every Ontario contact's formatted address →
+ * addressTokenMatch fired for all Ontario contacts → irrelevant contacts scored 0.75
+ * and appeared alongside Hussein in results.
+ * Fix: tokensFromVariants in contacts.ts strips leading/trailing non-alphanumeric
+ * chars before the length check — "n," → "n" (length 1, filtered).
+ * Also: "hussein," → "hussein" so the name now correctly matches "hussein el-aggan".
  *
  * B6d: Expanded numbered-list rule from choices-only (v98) to ALL lists (v99).
  * display field now uses 1./2./3. numbering, never bullet glyphs (•/-/*).
@@ -197,6 +206,41 @@ export const session2026_05_28Tests: TestCase[] = [
         speech.length > 0,
         'Community: speech must not be empty when ADD_TO_COMMUNITY is blocked',
       );
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // B-NEW-1 — contact search token punctuation bug (2026-05-28)
+  //
+  // Voice query "Find Hussein, spelled h u s s e i n, in my contacts"
+  // produced token "n," (trailing comma kept by old tokensFromVariants).
+  // "n," is a substring of "ON, Canada" in every Ontario address →
+  // addressTokenMatch fired for all Ontario contacts → false positives.
+  // Fix: strip leading/trailing non-alphanumeric chars from each token.
+  //
+  // Coverage gap: the contacts adapter hits Google People API (real OAuth).
+  // This test uses a provably-absent name so the result count must be 0
+  // regardless of which contacts are in the test account.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'session-2026-05-28.b-new-1-spelled-query-no-false-contacts',
+    category: 'session-2026-05-28',
+    description: 'B-NEW-1: voice "spelled" query for nonsense name must return 0 contacts, not Ontario false matches',
+    timeoutMs: 20_000,
+    async run(ctx) {
+      // "Xqzqzqzq" cannot exist in any real contact list.
+      // The trailing "n," in the query was the token that matched Ontario addresses.
+      const { status, data } = await adapters.globalSearch(ctx, 'Xqzqzqzq, spelled h u s s e i n,');
+      expect2xx(status, 'global-search');
+      const groups = ((data as any)?.groups ?? {}) as Record<string, unknown[]>;
+      const contactHits = Array.isArray(groups['contacts']) ? groups['contacts'] : [];
+      ctx.log(`contact hits for nonsense+spelled query: ${contactHits.length}`);
+      if (contactHits.length > 0) {
+        throw new Error(
+          `B-NEW-1 regression: query with "spelled n," noise returned ${contactHits.length} contacts. ` +
+          `Expected 0. First hit: ${JSON.stringify(contactHits[0]).slice(0, 200)}`,
+        );
+      }
     },
   },
 ];
