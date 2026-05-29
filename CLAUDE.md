@@ -327,6 +327,22 @@ Rules that are already covered elsewhere are NOT duplicated here — see CONFIGU
 
 A short-lived 2026-05-16 suspension related to an Expo build error was removed 2026-05-22 (Wael) — run the suite unconditionally before every build. No future "temporary suspension" survives without simultaneously suspending all build commands.
 
+**15b. ⭐ FIREBASE TEST LAB IS A MANDATORY GATE BEFORE EVERY PRODUCTION AAB** (Wael 2026-05-29). After `npm run test:auto` is 100% green and before `eas build --profile production`, a preview APK must be built and submitted to Firebase Test Lab. No exceptions.
+
+**The process is fully automated — do NOT manually upload to Firebase Console:**
+1. Build preview APK: `eas build --profile preview` (from `C:\Users\waela\naavi-mobile`)
+2. Copy the EAS APK URL from the build output
+3. Submit to Firebase Test Lab: `node scripts/submit-firebase-test.js <apkUrl>`
+   - Downloads APK → uploads to GCS bucket `mynaavi-testlab-uploads` → submits test matrix
+   - Devices: Pixel 6 (Android 13) + Samsung Galaxy S22 (Android 14)
+   - Polls every 30 seconds; sends SMS to +1 613 769 7957 when done
+4. **Wait for SMS: ✅ PASSED** before building the production AAB
+5. If any device shows ❌ FAILED — investigate and fix before building production
+
+**Before running step 3:** update the GCS filename in `scripts/submit-firebase-test.js` to match the actual build version (currently hardcoded as `naavi-v205.apk`).
+
+**The full pre-build gate sequence is: (1) auto-tester green → (2) Firebase Test Lab PASSED → (3) production AAB.** Skipping either gate is not allowed.
+
 15a. **⭐ EVERY NEW FUNCTIONALITY OR MODIFICATION MUST HAVE AN AUTO-TESTER TEST BEFORE MOVING ON** (Wael 2026-05-24). Sister rule to Rule 15. When Claude ships any new feature, fix, or modification to user-visible behavior or server-side code, Claude MUST add a corresponding regression test to `tests/catalogue/*.ts` and register it in `tests/runner.ts` so it runs as part of `npm run test:auto`. The test must lock in the new behavior (positive control) and/or guard against the prior buggy behavior (negative control), and must pass green before the work is considered done.
 
 **Claude must NOT move on to a different functionality / fix / feature until the corresponding test exists, is registered, and passes.** No exceptions. The test catalogue grows with every shipped change.
