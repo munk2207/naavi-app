@@ -3623,6 +3623,14 @@ let _pendingPlaybackCleanup: ((reason: string) => void) | null = null;
 
 export function stopSpeaking(): void {
   _speechGen++;  // invalidate any in-flight speakResponse
+  // B-NEW-4 fix: capture _currentSound BEFORE firing the cleanup callback.
+  // cleanupAndResolve (registered as _pendingPlaybackCleanup) sets
+  // _currentSound = null when it runs, so the `if (_currentSound)` block
+  // below was always skipped — stopAsync() was never called, only
+  // unloadAsync() (async/fire-and-forget from cleanupAndResolve), which
+  // does not reliably halt playback immediately on Android.
+  const soundToStop = _currentSound;
+  _currentSound = null;
   // V57.10.3 — release any pending playBase64AudioNative cleanup so the
   // speakResponse Promise resolves immediately instead of waiting for the
   // safety timer.
@@ -3642,15 +3650,13 @@ export function stopSpeaking(): void {
   // Native — stop AND unload. Without unloadAsync the native decoder leaks;
   // every "Naavi stop" mid-reply accumulates one leaked Sound object until
   // Android throttles the JS thread and the UI freezes.
-  if (_currentSound) {
-    const s = _currentSound;
-    _currentSound = null;
+  if (soundToStop) {
     try {
-      s.stopAsync()
-        .then(() => s.unloadAsync().catch(() => {}))
-        .catch(() => s.unloadAsync().catch(() => {}));
+      soundToStop.stopAsync()
+        .then(() => soundToStop.unloadAsync().catch(() => {}))
+        .catch(() => soundToStop.unloadAsync().catch(() => {}));
     } catch {
-      try { s.unloadAsync().catch(() => {}); } catch {}
+      try { soundToStop.unloadAsync().catch(() => {}); } catch {}
     }
   }
   Speech.stop().catch(() => {});
