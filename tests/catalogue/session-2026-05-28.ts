@@ -279,4 +279,32 @@ export const session2026_05_28Tests: TestCase[] = [
       }
     },
   },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // B-NEW-5 — fetchLiveCalendarEvents fetches ALL calendars (2026-05-29)
+  //
+  // Previously hardcoded to calendars/primary/events. Events on family /
+  // shared / subscribed calendars (e.g. 'Pick up Lila') were invisible
+  // to Naavi when answering 'drive me to my next meeting'.
+  // Fix: calendarList call → parallel per-calendar fetch → dedup by ID.
+  //
+  // Coverage gap (Rule 15a exception): cannot assert cross-calendar
+  // coverage without knowing which calendars are in mynaavi2207's
+  // account. The test verifies naavi-chat returns a 2xx response for a
+  // calendar query — structural health check only. Wael verifies the
+  // 4-event result live on the phone.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'session-2026-05-28.b-new-5-calendar-all-calendars-reachable',
+    category: 'session-2026-05-28',
+    description: 'B-NEW-5: naavi-chat returns 2xx for a calendar schedule query after all-calendars fix',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'What is on my calendar today?' }],
+        max_tokens: 512,
+      });
+      expect2xx(status, 'naavi-chat calendar query after B-NEW-5 all-calendars fix');
+    },
+  },
 ];
