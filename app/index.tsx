@@ -1363,7 +1363,7 @@ export default function HomeScreen() {
             cached user_id (prior sign-in on this device) but no current
             session — which means the auth tokens didn't survive the last
             install. One tap re-runs the Google sign-in flow. */}
-        {staleAuth && (
+        {staleAuth && !!currentUserId && (
           <TouchableOpacity
             style={styles.staleAuthBanner}
             onPress={() => {
@@ -2236,16 +2236,6 @@ export default function HomeScreen() {
             Visible regardless of Voice Playback setting — its role goes beyond
             silencing audio (cancelling thinking, releasing the answer-active
             lock). See Session 26 design lock. */}
-        {orangeVisible && orangeLabel && (
-          <TouchableOpacity
-            style={styles.stopSpeakingBtn}
-            onPress={onOrangeButtonPressed}
-            accessibilityLabel={orangeLabel}
-          >
-            <Text style={styles.stopSpeakingText}>{orangeLabel}</Text>
-          </TouchableOpacity>
-        )}
-
         {/* Input area — full-width text input + icon row (no labels).
             Mic ↔ Send toggles on the far right based on whether text is typed.
             Long-press any icon to see its label.
@@ -2282,6 +2272,19 @@ export default function HomeScreen() {
             </View>
             {/* Row 2 — Meet + Free on the left, Mic/Send toggle far right. */}
             <View style={styles.actionButtonsRow}>
+              {/* Stop — far left, in-flow (replaces the old absolute-positioned float).
+                  Visible during thinking / speaking / answer_active.
+                  Sits on the far left; right-side buttons stay right-aligned via actionButtonsRight. */}
+              {orangeVisible && orangeLabel && (
+                <TouchableOpacity
+                  style={styles.stopSpeakingBtn}
+                  onPress={onOrangeButtonPressed}
+                  accessibilityLabel={orangeLabel}
+                >
+                  <Text style={styles.stopSpeakingText}>{orangeLabel}</Text>
+                </TouchableOpacity>
+              )}
+              <View style={styles.actionButtonsRight}>
               {/* Visits — conversation / thought recorder.
                   Locked while a Naavi reply is in flight (thinking/speaking/
                   answer_active/pending_confirm). Stays tappable mid-recording
@@ -2393,6 +2396,16 @@ export default function HomeScreen() {
                         head: transcript.slice(0, 60),
                         tail: transcript.slice(-30),
                       });
+                      // "Naavi stop" / "stop" voice command — intercept before Claude.
+                      // Strip punctuation, remove "naavi" — if only "stop" remains,
+                      // fire onOrangeButtonPressed (same as tapping Stop button).
+                      const _stopWords = transcript.trim().toLowerCase()
+                        .replace(/[.,!?]/g, '').replace(/\s+/g, ' ')
+                        .split(' ').filter(w => w !== 'naavi' && w !== '');
+                      if (_stopWords.length === 1 && _stopWords[0] === 'stop') {
+                        onOrangeButtonPressed();
+                        return;
+                      }
                       setMemoTranscript(transcript);
                       await send(transcript);
                       setTimeout(() => setMemoTranscript(null), 5000);
@@ -2421,6 +2434,7 @@ export default function HomeScreen() {
                   />
                 );
               })()}
+              </View>{/* actionButtonsRight */}
             </View>
           </View>
         ) : null}
@@ -3257,25 +3271,16 @@ const styles = StyleSheet.create({
   memoBtnText: {
     fontSize: 22,
   },
-  // V57.11.8 — orange Stop button uses absolute positioning so a long
-  // Naavi reply (or keyboard pressure) can't push it off-screen below
-  // the input row. Wael 2026-05-06: long schedule reply caused the
-  // button to render initially then get cropped as ScrollView content
-  // grew. Now it floats at a fixed position above the input row,
-  // always visible while orangeVisible is true.
+  // Stop button — in-flow on the far left of actionButtonsRow.
+  // No longer absolute-positioned; lives inside the action bar so it
+  // never overlays chat content. space-between on the row pushes it
+  // to the left edge while Visits + Mic stay on the right.
   stopSpeakingBtn: {
-    position: 'absolute',
-    bottom: 130,             // sits above the input row + action button row
-    left: '50%',
-    marginLeft: -70,         // half of width (140/2) — centers horizontally
-    width: 140,
     backgroundColor: Colors.alert,
     borderRadius: 22,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 10,
-    zIndex: 100,
-    elevation: 8,
-    alignItems: 'center',    // centers the inner Text
+    alignItems: 'center',
   },
   stopSpeakingText: {
     color: '#fff',
@@ -3313,14 +3318,15 @@ const styles = StyleSheet.create({
   actionButtonsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    // All three icons grouped on the right side of the row with equal
-    // gap between them. Per-icon bg colours differentiate their purpose
-    // (Meet moderate-blue, Free blue, Mic/Send accent). Mic/Send stays
-    // last (closest to the screen edge) so the most-used button has the
-    // shortest thumb path.
-    justifyContent: 'flex-end',
-    gap: 16,
+    // Stop button on far left; Visits + Mic grouped on the right.
+    // space-between pushes them to opposite ends.
+    justifyContent: 'space-between',
     paddingBottom: 8,
+  },
+  actionButtonsRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
   },
   input: {
     flex: 1,
