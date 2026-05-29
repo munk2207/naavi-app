@@ -2414,8 +2414,16 @@ export default function HomeScreen() {
                   }
                   if (!memoSupported) return;
                   if (isTranscribing) return;
-                  memoStartedAtRef.current = Date.now();
-                  startRecording();
+                  // B-NEW-3: stop any active TTS before opening the mic.
+                  // Without this, Naavi's speaker audio echoes into the mic,
+                  // garbling the transcript ("Yes" → wrong words).
+                  // 300ms delay lets Android release AudioFocus from the
+                  // speaker path before the recording session opens.
+                  stopSpeaking();
+                  setTimeout(() => {
+                    memoStartedAtRef.current = Date.now();
+                    startRecording();
+                  }, 300);
                 };
                 return (
                   <IconButton
