@@ -47,10 +47,8 @@ const FIXTURES_PATH      = join(process.cwd(), 'tests', 'lib', 'fixtures.ts');
 const CREATE_CAL_PATH    = join(process.cwd(), 'supabase', 'functions', 'create-calendar-event', 'index.ts');
 const DELETE_CAL_PATH    = join(process.cwd(), 'supabase', 'functions', 'delete-calendar-event', 'index.ts');
 
-const ORCHESTRATOR_PATH = join(
-  process.cwd(),
-  'hooks', 'useOrchestrator.ts',
-);
+const ORCHESTRATOR_PATH = join(process.cwd(), 'hooks', 'useOrchestrator.ts');
+const APP_INDEX_PATH_B207 = join(process.cwd(), 'app', 'index.tsx');
 
 const SUPABASE_LIB_PATH = join(process.cwd(), 'lib', 'supabase.ts');
 const APP_INDEX_PATH    = join(process.cwd(), 'app', 'index.tsx');
@@ -266,6 +264,73 @@ export const session2026_05_29Tests: TestCase[] = [
       expectTruthy(
         src.includes('if (status >= 400)'),
         'fixtures.ts calendar cleanup must log all HTTP error responses',
+      );
+    },
+  },
+
+  // ─── B-NEW-3: stop TTS before opening mic ─────────────────────────────────
+  {
+    id: 'session-2026-05-29.b-new-3-stop-tts-before-mic',
+    category: 'session-2026-05-29',
+    description:
+      'B-NEW-3 — mic button handler must call stopSpeaking() before startRecording(). ' +
+      'Without this, active TTS audio echoes into the mic, garbling the transcript.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(APP_INDEX_PATH_B207, 'utf8');
+      // Find the mic button onPress handler — identified by the 300ms delay comment.
+      const markerIdx = src.indexOf('B-NEW-3: stop any active TTS before opening the mic');
+      expectTruthy(markerIdx >= 0, 'B-NEW-3 fix marker must exist in app/index.tsx mic handler');
+      const region = src.slice(markerIdx, markerIdx + 600);
+      expectTruthy(
+        region.includes('stopSpeaking()'),
+        'stopSpeaking() must be called before startRecording() — B-NEW-3 fix',
+      );
+      expectTruthy(
+        region.includes('startRecording()'),
+        'startRecording() must be called after stopSpeaking() inside setTimeout — B-NEW-3 fix',
+      );
+    },
+  },
+
+  // ─── Build 207 fixes ───────────────────────────────────────────────────────
+  {
+    id: 'session-2026-05-29.community-resource-name-in-presearch-context',
+    category: 'session-2026-05-29',
+    description:
+      'B6d — pre-search contact context must include resource_name so Claude can ' +
+      'populate contact_resource_name when calling add_to_community. Without this, ' +
+      'the tool was called with an empty string and Google API returned 200 OK silently.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(ORCHESTRATOR_PATH, 'utf8');
+      expectTruthy(
+        src.includes('meta?.resource_name'),
+        'useOrchestrator pre-search contact formatting must include resource_name from metadata',
+      );
+      expectTruthy(
+        src.includes('resource_name:${meta.resource_name}'),
+        'useOrchestrator must append [resource_name:...] to contact lines so Claude has it',
+      );
+    },
+  },
+  {
+    id: 'session-2026-05-29.bottom-buttons-right-align-no-margin-auto',
+    category: 'session-2026-05-29',
+    description:
+      'B6d — actionButtonsRight must NOT use marginLeft:auto (caused Yoga layout bug ' +
+      'where buttons disappeared). Right-alignment is achieved via conditional ' +
+      'justifyContent on actionButtonsRow.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(APP_INDEX_PATH_B207, 'utf8');
+      expectFalsy(
+        src.includes("marginLeft: 'auto'"),
+        'actionButtonsRight must not use marginLeft:auto — use conditional justifyContent instead',
+      );
+      expectTruthy(
+        src.includes("justifyContent: 'flex-end'"),
+        'actionButtonsRow must use justifyContent:flex-end when Stop button is hidden',
       );
     },
   },
