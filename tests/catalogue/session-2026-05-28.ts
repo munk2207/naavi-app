@@ -210,6 +210,29 @@ export const session2026_05_28Tests: TestCase[] = [
   },
 
   // ──────────────────────────────────────────────────────────────────────
+  // B-NEW-2 — community detection: fetchOtherContacts missing memberships
+  //
+  // fetchOtherContacts used readMask without "memberships". Any contact in
+  // the Other Contacts bucket had p.memberships=undefined → isCommunity=false
+  // even when the MyNaavi label was present in Google Contacts.
+  // Fix: added "memberships" to readMask in fetchOtherContacts (contacts.ts:165).
+  //
+  // Coverage gap: this test calls global-search but cannot assert is_community
+  // without knowing which contacts in mynaavi2207's account have the label.
+  // The test verifies the endpoint remains reachable after the change.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'session-2026-05-28.b-new-2-contacts-adapter-reachable',
+    category: 'session-2026-05-28',
+    description: 'B-NEW-2: global-search contacts adapter returns 2xx after memberships added to fetchOtherContacts readMask',
+    timeoutMs: 20_000,
+    async run(ctx) {
+      const { status } = await adapters.globalSearch(ctx, 'Hussein');
+      expect2xx(status, 'global-search contacts reachability after B-NEW-2 fix');
+    },
+  },
+
+  // ──────────────────────────────────────────────────────────────────────
   // B-NEW-1 — contact search token punctuation bug (2026-05-28)
   //
   // Voice query "Find Hussein, spelled h u s s e i n, in my contacts"

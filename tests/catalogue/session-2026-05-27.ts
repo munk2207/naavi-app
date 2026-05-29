@@ -130,7 +130,9 @@ export const session2026_05_27Tests: TestCase[] = [
       const src = readFileSync(CONTACTS_ADAPTER_PATH, 'utf8');
       expectTruthy(
         src.includes("'names,emailAddresses,phoneNumbers,addresses'") ||
-        src.includes('"names,emailAddresses,phoneNumbers,addresses"'),
+        src.includes('"names,emailAddresses,phoneNumbers,addresses"') ||
+        src.includes("'names,emailAddresses,phoneNumbers,addresses,memberships'") ||
+        src.includes('"names,emailAddresses,phoneNumbers,addresses,memberships"'),
         'contacts.ts fetchConnections must include "addresses" in personFields — F2h regression',
       );
     },

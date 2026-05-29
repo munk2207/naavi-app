@@ -162,7 +162,7 @@ async function fetchOtherContacts(accessToken: string): Promise<Person[]> {
   let pageToken: string | undefined = undefined;
   while (out.length < MAX_CONTACTS_PER_SOURCE) {
     const url = new URL(OTHER_CONTACTS_API);
-    url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers,addresses');
+    url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers,addresses,memberships');
     url.searchParams.set('pageSize', '1000');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
     try {
