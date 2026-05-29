@@ -314,6 +314,33 @@ export const session2026_05_29Tests: TestCase[] = [
       );
     },
   },
+  // ─── B6e: enrichedUserMessage persisted in history ───────────────────────
+  {
+    id: 'session-2026-05-29.b6e-enriched-message-stored-in-turn',
+    category: 'session-2026-05-29',
+    description:
+      'B6e — ConversationTurn must have enrichedUserMessage field so resource_name ' +
+      'from pre-search context persists in conversation history across turns. ' +
+      'Root cause: enrichedMessage (with [resource_name:...]) was sent to Claude on ' +
+      'turn 1 but NOT stored in history — on turn 2 Claude had no resource_name and ' +
+      'called add_to_community with empty string, silently failing.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(ORCHESTRATOR_PATH, 'utf8');
+      expectTruthy(
+        src.includes('enrichedUserMessage?: string'),
+        'ConversationTurn must have enrichedUserMessage field — B6e fix',
+      );
+      expectTruthy(
+        src.includes('enrichedUserMessage ?? t.userMessage'),
+        'historyRef must use enrichedUserMessage ?? userMessage so resource_name persists — B6e fix',
+      );
+      expectTruthy(
+        src.includes('enrichedUserMessage: enrichedMessage !== userMessage ? enrichedMessage : undefined'),
+        'newTurn must store enrichedUserMessage when enrichedMessage differs from userMessage — B6e fix',
+      );
+    },
+  },
   {
     id: 'session-2026-05-29.bottom-buttons-right-align-no-margin-auto',
     category: 'session-2026-05-29',

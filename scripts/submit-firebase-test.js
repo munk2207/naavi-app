@@ -60,11 +60,31 @@ const ROBO_SCRIPT_PATH = path.join(__dirname, '..', 'firebase', 'robo-script-onb
 
 // ── Args ──────────────────────────────────────────────────────────────────────
 
-const APK_URL = process.argv[2];
+let APK_URL = process.argv[2];
 if (!APK_URL) {
-  console.error('Usage: node scripts/submit-firebase-test.js <apkUrl>');
+  console.error('Usage: node scripts/submit-firebase-test.js <apkUrl|easBuildId>');
   console.error('Example: node scripts/submit-firebase-test.js https://expo.dev/artifacts/eas/q5ZHC8jUyfejFpxHo5VCjJ.apk');
+  console.error('         node scripts/submit-firebase-test.js https://expo.dev/accounts/waggan/projects/naavi/builds/<id>');
   process.exit(1);
+}
+
+// If it's an EAS build page URL (not a direct .apk), extract the artifact URL via EAS CLI.
+const BUILD_PAGE_RE = /expo\.dev\/accounts\/[^/]+\/projects\/[^/]+\/builds\/([a-f0-9-]{36})/;
+const buildPageMatch = APK_URL.match(BUILD_PAGE_RE);
+if (buildPageMatch) {
+  const buildId = buildPageMatch[1];
+  console.log(`Detected EAS build page URL — fetching artifact URL for build ${buildId}…`);
+  const { execSync } = require('child_process');
+  try {
+    const json = execSync(`npx eas build:view ${buildId} --json`, { cwd: path.join(__dirname, '..'), encoding: 'utf8', stdio: ['pipe','pipe','pipe'] });
+    const parsed = JSON.parse(json.replace(/^[^{]*/s, '').trim());
+    APK_URL = parsed?.artifacts?.applicationArchiveUrl || parsed?.artifacts?.buildUrl;
+    if (!APK_URL) throw new Error('No artifact URL in EAS response');
+    console.log(`     ✓ Artifact URL: ${APK_URL}\n`);
+  } catch (err) {
+    console.error('Failed to resolve artifact URL from EAS:', err.message);
+    process.exit(1);
+  }
 }
 
 // ── Google auth ───────────────────────────────────────────────────────────────
@@ -318,7 +338,7 @@ async function pollUntilDone(matrixId, token, tokenMintedAt) {
   console.log(`     ✓ APK downloaded (${apkSizeMB} MB) → ${tmpApk}`);
 
   // 3. Upload APK to GCS
-  const apkGcsName = `${GCS_FOLDER}/naavi-v206.apk`;
+  const apkGcsName = `${GCS_FOLDER}/naavi-v207.apk`;
   console.log(`\n3/5  Uploading APK to gs://${GCS_BUCKET}/${apkGcsName}…`);
   const apkUpload = await uploadToGCS(token, tmpApk, apkGcsName, 'application/vnd.android.package-archive');
   if (apkUpload.error) throw new Error(`APK upload failed: ${JSON.stringify(apkUpload.error)}`);

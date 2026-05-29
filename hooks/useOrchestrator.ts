@@ -276,6 +276,7 @@ export function orangeButtonLabel(s: OrchestratorStatus): '⏹ Stop' | '✕ Canc
 
 export interface ConversationTurn {
   userMessage: string;
+  enrichedUserMessage?: string;
   assistantSpeech: string;
   drafts: NaaviAction[];
   createdEvents: { summary: string; htmlLink?: string }[];
@@ -539,7 +540,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const historyRef = useRef<NaaviMessage[]>([]);
   useEffect(() => {
     historyRef.current = turns.flatMap(t => [
-      { role: 'user' as const,      content: t.userMessage },
+      { role: 'user' as const,      content: t.enrichedUserMessage ?? t.userMessage },
       { role: 'assistant' as const, content: t.assistantSpeech },
     ]);
   }, [turns]);
@@ -3105,6 +3106,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       endDiagSession(bubbleDiag);
       const newTurn: ConversationTurn = {
         userMessage,
+        enrichedUserMessage: enrichedMessage !== userMessage ? enrichedMessage : undefined,
         assistantSpeech: displaySpeech,
         drafts:           turnDrafts,
         createdEvents:    turnEvents,
