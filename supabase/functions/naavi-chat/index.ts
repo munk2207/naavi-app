@@ -715,33 +715,71 @@ async function fetchLiveCalendarEvents(
     const timeMin = new Date();
     const timeMax = new Date();
     timeMax.setDate(timeMax.getDate() + 7);
-    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events`
-      + `?singleEvents=true&orderBy=startTime&maxResults=50`
-      + `&timeMin=${encodeURIComponent(timeMin.toISOString())}`
-      + `&timeMax=${encodeURIComponent(timeMax.toISOString())}`;
-    // V57.11.6 — explicit Cache-Control: no-cache + Pragma: no-cache so
-    // Google Calendar API bypasses its CDN cache and returns fresh data.
-    // Without this, recently-edited event fields (e.g., the location
-    // field the user just changed) can read stale for up to ~30s.
-    // Wael 2026-05-05: changed Hussein meeting location in Google
-    // Calendar, asked Naavi "navigate to my next meeting" → Naavi read
-    // the OLD location.
-    const eventsRes = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-      },
-    });
-    if (!eventsRes.ok) return [];
-    const eventsData = await eventsRes.json();
-    const items = (eventsData?.items ?? []) as Array<{
-      id?: string;
-      summary?: string;
-      location?: string;
+
+    // Fetch all user calendars first — fall back to primary on failure.
+    // Previously hardcoded to primary only, which missed events on family /
+    // shared / subscribed calendars (e.g. "Pick up Lila" on a family cal).
+    let calendarIds: string[] = [];
+    try {
+      const calListRes = await fetch(
+        'https://www.googleapis.com/calendar/v3/users/me/calendarList',
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (calListRes.ok) {
+        const calListData = await calListRes.json();
+        const calItems = (calListData?.items ?? []) as Array<{ id: string }>;
+        calendarIds = calItems.map(c => c.id).filter(Boolean);
+      }
+    } catch { /* ignore — fall through to primary */ }
+    if (!calendarIds.length) calendarIds = ['primary'];
+
+    // V57.11.6 — Cache-Control: no-cache so recently-edited fields aren't stale.
+    const calEventArrays = await Promise.all(
+      calendarIds.map(async (calId) => {
+        const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`
+          + `?singleEvents=true&orderBy=startTime&maxResults=50`
+          + `&timeMin=${encodeURIComponent(timeMin.toISOString())}`
+          + `&timeMax=${encodeURIComponent(timeMax.toISOString())}`;
+        try {
+          const res = await fetch(url, {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache',
+            },
+          });
+          if (!res.ok) return [];
+          const data = await res.json();
+          return (data?.items ?? []) as Array<{
+            id?: string; summary?: string; location?: string;
+            start?: { dateTime?: string; date?: string };
+            end?: { dateTime?: string; date?: string };
+          }>;
+        } catch { return []; }
+      }),
+    );
+
+    // Deduplicate by event ID (same event may appear on multiple calendars).
+    // Re-sort by start time since parallel fetches interleave calendars.
+    const seen = new Set<string>();
+    const items: Array<{
+      id?: string; summary?: string; location?: string;
       start?: { dateTime?: string; date?: string };
       end?: { dateTime?: string; date?: string };
-    }>;
+    }> = [];
+    for (const arr of calEventArrays) {
+      for (const e of arr) {
+        const key = e.id ?? JSON.stringify(e);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push(e);
+      }
+    }
+    items.sort((a, b) => {
+      const aTime = new Date(a.start?.dateTime ?? a.start?.date ?? '').getTime();
+      const bTime = new Date(b.start?.dateTime ?? b.start?.date ?? '').getTime();
+      return aTime - bTime;
+    });
 
     // V57.11.2 — drop events whose start time has already passed. Without
     // this, Claude treats a meeting that started 27 minutes ago as "next"
