@@ -81,8 +81,8 @@ export const session2026_05_27Tests: TestCase[] = [
     id: 'b6d.prompt-version-bumped-to-v98',
     category: 'b6d',
     description:
-      'B6d/Community — PROMPT_VERSION must be 2026-05-28-v100-community (latest live version). ' +
-      'Updated from v99 → v100 when MyNaavi Community section was added (2026-05-28).',
+      'B6d/Nav-disambiguation — PROMPT_VERSION must be 2026-05-29-v101-nav-disambiguation (latest live version). ' +
+      'Updated from v100 → v101 when navigation disambiguation rule was added (2026-05-29).',
     timeoutMs: 15_000,
     async run(ctx) {
       const { status, data } = await adapters.call(
@@ -92,8 +92,8 @@ export const session2026_05_27Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-05-28-v100-community',
-        `Expected version "2026-05-28-v100-community", got "${version}"`,
+        version === '2026-05-29-v101-nav-disambiguation',
+        `Expected version "2026-05-29-v101-nav-disambiguation", got "${version}"`,
       );
     },
   },

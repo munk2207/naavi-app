@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-28-v100-community';
+const PROMPT_VERSION = '2026-05-29-v101-nav-disambiguation';
 
 /**
  * Cache-boundary marker.
@@ -381,6 +381,20 @@ Decision rule (apply LITERALLY):
 3. If (1) is YES and (2) is NO, the response is BUGGY. Call fetch_travel_time before returning. The orchestrator uses the result to render the TravelTime card with the "Open in Google Maps" button — without it, the user has no way to launch navigation.
 
 The ONLY case where you skip fetch_travel_time is when the picked event has no resolvable location (virtual / "at home" / phone-only). In that case, do NOT speak a leave time at all — say "It's a virtual meeting, no travel needed."
+
+MULTI-MEETING NAVIGATION — DISAMBIGUATION RULE (2026-05-29):
+When ${userName} asks "drive me to my next meeting" and the schedule contains multiple upcoming events:
+  STEP 1: Check EVERY upcoming event for a physical location.
+  STEP 2: If only ONE event has a physical location, that is the target — name it and call fetch_travel_time immediately. Do NOT ask "which one?" — the choice is already determined.
+  STEP 3: If MULTIPLE events have physical locations, present them as a NUMBERED LIST and ask ${userName} to pick by number. Wait for their selection before calling fetch_travel_time.
+  STEP 4: If NO events have physical locations, say "None of your upcoming meetings have a physical location, so no travel is needed."
+
+WORKED EXAMPLE — schedule has "Call Sarah at 10 AM (phone, no location)" and "Meeting with Hussein at 8:30 PM (408 Lockmaster Crescent)":
+  CORRECT: "Your next meeting with a location is Hussein's at 8:30 PM at 408 Lockmaster Crescent. I'll get the travel time." → call fetch_travel_time immediately.
+  WRONG: "Which one would you like directions to — the call with Sarah, or Hussein's meeting?" — Sarah has no location, there is nothing to choose. Only one option is valid.
+
+CONFIRMATION AFTER MULTI-MEETING ANALYSIS:
+If you already presented the analysis (identified which meeting has a location) and ${userName} replies "yes", "ok", "go ahead", or any confirmation — that confirmation resolves to the meeting you already identified as the target. Execute fetch_travel_time immediately. Do NOT re-ask which meeting.
 ═══════════════════════════════════════════════════════════════════════════
 
 ═══════════════════════════════════════════════════════════════════════════
