@@ -181,13 +181,15 @@ export const session2026_05_29Tests: TestCase[] = [
         src.includes('markOAuthScopeVersionCurrent'),
         'app/index.tsx must call markOAuthScopeVersionCurrent() after SIGNED_IN',
       );
-      // The SIGNED_IN + scope-mark block must appear together (mark fires after token capture)
-      const signedInIdx = src.indexOf("event === 'SIGNED_IN' && session?.provider_refresh_token");
+      // SIGNED_IN handler must call markOAuthScopeVersionCurrent() unconditionally
+      // (provider_refresh_token guard was removed 2026-05-29 — the guard caused
+      // repeated sign-outs when provider_refresh_token was absent on emulator/test accounts).
+      const signedInIdx = src.indexOf("event === 'SIGNED_IN'");
       expectTruthy(signedInIdx >= 0, 'SIGNED_IN handler must exist');
-      const signedInBlock = src.slice(signedInIdx, signedInIdx + 300);
+      const signedInBlock = src.slice(signedInIdx, signedInIdx + 400);
       expectTruthy(
         signedInBlock.includes('markOAuthScopeVersionCurrent'),
-        'markOAuthScopeVersionCurrent() must be called inside the SIGNED_IN + provider_refresh_token block',
+        'markOAuthScopeVersionCurrent() must be called inside the SIGNED_IN block (not gated by provider_refresh_token)',
       );
     },
   },

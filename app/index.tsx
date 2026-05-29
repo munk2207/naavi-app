@@ -744,8 +744,10 @@ export default function HomeScreen() {
           has_provider_refresh_token: !!session?.provider_refresh_token,
           ms_since_fg: msSinceForeground(),
         });
-        if (event === 'SIGNED_IN' && session?.provider_refresh_token) {
-          await captureAndStoreGoogleToken();
+        if (event === 'SIGNED_IN') {
+          if (session?.provider_refresh_token) {
+            await captureAndStoreGoogleToken();
+          }
           await markOAuthScopeVersionCurrent();
         }
         if (session?.user) {
@@ -3291,14 +3293,15 @@ const styles = StyleSheet.create({
   // to the left edge while Visits + Mic stay on the right.
   stopSpeakingBtn: {
     backgroundColor: Colors.alert,
-    borderRadius: 22,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    height: 52,
+    borderRadius: 26,
+    paddingHorizontal: 20,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   stopSpeakingText: {
     color: '#fff',
-    fontSize: Typography.sm,
+    fontSize: 15,
     fontWeight: Typography.bold,
   },
   inputBar: {
@@ -3341,6 +3344,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
+    marginLeft: 'auto',
   },
   input: {
     flex: 1,
