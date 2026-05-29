@@ -34,6 +34,7 @@ const OWNED_TABLES = [
   'pending_disambig',
   'documents',
   'email_actions',
+  'calendar_events',
 ];
 
 // V57.16 — multi-phone tests in the suite mutate user_settings.phone and
@@ -117,7 +118,7 @@ export async function teardownSuite(ctx: TestContext): Promise<void> {
       if (deleted > 0) {
         ctx.log(`[fixtures] cleaned ${deleted} calendar event(s) matching "${query}"`);
       }
-      if (status >= 400 && status !== 400) {
+      if (status >= 400) {
         ctx.log(`[fixtures] calendar cleanup status=${status} for "${query}": ${JSON.stringify(data).slice(0, 120)}`);
       }
     } catch (err) {

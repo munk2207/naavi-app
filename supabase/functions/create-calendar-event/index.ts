@@ -242,7 +242,7 @@ serve(async (req) => {
       calRow.start_date = null;
       calRow.end_date   = null;
     }
-    await adminClient.from('calendar_events').upsert(calRow, { onConflict: 'google_event_id' });
+    await adminClient.from('calendar_events').upsert(calRow, { onConflict: 'user_id,google_event_id' });
 
     return new Response(JSON.stringify({ success: true, eventId: created.id, htmlLink: created.htmlLink }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

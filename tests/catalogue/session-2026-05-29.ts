@@ -43,6 +43,10 @@ import { join } from 'node:path';
 import { expectTruthy, expectFalsy } from '../lib/assertions';
 import type { TestCase } from '../lib/types';
 
+const FIXTURES_PATH      = join(process.cwd(), 'tests', 'lib', 'fixtures.ts');
+const CREATE_CAL_PATH    = join(process.cwd(), 'supabase', 'functions', 'create-calendar-event', 'index.ts');
+const DELETE_CAL_PATH    = join(process.cwd(), 'supabase', 'functions', 'delete-calendar-event', 'index.ts');
+
 const ORCHESTRATOR_PATH = join(
   process.cwd(),
   'hooks', 'useOrchestrator.ts',
@@ -184,6 +188,82 @@ export const session2026_05_29Tests: TestCase[] = [
       expectTruthy(
         signedInBlock.includes('markOAuthScopeVersionCurrent'),
         'markOAuthScopeVersionCurrent() must be called inside the SIGNED_IN + provider_refresh_token block',
+      );
+    },
+  },
+
+  // ─── Calendar cleanup fixes ────────────────────────────────────────────────
+  {
+    id: 'session-2026-05-29.calendar-events-in-owned-tables',
+    category: 'session-2026-05-29',
+    description:
+      'calendar_events must be in OWNED_TABLES so teardown clears DB rows each run. ' +
+      'Without this, stale rows accumulate indefinitely.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(FIXTURES_PATH, 'utf8');
+      expectTruthy(
+        src.includes("'calendar_events'"),
+        "fixtures.ts OWNED_TABLES must include 'calendar_events'",
+      );
+    },
+  },
+  {
+    id: 'session-2026-05-29.create-calendar-event-onconflict-compound-key',
+    category: 'session-2026-05-29',
+    description:
+      'create-calendar-event upsert must use onConflict: "user_id,google_event_id" (the ' +
+      'actual DB UNIQUE constraint). The single-column "google_event_id" key caused the ' +
+      'upsert to fail silently on every call — no calendar_events DB rows were written.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(CREATE_CAL_PATH, 'utf8');
+      expectTruthy(
+        src.includes("onConflict: 'user_id,google_event_id'"),
+        "create-calendar-event must use onConflict: 'user_id,google_event_id'",
+      );
+      expectFalsy(
+        src.includes("onConflict: 'google_event_id'"),
+        "create-calendar-event must NOT use single-column 'google_event_id' conflict key",
+      );
+    },
+  },
+  {
+    id: 'session-2026-05-29.delete-calendar-event-single-events-true',
+    category: 'session-2026-05-29',
+    description:
+      'delete-calendar-event must use singleEvents=true in event list queries. ' +
+      'singleEvents=false caused freshly created events to not appear in list results, ' +
+      'so teardown always returned deleted:0.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(DELETE_CAL_PATH, 'utf8');
+      expectFalsy(
+        src.includes('singleEvents=false'),
+        'delete-calendar-event must not use singleEvents=false',
+      );
+      expectTruthy(
+        src.includes('singleEvents=true'),
+        'delete-calendar-event must use singleEvents=true',
+      );
+    },
+  },
+  {
+    id: 'session-2026-05-29.fixtures-status-400-logging',
+    category: 'session-2026-05-29',
+    description:
+      'fixtures.ts calendar cleanup must log status >= 400 responses (not > 400). ' +
+      'The old condition `status >= 400 && status !== 400` silently swallowed HTTP 400 errors.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(FIXTURES_PATH, 'utf8');
+      expectFalsy(
+        src.includes('status >= 400 && status !== 400'),
+        'fixtures.ts must not have the silent-400 condition — use `status >= 400`',
+      );
+      expectTruthy(
+        src.includes('if (status >= 400)'),
+        'fixtures.ts calendar cleanup must log all HTTP error responses',
       );
     },
   },

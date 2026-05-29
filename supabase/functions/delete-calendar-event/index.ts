@@ -127,7 +127,7 @@ serve(async (req) => {
         const evRes = await fetch(
           `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?` +
           `timeMin=${encodeURIComponent(timeMinDiag)}&timeMax=${encodeURIComponent(timeMaxDiag)}` +
-          `&singleEvents=false&maxResults=250`,
+          `&singleEvents=true&maxResults=250`,
           { headers: { Authorization: `Bearer ${accessToken}` } },
         );
         if (!evRes.ok) {
@@ -178,8 +178,8 @@ serve(async (req) => {
 
     // Admin: no q= (indexing lag misses fresh events). User: q= for speed.
     const searchUrl = isAdmin
-      ? `${CALENDAR_BASE}/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=false&maxResults=250`
-      : `${CALENDAR_BASE}/events?q=${encodeURIComponent(query)}&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=false&maxResults=25`;
+      ? `${CALENDAR_BASE}/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=true&maxResults=250`
+      : `${CALENDAR_BASE}/events?q=${encodeURIComponent(query)}&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}&singleEvents=true&maxResults=25`;
 
     const searchRes = await fetch(searchUrl, {
       headers: { Authorization: `Bearer ${accessToken}` },
