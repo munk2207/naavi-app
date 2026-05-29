@@ -1536,7 +1536,16 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           };
           const lines = preSearchResults.map(r => {
             const label = SOURCE_LABELS[r.source] ?? r.source;
-            return `- [${label}] ${r.title}${r.snippet ? ' — ' + r.snippet : ''}`;
+            let line = `- [${label}] ${r.title}${r.snippet ? ' — ' + r.snippet : ''}`;
+            if (r.source === 'contacts') {
+              const meta = r.metadata as Record<string, unknown> | undefined;
+              if (meta?.is_community === true) {
+                line += ' [MyNaavi Community member]';
+              } else if (meta?.is_community === false) {
+                line += ' [not in MyNaavi Community]';
+              }
+            }
+            return line;
           });
           enrichedMessage = `${enrichedMessage}\n\n## Live search results for the user's question (these are authoritative — use them to answer; do NOT say "I couldn't find" if results are listed here)\n${lines.join('\n')}`;
           turnGlobalSearch = { query: userMessage, results: preSearchResults, origin: 'pre-search' };

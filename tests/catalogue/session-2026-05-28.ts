@@ -29,6 +29,19 @@
  * SCHEDULE_MEDICATION, and non-email SET_ACTION_RULE triggers.
  * Tests in tests/catalogue/confirm-then-act.ts (b4z.* tests added 2026-05-28).
  *
+ * B-NEW-2 (community context in Claude): fetchOtherContacts was missing
+ * "memberships" in readMask → isCommunity always false for other-contacts bucket.
+ * Fix part 1 (server): added "memberships" to readMask (contacts.ts:165).
+ * Fix part 2 (mobile): useOrchestrator.ts pre-search result formatter now appends
+ * "[MyNaavi Community member]" or "[not in MyNaavi Community]" to contact lines
+ * so Claude can read community status and follow the community prompt rules.
+ *
+ * Coverage gap acknowledged (Rule 15a exception):
+ *   B-NEW-2 mobile formatter: useOrchestrator.ts pre-search formatting is mobile
+ *   client code not reachable from the Node auto-tester. Server-side fix (memberships
+ *   in readMask) is covered by the b-new-2-contacts-adapter-reachable test (2xx check).
+ *   Mobile formatter verified by Wael on next APK install via community tests.
+ *
  * Run via `npm run test:auto -- --grep session-2026-05-28`.
  */
 
