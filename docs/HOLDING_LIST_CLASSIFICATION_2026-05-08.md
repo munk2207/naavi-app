@@ -84,6 +84,14 @@ Active tooling list as of 2026-05-19. T3a closed (docs shipped, automation gaps 
 
 ---
 
+## Architecture (ARCH)
+
+Foundational design initiatives that reshape how Naavi works, not individual features or bugs.
+
+| ID | Description | Surface | Notes | Server/AAB | Status |
+|----|-------------|---------|-------|------------|--------|
+| ARCH-1 | Deterministic-first architecture — Layer 2 intent gate | backend | **Design decided 2026-05-29.** Naavi's value proposition is correct, honest, verifiable answers — not probabilistic AI output. Three-layer model: (1) Pre-Claude bypass for known intents (Layer 1 — B6e pattern, already proven); (2) Intent verification gate — Claude classifies intent into structured object {type, confidence, params}, server routes: high confidence + handler → deterministic execution, low confidence → ask Robert to confirm, out of scope → honest-out (Layer 2 — not yet built); (3) Path B transparent best-effort — when no deterministic handler exists, Naavi explicitly tells Robert "I can't give you a verified answer, here is my best understanding…" then Claude runs. Robert always knows which path he's on. **Prerequisites before coding:** define complete intent taxonomy (all intent types Naavi supports, named and scoped). **Scope:** ~3-5 hour dedicated session. Requires: get-naavi-prompt changes (intent output format), naavi-chat routing logic, test suite additions for gate behavior. Do NOT start during pre-AAB build sessions — log and schedule as its own session. | Both | open — dedicated session required |
+
 ## Ideas (I)
 
 Brainstorming-stage entries. Path or scope not yet chosen. Promote to F when committed as a real feature.
