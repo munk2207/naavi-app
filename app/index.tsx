@@ -100,14 +100,14 @@ const INTEGRATION_CATEGORIES: Array<{ category: string; items: IntegrationItem[]
       {
         icon: '🤖',
         name: 'MyNaavi AI',
-        description: 'Claude-powered assistant. Robert speaks or types naturally — MyNaavi understands intent and takes action without any app switching.',
+        description: 'AI-powered assistant. Speak or type naturally — MyNaavi understands intent and takes action without any app switching.',
       },
       {
         // Matches the mic icon on the home screen bottom bar so the two feel
         // connected — same glyph, same weight, same colour.
         ionIcon: 'mic',
         name: 'Whisper Voice',
-        description: 'Tap the microphone at the bottom right, speak your request, and release. OpenAI Whisper transcribes the audio and MyNaavi responds. Enables fully hands-free interaction.',
+        description: 'Tap the microphone at the bottom right, speak your request, and release. Your voice is transcribed and MyNaavi responds. Enables fully hands-free interaction.',
       },
     ],
   },
