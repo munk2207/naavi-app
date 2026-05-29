@@ -363,6 +363,90 @@ export const session2026_05_29Tests: TestCase[] = [
     },
   },
 
+  // ─── Community two-phase search (B-community-arch 2026-05-29) ───────────────
+  {
+    id: 'session-2026-05-29.community-phase1-queries-db-before-people-api',
+    category: 'session-2026-05-29',
+    description:
+      'Community two-phase search — contacts adapter must query community_members from ' +
+      'Supabase BEFORE fetching from Google People API. If Phase 1 hits are found, ' +
+      'Phase 2 (People API) must be skipped entirely.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(CONTACTS_ADAPTER_PATH, 'utf8');
+      // Phase 1 block must be present.
+      expectTruthy(
+        src.includes("'community_members'"),
+        "contacts adapter must query community_members table (Phase 1)",
+      );
+      expectTruthy(
+        src.includes('Phase 1: community DB'),
+        "contacts adapter must have Phase 1 community DB comment",
+      );
+      // Phase 1 must appear BEFORE the Phase 2 (People API) block in source order.
+      // Note: the file also has from('user_tokens') in isConnected (before search),
+      // so we only compare phase markers — not the first user_tokens occurrence.
+      const phase1Idx = src.indexOf('Phase 1: community DB');
+      const phase2Idx = src.indexOf('Phase 2: Google People API');
+      expectTruthy(phase1Idx >= 0, 'Phase 1 marker must exist');
+      expectTruthy(phase2Idx >= 0, 'Phase 2 marker must exist');
+      expectTruthy(
+        phase1Idx < phase2Idx,
+        'Phase 1 community DB query must come before Phase 2 (People API) in source order',
+      );
+      // Early-return when community hits found.
+      expectTruthy(
+        src.includes('communityHits.length > 0'),
+        'contacts adapter must early-return communityHits when Phase 1 finds results',
+      );
+    },
+  },
+  {
+    id: 'session-2026-05-29.community-phase1-metadata-is-community-true',
+    category: 'session-2026-05-29',
+    description:
+      'Community two-phase search — Phase 1 results must have is_community: true in ' +
+      'metadata so the prompt framing rule can detect them and say "I found X in your ' +
+      'MyNaavi community" instead of "I found X in your contacts".',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(CONTACTS_ADAPTER_PATH, 'utf8');
+      // The communityHits push must set is_community: true.
+      const communityPushIdx = src.indexOf('communityHits.push(');
+      expectTruthy(communityPushIdx >= 0, 'communityHits.push must exist in Phase 1');
+      const pushBlock = src.slice(communityPushIdx, communityPushIdx + 600);
+      expectTruthy(
+        pushBlock.includes('is_community: true'),
+        'Phase 1 community hits must set is_community: true in metadata',
+      );
+    },
+  },
+  {
+    id: 'session-2026-05-29.community-framing-rule-in-prompt',
+    category: 'session-2026-05-29',
+    description:
+      'Community two-phase search — get-naavi-prompt must instruct Claude to frame ' +
+      'community hits as "found in your MyNaavi community" (not "found in your contacts"). ' +
+      'This framing rule replaces the old boost-and-rank-first approach.',
+    timeoutMs: 1_000,
+    async run() {
+      const PROMPT_PATH = join(process.cwd(), 'supabase', 'functions', 'get-naavi-prompt', 'index.ts');
+      const src = readFileSync(PROMPT_PATH, 'utf8');
+      expectTruthy(
+        src.includes('is_community: true'),
+        'get-naavi-prompt must reference is_community: true metadata flag',
+      );
+      expectTruthy(
+        src.includes('in your MyNaavi community'),
+        'get-naavi-prompt must instruct community framing in search results',
+      );
+      expectTruthy(
+        src.includes('two-phase'),
+        'get-naavi-prompt must document the two-phase search architecture',
+      );
+    },
+  },
+
   // ─── B6f: contacts adapter AND-logic for multi-token name queries ──────────
   {
     id: 'session-2026-05-29.b6f-contacts-name-match-and-logic-for-multi-token',

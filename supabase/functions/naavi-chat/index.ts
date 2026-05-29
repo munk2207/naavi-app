@@ -17,6 +17,7 @@
 import Anthropic from 'npm:@anthropic-ai/sdk@0.79.0';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { NAAVI_TOOLS, TOOL_NAME_TO_ACTION_TYPE } from '../_shared/anthropic_tools.ts';
+import { computeContactHash, COMMUNITY_PERSON_FIELDS } from '../_shared/community_hash.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -321,6 +322,39 @@ async function executeAddToCommunity(
       return `I couldn't add ${contactName} to your community — ${modifyRes.status === 403 ? 'contacts write permission not granted yet (sign out and back in)' : 'Google returned an error'}.`;
     }
     console.log(`[community] added ${contactResourceName} (${contactName}) to MyNaavi group ${groupId}`);
+
+    // 5. Fetch contact data and write to community_members DB.
+    // Fire-and-forget — Google label write already succeeded; DB write failure
+    // is non-fatal (community search will fall back to People API).
+    (async () => {
+      try {
+        const personRes = await fetch(
+          `https://people.googleapis.com/v1/${contactResourceName}?personFields=${COMMUNITY_PERSON_FIELDS}`,
+          { headers: { Authorization: `Bearer ${accessToken}` } },
+        );
+        if (!personRes.ok) { console.warn('[community] person fetch failed:', personRes.status); return; }
+        const person = await personRes.json();
+        const contactData = {
+          names:          person.names          ?? [],
+          emailAddresses: person.emailAddresses ?? [],
+          phoneNumbers:   person.phoneNumbers   ?? [],
+        };
+        const hash  = await computeContactHash(contactData);
+        const name  = (person.names?.[0]?.displayName ?? contactName).trim();
+        const email = person.emailAddresses?.[0]?.value ?? null;
+        const phone = person.phoneNumbers?.[0]?.value   ?? null;
+        const { error } = await supabase.from('community_members').upsert({
+          user_id: userId, resource_name: contactResourceName,
+          name, email, phone, contact_data: contactData, contact_hash: hash,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id,resource_name' });
+        if (error) console.warn('[community] community_members upsert error:', error.message);
+        else console.log(`[community] community_members row upserted for ${contactResourceName}`);
+      } catch (e: any) {
+        console.warn('[community] community_members write failed:', e?.message);
+      }
+    })();
+
     return `Done. ${contactName} is now in your MyNaavi community.`;
   } catch (err: any) {
     console.error('[community] executeAddToCommunity error:', err);

@@ -25,6 +25,7 @@
  */
 
 import type { SearchAdapter, SearchContext, SearchResult } from './_interface.ts';
+import { computeContactHash, COMMUNITY_PERSON_FIELDS } from '../../_shared/community_hash.ts';
 
 const GOOGLE_TOKEN_URL       = 'https://oauth2.googleapis.com/token';
 const PEOPLE_CONNECTIONS_API = 'https://people.googleapis.com/v1/people/me/connections';
@@ -215,7 +216,73 @@ export const contactsAdapter: SearchAdapter = {
     const qDigits = normalizePhone(q);
     const isPhoneLike = qDigits.length >= 7;
 
-    // ── 1. Refresh token → access token ─────────────────────────────────────
+    // ── Phase 1: community DB (fast local lookup) ──────────────────────────
+    // Query community_members first. Community contacts always searched before
+    // the full People API fetch. If Phase 1 returns hits, Phase 2 is skipped.
+    const { data: communityRows } = await ctx.supabase
+      .from('community_members')
+      .select('resource_name, name, email, phone')
+      .eq('user_id', ctx.userId);
+
+    const communityHits: SearchResult[] = [];
+    for (const row of (communityRows ?? [])) {
+      const nameLower = (row.name ?? '').toLowerCase();
+      const emails    = row.email ? [row.email as string] : [];
+      const phones    = row.phone ? [row.phone as string] : [];
+
+      const nameTokenMatch = (() => {
+        if (variants.some(v => v.length > 0 && nameLower.includes(v))) return true;
+        if (tokens.size === 0) return false;
+        if (tokens.size >= 2) return [...tokens].every(t => nameLower.includes(t));
+        return [...tokens].some(t => nameLower.includes(t));
+      })();
+
+      const emailTokenMatch = emails.some(e => {
+        const el = e.toLowerCase();
+        return (tokens.size > 0 && [...tokens].some(t => el.includes(t))) ||
+               variants.some(v => el.includes(v));
+      });
+
+      const phoneMatch = isPhoneLike && phones.some(ph => normalizePhone(ph).includes(qDigits));
+
+      let score = 0;
+      if (nameTokenMatch)       score = 1.5;
+      else if (phoneMatch)      score = 1.275; // 0.85 × 1.5 community boost
+      else if (emailTokenMatch) score = 1.05;  // 0.70 × 1.5 community boost
+
+      if (score === 0) continue;
+
+      const url = phones[0]
+        ? `tel:${phones[0].replace(/[^\d+]/g, '')}`
+        : emails[0]
+        ? `mailto:${emails[0]}`
+        : undefined;
+
+      communityHits.push({
+        source: 'contacts',
+        title: row.name || emails[0] || phones[0] || 'Contact',
+        snippet: [emails[0], phones[0]].filter(Boolean).join(' · '),
+        score,
+        url,
+        metadata: {
+          resource_name: row.resource_name ?? null,
+          name: row.name ?? null,
+          emails,
+          phones,
+          is_community: true,
+          addresses: [],
+        },
+      });
+    }
+
+    if (communityHits.length > 0) {
+      console.log(`[contacts-adapter] Phase 1: ${communityHits.length} community hit(s) for "${q}"`);
+      communityHits.sort((a, b) => b.score - a.score);
+      return communityHits.slice(0, ctx.limit);
+    }
+
+    // ── Phase 2: Google People API (no community match found) ─────────────
+    // ── 2a. Refresh token → access token ──────────────────────────────────
     const { data: tokenRow } = await ctx.supabase
       .from('user_tokens')
       .select('refresh_token')

@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-29-v101-nav-disambiguation';
+const PROMPT_VERSION = '2026-05-29-v102-community-two-phase';
 
 /**
  * Cache-boundary marker.
@@ -240,7 +240,14 @@ ${choiceFormatRule}
 
 ${userName} maintains a "MyNaavi" label in Google Contacts for the people and businesses that matter most — family, close friends, key service providers, banks, etc. These are Community members.
 
-**How it affects search:** When search results include Community members, they are already ranked first (the search engine boosts them). Always present them at the top of the list — never bury a Community member below a general contact.
+**How it affects search — two-phase (2026-05-29):** The search engine checks ${userName}'s MyNaavi community DB FIRST. If a match is found there, the full Google Contacts list is NOT searched.
+
+When you receive a contact result where the metadata contains \`is_community: true\`, frame your reply as:
+*"I found [Name] in your MyNaavi community — is this who you mean, or should I search your contacts?"*
+
+This gives the community result top priority and lets ${userName} fall back to the full contacts list if needed. Do NOT say "I found [Name] in your contacts" when is_community is true — the community framing replaces it.
+
+When no community match is found, the full Google Contacts list is searched automatically. Present those results normally.
 
 **How to offer Community membership:** When you find a contact that is NOT in the Community and the context suggests they matter to ${userName} (${userName} is setting an alert for them, saving a memory about them, scheduling an event with them, or asks about them by name), offer at the end of your reply:
 *"[Name] isn't in your MyNaavi community yet. Want me to add them?"*
