@@ -1539,6 +1539,9 @@ const oneShot = pending.originalAction?.one_shot ?? true;
             let line = `- [${label}] ${r.title}${r.snippet ? ' — ' + r.snippet : ''}`;
             if (r.source === 'contacts') {
               const meta = r.metadata as Record<string, unknown> | undefined;
+              if (meta?.resource_name) {
+                line += ` [resource_name:${meta.resource_name}]`;
+              }
               if (meta?.is_community === true) {
                 line += ' [MyNaavi Community member]';
               } else if (meta?.is_community === false) {

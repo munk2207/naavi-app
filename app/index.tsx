@@ -2279,7 +2279,7 @@ export default function HomeScreen() {
               />
             </View>
             {/* Row 2 — Meet + Free on the left, Mic/Send toggle far right. */}
-            <View style={styles.actionButtonsRow}>
+            <View style={[styles.actionButtonsRow, !(orangeVisible && orangeLabel) && { justifyContent: 'flex-end' }]}>
               {/* Stop — far left, in-flow (replaces the old absolute-positioned float).
                   Visible during thinking / speaking / answer_active.
                   Sits on the far left; right-side buttons stay right-aligned via actionButtonsRight. */}
@@ -3344,7 +3344,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
-    marginLeft: 'auto',
   },
   input: {
     flex: 1,
