@@ -47,8 +47,9 @@ const FIXTURES_PATH      = join(process.cwd(), 'tests', 'lib', 'fixtures.ts');
 const CREATE_CAL_PATH    = join(process.cwd(), 'supabase', 'functions', 'create-calendar-event', 'index.ts');
 const DELETE_CAL_PATH    = join(process.cwd(), 'supabase', 'functions', 'delete-calendar-event', 'index.ts');
 
-const ORCHESTRATOR_PATH = join(process.cwd(), 'hooks', 'useOrchestrator.ts');
+const ORCHESTRATOR_PATH  = join(process.cwd(), 'hooks', 'useOrchestrator.ts');
 const APP_INDEX_PATH_B207 = join(process.cwd(), 'app', 'index.tsx');
+const CONTACTS_ADAPTER_PATH = join(process.cwd(), 'supabase', 'functions', 'global-search', 'adapters', 'contacts.ts');
 
 const SUPABASE_LIB_PATH = join(process.cwd(), 'lib', 'supabase.ts');
 const APP_INDEX_PATH    = join(process.cwd(), 'app', 'index.tsx');
@@ -358,6 +359,31 @@ export const session2026_05_29Tests: TestCase[] = [
       expectTruthy(
         src.includes("justifyContent: 'flex-end'"),
         'actionButtonsRow must use justifyContent:flex-end when Stop button is hidden',
+      );
+    },
+  },
+
+  // ─── B6f: contacts adapter AND-logic for multi-token name queries ──────────
+  {
+    id: 'session-2026-05-29.b6f-contacts-name-match-and-logic-for-multi-token',
+    category: 'session-2026-05-29',
+    description:
+      'B6f — contacts adapter nameTokenMatch must use AND logic for multi-token queries ' +
+      '(tokens.size >= 2). OR logic caused "sarah davidson" to match "sarah james" on ' +
+      'the "sarah" token alone, surfacing the wrong contact.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(CONTACTS_ADAPTER_PATH, 'utf8');
+      // Positive: AND logic for multi-token path must exist.
+      expectTruthy(
+        src.includes('tokens.size >= 2') && src.includes('.every(t => nameLower.includes(t))'),
+        'contacts adapter must use every() (AND) for multi-token name queries — B6f fix',
+      );
+      // Negative: the old top-level OR pattern must be gone.
+      // (Single-token .some() is still valid — we check the old combined assignment is absent.)
+      expectFalsy(
+        src.includes('tokens.size > 0 && [...tokens].some(t => nameLower.includes(t))'),
+        'contacts adapter must not use old OR-only nameTokenMatch assignment — B6f fix',
       );
     },
   },

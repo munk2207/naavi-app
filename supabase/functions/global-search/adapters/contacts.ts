@@ -281,13 +281,18 @@ export const contactsAdapter: SearchAdapter = {
 
       let score = 0;
 
-      // Match against tokens (e.g. "Bob" from "name Bob"), then fall back
-      // to whole-variant substring match for legacy callers that pass an
-      // already-clean query. Tokens win because they survive noise like
-      // "contact named X" that the whole-variant match would miss.
-      const nameTokenMatch =
-        (tokens.size > 0 && [...tokens].some(t => nameLower.includes(t))) ||
-        variants.some(v => v.length > 0 && nameLower.includes(v));
+      // Name match — three-tier logic:
+      // 1. Whole-variant match: full phrase (e.g. "sarah davidson") must appear
+      //    in the name. Most precise — checked first.
+      // 2. Multi-token AND: all tokens must appear ("sarah" AND "davidson").
+      //    Prevents "sarah davidson" matching "sarah james" on "sarah" alone.
+      // 3. Single-token OR: any token matches (legacy single-name queries).
+      const nameTokenMatch = (() => {
+        if (variants.some(v => v.length > 0 && nameLower.includes(v))) return true;
+        if (tokens.size === 0) return false;
+        if (tokens.size >= 2) return [...tokens].every(t => nameLower.includes(t));
+        return [...tokens].some(t => nameLower.includes(t));
+      })();
       const emailTokenMatch = emails.some(e => {
         const el = e.toLowerCase();
         return (tokens.size > 0 && [...tokens].some(t => el.includes(t))) ||
