@@ -149,6 +149,50 @@ export async function signOut(): Promise<void> {
   await supabase.auth.signOut();
 }
 
+// ─── OAuth scope-version gate ─────────────────────────────────────────────────
+//
+// Increment REQUIRED_OAUTH_SCOPE_VERSION whenever the Google OAuth scopes
+// requested at sign-in change. On app startup, if the version stored in
+// AsyncStorage is behind, the user is signed out silently — the next sign-in
+// goes through Google OAuth and presents the updated consent screen.
+//
+// Never decrement. History:
+//   1 — initial scopes (calendar, gmail, drive, contacts.readonly)
+//   2 — added contacts write scope for MyNaavi Community feature (2026-05-29)
+export const REQUIRED_OAUTH_SCOPE_VERSION = 2;
+const SCOPE_VERSION_KEY = 'naavi_oauth_scope_version';
+
+/**
+ * Call on startup after a session loads. Returns true if the stored scope
+ * version is current. Returns false (and signs the user out) if their token
+ * was issued under an older scope set — the next sign-in will request the
+ * correct scopes via the Google consent screen.
+ */
+export async function checkOAuthScopeVersion(): Promise<boolean> {
+  if (!supabase) return true;
+  try {
+    const stored = await AsyncStorage.getItem(SCOPE_VERSION_KEY);
+    const storedVersion = stored != null ? parseInt(stored, 10) : 0;
+    if (storedVersion >= REQUIRED_OAUTH_SCOPE_VERSION) return true;
+    console.log(`[Auth] OAuth scope v${storedVersion} < required v${REQUIRED_OAUTH_SCOPE_VERSION} — signing out`);
+    await supabase.auth.signOut();
+    return false;
+  } catch (err) {
+    console.warn('[Auth] checkOAuthScopeVersion error:', err);
+    return true;
+  }
+}
+
+/**
+ * Call after a successful SIGNED_IN event. Records that this session's token
+ * was issued under the current scope set so the startup check passes next time.
+ */
+export async function markOAuthScopeVersionCurrent(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(SCOPE_VERSION_KEY, String(REQUIRED_OAUTH_SCOPE_VERSION));
+  } catch { /* ignore */ }
+}
+
 // ─── Edge Function call ────────────────────────────────────────────────────────
 
 /**

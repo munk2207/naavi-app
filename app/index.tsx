@@ -75,7 +75,7 @@ import { fetchOttawaWeather } from '@/lib/weather';
 import { sendDriveFileAsEmail } from '@/lib/drive';
 import { lookupContact, type Contact } from '@/lib/contacts';
 import { resolveRecipient } from '@/lib/recipientLookup';
-import { saveContact, loadTodayConversation, signInWithGoogle, signOut } from '@/lib/supabase';
+import { saveContact, loadTodayConversation, signInWithGoogle, signOut, checkOAuthScopeVersion, markOAuthScopeVersionCurrent } from '@/lib/supabase';
 import { getBackgroundPermission, getForegroundPermission, requestLocationPermissions } from '@/lib/location';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync, isCalendarConnected } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
@@ -715,9 +715,14 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!supabase) return;
 
-    getSessionWithTimeout().then((session) => {
+    getSessionWithTimeout().then(async (session) => {
       console.log('[Home] getSession:', session?.user?.id ?? 'none');
       if (session?.user) {
+        // Scope-version gate: if the stored token was issued under an older
+        // scope set, sign out silently — next sign-in will request the
+        // current scopes. Don't set isSignedIn — user sees sign-in screen.
+        const scopeOk = await checkOAuthScopeVersion();
+        if (!scopeOk) return;
         setCurrentUserId(session.user.id);
         setIsSignedIn(true);
         setStaleAuth(false);
@@ -741,6 +746,7 @@ export default function HomeScreen() {
         });
         if (event === 'SIGNED_IN' && session?.provider_refresh_token) {
           await captureAndStoreGoogleToken();
+          await markOAuthScopeVersionCurrent();
         }
         if (session?.user) {
           setCurrentUserId(session.user.id);
