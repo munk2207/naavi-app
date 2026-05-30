@@ -518,6 +518,31 @@ export const session2026_05_30Tests: TestCase[] = [
     },
   },
 
+  // ─── Priority 3 — Disambiguation loop closure ─────────────────────────────
+  {
+    id: 'session-2026-05-30.p3-disambiguation-resolver-exists',
+    category: 'session-2026-05-30',
+    description:
+      'Priority 3 — Disambiguation resolver must exist in naavi-chat/index.ts ' +
+      'before Step 1.6, detecting "Which one?" in last assistant turn and routing pick.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      expectTruthy(
+        src.includes('Step 1.5: Disambiguation resolver'),
+        'Disambiguation resolver block must exist (Step 1.5)',
+      );
+      expectTruthy(
+        src.includes('Which one?'),
+        'Disambiguation resolver must detect "Which one?" in last assistant message',
+      );
+      expectTruthy(
+        src.includes('pickIndex'),
+        'Disambiguation resolver must extract a pick index from the user reply',
+      );
+    },
+  },
+
   {
     id: 'session-2026-05-30.p2-possessive-classifier-examples',
     category: 'session-2026-05-30',

@@ -1613,6 +1613,60 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── Step 1.5: Disambiguation resolver ────────────────────────────────────────
+    // When the previous assistant turn presented a numbered contact list ("Which one?"),
+    // and Robert's reply is a pick ("# 2", "the second one", "number 2", "2"),
+    // resolve it directly without calling Claude again.
+    {
+      const lastAssistant = [...(messages ?? [])]
+        .reverse()
+        .find((m: any) => m.role === 'assistant');
+      const lastText: string = typeof lastAssistant?.content === 'string'
+        ? lastAssistant.content
+        : (lastAssistant?.content ?? [])
+            .filter((b: any) => b.type === 'text')
+            .map((b: any) => String(b.text ?? ''))
+            .join('');
+
+      const isDisambig = lastText.includes('Which one?') && /\b\d+\.\s/.test(lastText);
+      if (isDisambig) {
+        // Parse a pick from the user: "# 2", "#2", "2", "number 2", "the second", "second one"
+        const pickMatch = userText.match(
+          /^#\s*(\d+)|^(\d+)\s*$|number\s+(\d+)|the\s+(\d+)(st|nd|rd|th)?|\bfirst\b|\bsecond\b|\bthird\b|\bfourth\b|\bfifth\b/i
+        );
+        const wordMap: Record<string, number> = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5 };
+        let pickIndex: number | null = null;
+        if (pickMatch) {
+          const digit = pickMatch[1] ?? pickMatch[2] ?? pickMatch[3] ?? pickMatch[4];
+          if (digit) {
+            pickIndex = parseInt(digit, 10);
+          } else {
+            const word = (userText.match(/\bfirst\b|\bsecond\b|\bthird\b|\bfourth\b|\bfifth\b/i) ?? [])[0]?.toLowerCase();
+            if (word) pickIndex = wordMap[word] ?? null;
+          }
+        }
+
+        if (pickIndex !== null) {
+          // Extract numbered lines from the last assistant message
+          const lineRe = /(\d+)\.\s+(.+?)(?=\n\d+\.|\n\n|$)/gs;
+          const entries: Array<{ idx: number; text: string }> = [];
+          let m: RegExpExecArray | null;
+          while ((m = lineRe.exec(lastText)) !== null) {
+            entries.push({ idx: parseInt(m[1], 10), text: m[2].trim() });
+          }
+          const chosen = entries.find(e => e.idx === pickIndex);
+          if (chosen) {
+            const speech  = `Got it — ${chosen.text}.`;
+            const display = `Got it — **${chosen.text}**.`;
+            console.log(`[timing] ${elapsed()} | Disambiguation resolved: pick=${pickIndex} → "${chosen.text}"`);
+            return jsonResponse({
+              rawText: JSON.stringify({ speech, display, actions: [], pendingThreads: [] }),
+            });
+          }
+        }
+      }
+    }
+
     // ── Step 1.6: Layer 2 — Intent classification and deterministic routing ──────
     // Only fires when the message looks like a handled-intent candidate (regex
     // gate avoids adding a second Claude call to every turn). For matched intents
