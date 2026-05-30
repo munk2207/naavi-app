@@ -358,7 +358,8 @@ export async function handleListRead(
       const { data: lists } = await supabase
         .from('lists')
         .select('id, name, items')
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .eq('enabled', true);
 
       const match = (lists ?? []).find((l: any) =>
         (l.name ?? '').toLowerCase().includes(kw)
@@ -384,11 +385,12 @@ export async function handleListRead(
       };
     }
 
-    // No specific list — return all list names
+    // No specific list — return active list names only
     const { data: rows, error } = await supabase
       .from('lists')
       .select('name, items')
       .eq('user_id', userId)
+      .eq('enabled', true)
       .order('name', { ascending: true });
 
     if (error) {
