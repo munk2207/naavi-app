@@ -35,24 +35,32 @@ const INTENT_HANDLERS_PATH = join(process.cwd(), 'supabase', 'functions', 'naavi
 
 export const session2026_05_30Tests: TestCase[] = [
 
-  // ─── 1. LAYER2_CANDIDATE_RE gate ───────────────────────────────────────────
+  // ─── 1. Universal gate ─────────────────────────────────────────────────────
   {
-    id: 'session-2026-05-30.layer2-candidate-regex-exists',
+    id: 'session-2026-05-30.universal-gate-exists',
     category: 'session-2026-05-30',
     description:
-      'Layer 2 — LAYER2_CANDIDATE_RE regex gate must exist in naavi-chat/index.ts ' +
-      'and must be tight enough not to catch capability questions or connection queries.',
+      'Universal gate — Step 1.6 must classify every message (Level A/B/action/chat). ' +
+      'LAYER2_CANDIDATE_RE must no longer be the routing gate. ' +
+      'IntentClassification must include a level field.',
     timeoutMs: 1_000,
     async run() {
       const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
       expectTruthy(
-        src.includes('LAYER2_CANDIDATE_RE'),
-        'LAYER2_CANDIDATE_RE must be defined in naavi-chat/index.ts',
+        src.includes('Universal gate — every message classified'),
+        'Step 1.6 must be the universal gate, not a regex-gated block',
       );
-      // Regex must include specific list-retrieval patterns, not just "what" + "alert"
       expectTruthy(
-        src.includes('list my alerts') || src.includes('list\\\\s+') || src.includes('show.*my.*alerts'),
-        'LAYER2_CANDIDATE_RE must use specific retrieval patterns, not generic word combinations',
+        src.includes("level: 'A' | 'B' | 'action' | 'chat'"),
+        'IntentClassification must include level field with A/B/action/chat values',
+      );
+      expectTruthy(
+        src.includes("classification.level === 'A'"),
+        'Universal gate must route on level field, not intent name alone',
+      );
+      expectTruthy(
+        src.includes("classification.level === 'B'"),
+        'Level B must always set pathB = true for Path B disclosure',
       );
     },
   },
@@ -195,13 +203,12 @@ export const session2026_05_30Tests: TestCase[] = [
     },
   },
 
-  // ─── 7. naavi-chat wiring — Layer 2 block after B6e ───────────────────────
+  // ─── 7. naavi-chat wiring — universal gate after B6e ─────────────────────
   {
     id: 'session-2026-05-30.layer2-block-wired-after-b6e',
     category: 'session-2026-05-30',
     description:
-      'Layer 2 — the Step 1.6 routing block must appear in naavi-chat/index.ts ' +
-      'AFTER the B6e calendar-read bypass and BEFORE the main Claude call.',
+      'Universal gate — Step 1.6 must appear AFTER B6e bypass and BEFORE the main Claude call.',
     timeoutMs: 1_000,
     async run() {
       const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
@@ -209,11 +216,11 @@ export const session2026_05_30Tests: TestCase[] = [
       const layer2Idx = src.indexOf('Step 1.6');
       const claudeIdx = src.indexOf('Step 3: forward to Claude');
       expectTruthy(b6eIdx    >= 0, 'B6e bypass marker must exist in naavi-chat/index.ts');
-      expectTruthy(layer2Idx >= 0, 'Step 1.6 Layer 2 block must exist in naavi-chat/index.ts');
+      expectTruthy(layer2Idx >= 0, 'Step 1.6 universal gate must exist in naavi-chat/index.ts');
       expectTruthy(claudeIdx >= 0, 'Step 3 Claude call marker must exist in naavi-chat/index.ts');
       expectTruthy(
         b6eIdx < layer2Idx && layer2Idx < claudeIdx,
-        'Layer 2 block must appear after B6e bypass and before the main Claude call',
+        'Universal gate must appear after B6e bypass and before the main Claude call',
       );
     },
   },

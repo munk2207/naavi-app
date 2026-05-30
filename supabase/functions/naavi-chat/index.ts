@@ -1384,6 +1384,7 @@ const LAYER2_CANDIDATE_RE =
   /\b(list|show)\s+(me\s+)?my\s+(alerts?|rules?|notifications?)\b|\bwhat\s+(alerts?|rules?|notifications?)\s+do\s+i\s+have\b|\bwhat\s+are\s+my\s+(alerts?|rules?|notifications?)\b|\bdo\s+i\s+have\s+(a[n]?\s+)?\w[\w\s]{0,30}(appointment|meeting|event)\b|\b(find|look\s+up)\s+(?!all\b|any\b|my\b|the\b|some\b|more\b|out\b|a\b|an\b|this\b|that\b)[A-Za-z][\w\s]{1,30}(in\s+my\s+contacts|contact)?\b|\bwhen\s+is\s+my\s+(next\s+)?\w[\w\s]{0,20}\b|\bhow\s+(far|long|much\s+time)\b.{0,40}\b(to|from|until)\b|\bwhat\s+(time|day|date)\s+is\s+my\b|\bwhat\s+did\s+i\s+(spend|pay|buy|order)\b|\bis\s+.{0,30}(on\s+my\s+calendar|in\s+my\s+contacts)\b|\bwhat\s+do\s+(we|you)\s+(have|know)\s+(about|on)\s+[A-Za-z]\w*\b|\btell\s+me\s+(everything\s+)?about\s+[A-Za-z]\w*\b|\bwho\s+is\s+[A-Za-z]\w[\w\s]{0,30}\b|\bdo\s+you\s+know\s+anything\s+about\s+[A-Za-z]\w*\b|\bwhat\s+(lists?|list\s+do)\s+(do\s+i\s+have|i\s+have|have)\b|\bwhat('?s|\s+is)\s+on\s+my\s+\w[\w\s]{0,20}list\b|\bshow\s+(me\s+)?my\s+(grocery|shopping|to.?do|todo|\w+)\s+list\b|\bwhat\s+reminders?\s+do\s+i\s+have\b|\bshow\s+(me\s+)?my\s+reminders?\b|\bwhat\s+am\s+i\s+(being\s+)?reminded\b|\bwhat\s+did\s+i\s+(tell|save|remember|ask)\s+(you|naavi)?\s*(about|to\s+remember)?\b|\bwhat\s+do\s+you\s+remember\s+about\b|\bwhat'?s\s+[A-Za-z]\w[\w\s]{0,20}'?s?\s+(email|phone|number|address|contact)\b|\bdoes\s+[A-Za-z]\w[\w\s]{0,20}have\s+(a\s+)?(phone|email|number|address)\b|\bwhat\s+is\s+[A-Za-z]\w[\w\s]{0,20}'?s?\s+(email|phone|number|address)\b/i;
 
 type IntentClassification = {
+  level: 'A' | 'B' | 'action' | 'chat';
   intent: string;
   confidence: 'high' | 'low';
   params: Record<string, string>;
@@ -1398,46 +1399,47 @@ async function classifyIntent(
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 150,
       temperature: 0,
-      system: `You are a query classifier. Output JSON only. No explanation. No markdown fences.
+      system: `You are a query classifier for Naavi, a personal AI assistant. Output JSON only. No explanation. No markdown fences.
 
-Classify the user's message into exactly one intent:
-- LIST_RULES: user wants to see their alerts, rules, or notifications list
-- LOOKUP_CONTACT: user wants to find a contact's phone/email (narrow contact card lookup)
-- CALENDAR_SEARCH: user wants to find a specific calendar event by keyword (e.g. "do I have a dentist appointment") — NOT a full calendar read
-- PERSON_LOOKUP: user wants to know everything Naavi has about a person or topic across all sources (contacts, calendar, emails, memories). E.g. "what do we have about Hussein", "tell me about Bob", "who is Sarah", "what's John's number", "do you know anything about Dr. Smith"
-- LIST_READ: user wants to see their lists or the contents of a specific list. E.g. "what lists do I have", "what's on my grocery list", "show me my shopping list"
-- REMINDER_READ: user wants to see their upcoming reminders. E.g. "what reminders do I have", "show me my reminders", "what am I being reminded of"
-- MEMORY_SEARCH: user wants to find something they told Naavi to remember. E.g. "what did I tell you about my medication", "what do you remember about my doctor", "what did I save about X"
-- UNKNOWN: anything else
+Every message must be classified into one of four LEVELS:
 
-For CALENDAR_SEARCH, extract ONLY the core subject noun (strip "appointment", "meeting", etc.).
-  "do I have a dentist appointment?" → keyword: "dentist"
-  "find my family doctor appointment" → keyword: "family doctor"
+LEVEL A — Question answerable from Robert's real verified data (calendar, contacts, alerts, lists, reminders, saved memories, emails, drive). Naavi fetches the answer from the real source.
+LEVEL B — Question requiring Claude's reasoning because no real data source can answer it directly. Naavi discloses this as best-effort.
+LEVEL action — State-changing request: creating, updating, or deleting data (reminders, alerts, events, memories, lists, contacts). Goes through confirmation flow.
+LEVEL chat — Conversational message with no data question (greetings, thanks, small talk, follow-up conversation). Claude responds naturally.
 
-For PERSON_LOOKUP and LOOKUP_CONTACT, extract the name/topic into params.name.
-  "what do we have about Hussein?" → name: "Hussein"
-  "tell me about Dr. Smith" → name: "Dr. Smith"
-  "what's Hussein's email?" → LOOKUP_CONTACT, name: "Hussein"
-  "does John have a phone number?" → LOOKUP_CONTACT, name: "John"
-  "what is Sarah's address?" → LOOKUP_CONTACT, name: "Sarah"
+LEVEL A intents (assign when query matches):
+- LIST_RULES: see alerts/rules/notifications list
+- LOOKUP_CONTACT: find a contact's phone/email/address (possessive forms: "what's John's email?", "does Sara have a number?")
+- CALENDAR_SEARCH: find a specific calendar event by keyword ("do I have a dentist appointment?")
+- PERSON_LOOKUP: everything Naavi has about a person across all sources ("what do we have about Hussein?", "tell me about Bob", "who is Sarah?")
+- LIST_READ: see lists or contents of a specific list ("what lists do I have?", "what's on my grocery list?")
+- REMINDER_READ: see upcoming reminders ("what reminders do I have?")
+- MEMORY_SEARCH: find something Robert told Naavi to remember ("what did I tell you about my medication?")
 
-For LIST_READ, extract the list name if specified into params.listName (omit if asking for all lists).
-  "what's on my grocery list?" → listName: "grocery"
-  "what lists do I have?" → (no listName)
+LEVEL action intents:
+- SET_REMINDER, CREATE_EVENT, SET_ALERT, REMEMBER, ADD_TO_LIST, DELETE_RULE, DELETE_EVENT, DELETE_MEMORY, DRAFT_MESSAGE, UPDATE_PROFILE
 
-For MEMORY_SEARCH, extract the topic into params.topic.
-  "what did I tell you about my medication?" → topic: "medication"
+LEVEL B: any data/information question not answerable from Robert's real data sources.
+LEVEL chat: greetings, thanks, follow-up, small talk, anything not a question or action.
 
-Output format examples (JSON only, no fences):
-{"intent":"LIST_RULES","confidence":"high","params":{}}
-{"intent":"LOOKUP_CONTACT","confidence":"high","params":{"name":"Bob Smith"}}
-{"intent":"CALENDAR_SEARCH","confidence":"high","params":{"keyword":"dentist"}}
-{"intent":"PERSON_LOOKUP","confidence":"high","params":{"name":"Hussein"}}
-{"intent":"LIST_READ","confidence":"high","params":{"listName":"grocery"}}
-{"intent":"LIST_READ","confidence":"high","params":{}}
-{"intent":"REMINDER_READ","confidence":"high","params":{}}
-{"intent":"MEMORY_SEARCH","confidence":"high","params":{"topic":"medication"}}
-{"intent":"UNKNOWN","confidence":"high","params":{}}
+Param extraction rules:
+- CALENDAR_SEARCH: extract ONLY core subject noun, strip "appointment/meeting/event". "family doctor appointment" → keyword: "family doctor"
+- LOOKUP_CONTACT / PERSON_LOOKUP: extract name into params.name. "what's Hussein's email?" → name: "Hussein"
+- LIST_READ: extract list name into params.listName if specified. "what's on my grocery list?" → listName: "grocery"
+- MEMORY_SEARCH: extract topic into params.topic. "what did I tell you about medication?" → topic: "medication"
+
+Output format (JSON only, no fences):
+{"level":"A","intent":"LIST_RULES","confidence":"high","params":{}}
+{"level":"A","intent":"LOOKUP_CONTACT","confidence":"high","params":{"name":"Hussein"}}
+{"level":"A","intent":"CALENDAR_SEARCH","confidence":"high","params":{"keyword":"dentist"}}
+{"level":"A","intent":"PERSON_LOOKUP","confidence":"high","params":{"name":"Bob"}}
+{"level":"A","intent":"LIST_READ","confidence":"high","params":{"listName":"grocery"}}
+{"level":"A","intent":"REMINDER_READ","confidence":"high","params":{}}
+{"level":"A","intent":"MEMORY_SEARCH","confidence":"high","params":{"topic":"medication"}}
+{"level":"B","intent":"UNKNOWN","confidence":"high","params":{}}
+{"level":"action","intent":"SET_REMINDER","confidence":"high","params":{}}
+{"level":"chat","intent":"UNKNOWN","confidence":"high","params":{}}
 
 Use "low" confidence when the intent is ambiguous.`,
       messages: [{ role: 'user', content: userText }],
@@ -1455,7 +1457,9 @@ Use "low" confidence when the intent is ambiguous.`,
 
     const parsed = JSON.parse(clean.slice(start, end + 1));
     if (typeof parsed?.intent !== 'string') return null;
+    const validLevels = ['A', 'B', 'action', 'chat'];
     return {
+      level:      validLevels.includes(parsed.level) ? parsed.level as 'A'|'B'|'action'|'chat' : 'B',
       intent:     String(parsed.intent),
       confidence: parsed.confidence === 'low' ? 'low' : 'high',
       params:     typeof parsed.params === 'object' && parsed.params !== null ? parsed.params : {},
@@ -1738,122 +1742,112 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Step 1.6: Layer 2 — Intent classification and deterministic routing ──────
-    // Only fires when the message looks like a handled-intent candidate (regex
-    // gate avoids adding a second Claude call to every turn). For matched intents
-    // with high confidence: run the deterministic handler and return — Claude is
-    // never called. For low confidence: ask Robert to confirm. For UNKNOWN or
-    // unhandled intents: fall through to the full Claude call below (Path B).
+    // ── Step 1.6: Universal gate — every message classified, no exceptions ────────
+    // Every message is classified as Level A (answerable from Robert's real data),
+    // Level B (Claude reasoning, disclosed as best-effort), Level action (state-
+    // changing, RULE 23 handles confirmation), or Level chat (conversational,
+    // Claude responds naturally). No message ever passes to Claude unclassified.
     //
-    // pathB is set true when LAYER2_CANDIDATE_RE matched (this is a data/info
-    // question) but we could not answer it deterministically. Claude will answer,
-    // but the response is flagged as best-effort in Layer 3 below.
+    // Level A → deterministic handler → verified answer, no qualifier
+    // Level B → Claude answers + Path B disclosure always wraps the response
+    // Level action → Claude answers, no disclosure (RULE 23 confirm-then-act)
+    // Level chat → Claude answers naturally, no disclosure
     let pathB = false;
-    if (LAYER2_CANDIDATE_RE.test(userText)) {
+    {
       const apiKeyL2 = Deno.env.get('ANTHROPIC_API_KEY');
       if (apiKeyL2) {
         const clientL2 = new Anthropic({ apiKey: apiKeyL2 });
         const classification = await classifyIntent(clientL2, userText);
-        console.log(`[timing] ${elapsed()} | Layer2 classification: ${JSON.stringify(classification)}`);
+        console.log(`[timing] ${elapsed()} | Universal gate classification: ${JSON.stringify(classification)}`);
 
-        if (classification && classification.intent !== 'UNKNOWN') {
-          if (classification.confidence === 'low') {
-            const intentDesc =
-              classification.intent === 'LIST_RULES'      ? 'see your alerts'
-            : classification.intent === 'LOOKUP_CONTACT'  ? `find a contact named "${classification.params.name ?? ''}"`
-            : classification.intent === 'CALENDAR_SEARCH' ? `find "${classification.params.keyword ?? ''}" on your calendar`
-            : classification.intent === 'PERSON_LOOKUP'   ? `search everything I have about "${classification.params.name ?? ''}"`
-            : classification.intent === 'LIST_READ'       ? (classification.params.listName ? `show your ${classification.params.listName} list` : 'show your lists')
-            : classification.intent === 'REMINDER_READ'   ? 'show your upcoming reminders'
-            : classification.intent === 'MEMORY_SEARCH'   ? `search your saved memories about "${classification.params.topic ?? ''}"`
-            : 'help with that';
-            // Embed the pending intent as a hidden marker in display so the
-            // next turn (Step 1.4) can recover and execute it on "yes".
-            const pendingMarker = `<!--PENDING_INTENT:${JSON.stringify({ intent: classification.intent, params: classification.params })}-->`;
-            const confirmSpeech = `I think you're asking me to ${intentDesc} — is that right?`;
-            return jsonResponse({
-              rawText: JSON.stringify({
-                speech: confirmSpeech,
-                display: `${confirmSpeech}\n${pendingMarker}`,
-                actions: [],
-                pendingThreads: [],
-              }),
-            });
+        if (classification) {
+          // ── Level A — answer from Robert's real data ──────────────────────────
+          if (classification.level === 'A') {
+            if (classification.confidence === 'low') {
+              const intentDesc =
+                classification.intent === 'LIST_RULES'      ? 'see your alerts'
+              : classification.intent === 'LOOKUP_CONTACT'  ? `find a contact named "${classification.params.name ?? ''}"`
+              : classification.intent === 'CALENDAR_SEARCH' ? `find "${classification.params.keyword ?? ''}" on your calendar`
+              : classification.intent === 'PERSON_LOOKUP'   ? `search everything I have about "${classification.params.name ?? ''}"`
+              : classification.intent === 'LIST_READ'       ? (classification.params.listName ? `show your ${classification.params.listName} list` : 'show your lists')
+              : classification.intent === 'REMINDER_READ'   ? 'show your upcoming reminders'
+              : classification.intent === 'MEMORY_SEARCH'   ? `search your saved memories about "${classification.params.topic ?? ''}"`
+              : 'help with that';
+              const pendingMarker = `<!--PENDING_INTENT:${JSON.stringify({ intent: classification.intent, params: classification.params })}-->`;
+              const confirmSpeech = `I think you're asking me to ${intentDesc} — is that right?`;
+              return jsonResponse({
+                rawText: JSON.stringify({
+                  speech: confirmSpeech,
+                  display: `${confirmSpeech}\n${pendingMarker}`,
+                  actions: [],
+                  pendingThreads: [],
+                }),
+              });
+            }
+
+            if (HANDLED_INTENTS.has(classification.intent)) {
+              if (classification.intent === 'LIST_RULES') {
+                const result = await handleListRules(supabase, userId);
+                console.log(`[timing] ${elapsed()} | Level A LIST_RULES deterministic`);
+                return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+              }
+              if (classification.intent === 'LOOKUP_CONTACT' && classification.params.name) {
+                const result = await handleLookupContact(supabase, userId, classification.params.name);
+                console.log(`[timing] ${elapsed()} | Level A LOOKUP_CONTACT deterministic`);
+                return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+              }
+              if (classification.intent === 'CALENDAR_SEARCH' && classification.params.keyword) {
+                const liveEventsL2 = await fetchLiveCalendarEvents(supabase, userId);
+                const result = await handleCalendarSearch(liveEventsL2, classification.params.keyword);
+                console.log(`[timing] ${elapsed()} | Level A CALENDAR_SEARCH deterministic`);
+                return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+              }
+              if (classification.intent === 'PERSON_LOOKUP' && classification.params.name) {
+                const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+                const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+                const result = await handlePersonLookup(classification.params.name, userId, supabaseUrl, serviceKey);
+                console.log(`[timing] ${elapsed()} | Level A PERSON_LOOKUP deterministic`);
+                return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+              }
+              if (classification.intent === 'LIST_READ') {
+                const result = await handleListRead(supabase, userId, classification.params.listName);
+                console.log(`[timing] ${elapsed()} | Level A LIST_READ deterministic`);
+                return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+              }
+              if (classification.intent === 'REMINDER_READ') {
+                const result = await handleReminderRead(supabase, userId);
+                console.log(`[timing] ${elapsed()} | Level A REMINDER_READ deterministic`);
+                return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+              }
+              if (classification.intent === 'MEMORY_SEARCH' && classification.params.topic) {
+                const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+                const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+                const result = await handleMemorySearch(classification.params.topic, userId, supabaseUrl, serviceKey);
+                console.log(`[timing] ${elapsed()} | Level A MEMORY_SEARCH deterministic`);
+                return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+              }
+            }
+
+            // Level A but no handler yet → honest-out + Path B
+            pathB = true;
+            console.log(`[timing] ${elapsed()} | Level A ${classification.intent} — no handler yet, Path B`);
+
+          } else if (classification.level === 'B') {
+            // Level B — Claude reasons, always disclosed as best-effort
+            pathB = true;
+            console.log(`[timing] ${elapsed()} | Level B — Claude best-effort, Path B disclosure`);
+
+          } else {
+            // Level action or chat — Claude responds naturally, no disclosure
+            console.log(`[timing] ${elapsed()} | Level ${classification.level} — Claude natural response`);
           }
-
-          if (HANDLED_INTENTS.has(classification.intent)) {
-            if (classification.intent === 'LIST_RULES') {
-              const result = await handleListRules(supabase, userId);
-              console.log(`[timing] ${elapsed()} | Layer2 LIST_RULES deterministic`);
-              return jsonResponse({
-                rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
-              });
-            }
-
-            if (classification.intent === 'LOOKUP_CONTACT' && classification.params.name) {
-              const result = await handleLookupContact(supabase, userId, classification.params.name);
-              console.log(`[timing] ${elapsed()} | Layer2 LOOKUP_CONTACT deterministic | contacts=${result.contacts?.length ?? 0}`);
-              return jsonResponse({
-                rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
-              });
-            }
-
-            if (classification.intent === 'CALENDAR_SEARCH' && classification.params.keyword) {
-              const liveEventsL2 = await fetchLiveCalendarEvents(supabase, userId);
-              const result = await handleCalendarSearch(liveEventsL2, classification.params.keyword);
-              console.log(`[timing] ${elapsed()} | Layer2 CALENDAR_SEARCH deterministic | events=${liveEventsL2.length}`);
-              return jsonResponse({
-                rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
-              });
-            }
-
-            if (classification.intent === 'PERSON_LOOKUP' && classification.params.name) {
-              const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-              const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-              const result = await handlePersonLookup(classification.params.name, userId, supabaseUrl, serviceKey);
-              console.log(`[timing] ${elapsed()} | Layer2 PERSON_LOOKUP deterministic`);
-              return jsonResponse({
-                rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
-              });
-            }
-
-            if (classification.intent === 'LIST_READ') {
-              const result = await handleListRead(supabase, userId, classification.params.listName);
-              console.log(`[timing] ${elapsed()} | Layer2 LIST_READ deterministic`);
-              return jsonResponse({
-                rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
-              });
-            }
-
-            if (classification.intent === 'REMINDER_READ') {
-              const result = await handleReminderRead(supabase, userId);
-              console.log(`[timing] ${elapsed()} | Layer2 REMINDER_READ deterministic`);
-              return jsonResponse({
-                rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
-              });
-            }
-
-            if (classification.intent === 'MEMORY_SEARCH' && classification.params.topic) {
-              const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-              const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-              const result = await handleMemorySearch(classification.params.topic, userId, supabaseUrl, serviceKey);
-              console.log(`[timing] ${elapsed()} | Layer2 MEMORY_SEARCH deterministic`);
-              return jsonResponse({
-                rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
-              });
-            }
-          }
-
-          // High confidence, known intent, no handler → Path B
-          pathB = true;
-          console.log(`[timing] ${elapsed()} | Layer2 ${classification.intent} high-confidence but no handler — Path B`);
         } else {
-          // UNKNOWN or classification failed → data question, Claude guessing → Path B
+          // Classification failed — treat as Level B to be safe
           pathB = true;
-          console.log(`[timing] ${elapsed()} | Layer2 UNKNOWN/null → Path B`);
+          console.log(`[timing] ${elapsed()} | Classification failed → Path B`);
         }
       } else {
-        pathB = true; // no API key for classifier — treat as Path B
+        pathB = true; // no API key — treat as Level B
       }
     }
 
