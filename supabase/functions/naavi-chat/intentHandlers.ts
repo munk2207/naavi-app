@@ -357,7 +357,7 @@ export async function handleListRead(
       const kw = listName.trim().toLowerCase();
       const { data: lists } = await supabase
         .from('lists')
-        .select('id, name, items')
+        .select('id, name')
         .eq('user_id', userId)
         .eq('enabled', true);
 
@@ -366,29 +366,19 @@ export async function handleListRead(
       );
 
       if (!match) {
-        const msg = `I don't see a list called "${listName}". Say "what lists do I have" to see your full list.`;
+        const msg = `I don't see an active list called "${listName}". Say "what lists do I have" to see your lists.`;
         return { speech: msg, display: msg, actions: [] };
       }
 
-      const items: string[] = Array.isArray(match.items) ? match.items : [];
-      if (items.length === 0) {
-        const msg = `Your ${match.name} list is empty.`;
-        return { speech: msg, display: msg, actions: [] };
-      }
-
-      const lines = items.map((it: string, i: number) => `${i + 1}. ${it}`);
-      const intro = `Your ${match.name} list has ${items.length} item${items.length === 1 ? '' : 's'}`;
-      return {
-        speech:  `${intro}: ${lines.join('. ')}.`,
-        display: `${intro}:\n\n${lines.join('\n')}`,
-        actions: [],
-      };
+      // Items live in the Drive file — tell the user the list exists and how to see it
+      const msg = `You have a list called ${match.name}. Open your lists from the menu to see its contents.`;
+      return { speech: msg, display: msg, actions: [] };
     }
 
     // No specific list — return active list names only
     const { data: rows, error } = await supabase
       .from('lists')
-      .select('name, items')
+      .select('name, category')
       .eq('user_id', userId)
       .eq('enabled', true)
       .order('name', { ascending: true });
@@ -399,16 +389,13 @@ export async function handleListRead(
       return { speech: msg, display: msg, actions: [] };
     }
 
-    const allLists = (rows ?? []) as Array<{ name: string; items: unknown[] }>;
+    const allLists = (rows ?? []) as Array<{ name: string; category?: string }>;
     if (allLists.length === 0) {
-      const msg = `You don't have any lists yet. Say "create a grocery list" to start one.`;
+      const msg = `You don't have any active lists right now.`;
       return { speech: msg, display: msg, actions: [] };
     }
 
-    const lines = allLists.map((l, i) => {
-      const count = Array.isArray(l.items) ? l.items.length : 0;
-      return `${i + 1}. ${l.name} (${count} item${count === 1 ? '' : 's'})`;
-    });
+    const lines = allLists.map((l, i) => `${i + 1}. ${l.name}`);
     const intro = `You have ${allLists.length} list${allLists.length === 1 ? '' : 's'}`;
     return {
       speech:  `${intro}: ${lines.join('. ')}.`,
