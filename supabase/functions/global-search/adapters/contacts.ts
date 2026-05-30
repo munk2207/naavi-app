@@ -222,9 +222,50 @@ export const contactsAdapter: SearchAdapter = {
     const { data: communityRows } = await ctx.supabase
       .from('community_members')
       .select('resource_name, name, email, phone')
-      .eq('user_id', ctx.userId);
+      .eq('user_id', ctx.userId)
+      .order('name', { ascending: true });
+
+    // "List my community" intent — when the query is about the community itself
+    // (no specific name/email/phone), return ALL community members.
+    // Matches: "list my community", "who is in my community", "show my MyNaavi community", etc.
+    const communityAdminWords = new Set([
+      'list', 'community', 'mynaavi', 'naavi', 'members', 'member',
+      'all', 'who', 'show', 'people', 'contacts', 'tell', 'what',
+    ]);
+    const qLower = q.toLowerCase();
+    const isCommunityListQuery =
+      (qLower.includes('community') || qLower.includes('mynaavi')) &&
+      [...tokens].every(t => communityAdminWords.has(t));
 
     const communityHits: SearchResult[] = [];
+
+    if (isCommunityListQuery && (communityRows ?? []).length > 0) {
+      console.log(`[contacts-adapter] community list intent for "${q}": returning all ${communityRows!.length} members`);
+      for (const row of communityRows!) {
+        const emails = row.email ? [row.email as string] : [];
+        const phones = row.phone ? [row.phone as string] : [];
+        const url = phones[0]
+          ? `tel:${phones[0].replace(/[^\d+]/g, '')}`
+          : emails[0] ? `mailto:${emails[0]}` : undefined;
+        communityHits.push({
+          source: 'contacts',
+          title: row.name || emails[0] || phones[0] || 'Contact',
+          snippet: [emails[0], phones[0]].filter(Boolean).join(' · '),
+          score: 1.5,
+          url,
+          metadata: {
+            resource_name: row.resource_name ?? null,
+            name: row.name ?? null,
+            emails,
+            phones,
+            is_community: true,
+            addresses: [],
+          },
+        });
+      }
+      return communityHits.slice(0, ctx.limit);
+    }
+
     for (const row of (communityRows ?? [])) {
       const nameLower = (row.name ?? '').toLowerCase();
       const emails    = row.email ? [row.email as string] : [];

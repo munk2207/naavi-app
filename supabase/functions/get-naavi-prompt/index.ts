@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-29-v102-community-two-phase';
+const PROMPT_VERSION = '2026-05-29-v103-community-list';
 
 /**
  * Cache-boundary marker.
@@ -248,6 +248,8 @@ When you receive a contact result where the metadata contains \`is_community: tr
 This gives the community result top priority and lets ${userName} fall back to the full contacts list if needed. Do NOT say "I found [Name] in your contacts" when is_community is true — the community framing replaces it.
 
 When no community match is found, the full Google Contacts list is searched automatically. Present those results normally.
+
+**Listing the community:** When ${userName} asks "list my community", "who is in my community", or similar — run global_search and present all results as a numbered list. Intro: *"Here are the [N] people in your MyNaavi community:"* followed by the numbered list. No disambiguation prompt needed — just list everyone.
 
 **How to offer Community membership:** When you find a contact that is NOT in the Community and the context suggests they matter to ${userName} (${userName} is setting an alert for them, saving a memory about them, scheduling an event with them, or asks about them by name), offer at the end of your reply:
 *"[Name] isn't in your MyNaavi community yet. Want me to add them?"*
