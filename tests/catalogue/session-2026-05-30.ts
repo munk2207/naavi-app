@@ -119,10 +119,56 @@ export const session2026_05_30Tests: TestCase[] = [
     timeoutMs: 1_000,
     async run() {
       const src = readFileSync(INTENT_HANDLERS_PATH, 'utf8');
-      // Must have an empty-result branch with a "don't see anything" or "not found" message.
       expectTruthy(
         src.includes("don't see anything matching"),
         'handleCalendarSearch must return honest-out when no events match the keyword',
+      );
+    },
+  },
+
+  // ─── 5b. Word-level matching — "family doctor appointment" finds "Family Doctor" ──
+  {
+    id: 'session-2026-05-30.calendar-search-word-level-matching',
+    category: 'session-2026-05-30',
+    description:
+      'Layer 2 CALENDAR_SEARCH — must use word-level OR matching so "family doctor appointment" ' +
+      'finds an event titled "Family Doctor". Stop words (appointment, meeting, etc.) must be ' +
+      'stripped before matching. Fix for Wael live test: first call returned no, second correct.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(INTENT_HANDLERS_PATH, 'utf8');
+      // Stop words set must exist
+      expectTruthy(
+        src.includes('CALENDAR_STOP_WORDS'),
+        'handleCalendarSearch must define CALENDAR_STOP_WORDS to strip generic words before matching',
+      );
+      // Word-level OR match must exist
+      expectTruthy(
+        src.includes('searchWords.some'),
+        'handleCalendarSearch must use word-level OR matching (searchWords.some)',
+      );
+      // "appointment" must be in stop words so it is stripped
+      expectTruthy(
+        src.includes("'appointment'"),
+        '"appointment" must be in CALENDAR_STOP_WORDS so it is not used as a search term',
+      );
+    },
+  },
+
+  // ─── 5c. Classification prompt — keyword must be core noun only ─────────────
+  {
+    id: 'session-2026-05-30.classify-intent-keyword-is-core-noun',
+    category: 'session-2026-05-30',
+    description:
+      'Layer 2 classifyIntent prompt must instruct Claude to extract only the core subject ' +
+      'noun as the keyword (strip "appointment", "meeting", etc.). Prevents "family doctor ' +
+      'appointment" keyword from failing to match "Family Doctor" event title.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      expectTruthy(
+        src.includes('Strip generic words like') || src.includes('core subject noun'),
+        'classifyIntent prompt must instruct Claude to strip generic words from the keyword',
       );
     },
   },

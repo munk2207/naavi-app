@@ -1399,6 +1399,14 @@ Classify the user's message into exactly one intent:
 - CALENDAR_SEARCH: user wants to find a specific calendar event by keyword (e.g. "do I have a dentist appointment", "find my flight") — NOT a full calendar read like "what's on my calendar today"
 - UNKNOWN: anything else
 
+For CALENDAR_SEARCH, extract ONLY the core subject noun — the thing they're looking for.
+Strip generic words like "appointment", "meeting", "event", "schedule", "time", "do I have".
+Examples:
+  "do I have a dentist appointment?" → keyword: "dentist"
+  "find my family doctor appointment" → keyword: "family doctor"
+  "is there a flight tomorrow?" → keyword: "flight"
+  "do I have a meeting with Hussein?" → keyword: "Hussein"
+
 Output format examples (JSON only, no fences):
 {"intent":"LIST_RULES","confidence":"high","params":{}}
 {"intent":"LOOKUP_CONTACT","confidence":"high","params":{"name":"Bob Smith"}}

@@ -203,15 +203,36 @@ export type CalendarItem = {
   detail?: string;
 };
 
+// Words that are too generic to use as search terms — strip them before
+// word-level matching so "family doctor appointment" finds "Family Doctor".
+const CALENDAR_STOP_WORDS = new Set([
+  'appointment', 'appointments', 'meeting', 'meetings', 'event', 'events',
+  'schedule', 'scheduled', 'time', 'session', 'visit', 'do', 'i', 'have',
+  'a', 'an', 'the', 'my', 'any', 'is', 'there', 'find', 'show', 'get',
+]);
+
 export async function handleCalendarSearch(
   liveEvents: CalendarItem[],
   keyword: string,
 ): Promise<HandlerResult> {
   const kw = keyword.trim().toLowerCase();
-  const matched = liveEvents.filter(e =>
-    (e.title ?? '').toLowerCase().includes(kw) ||
-    (e.detail ?? '').toLowerCase().includes(kw)
-  );
+
+  // Split keyword into meaningful words, drop stop words.
+  // Then match an event if ANY search word appears in its title or detail.
+  // This handles "family doctor" → finds "Family Doctor" or "Dr. Smith".
+  const searchWords = kw
+    .split(/\s+/)
+    .filter(w => w.length >= 2 && !CALENDAR_STOP_WORDS.has(w));
+
+  const matchEvent = (e: CalendarItem): boolean => {
+    const haystack = `${(e.title ?? '').toLowerCase()} ${(e.detail ?? '').toLowerCase()}`;
+    // Full phrase match first (most precise).
+    if (haystack.includes(kw)) return true;
+    // Word-level OR match: any search word present.
+    return searchWords.length > 0 && searchWords.some(w => haystack.includes(w));
+  };
+
+  const matched = liveEvents.filter(matchEvent);
 
   if (matched.length === 0) {
     const msg = `I don't see anything matching "${keyword}" on your calendar in the next 7 days.`;
