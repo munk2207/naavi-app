@@ -55,6 +55,7 @@ import { session2026_05_26Tests } from './catalogue/session-2026-05-26';
 import { session2026_05_27Tests } from './catalogue/session-2026-05-27';
 import { session2026_05_28Tests } from './catalogue/session-2026-05-28';
 import { session2026_05_29Tests } from './catalogue/session-2026-05-29';
+import { session2026_05_30Tests } from './catalogue/session-2026-05-30';
 import { confirmThenActTests } from './catalogue/confirm-then-act';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -146,6 +147,7 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_05_27Tests,
   ...session2026_05_28Tests,
   ...session2026_05_29Tests,
+  ...session2026_05_30Tests,
   ...confirmThenActTests,
 ];
 

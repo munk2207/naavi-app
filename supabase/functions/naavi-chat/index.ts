@@ -18,6 +18,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.79.0';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { NAAVI_TOOLS, TOOL_NAME_TO_ACTION_TYPE } from '../_shared/anthropic_tools.ts';
 import { computeContactHash, COMMUNITY_PERSON_FIELDS } from '../_shared/community_hash.ts';
+import { HANDLED_INTENTS, handleListRules, handleLookupContact, handleCalendarSearch } from './intentHandlers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1366,6 +1367,71 @@ async function saveAlertRule(
   else       console.log('[naavi-chat] Alert rule saved to action_rules:', label);
 }
 
+// ── Layer 2 — Intent classifier ───────────────────────────────────────────────
+//
+// Regex gate: only classify messages that look like they could be a handled
+// intent (LIST_RULES, LOOKUP_CONTACT, CALENDAR_SEARCH). Everything else
+// (create events, set alerts, general questions) falls straight through to the
+// full Claude call with no added latency or cost.
+const LAYER2_CANDIDATE_RE =
+  /\b(what|show|list|find|search|do i have|look up|get)\b.{0,80}\b(alerts?|rules?|notifications?|contacts?|appointment|event|meeting|dentist|doctor|schedule)\b/i;
+
+type IntentClassification = {
+  intent: string;
+  confidence: 'high' | 'low';
+  params: Record<string, string>;
+};
+
+async function classifyIntent(
+  client: Anthropic,
+  userText: string,
+): Promise<IntentClassification | null> {
+  try {
+    const res = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 150,
+      temperature: 0,
+      system: `You are a query classifier. Output JSON only. No explanation. No markdown fences.
+
+Classify the user's message into exactly one intent:
+- LIST_RULES: user wants to see their alerts, rules, or notifications list
+- LOOKUP_CONTACT: user wants to find a contact by name
+- CALENDAR_SEARCH: user wants to find a specific calendar event by keyword (e.g. "do I have a dentist appointment", "find my flight") — NOT a full calendar read like "what's on my calendar today"
+- UNKNOWN: anything else
+
+Output format examples (JSON only, no fences):
+{"intent":"LIST_RULES","confidence":"high","params":{}}
+{"intent":"LOOKUP_CONTACT","confidence":"high","params":{"name":"Bob Smith"}}
+{"intent":"CALENDAR_SEARCH","confidence":"high","params":{"keyword":"dentist"}}
+{"intent":"UNKNOWN","confidence":"high","params":{}}
+
+Use "low" confidence when the intent is ambiguous.`,
+      messages: [{ role: 'user', content: userText }],
+    });
+
+    const text = res.content
+      .filter((b: any) => b.type === 'text')
+      .map((b: any) => String(b.text ?? ''))
+      .join('');
+
+    const clean = text.replace(/```(?:json)?/gi, '').trim();
+    const start = clean.indexOf('{');
+    const end   = clean.lastIndexOf('}');
+    if (start < 0 || end < 0) return null;
+
+    const parsed = JSON.parse(clean.slice(start, end + 1));
+    if (typeof parsed?.intent !== 'string') return null;
+    return {
+      intent:     String(parsed.intent),
+      confidence: parsed.confidence === 'low' ? 'low' : 'high',
+      params:     typeof parsed.params === 'object' && parsed.params !== null ? parsed.params : {},
+    };
+  } catch (err) {
+    console.warn('[classifyIntent] failed:', (err as Error)?.message);
+    return null;
+  }
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -1511,6 +1577,62 @@ Deno.serve(async (req) => {
           pendingThreads: [],
         }),
       });
+    }
+
+    // ── Step 1.6: Layer 2 — Intent classification and deterministic routing ──────
+    // Only fires when the message looks like a handled-intent candidate (regex
+    // gate avoids adding a second Claude call to every turn). For matched intents
+    // with high confidence: run the deterministic handler and return — Claude is
+    // never called. For low confidence: ask Robert to confirm. For UNKNOWN or
+    // unhandled intents: fall through to the full Claude call below.
+    if (LAYER2_CANDIDATE_RE.test(userText)) {
+      const apiKeyL2 = Deno.env.get('ANTHROPIC_API_KEY');
+      if (apiKeyL2) {
+        const clientL2 = new Anthropic({ apiKey: apiKeyL2 });
+        const classification = await classifyIntent(clientL2, userText);
+        console.log(`[timing] ${elapsed()} | Layer2 classification: ${JSON.stringify(classification)}`);
+
+        if (classification && classification.intent !== 'UNKNOWN') {
+          if (classification.confidence === 'low') {
+            const intentDesc =
+              classification.intent === 'LIST_RULES'      ? 'see your alerts'
+            : classification.intent === 'LOOKUP_CONTACT'  ? `find a contact named "${classification.params.name ?? ''}"`
+            : classification.intent === 'CALENDAR_SEARCH' ? `find "${classification.params.keyword ?? ''}" on your calendar`
+            : 'help with that';
+            return speechResponse(`I think you're asking me to ${intentDesc} — is that right?`);
+          }
+
+          if (HANDLED_INTENTS.has(classification.intent)) {
+            if (classification.intent === 'LIST_RULES') {
+              const result = await handleListRules(supabase, userId);
+              console.log(`[timing] ${elapsed()} | Layer2 LIST_RULES deterministic`);
+              return jsonResponse({
+                rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
+              });
+            }
+
+            if (classification.intent === 'LOOKUP_CONTACT' && classification.params.name) {
+              const result = await handleLookupContact(supabase, userId, classification.params.name);
+              console.log(`[timing] ${elapsed()} | Layer2 LOOKUP_CONTACT deterministic | contacts=${result.contacts?.length ?? 0}`);
+              return jsonResponse({
+                rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
+              });
+            }
+
+            if (classification.intent === 'CALENDAR_SEARCH' && classification.params.keyword) {
+              const liveEventsL2 = await fetchLiveCalendarEvents(supabase, userId);
+              const result = await handleCalendarSearch(liveEventsL2, classification.params.keyword);
+              console.log(`[timing] ${elapsed()} | Layer2 CALENDAR_SEARCH deterministic | events=${liveEventsL2.length}`);
+              return jsonResponse({
+                rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
+              });
+            }
+          }
+
+          // High confidence but no handler yet — fall through to Claude
+          console.log(`[timing] ${elapsed()} | Layer2 ${classification.intent} high-confidence but no handler — falling to Claude`);
+        }
+      }
     }
 
     // ── Step 2 (B4z 2026-05-25): server-side email-alert bypass REMOVED ─────────
