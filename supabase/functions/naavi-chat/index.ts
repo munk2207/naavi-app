@@ -1381,7 +1381,7 @@ async function saveAlertRule(
 //   "when is my next X", "how far/long to X", "what did I spend on X",
 //   "what time is my X", "is X on my calendar"
 const LAYER2_CANDIDATE_RE =
-  /\b(list|show)\s+(me\s+)?my\s+(alerts?|rules?|notifications?)\b|\bwhat\s+(alerts?|rules?|notifications?)\s+do\s+i\s+have\b|\bwhat\s+are\s+my\s+(alerts?|rules?|notifications?)\b|\bdo\s+i\s+have\s+(a[n]?\s+)?\w[\w\s]{0,30}(appointment|meeting|event)\b|\b(find|look\s+up)\s+(?!all\b|any\b|my\b|the\b|some\b|more\b|out\b|a\b|an\b|this\b|that\b)[A-Za-z][\w\s]{1,30}(in\s+my\s+contacts|contact)?\b|\bwhen\s+is\s+my\s+(next\s+)?\w[\w\s]{0,20}\b|\bhow\s+(far|long|much\s+time)\b.{0,40}\b(to|from|until)\b|\bwhat\s+(time|day|date)\s+is\s+my\b|\bwhat\s+did\s+i\s+(spend|pay|buy|order)\b|\bis\s+.{0,30}(on\s+my\s+calendar|in\s+my\s+contacts)\b|\bwhat\s+do\s+(we|you)\s+(have|know)\s+(about|on)\s+[A-Za-z]\w*\b|\btell\s+me\s+(everything\s+)?about\s+[A-Za-z]\w*\b|\bwho\s+is\s+[A-Za-z]\w[\w\s]{0,30}\b|\bdo\s+you\s+know\s+anything\s+about\s+[A-Za-z]\w*\b|\bwhat\s+(lists?|list\s+do)\s+(do\s+i\s+have|i\s+have|have)\b|\bwhat('?s|\s+is)\s+on\s+my\s+\w[\w\s]{0,20}list\b|\bshow\s+(me\s+)?my\s+(grocery|shopping|to.?do|todo|\w+)\s+list\b|\bwhat\s+reminders?\s+do\s+i\s+have\b|\bshow\s+(me\s+)?my\s+reminders?\b|\bwhat\s+am\s+i\s+(being\s+)?reminded\b|\bwhat\s+did\s+i\s+(tell|save|remember|ask)\s+(you|naavi)?\s*(about|to\s+remember)?\b|\bwhat\s+do\s+you\s+remember\s+about\b/i;
+  /\b(list|show)\s+(me\s+)?my\s+(alerts?|rules?|notifications?)\b|\bwhat\s+(alerts?|rules?|notifications?)\s+do\s+i\s+have\b|\bwhat\s+are\s+my\s+(alerts?|rules?|notifications?)\b|\bdo\s+i\s+have\s+(a[n]?\s+)?\w[\w\s]{0,30}(appointment|meeting|event)\b|\b(find|look\s+up)\s+(?!all\b|any\b|my\b|the\b|some\b|more\b|out\b|a\b|an\b|this\b|that\b)[A-Za-z][\w\s]{1,30}(in\s+my\s+contacts|contact)?\b|\bwhen\s+is\s+my\s+(next\s+)?\w[\w\s]{0,20}\b|\bhow\s+(far|long|much\s+time)\b.{0,40}\b(to|from|until)\b|\bwhat\s+(time|day|date)\s+is\s+my\b|\bwhat\s+did\s+i\s+(spend|pay|buy|order)\b|\bis\s+.{0,30}(on\s+my\s+calendar|in\s+my\s+contacts)\b|\bwhat\s+do\s+(we|you)\s+(have|know)\s+(about|on)\s+[A-Za-z]\w*\b|\btell\s+me\s+(everything\s+)?about\s+[A-Za-z]\w*\b|\bwho\s+is\s+[A-Za-z]\w[\w\s]{0,30}\b|\bdo\s+you\s+know\s+anything\s+about\s+[A-Za-z]\w*\b|\bwhat\s+(lists?|list\s+do)\s+(do\s+i\s+have|i\s+have|have)\b|\bwhat('?s|\s+is)\s+on\s+my\s+\w[\w\s]{0,20}list\b|\bshow\s+(me\s+)?my\s+(grocery|shopping|to.?do|todo|\w+)\s+list\b|\bwhat\s+reminders?\s+do\s+i\s+have\b|\bshow\s+(me\s+)?my\s+reminders?\b|\bwhat\s+am\s+i\s+(being\s+)?reminded\b|\bwhat\s+did\s+i\s+(tell|save|remember|ask)\s+(you|naavi)?\s*(about|to\s+remember)?\b|\bwhat\s+do\s+you\s+remember\s+about\b|\bwhat'?s\s+[A-Za-z]\w[\w\s]{0,20}'?s?\s+(email|phone|number|address|contact)\b|\bdoes\s+[A-Za-z]\w[\w\s]{0,20}have\s+(a\s+)?(phone|email|number|address)\b|\bwhat\s+is\s+[A-Za-z]\w[\w\s]{0,20}'?s?\s+(email|phone|number|address)\b/i;
 
 type IntentClassification = {
   intent: string;
@@ -1417,6 +1417,9 @@ For CALENDAR_SEARCH, extract ONLY the core subject noun (strip "appointment", "m
 For PERSON_LOOKUP and LOOKUP_CONTACT, extract the name/topic into params.name.
   "what do we have about Hussein?" → name: "Hussein"
   "tell me about Dr. Smith" → name: "Dr. Smith"
+  "what's Hussein's email?" → LOOKUP_CONTACT, name: "Hussein"
+  "does John have a phone number?" → LOOKUP_CONTACT, name: "John"
+  "what is Sarah's address?" → LOOKUP_CONTACT, name: "Sarah"
 
 For LIST_READ, extract the list name if specified into params.listName (omit if asking for all lists).
   "what's on my grocery list?" → listName: "grocery"

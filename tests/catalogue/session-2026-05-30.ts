@@ -399,7 +399,7 @@ export const session2026_05_30Tests: TestCase[] = [
     async run() {
       const src = readFileSync(INTENT_HANDLERS_PATH, 'utf8');
       expectTruthy(
-        src.includes("don't have any lists yet"),
+        src.includes("don't have any active lists") || src.includes("don't have any lists"),
         'handleListRead must return honest-out when no lists exist',
       );
     },
@@ -493,6 +493,43 @@ export const session2026_05_30Tests: TestCase[] = [
       expectTruthy(
         src.includes('who\\\\s+is') || src.includes('who\\s+is'),
         'LAYER2_CANDIDATE_RE must catch "who is X" pattern',
+      );
+    },
+  },
+
+  // ─── Priority 2 — Possessive/question blind spots ─────────────────────────
+  {
+    id: 'session-2026-05-30.p2-possessive-regex-coverage',
+    category: 'session-2026-05-30',
+    description:
+      'Priority 2 — LAYER2_CANDIDATE_RE must catch possessive contact queries: ' +
+      '"What\'s Hussein\'s email?", "Does John have a phone?", "What is Sarah\'s address?"',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      expectTruthy(
+        src.includes("email|phone|number|address"),
+        'LAYER2_CANDIDATE_RE must catch possessive contact field queries (email/phone/number/address)',
+      );
+      expectTruthy(
+        src.includes("does\\\\s+") || src.includes('does\\s+'),
+        'LAYER2_CANDIDATE_RE must catch "does X have a phone/email" pattern',
+      );
+    },
+  },
+
+  {
+    id: 'session-2026-05-30.p2-possessive-classifier-examples',
+    category: 'session-2026-05-30',
+    description:
+      'Priority 2 — classifyIntent prompt must include possessive examples so Haiku ' +
+      'maps "what\'s Hussein\'s email" → LOOKUP_CONTACT with name extracted.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      expectTruthy(
+        src.includes("Hussein's email"),
+        'classifyIntent prompt must include possessive example for LOOKUP_CONTACT',
       );
     },
   },
