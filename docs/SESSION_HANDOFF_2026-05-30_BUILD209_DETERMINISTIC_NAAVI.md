@@ -38,6 +38,9 @@
 
 ## THE NEXT SESSION — Deterministic Naavi
 
+**Memory file:** `project_naavi_deterministic_design.md` — full design saved, indexed in MEMORY.md under ⭐⭐⭐ reputation-critical. Read it at session start before touching any code.
+
+
 ### Origin of the design (from this session, before compaction)
 
 Wael showed two screenshots of the same question ("Drive me to my next appointment") asked 2 minutes apart — Naavi gave two different answers. He said: *"I noticed this in several situations. I asked the exact question twice and received different answers."*
