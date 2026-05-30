@@ -245,6 +245,30 @@ If in doubt, ASK before creating parallel config.
 
 **The user_places table was DROPPED in V57.13.3.** It existed as a place-cache for resolve-place but produced more bugs than performance. The "saved places" feature is now absorbed by `action_rules` — if a user wants to be reminded at a place repeatedly, they create one recurring rule. See "FOUNDATIONAL PRINCIPLE — NO CACHE, FRESH ALWAYS, USER PICKS" at the top of this file.
 
+### MOBILE = CONVERSATION. WEB = MANAGEMENT. (Wael 2026-05-30)
+
+**The principle:** The mobile app is a conversation and quick-action surface. The web is the management workspace. These are two distinct roles — never collapse them into one.
+
+**Mobile shows:** A summary of what exists (count, last item, status). Enough for Robert to act by voice. Nothing that requires scrolling through a long list to manage.
+
+**Web handles:** Everything that grows over time and requires review, editing, reordering, deleting, or configuring. Alerts list, lists contents, notes/memories, settings — all of it.
+
+**The reference implementation already exists:** The Help section opens a web page from inside the app today. Every management screen follows the same pattern — Robert taps a button in the app, a fully authenticated WebView opens. He never sees a URL. He never logs in separately. From his perspective it is just a bigger screen.
+
+**How to classify any new feature:**
+- Is this something Robert says or asks? → Mobile (conversation).
+- Is this something Robert reviews, edits, or configures? → Web (management).
+- Does this screen grow unbounded as Robert uses the product? → Web.
+- Does this screen answer one specific question and close? → Mobile.
+
+**What this means for existing screens:**
+- Three-dot menu items (Alerts, Lists, Notes) → WebView launches, not native screens.
+- Native management screens are retired as web equivalents are built.
+- Mobile settings keeps only: name, primary phone, PIN. Everything else → web settings page.
+- New features that accumulate data over time must be designed web-first from day one.
+
+**Do NOT build a new native management screen.** If you are about to create a new ScrollView with a list of items Robert can tap, delete, or edit — stop. That belongs on the web. Build the WebView path instead.
+
 ### AI CODING DISCIPLINE (Wael 2026-05-25)
 
 Rules that are already covered elsewhere are NOT duplicated here — see CONFIGURATION DISCIPLINE (no duplicate config), CLAUDE PROMPT — SHARED SOURCE OF TRUTH (prompts in one place), and ABSOLUTE RULES 1–5 (explain before acting, stability over cost). This section adds what those don't cover.
@@ -331,8 +355,8 @@ A short-lived 2026-05-16 suspension related to an Expo build error was removed 2
 
 **The process is fully automated — do NOT manually upload to Firebase Console:**
 1. Build preview APK: `eas build --profile preview` (from `C:\Users\waela\naavi-mobile`)
-2. Copy the EAS APK URL from the build output
-3. Submit to Firebase Test Lab: `node scripts/submit-firebase-test.js <apkUrl>`
+2. Copy the URL from the build output — either the artifact URL (`https://expo.dev/artifacts/eas/...`) or the build page URL (`https://expo.dev/accounts/waggan/.../builds/<id>`). Both work — the script auto-resolves the artifact URL if given a build page URL.
+3. Submit to Firebase Test Lab: `node scripts/submit-firebase-test.js <url>`
    - Downloads APK → uploads to GCS bucket `mynaavi-testlab-uploads` → submits test matrix
    - Devices: Pixel 6 (Android 13) + Samsung Galaxy S22 (Android 14)
    - Polls every 30 seconds; sends SMS to +1 613 769 7957 when done
@@ -373,7 +397,7 @@ Canonical source: `docs/HOLDING_LIST_CLASSIFICATION_2026-05-08.md`. Closed items
 
 **Blocked on external approvals:**
 2. AWS Polly (voice unification mobile→Polly Joanna) — needs AWS account setup
-3. Maestro full-suite — needs emulator Internal Testing install
+3. Maestro full-suite — emulator OAuth blocker was stale (preview APK + sideload gives full OAuth on emulator). Real blocker: Maestro dadb driver times out on port 7001 on Windows (confirmed 2026-05-29). ADB restart did not resolve it. Fix path: investigate Maestro Windows/dadb compatibility or use `maestro --device emulator-5554` flag explicitly.
 4. **Geofence reliability — TRANSISTORSOFT TRIAL FAILED 2026-05-15.** Trial branch `claude/transistorsoft-trial` preserved. Decision: (a) retry with 4 postmortem fixes, (b) try Radar, (c) accept Samsung-geofencing-unsolved. Full postmortem: `docs/SESSION_HANDOFF_2026-05-15_V57.15.6_BUILD_179_TRANSISTORSOFT_TRIAL.md`.
 
 **Server-side queue (no AAB needed):**
