@@ -44,6 +44,7 @@ export async function handleListRules(
     .from('action_rules')
     .select('id, label, trigger_type, trigger_config, enabled, one_shot, last_fired_at')
     .eq('user_id', userId)
+    .eq('enabled', true)
     .order('created_at', { ascending: false })
     .limit(100);
 
@@ -71,20 +72,26 @@ export async function handleListRules(
     return { speech: empty, display: empty, actions: [] };
   }
 
-  const lines = allRows.map((r, i) => {
+  const active = allRows.filter(r => !(r.one_shot && r.last_fired_at != null));
+
+  if (active.length === 0) {
+    const empty = "You don't have any active alerts right now.";
+    return { speech: empty, display: empty, actions: [] };
+  }
+
+  const lines = active.map((r, i) => {
     const place = (r.trigger_config as any)?.place_name;
     const label = r.label || `${r.trigger_type} alert`;
     const where = place && !label.includes(place) ? ` (at ${place})` : '';
-    const isExpired = r.one_shot && r.last_fired_at != null;
-    const status = isExpired ? ' — expired' : (!r.enabled ? ' — disabled' : '');
-    return `${i + 1}. ${label}${where}${status}`;
+    return `${i + 1}. ${label}${where}`;
   });
 
-  const intro = `You have ${allRows.length} alert${allRows.length === 1 ? '' : 's'}`;
-  const speech  = `${intro}: ${lines.join('. ')}.`;
-  const display = `${intro}:\n\n${lines.join('\n')}`;
-
-  return { speech, display, actions: [] };
+  const intro = `You have ${active.length} active alert${active.length === 1 ? '' : 's'}`;
+  return {
+    speech:  `${intro}: ${lines.join('. ')}.`,
+    display: `${intro}:\n\n${lines.join('\n')}`,
+    actions: [],
+  };
 }
 
 // ── LOOKUP_CONTACT ────────────────────────────────────────────────────────────
@@ -476,9 +483,10 @@ export async function handleReminderRead(
 
 // ── MEMORY_SEARCH ─────────────────────────────────────────────────────────────
 // "What did I tell you about X?" / "What do you remember about X?" —
-// searches knowledge_fragments via global-search (which uses pgvector embeddings).
-// Routes through global-search rather than querying directly so the same
-// ranking logic applies as in PERSON_LOOKUP.
+// searches ONLY knowledge_fragments via the search-knowledge Edge Function
+// (OpenAI embedding + pgvector cosine similarity, min score 0.5).
+// Deliberately narrow: no emails, no calendar, no contacts — only what
+// Robert explicitly told Naavi to remember.
 
 export async function handleMemorySearch(
   query: string,
@@ -487,13 +495,13 @@ export async function handleMemorySearch(
   serviceKey: string,
 ): Promise<HandlerResult> {
   try {
-    const res = await fetch(`${supabaseUrl}/functions/v1/global-search`, {
+    const res = await fetch(`${supabaseUrl}/functions/v1/search-knowledge`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${serviceKey}`,
       },
-      body: JSON.stringify({ query, user_id: userId, limit: 8, sources: ['knowledge'] }),
+      body: JSON.stringify({ q: query, user_id: userId, top_k: 6 }),
     });
 
     if (!res.ok) {
@@ -502,19 +510,19 @@ export async function handleMemorySearch(
     }
 
     const data = await res.json();
-    const ranked: Array<{ title: string; snippet: string }> =
-      Array.isArray(data?.ranked) ? data.ranked : [];
+    const results: Array<{ content: string; similarity?: number }> =
+      Array.isArray(data?.results) ? data.results : [];
 
-    if (ranked.length === 0) {
+    if (results.length === 0) {
       const msg = `I don't have anything saved about "${query}". Say "remember that…" to save something.`;
       return { speech: msg, display: msg, actions: [] };
     }
 
-    const lines = ranked.slice(0, 6).map((r, i) => {
-      const detail = r.snippet ? r.snippet.slice(0, 100) : r.title;
+    const lines = results.slice(0, 6).map((r, i) => {
+      const text = (r.content ?? '').slice(0, 120);
       return {
-        speech:  `${i + 1}. ${detail}`,
-        display: `${i + 1}. ${detail}`,
+        speech:  `${i + 1}. ${text}`,
+        display: `${i + 1}. ${text}`,
       };
     });
 
