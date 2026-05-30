@@ -239,4 +239,85 @@ export const session2026_05_30Tests: TestCase[] = [
       );
     },
   },
+
+  // ─── Layer 3 — Path B disclosure ───────────────────────────────────────────
+  {
+    id: 'session-2026-05-30.layer3-pathb-flag-set',
+    category: 'session-2026-05-30',
+    description:
+      'Layer 3 — pathB flag must be declared and set in the Layer 2 fall-through paths ' +
+      '(UNKNOWN classification and high-confidence-no-handler). This is what triggers ' +
+      'the Path B disclosure wrapper on Claude\'s response.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      expectTruthy(src.includes('let pathB = false'), 'pathB flag must be declared before Layer 2 block');
+      expectTruthy(src.includes('pathB = true'), 'pathB must be set true in fall-through paths');
+      expectTruthy(
+        src.includes('Path B disclosure'),
+        'Layer 3 Path B disclosure block must exist in naavi-chat/index.ts',
+      );
+    },
+  },
+
+  {
+    id: 'session-2026-05-30.layer3-pathb-disclosure-wording',
+    category: 'session-2026-05-30',
+    description:
+      'Layer 3 — Path B disclosure speech must include "best reading" phrasing and ' +
+      '"does that work" so Robert knows the answer is not verified.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      expectTruthy(
+        src.includes("Here's my best reading"),
+        'Path B disclosure must include "Here\'s my best reading" phrasing',
+      );
+      expectTruthy(
+        src.includes('Does that work'),
+        'Path B disclosure must ask "Does that work" so Robert can redirect',
+      );
+    },
+  },
+
+  {
+    id: 'session-2026-05-30.layer3-pathb-skips-state-changing-actions',
+    category: 'session-2026-05-30',
+    description:
+      'Layer 3 — Path B disclosure must NOT fire when Claude emits a state-changing action ' +
+      '(CREATE_EVENT, SET_ACTION_RULE, etc.). Those have their own RULE 23 confirmation flow.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      // The state-changing set must be checked before applying disclosure
+      expectTruthy(
+        src.includes('stateChanging') && src.includes('CREATE_EVENT'),
+        'Path B disclosure must skip state-changing actions (stateChanging set with CREATE_EVENT)',
+      );
+    },
+  },
+
+  {
+    id: 'session-2026-05-30.layer2-expanded-scope',
+    category: 'session-2026-05-30',
+    description:
+      'Layer 2 scope expansion — LAYER2_CANDIDATE_RE must now catch additional data/info ' +
+      'question patterns: "when is my next X", "how far to X", "what did I spend on X".',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      expectTruthy(
+        src.includes('when\\\\s+is\\\\s+my') || src.includes('when is my') || src.includes('when\\s+is\\s+my'),
+        'LAYER2_CANDIDATE_RE must catch "when is my next X" pattern',
+      );
+      expectTruthy(
+        src.includes('how\\s+(far|long|much') || src.includes('how far'),
+        'LAYER2_CANDIDATE_RE must catch "how far/long to X" pattern',
+      );
+      expectTruthy(
+        src.includes('what\\s+did\\s+i\\s+(spend') || src.includes('what did i'),
+        'LAYER2_CANDIDATE_RE must catch "what did I spend" pattern',
+      );
+    },
+  },
 ];

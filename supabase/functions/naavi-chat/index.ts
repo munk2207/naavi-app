@@ -1374,13 +1374,14 @@ async function saveAlertRule(
 // a false negative (misses a candidate) just falls through to Claude; a false
 // positive (wrongly intercepts) breaks a user-facing query. Err toward tight.
 //
-// LIST_RULES:      "list my alerts", "show my rules", "what alerts do I have",
-//                  "what are my notifications"
-// CALENDAR_SEARCH: "do I have a dentist appointment", "find my flight",
-//                  "any doctor appointments this week"
-// LOOKUP_CONTACT:  "find Bob", "look up Hussein", "find Sarah in my contacts"
+// LIST_RULES:      "list my alerts", "show my rules", "what alerts do I have"
+// CALENDAR_SEARCH: "do I have a dentist appointment", "is my dentist on my calendar"
+// LOOKUP_CONTACT:  "find Bob", "look up Hussein"
+// PATH B (no handler, disclosed as best-effort):
+//   "when is my next X", "how far/long to X", "what did I spend on X",
+//   "what time is my X", "is X on my calendar"
 const LAYER2_CANDIDATE_RE =
-  /\b(list|show)\s+(me\s+)?my\s+(alerts?|rules?|notifications?)\b|\bwhat\s+(alerts?|rules?|notifications?)\s+do\s+i\s+have\b|\bwhat\s+are\s+my\s+(alerts?|rules?|notifications?)\b|\bdo\s+i\s+have\s+(a[n]?\s+)?\w[\w\s]{0,30}(appointment|meeting|event)\b|\b(find|look\s+up)\s+[A-Za-z][\w\s]{1,30}(in\s+my\s+contacts|contact)?\b/i;
+  /\b(list|show)\s+(me\s+)?my\s+(alerts?|rules?|notifications?)\b|\bwhat\s+(alerts?|rules?|notifications?)\s+do\s+i\s+have\b|\bwhat\s+are\s+my\s+(alerts?|rules?|notifications?)\b|\bdo\s+i\s+have\s+(a[n]?\s+)?\w[\w\s]{0,30}(appointment|meeting|event)\b|\b(find|look\s+up)\s+[A-Za-z][\w\s]{1,30}(in\s+my\s+contacts|contact)?\b|\bwhen\s+is\s+my\s+(next\s+)?\w[\w\s]{0,20}\b|\bhow\s+(far|long|much\s+time)\b.{0,40}\b(to|from|until)\b|\bwhat\s+(time|day|date)\s+is\s+my\b|\bwhat\s+did\s+i\s+(spend|pay|buy|order)\b|\bis\s+.{0,30}(on\s+my\s+calendar|in\s+my\s+contacts)\b/i;
 
 type IntentClassification = {
   intent: string;
@@ -1598,7 +1599,12 @@ Deno.serve(async (req) => {
     // gate avoids adding a second Claude call to every turn). For matched intents
     // with high confidence: run the deterministic handler and return — Claude is
     // never called. For low confidence: ask Robert to confirm. For UNKNOWN or
-    // unhandled intents: fall through to the full Claude call below.
+    // unhandled intents: fall through to the full Claude call below (Path B).
+    //
+    // pathB is set true when LAYER2_CANDIDATE_RE matched (this is a data/info
+    // question) but we could not answer it deterministically. Claude will answer,
+    // but the response is flagged as best-effort in Layer 3 below.
+    let pathB = false;
     if (LAYER2_CANDIDATE_RE.test(userText)) {
       const apiKeyL2 = Deno.env.get('ANTHROPIC_API_KEY');
       if (apiKeyL2) {
@@ -1643,9 +1649,16 @@ Deno.serve(async (req) => {
             }
           }
 
-          // High confidence but no handler yet — fall through to Claude
-          console.log(`[timing] ${elapsed()} | Layer2 ${classification.intent} high-confidence but no handler — falling to Claude`);
+          // High confidence, known intent, no handler → Path B
+          pathB = true;
+          console.log(`[timing] ${elapsed()} | Layer2 ${classification.intent} high-confidence but no handler — Path B`);
+        } else {
+          // UNKNOWN or classification failed → data question, Claude guessing → Path B
+          pathB = true;
+          console.log(`[timing] ${elapsed()} | Layer2 UNKNOWN/null → Path B`);
         }
+      } else {
+        pathB = true; // no API key for classifier — treat as Path B
       }
     }
 
@@ -2176,6 +2189,32 @@ Deno.serve(async (req) => {
       ?? ((speechBlocks && speechBlocks.trim().length > 0)
             ? speechBlocks
             : buildFallbackSpeech(actions));
+
+    // ── Layer 3 — Path B disclosure ───────────────────────────────────────────
+    // When the query matched LAYER2_CANDIDATE_RE (a data/information question)
+    // but Layer 2 couldn't answer it deterministically, Claude is guessing.
+    // Flag the response as best-effort so Robert knows it isn't a verified answer.
+    // Only fires on spoken content (not fallback confirmations like "Alert set.").
+    // Never overrides a server-side rejection message.
+    if (
+      pathB
+      && !serverRejectionMessage
+      && speechBlocks.trim().length > 0
+      && actions.every((a: any) => {
+        // Don't add Path B disclosure if Claude is taking a state-changing action —
+        // those have their own RULE 23 confirmation flow.
+        const stateChanging = new Set([
+          'CREATE_EVENT','DELETE_EVENT','SET_ACTION_RULE','DELETE_RULE',
+          'SET_REMINDER','REMEMBER','DELETE_MEMORY','UPDATE_MORNING_CALL',
+          'SCHEDULE_MEDICATION','ADD_CONTACT','SAVE_TO_DRIVE','LIST_CREATE',
+          'LIST_ADD','LIST_REMOVE','DRAFT_MESSAGE',
+        ]);
+        return !stateChanging.has(a?.type);
+      })
+    ) {
+      speech = `Here's my best reading: ${speech} — I can't verify this from a live source right now. Does that work, or would you like me to try a different approach?`;
+      console.log(`[timing] ${elapsed()} | Layer3 Path B disclosure applied`);
+    }
     if (!speechBlocks.trim() && actions.length > 0) {
       console.log(
         `[naavi-chat] Bug E fallback fired — empty speech, ${actions.length} actions, ` +
