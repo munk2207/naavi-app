@@ -167,7 +167,10 @@ export const promptRegressionTests: TestCase[] = [
   {
     id: 'prompt-regression.list-rules-emits-action',
     category: 'prompt-regression',
-    description: 'V57.11.6 regression — "what alerts do I have?" must emit LIST_RULES action',
+    // Updated 2026-05-30 (Build 210): Layer 2 intercepts "what alerts do I have?"
+    // deterministically via handleListRules — no LIST_RULES action is emitted.
+    // The test now verifies the response is valid (2xx + non-empty speech).
+    description: 'Layer 2 deterministic — "what alerts do I have?" returns valid speech response (no Claude action needed)',
     timeoutMs: 30_000,
     async run(ctx) {
       const { status, data } = await adapters.naaviChat(ctx, {
@@ -177,8 +180,13 @@ export const promptRegressionTests: TestCase[] = [
       expect2xx(status, 'naavi-chat');
       ctx.log(`rawText: ${data?.rawText?.slice(0, 250)}…`);
 
-      const action = findActionInRawText(data?.rawText ?? '', 'LIST_RULES');
-      expectTruthy(action, 'LIST_RULES action — must emit, not just GLOBAL_SEARCH');
+      // Layer 2 returns speech directly — parse and verify it's non-empty.
+      let parsed: any = null;
+      try { parsed = JSON.parse(data?.rawText ?? ''); } catch { /* ignore */ }
+      expectTruthy(
+        typeof parsed?.speech === 'string' && parsed.speech.length > 0,
+        'Layer 2 LIST_RULES — response must contain non-empty speech',
+      );
     },
   },
 

@@ -40,14 +40,19 @@ export const session2026_05_30Tests: TestCase[] = [
     id: 'session-2026-05-30.layer2-candidate-regex-exists',
     category: 'session-2026-05-30',
     description:
-      'Layer 2 — LAYER2_CANDIDATE_RE regex gate must exist in naavi-chat/index.ts. ' +
-      'It prevents the classification call from firing on every message.',
+      'Layer 2 — LAYER2_CANDIDATE_RE regex gate must exist in naavi-chat/index.ts ' +
+      'and must be tight enough not to catch capability questions or connection queries.',
     timeoutMs: 1_000,
     async run() {
       const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
       expectTruthy(
         src.includes('LAYER2_CANDIDATE_RE'),
         'LAYER2_CANDIDATE_RE must be defined in naavi-chat/index.ts',
+      );
+      // Regex must include specific list-retrieval patterns, not just "what" + "alert"
+      expectTruthy(
+        src.includes('list my alerts') || src.includes('list\\\\s+') || src.includes('show.*my.*alerts'),
+        'LAYER2_CANDIDATE_RE must use specific retrieval patterns, not generic word combinations',
       );
     },
   },

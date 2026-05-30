@@ -1040,6 +1040,18 @@ export default function HomeScreen() {
     }
   }, [turns.length]);
 
+  // Android: when the keyboard opens, scroll chat to the bottom so the latest
+  // message isn't hidden behind the keyboard. KeyboardAvoidingView is disabled
+  // on Android (resize mode handles layout), but it doesn't auto-scroll the
+  // ScrollView — this listener does.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+    });
+    return () => sub.remove();
+  }, []);
+
   // 3-minute idle auto-clear DISABLED 2026-04-26 (Session 24, Wael's request).
   // Original intent: return to brief after 3 min of inactivity so the user
   // doesn't return to stale bubbles. Re-enable later if the freeze

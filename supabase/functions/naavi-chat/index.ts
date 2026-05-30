@@ -1370,11 +1370,17 @@ async function saveAlertRule(
 // ── Layer 2 — Intent classifier ───────────────────────────────────────────────
 //
 // Regex gate: only classify messages that look like they could be a handled
-// intent (LIST_RULES, LOOKUP_CONTACT, CALENDAR_SEARCH). Everything else
-// (create events, set alerts, general questions) falls straight through to the
-// full Claude call with no added latency or cost.
+// intent (LIST_RULES, LOOKUP_CONTACT, CALENDAR_SEARCH). Intentionally tight —
+// a false negative (misses a candidate) just falls through to Claude; a false
+// positive (wrongly intercepts) breaks a user-facing query. Err toward tight.
+//
+// LIST_RULES:      "list my alerts", "show my rules", "what alerts do I have",
+//                  "what are my notifications"
+// CALENDAR_SEARCH: "do I have a dentist appointment", "find my flight",
+//                  "any doctor appointments this week"
+// LOOKUP_CONTACT:  "find Bob", "look up Hussein", "find Sarah in my contacts"
 const LAYER2_CANDIDATE_RE =
-  /\b(what|show|list|find|search|do i have|look up|get)\b.{0,80}\b(alerts?|rules?|notifications?|contacts?|appointment|event|meeting|dentist|doctor|schedule)\b/i;
+  /\b(list|show)\s+(me\s+)?my\s+(alerts?|rules?|notifications?)\b|\bwhat\s+(alerts?|rules?|notifications?)\s+do\s+i\s+have\b|\bwhat\s+are\s+my\s+(alerts?|rules?|notifications?)\b|\bdo\s+i\s+have\s+(a[n]?\s+)?\w[\w\s]{0,30}(appointment|meeting|event)\b|\b(find|look\s+up)\s+[A-Za-z][\w\s]{1,30}(in\s+my\s+contacts|contact)?\b/i;
 
 type IntentClassification = {
   intent: string;
