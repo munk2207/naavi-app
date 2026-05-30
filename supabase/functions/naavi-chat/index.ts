@@ -1399,49 +1399,18 @@ async function classifyIntent(
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 150,
       temperature: 0,
-      system: `You are a query classifier for Naavi, a personal AI assistant. Output JSON only. No explanation. No markdown fences.
+      system: `Classify the message. JSON only. No fences.
 
-Every message must be classified into one of four LEVELS:
+Levels:
+A = answerable from user's real data (calendar, contacts, alerts, lists, reminders, memories). Use intents: LIST_RULES, LOOKUP_CONTACT, CALENDAR_SEARCH, PERSON_LOOKUP, LIST_READ, REMINDER_READ, MEMORY_SEARCH
+B = data question Claude must reason about (no real source)
+action = creating/updating/deleting data (reminder, alert, event, memory, list item)
+chat = conversational, no data question
 
-LEVEL A — Question answerable from Robert's real verified data (calendar, contacts, alerts, lists, reminders, saved memories, emails, drive). Naavi fetches the answer from the real source.
-LEVEL B — Question requiring Claude's reasoning because no real data source can answer it directly. Naavi discloses this as best-effort.
-LEVEL action — State-changing request: creating, updating, or deleting data (reminders, alerts, events, memories, lists, contacts). Goes through confirmation flow.
-LEVEL chat — Conversational message with no data question (greetings, thanks, small talk, follow-up conversation). Claude responds naturally.
+Params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic.
 
-LEVEL A intents (assign when query matches):
-- LIST_RULES: see alerts/rules/notifications list
-- LOOKUP_CONTACT: find a contact's phone/email/address (possessive forms: "what's John's email?", "does Sara have a number?")
-- CALENDAR_SEARCH: find a specific calendar event by keyword ("do I have a dentist appointment?")
-- PERSON_LOOKUP: everything Naavi has about a person across all sources ("what do we have about Hussein?", "tell me about Bob", "who is Sarah?")
-- LIST_READ: see lists or contents of a specific list ("what lists do I have?", "what's on my grocery list?")
-- REMINDER_READ: see upcoming reminders ("what reminders do I have?")
-- MEMORY_SEARCH: find something Robert told Naavi to remember ("what did I tell you about my medication?")
-
-LEVEL action intents:
-- SET_REMINDER, CREATE_EVENT, SET_ALERT, REMEMBER, ADD_TO_LIST, DELETE_RULE, DELETE_EVENT, DELETE_MEMORY, DRAFT_MESSAGE, UPDATE_PROFILE
-
-LEVEL B: any data/information question not answerable from Robert's real data sources.
-LEVEL chat: greetings, thanks, follow-up, small talk, anything not a question or action.
-
-Param extraction rules:
-- CALENDAR_SEARCH: extract ONLY core subject noun, strip "appointment/meeting/event". "family doctor appointment" → keyword: "family doctor"
-- LOOKUP_CONTACT / PERSON_LOOKUP: extract name into params.name. "what's Hussein's email?" → name: "Hussein"
-- LIST_READ: extract list name into params.listName if specified. "what's on my grocery list?" → listName: "grocery"
-- MEMORY_SEARCH: extract topic into params.topic. "what did I tell you about medication?" → topic: "medication"
-
-Output format (JSON only, no fences):
-{"level":"A","intent":"LIST_RULES","confidence":"high","params":{}}
-{"level":"A","intent":"LOOKUP_CONTACT","confidence":"high","params":{"name":"Hussein"}}
-{"level":"A","intent":"CALENDAR_SEARCH","confidence":"high","params":{"keyword":"dentist"}}
-{"level":"A","intent":"PERSON_LOOKUP","confidence":"high","params":{"name":"Bob"}}
-{"level":"A","intent":"LIST_READ","confidence":"high","params":{"listName":"grocery"}}
-{"level":"A","intent":"REMINDER_READ","confidence":"high","params":{}}
-{"level":"A","intent":"MEMORY_SEARCH","confidence":"high","params":{"topic":"medication"}}
-{"level":"B","intent":"UNKNOWN","confidence":"high","params":{}}
-{"level":"action","intent":"SET_REMINDER","confidence":"high","params":{}}
-{"level":"chat","intent":"UNKNOWN","confidence":"high","params":{}}
-
-Use "low" confidence when the intent is ambiguous.`,
+Output: {"level":"A","intent":"LIST_RULES","confidence":"high","params":{}}
+Use "low" confidence when ambiguous.`,
       messages: [{ role: 'user', content: userText }],
     });
 
@@ -1752,8 +1721,19 @@ Deno.serve(async (req) => {
     // Level B → Claude answers + Path B disclosure always wraps the response
     // Level action → Claude answers, no disclosure (RULE 23 confirm-then-act)
     // Level chat → Claude answers naturally, no disclosure
+    //
+    // Fast pre-filter: obvious conversational messages skip Haiku entirely.
+    // Keeps the universal guarantee (nothing unclassified reaches Claude) while
+    // eliminating the Haiku cost for greetings, thanks, and short follow-ups.
+    const FAST_CHAT_RE = /^\s*(hi|hello|hey|good\s*(morning|afternoon|evening|night)|thanks?|thank\s+you|ok|okay|great|perfect|sounds\s+good|got\s+it|understood|sure|bye|goodbye|see\s+you|later|awesome|nice|cool|wow|really|interesting|haha|lol|not\s+really|no\s+thanks|never\s+mind|that'?s\s+(ok|fine|great|all))\s*[.!?]?\s*$/i;
+    // List-connection queries ("where is my X list connected?", "what list is on my X alert?")
+    // require Claude's LIST_CONNECTION_QUERY action — bypass the classifier entirely.
+    const LIST_CONNECTION_RE = /\b(where\s+is\s+.{0,30}connected|what\s+list\s+is\s+on\s+my|connected\s+to\s+my\s+(alert|rule))\b/i;
     let pathB = false;
-    {
+    if (FAST_CHAT_RE.test(userText) || LIST_CONNECTION_RE.test(userText)) {
+      // Instant pass-through — no Haiku call needed
+      console.log(`[timing] ${elapsed()} | Fast pre-filter: ${FAST_CHAT_RE.test(userText) ? 'chat' : 'list-connection'} — skipping classifier`);
+    } else {
       const apiKeyL2 = Deno.env.get('ANTHROPIC_API_KEY');
       if (apiKeyL2) {
         const clientL2 = new Anthropic({ apiKey: apiKeyL2 });
@@ -1849,7 +1829,7 @@ Deno.serve(async (req) => {
       } else {
         pathB = true; // no API key — treat as Level B
       }
-    }
+    } // end else (not FAST_CHAT_RE)
 
     // ── Step 2 (B4z 2026-05-25): server-side email-alert bypass REMOVED ─────────
     // The old detectEmailAlert → saveAlertRule path was a single-turn write

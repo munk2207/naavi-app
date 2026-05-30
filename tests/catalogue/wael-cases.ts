@@ -36,7 +36,10 @@ export const waelTests: TestCase[] = [
       // Failure means a crash, empty response, or generic-Claude refusal.
       expectTruthy(data?.rawText && data.rawText.length > 10, 'non-empty response');
       // Refusal sniff: "I can't" / "I don't have access" → fail.
-      if (/i (can'?t|cannot|don'?t have access|am unable)/i.test(data?.rawText ?? '')) {
+      // Refusal sniff — exclude Level B disclosure ("I can't verify this from a live source")
+      // which is correct honest behavior, not a refusal.
+      const rawForSniff = (data?.rawText ?? '').replace(/i can'?t verify this from a live source/gi, '');
+      if (/i (can'?t|cannot|don'?t have access|am unable)/i.test(rawForSniff)) {
         throw new Error(`Naavi refused: ${data?.rawText?.slice(0, 200)}`);
       }
     },
@@ -58,7 +61,10 @@ export const waelTests: TestCase[] = [
       expect2xx(status, 'naavi-chat');
       ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
       expectTruthy(data?.rawText && data.rawText.length > 10, 'non-empty response');
-      if (/i (can'?t|cannot|don'?t have access|am unable)/i.test(data?.rawText ?? '')) {
+      // Refusal sniff — exclude Level B disclosure ("I can't verify this from a live source")
+      // which is correct honest behavior, not a refusal.
+      const rawForSniff = (data?.rawText ?? '').replace(/i can'?t verify this from a live source/gi, '');
+      if (/i (can'?t|cannot|don'?t have access|am unable)/i.test(rawForSniff)) {
         throw new Error(`Naavi refused: ${data?.rawText?.slice(0, 200)}`);
       }
     },
@@ -80,7 +86,10 @@ export const waelTests: TestCase[] = [
       expect2xx(status, 'naavi-chat');
       ctx.log(`rawText: ${data?.rawText?.slice(0, 300)}…`);
       expectTruthy(data?.rawText && data.rawText.length > 10, 'non-empty response');
-      if (/i (can'?t|cannot|don'?t have access|am unable)/i.test(data?.rawText ?? '')) {
+      // Refusal sniff — exclude Level B disclosure ("I can't verify this from a live source")
+      // which is correct honest behavior, not a refusal.
+      const rawForSniff = (data?.rawText ?? '').replace(/i can'?t verify this from a live source/gi, '');
+      if (/i (can'?t|cannot|don'?t have access|am unable)/i.test(rawForSniff)) {
         throw new Error(`Naavi refused: ${data?.rawText?.slice(0, 200)}`);
       }
     },
