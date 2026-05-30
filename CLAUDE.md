@@ -351,7 +351,9 @@ Rules that are already covered elsewhere are NOT duplicated here — see CONFIGU
 
 A short-lived 2026-05-16 suspension related to an Expo build error was removed 2026-05-22 (Wael) — run the suite unconditionally before every build. No future "temporary suspension" survives without simultaneously suspending all build commands.
 
-**15b. ⭐ FIREBASE TEST LAB IS A MANDATORY GATE BEFORE EVERY PRODUCTION AAB** (Wael 2026-05-29). After `npm run test:auto` is 100% green and before `eas build --profile production`, a preview APK must be built and submitted to Firebase Test Lab. No exceptions.
+**15b. ⭐ FIREBASE TEST LAB — ON HOLD** (suspended 2026-05-30 by Wael). Firebase Test Lab is suspended until an end-to-end process for reviewing and acting on its findings is established. While suspended, Rule 15b does NOT block AAB builds — Rule 15 (auto-tester 100% green) remains the sole pre-build gate. Do NOT run Firebase Test Lab submissions until Wael explicitly lifts this hold.
+
+**Original rule (restored when hold is lifted): FIREBASE TEST LAB IS A MANDATORY GATE BEFORE EVERY PRODUCTION AAB** (Wael 2026-05-29). After `npm run test:auto` is 100% green and before `eas build --profile production`, a preview APK must be built and submitted to Firebase Test Lab. No exceptions.
 
 **The process is fully automated — do NOT manually upload to Firebase Console:**
 1. Build preview APK: `eas build --profile preview` (from `C:\Users\waela\naavi-mobile`)
