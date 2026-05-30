@@ -378,6 +378,101 @@ export const session2026_05_30Tests: TestCase[] = [
     },
   },
 
+  // ─── LIST_READ handler ───────────────────────────────────────────────────────
+  {
+    id: 'session-2026-05-30.list-read-handler-exported',
+    category: 'session-2026-05-30',
+    description: 'LIST_READ — handleListRead must be exported and in HANDLED_INTENTS.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(INTENT_HANDLERS_PATH, 'utf8');
+      expectTruthy(src.includes('export async function handleListRead'), 'handleListRead must be exported');
+      expectTruthy(src.includes("'LIST_READ'"), "LIST_READ must be in HANDLED_INTENTS");
+    },
+  },
+
+  {
+    id: 'session-2026-05-30.list-read-empty-honest-out',
+    category: 'session-2026-05-30',
+    description: 'LIST_READ — must return honest "no lists" message when lists table is empty.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(INTENT_HANDLERS_PATH, 'utf8');
+      expectTruthy(
+        src.includes("don't have any lists yet"),
+        'handleListRead must return honest-out when no lists exist',
+      );
+    },
+  },
+
+  // ─── REMINDER_READ handler ────────────────────────────────────────────────
+  {
+    id: 'session-2026-05-30.reminder-read-handler-exported',
+    category: 'session-2026-05-30',
+    description: 'REMINDER_READ — handleReminderRead must be exported and in HANDLED_INTENTS.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(INTENT_HANDLERS_PATH, 'utf8');
+      expectTruthy(src.includes('export async function handleReminderRead'), 'handleReminderRead must be exported');
+      expectTruthy(src.includes("'REMINDER_READ'"), "REMINDER_READ must be in HANDLED_INTENTS");
+    },
+  },
+
+  {
+    id: 'session-2026-05-30.reminder-read-empty-honest-out',
+    category: 'session-2026-05-30',
+    description: 'REMINDER_READ — must return honest "no reminders" message when none exist.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(INTENT_HANDLERS_PATH, 'utf8');
+      expectTruthy(
+        src.includes("don't have any upcoming reminders"),
+        'handleReminderRead must return honest-out when no reminders exist',
+      );
+    },
+  },
+
+  {
+    id: 'session-2026-05-30.reminder-read-timestamps-in-est',
+    category: 'session-2026-05-30',
+    description: 'REMINDER_READ — timestamps must be formatted in EST (America/Toronto), never UTC.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(INTENT_HANDLERS_PATH, 'utf8');
+      expectTruthy(
+        src.includes('America/Toronto'),
+        'handleReminderRead must format timestamps in America/Toronto timezone',
+      );
+    },
+  },
+
+  // ─── MEMORY_SEARCH handler ────────────────────────────────────────────────
+  {
+    id: 'session-2026-05-30.memory-search-handler-exported',
+    category: 'session-2026-05-30',
+    description: 'MEMORY_SEARCH — handleMemorySearch must be exported and in HANDLED_INTENTS.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(INTENT_HANDLERS_PATH, 'utf8');
+      expectTruthy(src.includes('export async function handleMemorySearch'), 'handleMemorySearch must be exported');
+      expectTruthy(src.includes("'MEMORY_SEARCH'"), "MEMORY_SEARCH must be in HANDLED_INTENTS");
+    },
+  },
+
+  {
+    id: 'session-2026-05-30.memory-search-honest-out',
+    category: 'session-2026-05-30',
+    description: 'MEMORY_SEARCH — must return honest "nothing saved" message when no memories found.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(INTENT_HANDLERS_PATH, 'utf8');
+      expectTruthy(
+        src.includes("don't have anything saved about"),
+        'handleMemorySearch must return honest-out when no memories match',
+      );
+    },
+  },
+
   {
     id: 'session-2026-05-30.person-lookup-regex-coverage',
     category: 'session-2026-05-30',

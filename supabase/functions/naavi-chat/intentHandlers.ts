@@ -26,6 +26,9 @@ export const HANDLED_INTENTS = new Set([
   'LOOKUP_CONTACT',
   'CALENDAR_SEARCH',
   'PERSON_LOOKUP',
+  'LIST_READ',
+  'REMINDER_READ',
+  'MEMORY_SEARCH',
 ]);
 
 // ── LIST_RULES ────────────────────────────────────────────────────────────────
@@ -325,6 +328,202 @@ export async function handlePersonLookup(
   } catch (err) {
     console.error('[handlePersonLookup] error:', (err as Error)?.message);
     const msg = `I couldn't search your records right now. Please try again.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
+}
+
+// ── LIST_READ ─────────────────────────────────────────────────────────────────
+// "What lists do I have?" / "What's on my grocery list?" — reads the lists table
+// and optionally fetches items from the named list. Always from the DB; never guesses.
+
+export async function handleListRead(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  listName?: string,
+): Promise<HandlerResult> {
+  try {
+    if (listName) {
+      // User asked about a specific list — fetch its items
+      const kw = listName.trim().toLowerCase();
+      const { data: lists } = await supabase
+        .from('lists')
+        .select('id, name, items')
+        .eq('user_id', userId);
+
+      const match = (lists ?? []).find((l: any) =>
+        (l.name ?? '').toLowerCase().includes(kw)
+      );
+
+      if (!match) {
+        const msg = `I don't see a list called "${listName}". Say "what lists do I have" to see your full list.`;
+        return { speech: msg, display: msg, actions: [] };
+      }
+
+      const items: string[] = Array.isArray(match.items) ? match.items : [];
+      if (items.length === 0) {
+        const msg = `Your ${match.name} list is empty.`;
+        return { speech: msg, display: msg, actions: [] };
+      }
+
+      const lines = items.map((it: string, i: number) => `${i + 1}. ${it}`);
+      const intro = `Your ${match.name} list has ${items.length} item${items.length === 1 ? '' : 's'}`;
+      return {
+        speech:  `${intro}: ${lines.join('. ')}.`,
+        display: `${intro}:\n\n${lines.join('\n')}`,
+        actions: [],
+      };
+    }
+
+    // No specific list — return all list names
+    const { data: rows, error } = await supabase
+      .from('lists')
+      .select('name, items')
+      .eq('user_id', userId)
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.error('[handleListRead] DB error:', error.message);
+      const msg = `I couldn't retrieve your lists right now. Please try again.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+
+    const allLists = (rows ?? []) as Array<{ name: string; items: unknown[] }>;
+    if (allLists.length === 0) {
+      const msg = `You don't have any lists yet. Say "create a grocery list" to start one.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+
+    const lines = allLists.map((l, i) => {
+      const count = Array.isArray(l.items) ? l.items.length : 0;
+      return `${i + 1}. ${l.name} (${count} item${count === 1 ? '' : 's'})`;
+    });
+    const intro = `You have ${allLists.length} list${allLists.length === 1 ? '' : 's'}`;
+    return {
+      speech:  `${intro}: ${lines.join('. ')}.`,
+      display: `${intro}:\n\n${lines.join('\n')}`,
+      actions: [],
+    };
+  } catch (err) {
+    console.error('[handleListRead] error:', (err as Error)?.message);
+    const msg = `I couldn't retrieve your lists right now. Please try again.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
+}
+
+// ── REMINDER_READ ─────────────────────────────────────────────────────────────
+// "What reminders do I have?" — reads upcoming (unfired) reminders from the DB.
+// Returns a chronological list. Always from the DB; never guesses.
+
+export async function handleReminderRead(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<HandlerResult> {
+  try {
+    const now = new Date().toISOString();
+    const { data: rows, error } = await supabase
+      .from('reminders')
+      .select('id, title, datetime, is_priority')
+      .eq('user_id', userId)
+      .eq('fired', false)
+      .gte('datetime', now)
+      .order('datetime', { ascending: true })
+      .limit(20);
+
+    if (error) {
+      console.error('[handleReminderRead] DB error:', error.message);
+      const msg = `I couldn't retrieve your reminders right now. Please try again.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+
+    const reminders = (rows ?? []) as Array<{
+      id: string; title: string; datetime: string; is_priority: boolean;
+    }>;
+
+    if (reminders.length === 0) {
+      const msg = `You don't have any upcoming reminders.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+
+    const lines = reminders.map((r, i) => {
+      const dt = new Date(r.datetime);
+      const label = dt.toLocaleString('en-CA', {
+        timeZone: 'America/Toronto',
+        weekday: 'short', month: 'short', day: 'numeric',
+        hour: 'numeric', minute: '2-digit',
+      });
+      const priority = r.is_priority ? ' ⚡' : '';
+      return {
+        speech:  `${i + 1}. ${r.title}, ${label}${priority}`,
+        display: `${i + 1}. **${r.title}** — ${label}${priority}`,
+      };
+    });
+
+    const intro = `You have ${reminders.length} upcoming reminder${reminders.length === 1 ? '' : 's'}`;
+    return {
+      speech:  `${intro}: ${lines.map(l => l.speech).join('. ')}.`,
+      display: `${intro}:\n\n${lines.map(l => l.display).join('\n')}`,
+      actions: [],
+    };
+  } catch (err) {
+    console.error('[handleReminderRead] error:', (err as Error)?.message);
+    const msg = `I couldn't retrieve your reminders right now. Please try again.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
+}
+
+// ── MEMORY_SEARCH ─────────────────────────────────────────────────────────────
+// "What did I tell you about X?" / "What do you remember about X?" —
+// searches knowledge_fragments via global-search (which uses pgvector embeddings).
+// Routes through global-search rather than querying directly so the same
+// ranking logic applies as in PERSON_LOOKUP.
+
+export async function handleMemorySearch(
+  query: string,
+  userId: string,
+  supabaseUrl: string,
+  serviceKey: string,
+): Promise<HandlerResult> {
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/global-search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({ query, user_id: userId, limit: 8, sources: ['knowledge'] }),
+    });
+
+    if (!res.ok) {
+      const msg = `I couldn't search your memories right now. Please try again.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+
+    const data = await res.json();
+    const ranked: Array<{ title: string; snippet: string }> =
+      Array.isArray(data?.ranked) ? data.ranked : [];
+
+    if (ranked.length === 0) {
+      const msg = `I don't have anything saved about "${query}". Say "remember that…" to save something.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+
+    const lines = ranked.slice(0, 6).map((r, i) => {
+      const detail = r.snippet ? r.snippet.slice(0, 100) : r.title;
+      return {
+        speech:  `${i + 1}. ${detail}`,
+        display: `${i + 1}. ${detail}`,
+      };
+    });
+
+    const intro = `Here's what I have saved about "${query}"`;
+    return {
+      speech:  `${intro}: ${lines.map(l => l.speech).join('. ')}.`,
+      display: `${intro}:\n\n${lines.map(l => l.display).join('\n')}`,
+      actions: [],
+    };
+  } catch (err) {
+    console.error('[handleMemorySearch] error:', (err as Error)?.message);
+    const msg = `I couldn't search your memories right now. Please try again.`;
     return { speech: msg, display: msg, actions: [] };
   }
 }

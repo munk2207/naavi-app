@@ -18,7 +18,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.79.0';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { NAAVI_TOOLS, TOOL_NAME_TO_ACTION_TYPE } from '../_shared/anthropic_tools.ts';
 import { computeContactHash, COMMUNITY_PERSON_FIELDS } from '../_shared/community_hash.ts';
-import { HANDLED_INTENTS, handleListRules, handleLookupContact, handleCalendarSearch, handlePersonLookup } from './intentHandlers.ts';
+import { HANDLED_INTENTS, handleListRules, handleLookupContact, handleCalendarSearch, handlePersonLookup, handleListRead, handleReminderRead, handleMemorySearch } from './intentHandlers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1381,7 +1381,7 @@ async function saveAlertRule(
 //   "when is my next X", "how far/long to X", "what did I spend on X",
 //   "what time is my X", "is X on my calendar"
 const LAYER2_CANDIDATE_RE =
-  /\b(list|show)\s+(me\s+)?my\s+(alerts?|rules?|notifications?)\b|\bwhat\s+(alerts?|rules?|notifications?)\s+do\s+i\s+have\b|\bwhat\s+are\s+my\s+(alerts?|rules?|notifications?)\b|\bdo\s+i\s+have\s+(a[n]?\s+)?\w[\w\s]{0,30}(appointment|meeting|event)\b|\b(find|look\s+up)\s+(?!all\b|any\b|my\b|the\b|some\b|more\b|out\b|a\b|an\b|this\b|that\b)[A-Za-z][\w\s]{1,30}(in\s+my\s+contacts|contact)?\b|\bwhen\s+is\s+my\s+(next\s+)?\w[\w\s]{0,20}\b|\bhow\s+(far|long|much\s+time)\b.{0,40}\b(to|from|until)\b|\bwhat\s+(time|day|date)\s+is\s+my\b|\bwhat\s+did\s+i\s+(spend|pay|buy|order)\b|\bis\s+.{0,30}(on\s+my\s+calendar|in\s+my\s+contacts)\b|\bwhat\s+do\s+(we|you)\s+(have|know)\s+(about|on)\s+[A-Za-z]\w*\b|\btell\s+me\s+(everything\s+)?about\s+[A-Za-z]\w*\b|\bwho\s+is\s+[A-Za-z]\w[\w\s]{0,30}\b|\bdo\s+you\s+know\s+anything\s+about\s+[A-Za-z]\w*\b/i;
+  /\b(list|show)\s+(me\s+)?my\s+(alerts?|rules?|notifications?)\b|\bwhat\s+(alerts?|rules?|notifications?)\s+do\s+i\s+have\b|\bwhat\s+are\s+my\s+(alerts?|rules?|notifications?)\b|\bdo\s+i\s+have\s+(a[n]?\s+)?\w[\w\s]{0,30}(appointment|meeting|event)\b|\b(find|look\s+up)\s+(?!all\b|any\b|my\b|the\b|some\b|more\b|out\b|a\b|an\b|this\b|that\b)[A-Za-z][\w\s]{1,30}(in\s+my\s+contacts|contact)?\b|\bwhen\s+is\s+my\s+(next\s+)?\w[\w\s]{0,20}\b|\bhow\s+(far|long|much\s+time)\b.{0,40}\b(to|from|until)\b|\bwhat\s+(time|day|date)\s+is\s+my\b|\bwhat\s+did\s+i\s+(spend|pay|buy|order)\b|\bis\s+.{0,30}(on\s+my\s+calendar|in\s+my\s+contacts)\b|\bwhat\s+do\s+(we|you)\s+(have|know)\s+(about|on)\s+[A-Za-z]\w*\b|\btell\s+me\s+(everything\s+)?about\s+[A-Za-z]\w*\b|\bwho\s+is\s+[A-Za-z]\w[\w\s]{0,30}\b|\bdo\s+you\s+know\s+anything\s+about\s+[A-Za-z]\w*\b|\bwhat\s+(lists?|list\s+do)\s+(do\s+i\s+have|i\s+have|have)\b|\bwhat('?s|\s+is)\s+on\s+my\s+\w[\w\s]{0,20}list\b|\bshow\s+(me\s+)?my\s+(grocery|shopping|to.?do|todo|\w+)\s+list\b|\bwhat\s+reminders?\s+do\s+i\s+have\b|\bshow\s+(me\s+)?my\s+reminders?\b|\bwhat\s+am\s+i\s+(being\s+)?reminded\b|\bwhat\s+did\s+i\s+(tell|save|remember|ask)\s+(you|naavi)?\s*(about|to\s+remember)?\b|\bwhat\s+do\s+you\s+remember\s+about\b/i;
 
 type IntentClassification = {
   intent: string;
@@ -1405,6 +1405,9 @@ Classify the user's message into exactly one intent:
 - LOOKUP_CONTACT: user wants to find a contact's phone/email (narrow contact card lookup)
 - CALENDAR_SEARCH: user wants to find a specific calendar event by keyword (e.g. "do I have a dentist appointment") — NOT a full calendar read
 - PERSON_LOOKUP: user wants to know everything Naavi has about a person or topic across all sources (contacts, calendar, emails, memories). E.g. "what do we have about Hussein", "tell me about Bob", "who is Sarah", "what's John's number", "do you know anything about Dr. Smith"
+- LIST_READ: user wants to see their lists or the contents of a specific list. E.g. "what lists do I have", "what's on my grocery list", "show me my shopping list"
+- REMINDER_READ: user wants to see their upcoming reminders. E.g. "what reminders do I have", "show me my reminders", "what am I being reminded of"
+- MEMORY_SEARCH: user wants to find something they told Naavi to remember. E.g. "what did I tell you about my medication", "what do you remember about my doctor", "what did I save about X"
 - UNKNOWN: anything else
 
 For CALENDAR_SEARCH, extract ONLY the core subject noun (strip "appointment", "meeting", etc.).
@@ -1415,11 +1418,22 @@ For PERSON_LOOKUP and LOOKUP_CONTACT, extract the name/topic into params.name.
   "what do we have about Hussein?" → name: "Hussein"
   "tell me about Dr. Smith" → name: "Dr. Smith"
 
+For LIST_READ, extract the list name if specified into params.listName (omit if asking for all lists).
+  "what's on my grocery list?" → listName: "grocery"
+  "what lists do I have?" → (no listName)
+
+For MEMORY_SEARCH, extract the topic into params.topic.
+  "what did I tell you about my medication?" → topic: "medication"
+
 Output format examples (JSON only, no fences):
 {"intent":"LIST_RULES","confidence":"high","params":{}}
 {"intent":"LOOKUP_CONTACT","confidence":"high","params":{"name":"Bob Smith"}}
 {"intent":"CALENDAR_SEARCH","confidence":"high","params":{"keyword":"dentist"}}
 {"intent":"PERSON_LOOKUP","confidence":"high","params":{"name":"Hussein"}}
+{"intent":"LIST_READ","confidence":"high","params":{"listName":"grocery"}}
+{"intent":"LIST_READ","confidence":"high","params":{}}
+{"intent":"REMINDER_READ","confidence":"high","params":{}}
+{"intent":"MEMORY_SEARCH","confidence":"high","params":{"topic":"medication"}}
 {"intent":"UNKNOWN","confidence":"high","params":{}}
 
 Use "low" confidence when the intent is ambiguous.`,
@@ -1621,6 +1635,9 @@ Deno.serve(async (req) => {
             : classification.intent === 'LOOKUP_CONTACT'  ? `find a contact named "${classification.params.name ?? ''}"`
             : classification.intent === 'CALENDAR_SEARCH' ? `find "${classification.params.keyword ?? ''}" on your calendar`
             : classification.intent === 'PERSON_LOOKUP'   ? `search everything I have about "${classification.params.name ?? ''}"`
+            : classification.intent === 'LIST_READ'       ? (classification.params.listName ? `show your ${classification.params.listName} list` : 'show your lists')
+            : classification.intent === 'REMINDER_READ'   ? 'show your upcoming reminders'
+            : classification.intent === 'MEMORY_SEARCH'   ? `search your saved memories about "${classification.params.topic ?? ''}"`
             : 'help with that';
             return speechResponse(`I think you're asking me to ${intentDesc} — is that right?`);
           }
@@ -1656,6 +1673,32 @@ Deno.serve(async (req) => {
               const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
               const result = await handlePersonLookup(classification.params.name, userId, supabaseUrl, serviceKey);
               console.log(`[timing] ${elapsed()} | Layer2 PERSON_LOOKUP deterministic`);
+              return jsonResponse({
+                rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
+              });
+            }
+
+            if (classification.intent === 'LIST_READ') {
+              const result = await handleListRead(supabase, userId, classification.params.listName);
+              console.log(`[timing] ${elapsed()} | Layer2 LIST_READ deterministic`);
+              return jsonResponse({
+                rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
+              });
+            }
+
+            if (classification.intent === 'REMINDER_READ') {
+              const result = await handleReminderRead(supabase, userId);
+              console.log(`[timing] ${elapsed()} | Layer2 REMINDER_READ deterministic`);
+              return jsonResponse({
+                rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
+              });
+            }
+
+            if (classification.intent === 'MEMORY_SEARCH' && classification.params.topic) {
+              const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+              const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+              const result = await handleMemorySearch(classification.params.topic, userId, supabaseUrl, serviceKey);
+              console.log(`[timing] ${elapsed()} | Layer2 MEMORY_SEARCH deterministic`);
               return jsonResponse({
                 rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }),
               });
