@@ -447,6 +447,48 @@ export const session2026_05_29Tests: TestCase[] = [
     },
   },
 
+  // ─── B-NEW-6: contacts adapter stopwords + organizations field ───────────────
+  {
+    id: 'session-2026-05-29.b-new-6-stopwords-include-search-verbs',
+    category: 'session-2026-05-29',
+    description:
+      'B-NEW-6 — CONTACT_STOPWORDS must include search-intent verbs (check, find, list, ' +
+      'show, etc.). Without them "check RBC in my contact list" tokenises to {check,rbc,list} ' +
+      'and the AND-match fails because "rbc" does not contain "check" or "list".',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(CONTACTS_ADAPTER_PATH, 'utf8');
+      expectTruthy(
+        src.includes("'check'") && src.includes("'find'") && src.includes("'list'"),
+        'CONTACT_STOPWORDS must include check, find, and list — B-NEW-6 fix',
+      );
+      expectTruthy(
+        src.includes("'show'") && src.includes("'search'"),
+        'CONTACT_STOPWORDS must include show and search — B-NEW-6 fix',
+      );
+    },
+  },
+  {
+    id: 'session-2026-05-29.b-new-6-organizations-in-person-fields',
+    category: 'session-2026-05-29',
+    description:
+      'B-NEW-6 — fetchConnections personFields must include "organizations" so contacts ' +
+      'like "RBC" (company = "Royal Bank") are findable by their company name.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(CONTACTS_ADAPTER_PATH, 'utf8');
+      expectTruthy(
+        src.includes("'names,emailAddresses,phoneNumbers,addresses,memberships,organizations'") ||
+        src.includes('"names,emailAddresses,phoneNumbers,addresses,memberships,organizations"'),
+        'fetchConnections personFields must include organizations — B-NEW-6 fix',
+      );
+      expectTruthy(
+        src.includes('orgName') && src.includes('organizations?.[0]?.name'),
+        'contacts adapter scoring must read org name from organizations field — B-NEW-6 fix',
+      );
+    },
+  },
+
   // ─── B6f: contacts adapter AND-logic for multi-token name queries ──────────
   {
     id: 'session-2026-05-29.b6f-contacts-name-match-and-logic-for-multi-token',

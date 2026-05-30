@@ -54,6 +54,11 @@ const CONTACT_STOPWORDS = new Set<string>([
   'name', 'named', 'called', 'contact', 'contacts',
   'phone', 'number', 'numbers', 'email', 'emails', 'address', 'addresses',
   'with', 'for', 'about', 'on', 'in', 'from', 'to', 'of',
+  // Search-intent verbs and navigational words — never part of a contact name.
+  // Without these, "check RBC in my contact list" tokenises to {check,rbc,list}
+  // and the ALL-token match fails because "rbc" doesn't contain "check".
+  'check', 'find', 'search', 'show', 'tell', 'get', 'look', 'give', 'see',
+  'list', 'who', 'what', 'where', 'when', 'how', 'can', 'could', 'please',
 ]);
 
 // Tokenize variants into search tokens — words ≥ 2 chars, not stopwords.
@@ -72,11 +77,12 @@ function tokensFromVariants(variants: string[]): Set<string> {
   return out;
 }
 
-type PersonName       = { displayName?: string; givenName?: string; familyName?: string };
-type PersonEmail      = { value?: string; type?: string };
-type PersonPhone      = { value?: string; type?: string };
-type PersonAddress    = { formattedValue?: string; postalCode?: string; city?: string; type?: string };
-type PersonMembership = { contactGroupMembership?: { contactGroupId?: string; contactGroupResourceName?: string } };
+type PersonName         = { displayName?: string; givenName?: string; familyName?: string };
+type PersonEmail        = { value?: string; type?: string };
+type PersonPhone        = { value?: string; type?: string };
+type PersonAddress      = { formattedValue?: string; postalCode?: string; city?: string; type?: string };
+type PersonMembership   = { contactGroupMembership?: { contactGroupId?: string; contactGroupResourceName?: string } };
+type PersonOrganization = { name?: string; title?: string };
 type Person = {
   resourceName?: string;
   names?: PersonName[];
@@ -84,6 +90,7 @@ type Person = {
   phoneNumbers?: PersonPhone[];
   addresses?: PersonAddress[];
   memberships?: PersonMembership[];
+  organizations?: PersonOrganization[];
 };
 
 function normalizePhone(s: string): string {
@@ -135,7 +142,7 @@ async function fetchConnections(accessToken: string): Promise<Person[]> {
   let pageToken: string | undefined = undefined;
   while (out.length < MAX_CONTACTS_PER_SOURCE) {
     const url = new URL(PEOPLE_CONNECTIONS_API);
-    url.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers,addresses,memberships');
+    url.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers,addresses,memberships,organizations');
     url.searchParams.set('pageSize', '1000');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
     try {
@@ -563,6 +570,8 @@ export const contactsAdapter: SearchAdapter = {
     for (const p of all) {
       const displayName = p.names?.[0]?.displayName ?? '';
       const nameLower   = displayName.toLowerCase();
+      // Organization name (company field) — e.g. "RBC" contact with company "Royal Bank".
+      const orgName     = (p.organizations?.[0]?.name ?? '').toLowerCase();
 
       const emails = (p.emailAddresses ?? [])
         .map(e => e.value ?? '')
@@ -580,17 +589,27 @@ export const contactsAdapter: SearchAdapter = {
 
       let score = 0;
 
-      // Name match — three-tier logic:
+      // Name match — three-tier logic applied to both display name AND org name:
       // 1. Whole-variant match: full phrase (e.g. "sarah davidson") must appear
       //    in the name. Most precise — checked first.
       // 2. Multi-token AND: all tokens must appear ("sarah" AND "davidson").
       //    Prevents "sarah davidson" matching "sarah james" on "sarah" alone.
       // 3. Single-token OR: any token matches (legacy single-name queries).
       const nameTokenMatch = (() => {
-        if (variants.some(v => v.length > 0 && nameLower.includes(v))) return true;
+        const inDisplay = (() => {
+          if (variants.some(v => v.length > 0 && nameLower.includes(v))) return true;
+          if (tokens.size === 0) return false;
+          if (tokens.size >= 2) return [...tokens].every(t => nameLower.includes(t));
+          return [...tokens].some(t => nameLower.includes(t));
+        })();
+        if (inDisplay) return true;
+        // Org name fallback — same logic. Lets "Royal Bank" find the "RBC" contact
+        // whose company field contains "Royal Bank".
+        if (!orgName) return false;
+        if (variants.some(v => v.length > 0 && orgName.includes(v))) return true;
         if (tokens.size === 0) return false;
-        if (tokens.size >= 2) return [...tokens].every(t => nameLower.includes(t));
-        return [...tokens].some(t => nameLower.includes(t));
+        if (tokens.size >= 2) return [...tokens].every(t => orgName.includes(t));
+        return [...tokens].some(t => orgName.includes(t));
       })();
       // Email match — full-variant always works; token-match disabled for multi-token
       // queries ("sarah james") to prevent "sarah@gmail.com" matching on "sarah" alone.
@@ -651,7 +670,10 @@ export const contactsAdapter: SearchAdapter = {
       const primaryEmail = emails[0];
       const primaryPhone = phones[0];
       const primaryAddress = addresses[0]?.formattedValue ?? null;
-      const snippetParts = [primaryEmail, primaryPhone, primaryAddress].filter(Boolean);
+      // Include org name in snippet when it differs from the display name
+      // so Claude can read "RBC — Royal Bank · +1 800-769-2511".
+      const orgDisplay = orgName && !nameLower.includes(orgName) ? p.organizations?.[0]?.name : null;
+      const snippetParts = [orgDisplay, primaryEmail, primaryPhone, primaryAddress].filter(Boolean);
 
       // Give each contact a tap target: tel: to dial, fall back to mailto:.
       // The mobile UI uses Linking.openURL(hit.url), which honors both schemes.
