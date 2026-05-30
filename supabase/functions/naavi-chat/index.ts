@@ -1728,7 +1728,7 @@ Deno.serve(async (req) => {
     const FAST_CHAT_RE = /^\s*(hi|hello|hey|good\s*(morning|afternoon|evening|night)|thanks?|thank\s+you|ok|okay|great|perfect|sounds\s+good|got\s+it|understood|sure|bye|goodbye|see\s+you|later|awesome|nice|cool|wow|really|interesting|haha|lol|not\s+really|no\s+thanks|never\s+mind|that'?s\s+(ok|fine|great|all))\s*[.!?]?\s*$/i;
     // List-connection queries ("where is my X list connected?", "what list is on my X alert?")
     // require Claude's LIST_CONNECTION_QUERY action — bypass the classifier entirely.
-    const LIST_CONNECTION_RE = /\b(where\s+is\s+.{0,30}connected|what\s+list\s+is\s+on\s+my|connected\s+to\s+my\s+(alert|rule))\b/i;
+    const LIST_CONNECTION_RE = /\b(where\s+is\s+.{0,30}connected|what\s+list(s)?\s+is\s+on\s+my|what\s+list(s)?\s+are\s+on\s+.{0,40}|connected\s+to\s+my\s+(alert|rule))\b/i;
     let pathB = false;
     if (FAST_CHAT_RE.test(userText) || LIST_CONNECTION_RE.test(userText)) {
       // Instant pass-through — no Haiku call needed
