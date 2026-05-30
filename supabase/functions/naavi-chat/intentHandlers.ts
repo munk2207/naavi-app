@@ -42,7 +42,7 @@ export async function handleListRules(
 ): Promise<HandlerResult> {
   const { data: rows, error } = await supabase
     .from('action_rules')
-    .select('id, label, trigger_type, trigger_config, enabled')
+    .select('id, label, trigger_type, trigger_config, enabled, one_shot, last_fired_at')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(100);
@@ -62,6 +62,8 @@ export async function handleListRules(
     trigger_type: string;
     trigger_config: Record<string, unknown> | null;
     enabled: boolean;
+    one_shot: boolean;
+    last_fired_at: string | null;
   }>;
 
   if (allRows.length === 0) {
@@ -73,7 +75,8 @@ export async function handleListRules(
     const place = (r.trigger_config as any)?.place_name;
     const label = r.label || `${r.trigger_type} alert`;
     const where = place && !label.includes(place) ? ` (at ${place})` : '';
-    const status = r.enabled ? '' : ' — disabled';
+    const isExpired = r.one_shot && r.last_fired_at != null;
+    const status = isExpired ? ' — expired' : (!r.enabled ? ' — disabled' : '');
     return `${i + 1}. ${label}${where}${status}`;
   });
 

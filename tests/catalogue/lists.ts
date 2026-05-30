@@ -52,7 +52,9 @@ export const listsTests: TestCase[] = [
   {
     id: 'lists.read',
     category: 'lists',
-    description: 'TEST_PLAN H3 — "What is on my shopping list?" emits LIST_READ',
+    description: 'TEST_PLAN H3 — "What is on my shopping list?" returns a non-empty response. ' +
+      'Layer 2 now intercepts this query and answers deterministically from the lists table ' +
+      '(no LIST_READ action emitted — Claude is not called for the answer).',
     timeoutMs: 30_000,
     async run(ctx) {
       const { status, data } = await adapters.naaviChat(ctx, {
@@ -60,8 +62,10 @@ export const listsTests: TestCase[] = [
         max_tokens: 512,
       });
       expect2xx(status, 'naavi-chat');
-      const action = findActionInRawText(data?.rawText ?? '', 'LIST_READ');
-      expectTruthy(action, 'LIST_READ action');
+      expectTruthy(
+        data?.rawText && data.rawText.length > 10,
+        'Layer 2 LIST_READ must return a non-empty speech response',
+      );
     },
   },
   {
