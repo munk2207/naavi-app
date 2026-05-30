@@ -1377,7 +1377,7 @@ export default function HomeScreen() {
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         enabled={true}
-        keyboardVerticalOffset={90}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         {/* V57.9.7 — stale-auth recovery banner. Shown when we have a
             cached user_id (prior sign-in on this device) but no current
