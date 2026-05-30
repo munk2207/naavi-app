@@ -320,4 +320,85 @@ export const session2026_05_30Tests: TestCase[] = [
       );
     },
   },
+
+  // ─── PERSON_LOOKUP handler ────────────────────────────────────────────────
+  {
+    id: 'session-2026-05-30.person-lookup-handler-exported',
+    category: 'session-2026-05-30',
+    description:
+      'PERSON_LOOKUP — handlePersonLookup must be exported from intentHandlers.ts ' +
+      'and PERSON_LOOKUP must be in HANDLED_INTENTS.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(INTENT_HANDLERS_PATH, 'utf8');
+      expectTruthy(
+        src.includes('export async function handlePersonLookup'),
+        'handlePersonLookup must be exported from intentHandlers.ts',
+      );
+      expectTruthy(
+        src.includes("'PERSON_LOOKUP'"),
+        "PERSON_LOOKUP must be in HANDLED_INTENTS",
+      );
+    },
+  },
+
+  {
+    id: 'session-2026-05-30.person-lookup-honest-out',
+    category: 'session-2026-05-30',
+    description:
+      'PERSON_LOOKUP — handlePersonLookup must return an honest "not found" message ' +
+      'when global-search returns no ranked results.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(INTENT_HANDLERS_PATH, 'utf8');
+      expectTruthy(
+        src.includes("didn't find anything about"),
+        'handlePersonLookup must return honest-out when global-search returns no results',
+      );
+    },
+  },
+
+  {
+    id: 'session-2026-05-30.person-lookup-wired-in-layer2',
+    category: 'session-2026-05-30',
+    description:
+      'PERSON_LOOKUP — Layer 2 block in naavi-chat/index.ts must route PERSON_LOOKUP ' +
+      'to handlePersonLookup and pass query + userId + supabaseUrl + serviceKey.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      expectTruthy(
+        src.includes("classification.intent === 'PERSON_LOOKUP'"),
+        "Layer 2 must route PERSON_LOOKUP intent",
+      );
+      expectTruthy(
+        src.includes('handlePersonLookup('),
+        'Layer 2 must call handlePersonLookup',
+      );
+    },
+  },
+
+  {
+    id: 'session-2026-05-30.person-lookup-regex-coverage',
+    category: 'session-2026-05-30',
+    description:
+      'PERSON_LOOKUP — LAYER2_CANDIDATE_RE must catch "what do we have about X", ' +
+      '"tell me about X", and "who is X" query shapes.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      expectTruthy(
+        src.includes('what\\\\s+do\\\\s+(we|you)') || src.includes('what\\s+do\\s+(we|you)'),
+        'LAYER2_CANDIDATE_RE must catch "what do we/you have about X" pattern',
+      );
+      expectTruthy(
+        src.includes('tell\\\\s+me') || src.includes('tell\\s+me'),
+        'LAYER2_CANDIDATE_RE must catch "tell me about X" pattern',
+      );
+      expectTruthy(
+        src.includes('who\\\\s+is') || src.includes('who\\s+is'),
+        'LAYER2_CANDIDATE_RE must catch "who is X" pattern',
+      );
+    },
+  },
 ];

@@ -25,6 +25,7 @@ export const HANDLED_INTENTS = new Set([
   'LIST_RULES',
   'LOOKUP_CONTACT',
   'CALENDAR_SEARCH',
+  'PERSON_LOOKUP',
 ]);
 
 // ── LIST_RULES ────────────────────────────────────────────────────────────────
@@ -257,4 +258,73 @@ export async function handleCalendarSearch(
     display: `${intro}:\n\n${lines.map(l => l.display).join('\n')}`,
     actions: [],
   };
+}
+
+// ── PERSON_LOOKUP ─────────────────────────────────────────────────────────────
+// "What do we have about Hussein?" — calls global-search with the entity name
+// and formats the ranked results. Always fetches from real sources regardless
+// of conversation context, so the answer is the same every time.
+//
+// supabaseUrl + serviceKey are passed in from index.ts so this file stays
+// free of Deno.env reads (easier to test).
+
+export async function handlePersonLookup(
+  query: string,
+  userId: string,
+  supabaseUrl: string,
+  serviceKey: string,
+): Promise<HandlerResult> {
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/global-search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({ query, user_id: userId, limit: 10 }),
+    });
+
+    if (!res.ok) {
+      console.warn('[handlePersonLookup] global-search returned', res.status);
+      const msg = `I couldn't search your records right now. Please try again.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+
+    const data = await res.json();
+    const ranked: Array<{ title: string; snippet: string; source: string; label: string }> =
+      Array.isArray(data?.ranked) ? data.ranked : [];
+
+    if (ranked.length === 0) {
+      const msg = `I didn't find anything about "${query}" in your contacts, calendar, emails, or saved memories.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+
+    // Group by source for a readable summary.
+    const bySource = new Map<string, string[]>();
+    for (const r of ranked.slice(0, 8)) {
+      const src = r.label || r.source || 'Records';
+      if (!bySource.has(src)) bySource.set(src, []);
+      const detail = r.snippet
+        ? `${r.title} — ${r.snippet.slice(0, 80)}`
+        : r.title;
+      bySource.get(src)!.push(detail);
+    }
+
+    const sections = [...bySource.entries()].map(([src, items]) => ({
+      src,
+      speech:  `${src}: ${items.join(', ')}`,
+      display: `**${src}**\n${items.map(i => `- ${i}`).join('\n')}`,
+    }));
+
+    const intro = `Here's what I found about "${query}"`;
+    return {
+      speech:  `${intro}. ${sections.map(s => s.speech).join('. ')}.`,
+      display: `${intro}:\n\n${sections.map(s => s.display).join('\n\n')}`,
+      actions: [],
+    };
+  } catch (err) {
+    console.error('[handlePersonLookup] error:', (err as Error)?.message);
+    const msg = `I couldn't search your records right now. Please try again.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
 }
