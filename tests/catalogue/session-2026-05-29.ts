@@ -473,7 +473,8 @@ export const session2026_05_29Tests: TestCase[] = [
     category: 'session-2026-05-29',
     description:
       'B-NEW-6 — fetchConnections personFields must include "organizations" so contacts ' +
-      'like "RBC" (company = "Royal Bank") are findable by their company name.',
+      'like "RBC" (company = "Royal Bank") are findable by company name. Also confirms ' +
+      'the combined name+org field so "Sara from Amazon" matches name="Sara" org="Amazon".',
     timeoutMs: 1_000,
     async run() {
       const src = readFileSync(CONTACTS_ADAPTER_PATH, 'utf8');
@@ -485,6 +486,11 @@ export const session2026_05_29Tests: TestCase[] = [
       expectTruthy(
         src.includes('orgName') && src.includes('organizations?.[0]?.name'),
         'contacts adapter scoring must read org name from organizations field — B-NEW-6 fix',
+      );
+      // Combined field check: name+org merged so cross-field AND queries work.
+      expectTruthy(
+        src.includes('`${nameLower} ${orgName}`'),
+        'nameTokenMatch must combine nameLower and orgName so "Sara from Amazon" matches across fields',
       );
     },
   },

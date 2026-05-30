@@ -596,20 +596,17 @@ export const contactsAdapter: SearchAdapter = {
       //    Prevents "sarah davidson" matching "sarah james" on "sarah" alone.
       // 3. Single-token OR: any token matches (legacy single-name queries).
       const nameTokenMatch = (() => {
-        const inDisplay = (() => {
-          if (variants.some(v => v.length > 0 && nameLower.includes(v))) return true;
-          if (tokens.size === 0) return false;
-          if (tokens.size >= 2) return [...tokens].every(t => nameLower.includes(t));
-          return [...tokens].some(t => nameLower.includes(t));
-        })();
-        if (inDisplay) return true;
-        // Org name fallback — same logic. Lets "Royal Bank" find the "RBC" contact
-        // whose company field contains "Royal Bank".
-        if (!orgName) return false;
-        if (variants.some(v => v.length > 0 && orgName.includes(v))) return true;
         if (tokens.size === 0) return false;
-        if (tokens.size >= 2) return [...tokens].every(t => orgName.includes(t));
-        return [...tokens].some(t => orgName.includes(t));
+        // Combined field: name + org so "Sara from Amazon" matches a contact
+        // named "Sara" with organization "Amazon" — tokens split across fields.
+        const combined = orgName ? `${nameLower} ${orgName}` : nameLower;
+        // Tier 1 — whole-variant match against combined field.
+        if (variants.some(v => v.length > 0 && combined.includes(v))) return true;
+        // Tier 2 — AND: all tokens must appear somewhere in combined field.
+        // Prevents "Sarah James" matching "Sarah Davidson" on "Sarah" alone.
+        if (tokens.size >= 2) return [...tokens].every(t => combined.includes(t));
+        // Tier 3 — single-token OR.
+        return [...tokens].some(t => combined.includes(t));
       })();
       // Email match — full-variant always works; token-match disabled for multi-token
       // queries ("sarah james") to prevent "sarah@gmail.com" matching on "sarah" alone.
