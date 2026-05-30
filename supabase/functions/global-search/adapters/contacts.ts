@@ -207,6 +207,55 @@ function getAdminSupabase(): ReturnType<typeof createClient> {
   return _adminSupabase;
 }
 
+// Send a bug alert to bugs@mynaavi.com via send-user-email (fire-and-forget).
+// Uses the triggering user's Gmail OAuth so no separate email provider needed.
+async function sendHashAnomalyAlert(
+  userId: string,
+  checked: number,
+  updated: number,
+  skipped: number,
+): Promise<void> {
+  try {
+    const now = new Date().toLocaleString('en-CA', { timeZone: 'America/Toronto' });
+    const body = [
+      `⚠️  Community hash function anomaly detected`,
+      ``,
+      `Time      : ${now} EST`,
+      `User ID   : ${userId}`,
+      `Checked   : ${checked}`,
+      `Updated   : ${updated}  (hash mismatch → row replaced)`,
+      `Skipped   : ${skipped}  (hash matched → no write)`,
+      ``,
+      `ALL ${checked} contacts were replaced in a single sync cycle.`,
+      `This means the hash function is producing different values every run,`,
+      `which suggests a field mismatch or non-deterministic input.`,
+      ``,
+      `Check: COMMUNITY_PERSON_FIELDS in _shared/community_hash.ts`,
+      `must match the personFields used at write time and at refresh time.`,
+    ].join('\n');
+
+    await fetch(
+      `${Deno.env.get('SUPABASE_URL')}/functions/v1/send-user-email`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          to: 'bugs@mynaavi.com',
+          subject: `⚠️ Community hash anomaly: ${updated}/${checked} replaced for user ${userId.slice(0, 8)}`,
+          body,
+        }),
+      },
+    );
+    console.log('[contacts-adapter] hash anomaly alert sent to bugs@mynaavi.com');
+  } catch (e: any) {
+    console.error('[contacts-adapter] failed to send hash anomaly alert:', e?.message);
+  }
+}
+
 // Write one community member to the DB. No-op if displayName is missing.
 async function backfillCommunityMember(userId: string, p: Person): Promise<void> {
   if (!p.resourceName || !p.names?.[0]?.displayName) return;
@@ -328,15 +377,46 @@ export const contactsAdapter: SearchAdapter = {
               });
             }
             if (communityHits.length > 0) {
-              // Backfill any community members missing from the DB (synchronous —
-              // we're still in the request so writes will complete before we return).
-              const dbResourceNames = new Set((communityRows ?? []).map(r => r.resource_name));
-              const toBackfill = communityContacts.filter(
-                p => p.resourceName && !dbResourceNames.has(p.resourceName),
+              // Sync community_members DB: hash comparison + backfill.
+              // - New contacts (not in DB): always write.
+              // - Existing contacts: compare hash; skip if match, replace if mismatch.
+              // Track checked/updated/skipped to detect broken hash function.
+              const dbMap = new Map(
+                (communityRows ?? []).map(r => [r.resource_name, r.contact_hash as string]),
               );
-              if (toBackfill.length > 0) {
-                console.log(`[contacts-adapter] backfilling ${toBackfill.length} missing community member(s)`);
-                await Promise.all(toBackfill.map(p => backfillCommunityMember(ctx.userId, p)));
+              let syncChecked = 0; let syncUpdated = 0; let syncSkipped = 0;
+              const syncTasks: Promise<void>[] = [];
+
+              for (const p of communityContacts) {
+                if (!p.resourceName) continue;
+                const existingHash = dbMap.get(p.resourceName);
+                if (existingHash !== undefined) {
+                  // Existing row — compare hash.
+                  syncChecked++;
+                  const contactData = {
+                    names: p.names ?? [], emailAddresses: p.emailAddresses ?? [], phoneNumbers: p.phoneNumbers ?? [],
+                  };
+                  const freshHash = await computeContactHash(contactData);
+                  if (freshHash === existingHash) {
+                    syncSkipped++;
+                    continue; // No change — skip write.
+                  }
+                  syncUpdated++;
+                  syncTasks.push(backfillCommunityMember(ctx.userId, p));
+                } else {
+                  // New contact — write unconditionally.
+                  syncTasks.push(backfillCommunityMember(ctx.userId, p));
+                }
+              }
+
+              if (syncTasks.length > 0) await Promise.all(syncTasks);
+              console.log(`[contacts-adapter] community sync: ${syncChecked} checked, ${syncUpdated} updated, ${syncSkipped} skipped`);
+
+              // Anomaly check: if ALL existing contacts were replaced, the hash
+              // function may be broken (non-deterministic or wrong field set).
+              if (syncChecked >= 2 && syncUpdated === syncChecked && syncSkipped === 0) {
+                console.error(`[contacts-adapter] HASH ANOMALY: ${syncUpdated}/${syncChecked} replaced — alerting bugs@mynaavi.com`);
+                sendHashAnomalyAlert(ctx.userId, syncChecked, syncUpdated, syncSkipped).catch(() => {});
               }
               communityHits.sort((a, b) => (a.title ?? '').localeCompare(b.title ?? ''));
               return communityHits.slice(0, ctx.limit);
