@@ -1613,6 +1613,77 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── Step 1.4: Low-confidence intent confirmation resolver ─────────────────────
+    // When the previous assistant turn asked "I think you're asking me to X — is that
+    // right?" (low-confidence Layer 2), and Robert replies with yes or no, execute
+    // or drop the pending intent without calling Claude.
+    {
+      const YES_RE = /^\s*(yes|yeah|yep|yup|correct|right|confirm|go ahead|do it|please|ok|okay|sure|absolutely|definitely|affirmative)\s*[.!]?\s*$/i;
+      const NO_RE  = /^\s*(no|nope|nah|cancel|stop|never mind|nevermind|forget it|don't)\s*[.!]?\s*$/i;
+
+      if (YES_RE.test(userText) || NO_RE.test(userText)) {
+        const lastAssistant = [...(messages ?? [])]
+          .reverse()
+          .find((m: any) => m.role === 'assistant');
+        const lastDisplay: string = (() => {
+          const c = lastAssistant?.content;
+          if (typeof c === 'string') return c;
+          if (Array.isArray(c)) return c.filter((b: any) => b.type === 'text').map((b: any) => String(b.text ?? '')).join('');
+          // Also check rawText if the last message is the structured naavi format
+          return '';
+        })();
+
+        // Try to extract PENDING_INTENT from the display field
+        const markerMatch = lastDisplay.match(/<!--PENDING_INTENT:(\{.*?\})-->/s);
+        if (markerMatch) {
+          if (NO_RE.test(userText)) {
+            const msg = `No problem — just let me know what you need.`;
+            console.log(`[timing] ${elapsed()} | Step1.4 — low-confidence intent cancelled`);
+            return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+          }
+
+          try {
+            const pending: IntentClassification = JSON.parse(markerMatch[1]);
+            console.log(`[timing] ${elapsed()} | Step1.4 — executing confirmed intent: ${pending.intent}`);
+
+            if (pending.intent === 'LIST_RULES') {
+              const result = await handleListRules(supabase, userId);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+            if (pending.intent === 'LOOKUP_CONTACT' && pending.params.name) {
+              const result = await handleLookupContact(supabase, userId, pending.params.name);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+            if (pending.intent === 'CALENDAR_SEARCH' && pending.params.keyword) {
+              const liveEvents = await fetchLiveCalendarEvents(supabase, userId);
+              const result = await handleCalendarSearch(liveEvents, pending.params.keyword);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+            if (pending.intent === 'PERSON_LOOKUP' && pending.params.name) {
+              const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+              const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+              const result = await handlePersonLookup(pending.params.name, userId, supabaseUrl, serviceKey);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+            if (pending.intent === 'LIST_READ') {
+              const result = await handleListRead(supabase, userId, pending.params.listName);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+            if (pending.intent === 'REMINDER_READ') {
+              const result = await handleReminderRead(supabase, userId);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+            if (pending.intent === 'MEMORY_SEARCH' && pending.params.topic) {
+              const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+              const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+              const result = await handleMemorySearch(pending.params.topic, userId, supabaseUrl, serviceKey);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+          } catch (_) { /* fall through to Claude */ }
+        }
+      }
+    }
+
     // ── Step 1.5: Disambiguation resolver ────────────────────────────────────────
     // When the previous assistant turn presented a numbered contact list ("Which one?"),
     // and Robert's reply is a pick ("# 2", "the second one", "number 2", "2"),
@@ -1696,7 +1767,18 @@ Deno.serve(async (req) => {
             : classification.intent === 'REMINDER_READ'   ? 'show your upcoming reminders'
             : classification.intent === 'MEMORY_SEARCH'   ? `search your saved memories about "${classification.params.topic ?? ''}"`
             : 'help with that';
-            return speechResponse(`I think you're asking me to ${intentDesc} — is that right?`);
+            // Embed the pending intent as a hidden marker in display so the
+            // next turn (Step 1.4) can recover and execute it on "yes".
+            const pendingMarker = `<!--PENDING_INTENT:${JSON.stringify({ intent: classification.intent, params: classification.params })}-->`;
+            const confirmSpeech = `I think you're asking me to ${intentDesc} — is that right?`;
+            return jsonResponse({
+              rawText: JSON.stringify({
+                speech: confirmSpeech,
+                display: `${confirmSpeech}\n${pendingMarker}`,
+                actions: [],
+                pendingThreads: [],
+              }),
+            });
           }
 
           if (HANDLED_INTENTS.has(classification.intent)) {

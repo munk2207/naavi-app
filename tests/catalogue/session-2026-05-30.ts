@@ -518,6 +518,36 @@ export const session2026_05_30Tests: TestCase[] = [
     },
   },
 
+  // ─── Low-confidence memory (Step 1.4) ────────────────────────────────────
+  {
+    id: 'session-2026-05-30.low-confidence-resolver-exists',
+    category: 'session-2026-05-30',
+    description:
+      'Step 1.4 — low-confidence confirmation resolver must exist in naavi-chat/index.ts. ' +
+      'Detects PENDING_INTENT marker in last assistant display, executes handler on "yes", ' +
+      'cancels on "no", without calling Claude.',
+    timeoutMs: 1_000,
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      expectTruthy(
+        src.includes('Step 1.4: Low-confidence intent confirmation resolver'),
+        'Step 1.4 resolver block must exist',
+      );
+      expectTruthy(
+        src.includes('PENDING_INTENT'),
+        'Low-confidence response must embed PENDING_INTENT marker',
+      );
+      expectTruthy(
+        src.includes('YES_RE'),
+        'Step 1.4 must define YES_RE to detect affirmative replies',
+      );
+      expectTruthy(
+        src.includes('NO_RE'),
+        'Step 1.4 must define NO_RE to detect negative replies',
+      );
+    },
+  },
+
   // ─── Priority 3 — Disambiguation loop closure ─────────────────────────────
   {
     id: 'session-2026-05-30.p3-disambiguation-resolver-exists',
