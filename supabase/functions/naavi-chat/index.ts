@@ -323,16 +323,17 @@ async function executeAddToCommunity(
     }
     console.log(`[community] added ${contactResourceName} (${contactName}) to MyNaavi group ${groupId}`);
 
-    // 5. Fetch contact data and write to community_members DB.
-    // Fire-and-forget — Google label write already succeeded; DB write failure
-    // is non-fatal (community search will fall back to People API).
-    (async () => {
-      try {
-        const personRes = await fetch(
-          `https://people.googleapis.com/v1/${contactResourceName}?personFields=${COMMUNITY_PERSON_FIELDS}`,
-          { headers: { Authorization: `Bearer ${accessToken}` } },
-        );
-        if (!personRes.ok) { console.warn('[community] person fetch failed:', personRes.status); return; }
+    // 5. Fetch contact data and write to community_members DB (synchronous).
+    // Must await before returning — fire-and-forget is killed when Edge Function
+    // sends the response in Deno Deploy. DB write failure is non-fatal (logged only).
+    try {
+      const personRes = await fetch(
+        `https://people.googleapis.com/v1/${contactResourceName}?personFields=${COMMUNITY_PERSON_FIELDS}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!personRes.ok) {
+        console.warn('[community] person fetch failed:', personRes.status);
+      } else {
         const person = await personRes.json();
         const contactData = {
           names:          person.names          ?? [],
@@ -350,10 +351,10 @@ async function executeAddToCommunity(
         }, { onConflict: 'user_id,resource_name' });
         if (error) console.warn('[community] community_members upsert error:', error.message);
         else console.log(`[community] community_members row upserted for ${contactResourceName}`);
-      } catch (e: any) {
-        console.warn('[community] community_members write failed:', e?.message);
       }
-    })();
+    } catch (e: any) {
+      console.warn('[community] community_members write failed:', e?.message);
+    }
 
     return `Done. ${contactName} is now in your MyNaavi community.`;
   } catch (err: any) {

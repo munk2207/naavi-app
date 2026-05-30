@@ -469,6 +469,12 @@ export const session2026_05_29Tests: TestCase[] = [
         src.includes('tokens.size > 0 && [...tokens].some(t => nameLower.includes(t))'),
         'contacts adapter must not use old OR-only nameTokenMatch assignment — B6f fix',
       );
+      // Email match must be disabled for multi-token queries (prevents "sarah@gmail.com"
+      // from matching query "sarah james" on the "sarah" token alone).
+      expectTruthy(
+        src.includes('tokens.size <= 1') && src.includes('return false'),
+        'contacts adapter email match must disable token-matching for multi-token queries',
+      );
     },
   },
 ];

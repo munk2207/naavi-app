@@ -81,8 +81,8 @@ export const session2026_05_27Tests: TestCase[] = [
     id: 'b6d.prompt-version-bumped-to-v98',
     category: 'b6d',
     description:
-      'B6d/Nav-disambiguation — PROMPT_VERSION must be 2026-05-29-v101-nav-disambiguation (latest live version). ' +
-      'Updated from v100 → v101 when navigation disambiguation rule was added (2026-05-29).',
+      'B6d/Nav-disambiguation — PROMPT_VERSION must be 2026-05-29-v102-community-two-phase (latest live version). ' +
+      'Updated from v101 → v102 when community two-phase search framing rule was added (2026-05-29).',
     timeoutMs: 15_000,
     async run(ctx) {
       const { status, data } = await adapters.call(
@@ -92,8 +92,8 @@ export const session2026_05_27Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-05-29-v101-nav-disambiguation',
-        `Expected version "2026-05-29-v101-nav-disambiguation", got "${version}"`,
+        version === '2026-05-29-v102-community-two-phase',
+        `Expected version "2026-05-29-v102-community-two-phase", got "${version}"`,
       );
     },
   },

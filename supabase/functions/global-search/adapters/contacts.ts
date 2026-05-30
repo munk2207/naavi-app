@@ -237,10 +237,13 @@ export const contactsAdapter: SearchAdapter = {
         return [...tokens].some(t => nameLower.includes(t));
       })();
 
+      // Email match — full-variant always works; token-match disabled for multi-token
+      // queries ("sarah james") to prevent "sarah@gmail.com" matching on "sarah" alone.
       const emailTokenMatch = emails.some(e => {
         const el = e.toLowerCase();
-        return (tokens.size > 0 && [...tokens].some(t => el.includes(t))) ||
-               variants.some(v => el.includes(v));
+        if (variants.some(v => v.length > 2 && el.includes(v))) return true;
+        if (tokens.size <= 1) return tokens.size > 0 && [...tokens].some(t => el.includes(t));
+        return false;
       });
 
       const phoneMatch = isPhoneLike && phones.some(ph => normalizePhone(ph).includes(qDigits));
@@ -360,10 +363,13 @@ export const contactsAdapter: SearchAdapter = {
         if (tokens.size >= 2) return [...tokens].every(t => nameLower.includes(t));
         return [...tokens].some(t => nameLower.includes(t));
       })();
+      // Email match — full-variant always works; token-match disabled for multi-token
+      // queries ("sarah james") to prevent "sarah@gmail.com" matching on "sarah" alone.
       const emailTokenMatch = emails.some(e => {
         const el = e.toLowerCase();
-        return (tokens.size > 0 && [...tokens].some(t => el.includes(t))) ||
-               variants.some(v => el.includes(v));
+        if (variants.some(v => v.length > 2 && el.includes(v))) return true;
+        if (tokens.size <= 1) return tokens.size > 0 && [...tokens].some(t => el.includes(t));
+        return false;
       });
       // F2h — address/postal-code matching (Wael 2026-05-27).
       // Matches formattedValue, postalCode, and city against query tokens.
