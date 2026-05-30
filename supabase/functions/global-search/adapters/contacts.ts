@@ -26,6 +26,7 @@
 
 import type { SearchAdapter, SearchContext, SearchResult } from './_interface.ts';
 import { computeContactHash, COMMUNITY_PERSON_FIELDS } from '../../_shared/community_hash.ts';
+import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const GOOGLE_TOKEN_URL       = 'https://oauth2.googleapis.com/token';
 const PEOPLE_CONNECTIONS_API = 'https://people.googleapis.com/v1/people/me/connections';
@@ -191,6 +192,46 @@ async function fetchOtherContacts(accessToken: string): Promise<Person[]> {
   return out.slice(0, MAX_CONTACTS_PER_SOURCE);
 }
 
+// ── Community backfill helpers ────────────────────────────────────────────────
+// Service-role client for community_members writes — the user JWT client
+// (ctx.supabase) is read-only for that table (RLS restricts INSERT to service_role).
+let _adminSupabase: ReturnType<typeof createClient> | null = null;
+function getAdminSupabase(): ReturnType<typeof createClient> {
+  if (!_adminSupabase) {
+    _adminSupabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      { auth: { persistSession: false } },
+    );
+  }
+  return _adminSupabase;
+}
+
+// Write one community member to the DB. No-op if displayName is missing.
+async function backfillCommunityMember(userId: string, p: Person): Promise<void> {
+  if (!p.resourceName || !p.names?.[0]?.displayName) return;
+  try {
+    const contactData = {
+      names:          p.names          ?? [],
+      emailAddresses: p.emailAddresses ?? [],
+      phoneNumbers:   p.phoneNumbers   ?? [],
+    };
+    const hash  = await computeContactHash(contactData);
+    const name  = p.names[0].displayName!;
+    const email = p.emailAddresses?.[0]?.value ?? null;
+    const phone = p.phoneNumbers?.[0]?.value   ?? null;
+    const { error } = await getAdminSupabase().from('community_members').upsert({
+      user_id: userId, resource_name: p.resourceName,
+      name, email, phone, contact_data: contactData, contact_hash: hash,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,resource_name' });
+    if (error) console.warn('[contacts-adapter] backfill error:', error.message);
+    else        console.log(`[contacts-adapter] backfilled community member: ${name}`);
+  } catch (e: any) {
+    console.warn('[contacts-adapter] backfill failed:', e?.message);
+  }
+}
+
 export const contactsAdapter: SearchAdapter = {
   name: 'contacts',
   label: 'Contacts',
@@ -239,31 +280,98 @@ export const contactsAdapter: SearchAdapter = {
 
     const communityHits: SearchResult[] = [];
 
-    if (isCommunityListQuery && (communityRows ?? []).length > 0) {
-      console.log(`[contacts-adapter] community list intent for "${q}": returning all ${communityRows!.length} members`);
-      for (const row of communityRows!) {
-        const emails = row.email ? [row.email as string] : [];
-        const phones = row.phone ? [row.phone as string] : [];
-        const url = phones[0]
-          ? `tel:${phones[0].replace(/[^\d+]/g, '')}`
-          : emails[0] ? `mailto:${emails[0]}` : undefined;
-        communityHits.push({
-          source: 'contacts',
-          title: row.name || emails[0] || phones[0] || 'Contact',
-          snippet: [emails[0], phones[0]].filter(Boolean).join(' · '),
-          score: 1.5,
-          url,
-          metadata: {
-            resource_name: row.resource_name ?? null,
-            name: row.name ?? null,
-            emails,
-            phones,
-            is_community: true,
-            addresses: [],
-          },
-        });
+    if (isCommunityListQuery) {
+      // For list intent: go to Google Contacts (authoritative source) — the
+      // community_members DB may be incomplete (contacts labeled before the table
+      // existed won't have rows). Fetch connections, filter to MyNaavi label only.
+      const { data: tokenRow } = await ctx.supabase
+        .from('user_tokens')
+        .select('refresh_token')
+        .eq('user_id', ctx.userId)
+        .eq('provider', 'google')
+        .maybeSingle();
+      if (tokenRow?.refresh_token) {
+        const listAccessToken = await getAccessToken(tokenRow.refresh_token);
+        if (listAccessToken) {
+          const [listConnections, listGroupId] = await Promise.all([
+            fetchConnections(listAccessToken),
+            fetchMyNaaviGroupId(listAccessToken),
+          ]);
+          if (listGroupId) {
+            const communityContacts = listConnections.filter(p =>
+              (p.memberships ?? []).some(
+                m => m.contactGroupMembership?.contactGroupId === listGroupId,
+              ),
+            );
+            console.log(`[contacts-adapter] community list: ${communityContacts.length} MyNaavi-labeled contacts`);
+            for (const p of communityContacts) {
+              const displayName = p.names?.[0]?.displayName ?? '';
+              const emails = (p.emailAddresses ?? []).map(e => e.value ?? '').filter(Boolean);
+              const phones = (p.phoneNumbers  ?? []).map(ph => ph.value ?? '').filter(Boolean);
+              const url = phones[0]
+                ? `tel:${phones[0].replace(/[^\d+]/g, '')}`
+                : emails[0] ? `mailto:${emails[0]}` : undefined;
+              communityHits.push({
+                source: 'contacts',
+                title: displayName || emails[0] || phones[0] || 'Contact',
+                snippet: [emails[0], phones[0]].filter(Boolean).join(' · '),
+                score: 1.5,
+                url,
+                metadata: {
+                  resource_name: p.resourceName ?? null,
+                  name: displayName || null,
+                  emails,
+                  phones,
+                  is_community: true,
+                  addresses: [],
+                },
+              });
+            }
+            if (communityHits.length > 0) {
+              // Backfill any community members missing from the DB (synchronous —
+              // we're still in the request so writes will complete before we return).
+              const dbResourceNames = new Set((communityRows ?? []).map(r => r.resource_name));
+              const toBackfill = communityContacts.filter(
+                p => p.resourceName && !dbResourceNames.has(p.resourceName),
+              );
+              if (toBackfill.length > 0) {
+                console.log(`[contacts-adapter] backfilling ${toBackfill.length} missing community member(s)`);
+                await Promise.all(toBackfill.map(p => backfillCommunityMember(ctx.userId, p)));
+              }
+              communityHits.sort((a, b) => (a.title ?? '').localeCompare(b.title ?? ''));
+              return communityHits.slice(0, ctx.limit);
+            }
+          }
+        }
       }
-      return communityHits.slice(0, ctx.limit);
+      // Fallback: no token or Google call failed — return DB rows if any.
+      if ((communityRows ?? []).length > 0) {
+        for (const row of communityRows!) {
+          const emails = row.email ? [row.email as string] : [];
+          const phones = row.phone ? [row.phone as string] : [];
+          const url = phones[0]
+            ? `tel:${phones[0].replace(/[^\d+]/g, '')}`
+            : emails[0] ? `mailto:${emails[0]}` : undefined;
+          communityHits.push({
+            source: 'contacts',
+            title: row.name || emails[0] || phones[0] || 'Contact',
+            snippet: [emails[0], phones[0]].filter(Boolean).join(' · '),
+            score: 1.5,
+            url,
+            metadata: {
+              resource_name: row.resource_name ?? null,
+              name: row.name ?? null,
+              emails,
+              phones,
+              is_community: true,
+              addresses: [],
+            },
+          });
+        }
+        communityHits.sort((a, b) => (a.title ?? '').localeCompare(b.title ?? ''));
+        return communityHits.slice(0, ctx.limit);
+      }
+      return []; // No community members found from either source.
     }
 
     for (const row of (communityRows ?? [])) {
@@ -448,7 +556,17 @@ export const contactsAdapter: SearchAdapter = {
       // Community boost — multiply by 1.5 so MyNaavi members always rank
       // above non-community contacts with the same match type. Cap at 1.5
       // so the sort order is stable (community name=1.5 > non-community name=1.0).
-      if (isCommunity) score = Math.min(score * 1.5, 1.5);
+      if (isCommunity) {
+        score = Math.min(score * 1.5, 1.5);
+        // Fire-and-forget backfill: if this community member isn't in the DB yet,
+        // write them now so future searches hit Phase 1 instead of People API.
+        if (p.resourceName) {
+          const dbSet = new Set((communityRows ?? []).map(r => r.resource_name));
+          if (!dbSet.has(p.resourceName)) {
+            backfillCommunityMember(ctx.userId, p).catch(() => {});
+          }
+        }
+      }
 
       const primaryEmail = emails[0];
       const primaryPhone = phones[0];
