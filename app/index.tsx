@@ -83,6 +83,7 @@ import { supabase } from '@/lib/supabase';
 import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout, getCachedUserId } from '@/lib/invokeWithTimeout';
 import { justForegrounded, msSinceForeground, getLifecycleSession } from '@/lib/appLifecycle';
 import { remoteLog, newDiagSession } from '@/lib/remoteLog';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 // ─── Integrations data ────────────────────────────────────────────────────────
 
@@ -1619,11 +1620,14 @@ export default function HomeScreen() {
             = scroll (ScrollView wins). Stationary press 300 ms = mic
             opens. After mic opens, user can release; recording stays on
             until they tap the mic button to stop + send. */}
-        <ScrollView
-          ref={scrollRef}
+        <KeyboardAwareScrollView
+          innerRef={ref => { (scrollRef as any).current = ref; }}
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          enableOnAndroid={true}
+          keyboardShouldPersistTaps="handled"
+          extraScrollHeight={20}
         >
         <Pressable
           delayLongPress={300}
@@ -2183,7 +2187,7 @@ export default function HomeScreen() {
             </View>
           ) : null}
         </Pressable>
-        </ScrollView>
+        </KeyboardAwareScrollView>
 
         {/* Recording / transcribing status.
             V57.11.3 — when in press-and-hold mode the hint is "release to
