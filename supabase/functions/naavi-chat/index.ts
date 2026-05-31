@@ -18,7 +18,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.79.0';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { NAAVI_TOOLS, TOOL_NAME_TO_ACTION_TYPE } from '../_shared/anthropic_tools.ts';
 import { computeContactHash, COMMUNITY_PERSON_FIELDS } from '../_shared/community_hash.ts';
-import { HANDLED_INTENTS, handleListRules, handleLookupContact, handleCalendarSearch, handlePersonLookup, handleListRead, handleReminderRead, handleMemorySearch } from './intentHandlers.ts';
+import { HANDLED_INTENTS, handleListRules, handleLookupContact, handleCalendarSearch, handlePersonLookup, handleListRead, handleReminderRead, handleMemorySearch, handleCreateTicket } from './intentHandlers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1402,12 +1402,12 @@ async function classifyIntent(
       system: `Classify the message. JSON only. No fences.
 
 Levels:
-A = answerable from user's real data (calendar, contacts, alerts, lists, reminders, memories). Use intents: LIST_RULES, LOOKUP_CONTACT, CALENDAR_SEARCH, PERSON_LOOKUP, LIST_READ, REMINDER_READ, MEMORY_SEARCH
+A = answerable from user's real data (calendar, contacts, alerts, lists, reminders, memories). Use intents: LIST_RULES, LOOKUP_CONTACT, CALENDAR_SEARCH, PERSON_LOOKUP, LIST_READ, REMINDER_READ, MEMORY_SEARCH, CREATE_TICKET
 B = data question Claude must reason about (no real source)
 action = creating/updating/deleting data (reminder, alert, event, memory, list item)
 chat = conversational, no data question
 
-Params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic.
+Params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic. CREATE_TICKET→reporter_email (customer email), body (issue description).
 
 Output: {"level":"A","intent":"LIST_RULES","confidence":"high","params":{}}
 Use "low" confidence when ambiguous.`,
@@ -1652,6 +1652,17 @@ Deno.serve(async (req) => {
               const result = await handleMemorySearch(pending.params.topic, userId, supabaseUrl, serviceKey);
               return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
             }
+            if (pending.intent === 'CREATE_TICKET' && pending.params.reporter_email && pending.params.body) {
+              const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+              const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+              const result = await handleCreateTicket(
+                pending.params as { reporter_email: string; body: string; staff_email: string },
+                supabaseUrl,
+                serviceKey,
+              );
+              console.log(`[timing] ${elapsed()} | Level A CREATE_TICKET executed`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
           } catch (_) { /* fall through to Claude */ }
         }
       }
@@ -1805,6 +1816,42 @@ Deno.serve(async (req) => {
                 const result = await handleMemorySearch(classification.params.topic, userId, supabaseUrl, serviceKey);
                 console.log(`[timing] ${elapsed()} | Level A MEMORY_SEARCH deterministic`);
                 return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+              }
+              if (classification.intent === 'CREATE_TICKET') {
+                const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+                const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+                const adminClient = createClient(supabaseUrl, serviceKey);
+                // Verify caller is authorized staff
+                const { data: userData } = await adminClient.auth.admin.getUserById(userId);
+                const staffEmail = userData?.user?.email ?? '';
+                const { data: staffRow } = await adminClient
+                  .from('support_staff')
+                  .select('email')
+                  .eq('email', staffEmail)
+                  .eq('active', true)
+                  .maybeSingle();
+                if (!staffRow) {
+                  const msg = `You're not authorized to create support tickets.`;
+                  console.log(`[timing] ${elapsed()} | Level A CREATE_TICKET — unauthorized: ${staffEmail}`);
+                  return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                }
+                // Validate required params
+                const reporterEmail = String(classification.params.reporter_email ?? '').trim();
+                const body          = String(classification.params.body ?? '').trim();
+                if (!reporterEmail || !/@/.test(reporterEmail)) {
+                  const msg = `I need the customer's email address to create a ticket. What's their email?`;
+                  return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                }
+                if (!body) {
+                  const msg = `What's the issue you'd like to log for ${reporterEmail}?`;
+                  return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                }
+                // Return confirmation ask — ticket created on turn 2 after staff says yes
+                const pending = { intent: 'CREATE_TICKET', level: 'A', confidence: 'high', params: { reporter_email: reporterEmail, body, staff_email: staffEmail } };
+                const confirmMsg = `I'll create a ticket for ${reporterEmail}: "${body.slice(0, 100)}". Say yes to confirm.`;
+                const display    = `${confirmMsg}\n<!--PENDING_INTENT:${JSON.stringify(pending)}-->`;
+                console.log(`[timing] ${elapsed()} | Level A CREATE_TICKET — awaiting confirmation from ${staffEmail}`);
+                return jsonResponse({ rawText: JSON.stringify({ speech: confirmMsg, display, actions: [], pendingThreads: [] }) });
               }
             }
 

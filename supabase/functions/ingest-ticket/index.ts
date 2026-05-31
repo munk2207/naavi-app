@@ -64,7 +64,8 @@ interface IngestPayload {
 
   // Internal-relay extras — pre-resolved user_id allowed; saves a
   // lookup when Wael already knows who the ticket is from.
-  user_id?: string;
+  user_id?:     string;
+  created_by?:  string; // staff email for internal-relay tickets
 
   // Web form payload shape — fields named per the form's
   // <input name="..."> attributes. We extract subject/body from
@@ -234,7 +235,7 @@ serve(async (req) => {
     // ── Build initial audit_trail entry ──────────────────────────────
     const auditEntry = {
       at: new Date().toISOString(),
-      actor: channel === 'internal-relay' ? 'wael' : 'system',
+      actor: channel === 'internal-relay' ? (String(payload.created_by ?? 'staff')) : 'system',
       from_status: null,
       to_status: 'new',
       note: `Ingested via ${channel}` + (userId ? ` — resolved to user ${userId.slice(0, 8)}` : ' — anonymous'),

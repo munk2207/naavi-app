@@ -29,6 +29,7 @@ export const HANDLED_INTENTS = new Set([
   'LIST_READ',
   'REMINDER_READ',
   'MEMORY_SEARCH',
+  'CREATE_TICKET',
 ]);
 
 // ── LIST_RULES ────────────────────────────────────────────────────────────────
@@ -524,6 +525,48 @@ export async function handleMemorySearch(
   } catch (err) {
     console.error('[handleMemorySearch] error:', (err as Error)?.message);
     const msg = `I couldn't search your memories right now. Please try again.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
+}
+
+// ── CREATE_TICKET ─────────────────────────────────────────────────────────────
+// Staff-only: creates a support ticket on behalf of a user via internal-relay.
+// Called on turn 2 after staff confirmed the ticket details.
+// Turn 1 (confirmation ask) is handled inline in naavi-chat/index.ts.
+
+export async function handleCreateTicket(
+  params: { reporter_email: string; body: string; staff_email: string },
+  supabaseUrl: string,
+  serviceKey: string,
+): Promise<HandlerResult> {
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/ingest-ticket`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({
+        source_channel: 'internal-relay',
+        reporter_email: params.reporter_email,
+        body:           params.body,
+        subject:        params.body.slice(0, 80),
+        created_by:     params.staff_email,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      const msg = `I couldn't create the ticket. ${(err as any).error ?? res.status}`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+
+    const data = await res.json() as { ticket_number: number };
+    const msg = `Done. Ticket #${data.ticket_number} created for ${params.reporter_email}.`;
+    return { speech: msg, display: msg, actions: [] };
+  } catch (err) {
+    console.error('[handleCreateTicket] error:', (err as Error)?.message);
+    const msg = `I couldn't create the ticket right now. Please try again.`;
     return { speech: msg, display: msg, actions: [] };
   }
 }
