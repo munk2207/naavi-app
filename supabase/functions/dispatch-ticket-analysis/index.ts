@@ -60,7 +60,10 @@ serve(async (req) => {
       .select('id, ticket_number, created_at, reporter_email')
       .eq('status', 'new')
       .not('hubspot_ticket_id', 'is', null)
-      .is('last_drafted_at', null)   // skip tickets already drafted
+      .is('last_drafted_at', null)        // skip tickets already drafted
+      .not('reporter_email', 'ilike', '%autotester%')  // skip auto-tester tickets
+      .not('reporter_email', 'ilike', '%autotest%')    // skip auto-tester tickets
+      .not('reporter_email', 'ilike', '%example.com%') // skip all test domains
       .gte('created_at', ANALYZE_BASELINE)
       .order('created_at', { ascending: true })
       .limit(BATCH_LIMIT);
