@@ -60,6 +60,7 @@ serve(async (req) => {
       .select('id, ticket_number, created_at, reporter_email')
       .eq('status', 'new')
       .not('hubspot_ticket_id', 'is', null)
+      .is('last_drafted_at', null)   // skip tickets already drafted
       .gte('created_at', ANALYZE_BASELINE)
       .order('created_at', { ascending: true })
       .limit(BATCH_LIMIT);
