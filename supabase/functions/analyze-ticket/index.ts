@@ -315,11 +315,14 @@ Draft the reply now. JSON only — no prose, no markdown fences.`;
     const draftEmailId = String(draftRespBody.id ?? '');
 
     // ── Update tickets row ───────────────────────────────────────────
+    // Status stays 'new' — ticket remains active until staff closes it in
+    // HubSpot, which triggers the hubspot-ticket-closed webhook to update
+    // Supabase. analyze-ticket saves the draft only; status does not advance.
     const auditEntry = {
       at:          new Date().toISOString(),
       actor:       'analyze-ticket',
       from_status: ticket.status,
-      to_status:   'drafted',
+      to_status:   ticket.status,
       note:        `Draft posted to HubSpot email ${draftEmailId} (${evidenceCount} cited claims, ${parsed.draft_reply.length} chars).`,
     };
     const newAudit = Array.isArray(ticket.audit_trail) ? [...ticket.audit_trail, auditEntry] : [auditEntry];
@@ -328,7 +331,6 @@ Draft the reply now. JSON only — no prose, no markdown fences.`;
       .from('tickets')
       .update({
         draft_response:  parsed.draft_reply,
-        status:          'drafted',
         last_drafted_at: new Date().toISOString(),
         audit_trail:     newAudit,
       })
@@ -343,7 +345,7 @@ Draft the reply now. JSON only — no prose, no markdown fences.`;
       ticket_id,
       ticket_number:    ticket.ticket_number,
       hubspot_email_id: draftEmailId,
-      status:           'drafted',
+      status:           ticket.status,
       claude_ms:        claudeMs,
       draft_length:     parsed.draft_reply.length,
       claims_count:     evidenceCount,
