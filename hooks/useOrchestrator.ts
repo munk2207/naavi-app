@@ -1423,7 +1423,11 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       const hasLongDigitRun = /\d{7,}/.test(digitsOnly);
       const hasAtSign = /@/.test(userMessage);
       const retrievalRe = /\b(find|look\s*up|search|show\s*me|what\s+do\s+(we|you|i)\s+have|what\s+do\s+you\s+know|do\s+(we|you|i)\s+have|is\s+there|tell\s+me\s+about|information\s+on|anything\s+(about|on))\b/i;
-      const isRetrievalQuery = hasLongDigitRun || hasAtSign || retrievalRe.test(userMessage);
+      // Ticket creation messages contain an @ (the reporter email) but are not
+      // retrieval queries — skip pre-search so unrelated inbox results don't
+      // appear alongside the confirmation bubble.
+      const isTicketCreation = /\b(open|create|log|file|submit|raise)\s+(a\s+)?(support\s+)?(ticket|issue|report)\b/i.test(userMessage);
+      const isRetrievalQuery = !isTicketCreation && (hasLongDigitRun || hasAtSign || retrievalRe.test(userMessage));
 
       // Strip question/retrieval verbs and trailing filler so the search
       // query matches real content. The raw user message "Find Gordon Doig's

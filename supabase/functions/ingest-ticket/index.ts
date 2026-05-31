@@ -351,7 +351,7 @@ serve(async (req) => {
                 // appear in the HubSpot ticket BODY below (so staff sees
                 // the full request when they click into a ticket).
                 subject:           `Ticket #${ticket.ticket_number}`,
-                content:           body + `\n\n— Source: ${channel}` + (sourceTag ? ` (${sourceTag})` : '') + `\n— Ticket: #${ticket.ticket_number}` + `\n— Sender Email: ${reporterEmail}`,
+                content:           body,
                 hs_pipeline:       HUBSPOT_PIPELINE_ID,
                 hs_pipeline_stage: HUBSPOT_PIPELINE_STAGE,
                 hs_ticket_priority: 'MEDIUM',

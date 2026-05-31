@@ -1117,55 +1117,30 @@ export default function SettingsScreen() {
 
         <View style={styles.divider} />
 
-        {/* Morning Call */}
+        {/* Briefings */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Morning Brief Call</Text>
+          <Text style={styles.sectionTitle}>Briefings</Text>
           <Text style={styles.sectionNote}>
-            Naavi calls you every morning with your schedule, weather, reminders, and emails.
+            Choose when and how Naavi reaches you — morning, midday, evening, and night. Set the time and channels for each.
           </Text>
-
-          <View style={styles.toolRow}>
-            <View>
-              <Text style={styles.toolLabel}>Morning Call</Text>
-              <Text style={styles.toolStatus}>
-                {morningCallEnabled ? `Enabled — ${morningCallTime} daily` : 'Disabled'}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={[styles.connectBtn, !morningCallEnabled && styles.connectBtnInactive]}
-              onPress={() => {
-                setMorningCallEnabled(!morningCallEnabled);
-              }}
-            >
-              <Text style={[styles.connectBtnText, !morningCallEnabled && styles.connectBtnTextInactive]}>
-                {morningCallEnabled ? 'On' : 'Off'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {morningCallEnabled && (
-            <View style={{ marginTop: 12 }}>
-              <Text style={styles.toolLabel}>Call Time (24h format)</Text>
-              <TextInput
-                style={styles.keyInput}
-                value={morningCallTime}
-                onChangeText={setMorningCallTime}
-                placeholder="08:00"
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="numbers-and-punctuation"
-                maxLength={5}
-                accessibilityLabel="Morning call time"
-              />
-            </View>
-          )}
-
           <TouchableOpacity
-            style={[styles.saveBtn, morningCallLoading && styles.saveBtnDisabled]}
-            onPress={handleSaveMorningCall}
-            disabled={morningCallLoading}
+            style={styles.saveBtn}
             accessibilityRole="button"
+            onPress={async () => {
+              try {
+                const { data } = await supabase.auth.getSession();
+                const token = data?.session?.access_token ?? '';
+                const url = `https://mynaavi.com/briefings${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+                const { Linking } = await import('react-native');
+                Linking.openURL(url).catch(() =>
+                  Alert.alert('Could not open', 'Please visit mynaavi.com/briefings in your browser.')
+                );
+              } catch {
+                Alert.alert('Could not open', 'Please visit mynaavi.com/briefings in your browser.');
+              }
+            }}
           >
-            <Text style={styles.saveBtnText}>{morningCallLoading ? 'Saving...' : 'Save'}</Text>
+            <Text style={styles.saveBtnText}>Manage Briefings</Text>
           </TouchableOpacity>
         </View>
 

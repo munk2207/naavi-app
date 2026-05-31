@@ -1766,7 +1766,7 @@ export default function HomeScreen() {
               ) : (
                 <>
                   <ConversationBubble role="user" content={turn.userMessage} timestamp={turn.timestamp} />
-                  <ConversationBubble role="assistant" content={turn.assistantSpeech} timestamp={turn.timestamp} />
+                  <ConversationBubble role="assistant" content={turn.assistantSpeech.replace(/<!--PENDING_INTENT:[\s\S]*?-->/g, '').trim()} timestamp={turn.timestamp} />
                   {/* V57.9.7 — collapse-back affordance for older turns
                       that were expanded. Without this, expand was a one-way
                       action (Wael 2026-05-01). Latest turn never gets this

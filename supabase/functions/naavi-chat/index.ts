@@ -1733,6 +1733,60 @@ Deno.serve(async (req) => {
     // Level action → Claude answers, no disclosure (RULE 23 confirm-then-act)
     // Level chat → Claude answers naturally, no disclosure
     //
+    // ── CREATE_TICKET pre-classifier intercept ───────────────────────────────
+    // "Open a ticket", "create a ticket", etc. are write operations — Haiku
+    // misclassifies them as Level action (not Level A) because Level A is
+    // described as "answerable from user's real data." Bypass Haiku entirely
+    // and route straight to the CREATE_TICKET Level A handler.
+    const CREATE_TICKET_RE = /\b(open|create|log|file|submit|raise)\s+(a\s+)?(support\s+)?(ticket|issue|report)\b/i;
+    if (CREATE_TICKET_RE.test(userText)) {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+      const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+      const adminClient = createClient(supabaseUrl, serviceKey);
+      // Verify caller is authorized staff
+      const { data: userData } = await adminClient.auth.admin.getUserById(userId);
+      const staffEmail = userData?.user?.email ?? '';
+      const { data: staffRow } = await adminClient
+        .from('support_staff')
+        .select('email')
+        .eq('email', staffEmail)
+        .eq('active', true)
+        .maybeSingle();
+      if (!staffRow) {
+        const msg = `You're not authorized to create support tickets.`;
+        console.log(`[timing] ${elapsed()} | CREATE_TICKET_RE — unauthorized: ${staffEmail}`);
+        return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+      }
+      // Extract reporter_email and body from message
+      const emailMatch = userText.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+      const reporterEmail = emailMatch ? emailMatch[0].toLowerCase() : '';
+      // Strip enrichment context before extracting body — everything from
+      // "## Live search results" onwards is internal context, not user input.
+      const cleanText = userText.split(/\n\n##\s+Live search results/i)[0];
+      // Body = everything after the email, or after the ticket phrase if no email found
+      const bodyRaw = cleanText
+        .replace(CREATE_TICKET_RE, '')
+        .replace(reporterEmail, '')
+        .replace(/^\s*(for|to|about|re:?|:|-|—)\s*/i, '')
+        .trim();
+      const body = bodyRaw || '';
+      if (!reporterEmail) {
+        const msg = `I need the customer's email address to create a ticket. What's their email?`;
+        return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+      }
+      if (!body) {
+        const msg = `What's the issue you'd like to log for ${reporterEmail}?`;
+        return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+      }
+      // Return confirmation ask — ticket created on turn 2
+      // body is already stripped of enrichment context; safe to show to staff
+      const pending = { intent: 'CREATE_TICKET', level: 'A', confidence: 'high', params: { reporter_email: reporterEmail, body, staff_email: staffEmail } };
+      const confirmMsg = `I'll create a ticket for ${reporterEmail}: "${body.slice(0, 100)}". Say yes to confirm.`;
+      const display    = `${confirmMsg}\n<!--PENDING_INTENT:${JSON.stringify(pending)}-->`;
+      console.log(`[timing] ${elapsed()} | CREATE_TICKET_RE — awaiting confirmation from ${staffEmail}`);
+      return jsonResponse({ rawText: JSON.stringify({ speech: confirmMsg, display, actions: [], pendingThreads: [] }) });
+    }
+
     // Fast pre-filter: obvious conversational messages skip Haiku entirely.
     // Keeps the universal guarantee (nothing unclassified reaches Claude) while
     // eliminating the Haiku cost for greetings, thanks, and short follow-ups.
