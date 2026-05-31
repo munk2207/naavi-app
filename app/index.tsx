@@ -1375,8 +1375,7 @@ export default function HomeScreen() {
       />
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior="padding"
-        enabled={Platform.OS === 'ios'}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={90}
       >
         {/* V57.9.7 — stale-auth recovery banner. Shown when we have a
