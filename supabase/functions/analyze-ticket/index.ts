@@ -379,18 +379,7 @@ function mdToHtml(md: string): string {
 }
 
 function formatDraftEmailBody(parsed: { draft_reply: string; claims_evidence: { claim: string; source: string }[]; uncertainty_notes: string }, ticket: { ticket_number: number }): string {
-  const evidenceLines = (parsed.claims_evidence ?? []).map(c => `• ${c.claim}\n  ↳ ${c.source}`).join('\n');
-  const uncertainty = (parsed.uncertainty_notes && parsed.uncertainty_notes.trim().length)
-    ? `\n\n— What we don't yet know —\n${parsed.uncertainty_notes}`
-    : '';
-  return [
-    parsed.draft_reply,
-    '',
-    '',
-    `— internal review (Naavi analyze-ticket, ticket #${ticket.ticket_number}) — strip this footer before sending to the customer —`,
-    '',
-    '— Evidence for each factual claim —',
-    evidenceLines || '(no factual claims — generic reply)',
-    uncertainty,
-  ].join('\n');
+  // Return the draft reply only — no internal footer, no evidence section.
+  // Staff reviews and sends directly from HubSpot.
+  return parsed.draft_reply;
 }
