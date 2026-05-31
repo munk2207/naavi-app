@@ -1354,9 +1354,9 @@ export default function HomeScreen() {
           headerLeft: () => null,
           headerRight: () => (
             <TopBarMenu items={[
-              { label: 'Alerts',   onPress: () => router.push({ pathname: '/manage', params: { url: 'alerts', title: 'Alerts' } }) },
-              { label: 'Lists',    onPress: () => router.push({ pathname: '/manage', params: { url: 'lists', title: 'Lists' } }) },
-              { label: 'Notes',    onPress: () => router.push({ pathname: '/manage', params: { url: 'notes', title: 'Notes & Memories' } }) },
+              { label: 'Alerts',   onPress: () => router.push('/alerts') },
+              { label: 'Lists',    onPress: () => router.push('/lists') },
+              { label: 'Notes',    onPress: () => router.push('/notes') },
               { label: 'Info',     onPress: () => setShowIntegrations(true) },
               { label: 'Help',     onPress: () => router.push('/help') },
               { label: 'Settings', onPress: () => router.push('/settings') },

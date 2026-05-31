@@ -357,8 +357,6 @@ export default function RootLayout() {
           name="permission-location"
           options={{ title: 'Location alerts', headerShown: true }}
         />
-        {/* Authenticated WebView — has its own back/title header */}
-        <Stack.Screen name="manage"   options={{ headerShown: false }} />
         {/* Google Assistant App Action deep link screens — transient, no header */}
         <Stack.Screen name="brief"    options={{ headerShown: false }} />
         <Stack.Screen name="calendar" options={{ headerShown: false }} />

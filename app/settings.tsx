@@ -1037,22 +1037,6 @@ export default function SettingsScreen() {
 
         <View style={styles.divider} />
 
-        {/* Advanced Settings — web-based management screen (Mobile=Conversation/Web=Management) */}
-        <TouchableOpacity
-          style={styles.advancedSettingsRow}
-          onPress={() => router.push({ pathname: '/manage', params: { url: 'settings', title: 'Advanced Settings' } })}
-          accessibilityRole="button"
-          accessibilityLabel="Open Advanced Settings"
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={styles.advancedSettingsLabel}>Advanced Settings</Text>
-            <Text style={styles.advancedSettingsSub}>Morning call, alerts, addresses, briefing windows</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
-        </TouchableOpacity>
-
-        <View style={styles.divider} />
-
         {/* Connected services */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Connected Services</Text>
@@ -1313,7 +1297,7 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V57.33.5 (build 215)</Text>
+        <Text style={styles.version}>MyNaavi — V57.33.6 (build 216)</Text>
 
       </ScrollView>
       </KeyboardAvoidingView>
@@ -1638,24 +1622,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
-  // Advanced Settings row — opens manage.tsx WebView (Mobile=Conversation/Web=Management)
-  advancedSettingsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 4,
-    gap: 12,
-  },
-  advancedSettingsLabel: {
-    fontSize: Typography.body,
-    fontWeight: Typography.semibold,
-    color: Colors.textPrimary,
-  },
-  advancedSettingsSub: {
-    fontSize: Typography.caption,
-    color: Colors.textHint,
-    marginTop: 2,
-  },
 
   // ── Voice PIN section + modal (V57.15.5) ─────────────────────────────────
   pinRemoveBtn: {
