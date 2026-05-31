@@ -21,7 +21,7 @@
       }
     },
     "android": {
-      "versionCode": 218,
+      "versionCode": 219,
       "softwareKeyboardLayoutMode": "pan",
       "package": "ca.naavi.app",
       "googleServicesFile": "./google-services.json",
