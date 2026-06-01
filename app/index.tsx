@@ -1344,6 +1344,22 @@ export default function HomeScreen() {
     error:           error ?? t('errors.apiError'),
   }[status];
 
+  // Open a MyNaavi web management page with the user's JWT token so the
+  // page loads authenticated without a separate login. Falls back to the
+  // plain URL if session is unavailable.
+  async function openWebView(url: string) {
+    try {
+      const { data } = await supabase!.auth.getSession();
+      const tok = data?.session?.access_token ?? '';
+      const fullUrl = tok ? `${url}?token=${encodeURIComponent(tok)}` : url;
+      RNLinking.openURL(fullUrl).catch(() =>
+        Alert.alert('Could not open', 'Please try again.')
+      );
+    } catch {
+      RNLinking.openURL(url).catch(() => {});
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       {/* Attach the 3-dot menu to the native header so it sits on the same row
@@ -1355,9 +1371,9 @@ export default function HomeScreen() {
           headerLeft: () => null,
           headerRight: () => (
             <TopBarMenu items={[
-              { label: 'Alerts',   onPress: () => router.push('/alerts') },
-              { label: 'Lists',    onPress: () => router.push('/lists') },
-              { label: 'Notes',    onPress: () => router.push('/notes') },
+              { label: 'Alerts',   onPress: () => openWebView('https://mynaavi.com/alerts.html') },
+              { label: 'Lists',    onPress: () => openWebView('https://mynaavi.com/lists.html') },
+              { label: 'Notes',    onPress: () => openWebView('https://mynaavi.com/notes.html') },
               { label: 'Info',     onPress: () => setShowIntegrations(true) },
               { label: 'Help',     onPress: () => router.push('/help') },
               { label: 'Settings', onPress: () => router.push('/settings') },
