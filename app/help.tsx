@@ -50,12 +50,6 @@ export default function HelpScreen() {
       onPress: () => openUrl(FAQ_URL),
     },
     {
-      icon: 'bug',
-      label: 'Report a problem',
-      sub: 'Something broken or wrong? Tell us.',
-      onPress: () => router.push('/report'),
-    },
-    {
       icon: 'mail',
       label: 'Contact support',
       sub: 'Questions, feedback, anything else',

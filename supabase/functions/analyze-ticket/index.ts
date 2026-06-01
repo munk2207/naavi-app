@@ -37,16 +37,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const HUBSPOT_API     = 'https://api.hubapi.com';
-// Association type ids (discovered 2026-05-21 via GET /crm/v4/associations/.../labels).
-// Email→ticket = 224. Note→ticket = 228 (retained for reference / future use).
-const HS_EMAIL_TO_TICKET_TYPE_ID = 224;
-const HS_NOTE_TO_TICKET_TYPE_ID  = 228;
-
-// Sender identity for outbound drafts. mynaavi.com routes to the shared team
-// inbox; staff sees this as the From in the Reply composer too.
-const NAAVI_SUPPORT_FROM_EMAIL = 'support@mynaavi.com';
-const NAAVI_SUPPORT_FROM_NAME  = 'MyNaavi Team';
 
 const CLAUDE_MODEL    = 'claude-sonnet-4-6';
 const CLAUDE_MAX_TOK  = 2048;
@@ -76,7 +66,6 @@ serve(async (req) => {
   const supabaseUrl  = Deno.env.get('SUPABASE_URL')!;
   const serviceKey   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-  const hubspotToken = Deno.env.get('HUBSPOT_ACCESS_TOKEN');
 
   if (!anthropicKey) return json({ error: 'ANTHROPIC_API_KEY not set' }, 500);
 
@@ -122,7 +111,7 @@ serve(async (req) => {
     // (a) Prior tickets from the same reporter_email (exclude current).
     const { data: priorTickets } = await admin
       .from('tickets')
-      .select('ticket_number, source_channel, subject, body, status, created_at, audit_trail, hubspot_ticket_id')
+      .select('ticket_number, source_channel, subject, body, status, created_at, audit_trail')
       .eq('reporter_email', ticket.reporter_email)
       .neq('id', ticket.id)
       .order('created_at', { ascending: false })
@@ -262,68 +251,15 @@ Draft the reply now. JSON only — no prose, no markdown fences.`;
       });
     }
 
-    // ── Post draft as editable Logged email engagement ───────────────
-    // 2026-05-21 (Wael): switched from Internal Note to editable Logged
-    // email engagement after the 2026-05-21 UI verification. The Logged
-    // email shows in the ticket timeline as a draft staff can open and
-    // edit in place. To send to the customer, staff copies the edited
-    // text → clicks Reply on the inbound EMAIL engagement (created by
-    // ingest-ticket) at the top of the timeline → pastes → Send. Pre-
-    // threaded composer auto-fills subject as "Re: Ticket #NNNN — ...".
-    if (!ticket.hubspot_ticket_id) {
-      return json({ error: 'ticket has no hubspot_ticket_id — cannot post draft', ticket_number: ticket.ticket_number }, 400);
-    }
-    if (!hubspotToken) return json({ error: 'HUBSPOT_ACCESS_TOKEN not set' }, 500);
-
-    const draftBodyText = formatDraftEmailBody(parsed, ticket);
-    const draftBodyHtml = mdToHtml(draftBodyText);
-    const draftSubject  = `[DRAFT] Re: Ticket #${ticket.ticket_number}`;
-
-    const draftRes = await fetch(`${HUBSPOT_API}/crm/v3/objects/emails`, {
-      method:  'POST',
-      headers: {
-        Authorization: `Bearer ${hubspotToken}`,
-        'Content-Type': 'application/json',
-        Accept:        'application/json',
-      },
-      body: JSON.stringify({
-        properties: {
-          hs_timestamp:       new Date().toISOString(),
-          hs_email_status:    'DRAFT',
-          hs_email_direction: 'EMAIL',
-          hs_email_subject:   draftSubject,
-          hs_email_text:      draftBodyText,
-          hs_email_html:      draftBodyHtml,
-          hs_email_headers:   JSON.stringify({
-            from: { email: NAAVI_SUPPORT_FROM_EMAIL, firstName: 'MyNaavi', lastName: 'Team' },
-            to:   [{ email: ticket.reporter_email, firstName: ticket.reporter_name || '' }],
-            cc:   [],
-            bcc:  [],
-          }),
-        },
-        associations: [{
-          to:    { id: ticket.hubspot_ticket_id },
-          types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: HS_EMAIL_TO_TICKET_TYPE_ID }],
-        }],
-      }),
-    });
-    const draftRespBody = await draftRes.json().catch(() => ({}));
-    if (!draftRes.ok) {
-      console.error('[analyze-ticket] HubSpot draft email POST failed:', draftRes.status, JSON.stringify(draftRespBody).slice(0, 300));
-      return json({ error: `hubspot_draft_email_${draftRes.status}`, detail: draftRespBody, ticket_number: ticket.ticket_number }, 502);
-    }
-    const draftEmailId = String(draftRespBody.id ?? '');
-
-    // ── Update tickets row ───────────────────────────────────────────
-    // Status stays 'new' — ticket remains active until staff closes it in
-    // HubSpot, which triggers the hubspot-ticket-closed webhook to update
-    // Supabase. analyze-ticket saves the draft only; status does not advance.
+    // ── Save draft to Supabase (HubSpot removed 2026-06-01) ─────────
+    // Draft stored in tickets.draft_response for staff to read and send
+    // via the Naavi tickets web page. Status stays 'new' until staff closes.
     const auditEntry = {
       at:          new Date().toISOString(),
       actor:       'analyze-ticket',
       from_status: ticket.status,
       to_status:   ticket.status,
-      note:        `Draft posted to HubSpot email ${draftEmailId} (${evidenceCount} cited claims, ${parsed.draft_reply.length} chars).`,
+      note:        `Draft saved (${evidenceCount} cited claims, ${parsed.draft_reply.length} chars).`,
     };
     const newAudit = Array.isArray(ticket.audit_trail) ? [...ticket.audit_trail, auditEntry] : [auditEntry];
 
@@ -336,17 +272,16 @@ Draft the reply now. JSON only — no prose, no markdown fences.`;
       })
       .eq('id', ticket.id);
     if (uErr) {
-      console.error('[analyze-ticket] tickets UPDATE failed AFTER HubSpot draft email posted:', uErr.message);
-      return json({ error: 'tickets_update_failed_after_draft_email', hubspot_email_id: draftEmailId, detail: uErr.message }, 500);
+      console.error('[analyze-ticket] tickets UPDATE failed:', uErr.message);
+      return json({ error: 'tickets_update_failed', detail: uErr.message }, 500);
     }
 
     return json({
-      success:          true,
+      success:       true,
       ticket_id,
-      ticket_number:    ticket.ticket_number,
-      hubspot_email_id: draftEmailId,
-      status:           ticket.status,
-      claude_ms:        claudeMs,
+      ticket_number: ticket.ticket_number,
+      status:        ticket.status,
+      claude_ms:     claudeMs,
       draft_length:     parsed.draft_reply.length,
       claims_count:     evidenceCount,
     });
