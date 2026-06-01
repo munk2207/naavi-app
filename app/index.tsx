@@ -1344,29 +1344,6 @@ export default function HomeScreen() {
     error:           error ?? t('errors.apiError'),
   }[status];
 
-  // Open a MyNaavi web management page with the user's JWT token.
-  // Uses WebBrowser.openBrowserAsync (awaitable) so we can re-sync
-  // geofences after the user closes the page — keeping the Transistorsoft
-  // SDK in sync with any changes made on the web (delete/reactivate).
-  async function openWebView(url: string) {
-    try {
-      const { data } = await supabase!.auth.getSession();
-      const tok = data?.session?.access_token ?? '';
-      const userId = data?.session?.user?.id ?? null;
-      const fullUrl = tok ? `${url}?token=${encodeURIComponent(tok)}` : url;
-      await WebBrowser.openBrowserAsync(fullUrl);
-      // Re-sync geofences after the page closes so any delete/reactivate
-      // actions on the web page are reflected in the SDK immediately.
-      if (userId) {
-        import('@/hooks/useGeofencing')
-          .then(({ syncGeofencesForUser }) => syncGeofencesForUser(userId))
-          .catch((err) => console.error('[openWebView] geofence sync failed:', err));
-      }
-    } catch (err) {
-      Alert.alert('Could not open', 'Please try again.');
-    }
-  }
-
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       {/* Attach the 3-dot menu to the native header so it sits on the same row
@@ -1378,9 +1355,9 @@ export default function HomeScreen() {
           headerLeft: () => null,
           headerRight: () => (
             <TopBarMenu items={[
-              { label: 'Alerts',   onPress: () => openWebView('https://mynaavi.com/alerts.html') },
-              { label: 'Lists',    onPress: () => openWebView('https://mynaavi.com/lists.html') },
-              { label: 'Notes',    onPress: () => openWebView('https://mynaavi.com/notes.html') },
+              { label: 'Alerts',   onPress: () => router.push('/alerts') },
+              { label: 'Lists',    onPress: () => router.push('/lists') },
+              { label: 'Notes',    onPress: () => router.push('/notes') },
               { label: 'Info',     onPress: () => setShowIntegrations(true) },
               { label: 'Help',     onPress: () => router.push('/help') },
               { label: 'Settings', onPress: () => router.push('/settings') },
