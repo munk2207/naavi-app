@@ -1117,35 +1117,6 @@ export default function SettingsScreen() {
 
         <View style={styles.divider} />
 
-        {/* Support */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Support</Text>
-          <Text style={styles.sectionNote}>
-            View and reply to customer support requests.
-          </Text>
-          <TouchableOpacity
-            style={styles.saveBtn}
-            accessibilityRole="button"
-            onPress={async () => {
-              try {
-                const { data } = await supabase.auth.getSession();
-                const tok = data?.session?.access_token ?? '';
-                const url = `https://mynaavi.com/support${tok ? `?token=${encodeURIComponent(tok)}` : ''}`;
-                const { Linking } = await import('react-native');
-                Linking.openURL(url).catch(() =>
-                  Alert.alert('Could not open', 'Please visit mynaavi.com/support in your browser.')
-                );
-              } catch {
-                Alert.alert('Could not open', 'Please visit mynaavi.com/support in your browser.');
-              }
-            }}
-          >
-            <Text style={styles.saveBtnText}>Open Support</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.divider} />
-
         {/* Briefings */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Briefings</Text>
