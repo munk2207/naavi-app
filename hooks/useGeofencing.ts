@@ -245,7 +245,7 @@ function ensureReady(): Promise<void> {
       // diagnostic only; not needed in production. Re-enable temporarily by
       // setting true if a future geofence-not-firing incident needs
       // audible confirmation that the native SDK detected the transition.
-      debug: false,
+      debug: true,
 
       // V57.17 — Native HTTP autosync (Config.url). The SDK posts every
       // persisted geofence event directly to our webhook from native code,
@@ -915,6 +915,33 @@ export function useGeofencing(userId: string | null | undefined) {
         syncGeofencesForUser(userId).catch((err) =>
           console.error('[useGeofencing] foreground sync failed:', err),
         );
+        // Post-drive native log capture — dumps the SDK's internal log for
+        // the last 10 minutes into client_diagnostics so we can see what the
+        // native layer was doing during the drive even when the JS thread was
+        // suspended. Fire-and-forget; never blocks sync or UI.
+        (async () => {
+          try {
+            await ensureReady();
+            const Logger = BackgroundGeolocation.logger;
+            const sinceMs = Date.now() - 10 * 60 * 1000;
+            const log = await Logger.getLog({
+              start: sinceMs,
+              end: Date.now(),
+              order: Logger.ORDER_ASC,
+              limit: 500,
+            });
+            if (log && log.length > 10) {
+              remoteLog(getLifecycleSession(), 'tsoft-native-log-dump', {
+                log_chars: log.length,
+                log: log.length > 8000 ? log.slice(0, 8000) + '\n…[truncated]' : log,
+              });
+            }
+          } catch (err) {
+            remoteLog(getLifecycleSession(), 'tsoft-native-log-dump-failed', {
+              error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+            });
+          }
+        })();
       }
     });
     return () => sub.remove();
