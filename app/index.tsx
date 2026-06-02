@@ -35,6 +35,7 @@ import { useRouter, Stack } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
+import { WebView } from 'react-native-webview';
 import * as Speech from 'expo-speech';
 import { SPEECH } from '@/lib/voice-confirm';
 
@@ -77,6 +78,7 @@ import { lookupContact, type Contact } from '@/lib/contacts';
 import { resolveRecipient } from '@/lib/recipientLookup';
 import { saveContact, loadTodayConversation, signInWithGoogle, signOut, checkOAuthScopeVersion, markOAuthScopeVersionCurrent } from '@/lib/supabase';
 import { getBackgroundPermission, getForegroundPermission, requestLocationPermissions } from '@/lib/location';
+import { syncGeofencesForUser } from '@/hooks/useGeofencing';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync, isCalendarConnected } from '@/lib/calendar';
 import { registry } from '@/lib/adapters/registry';
 import { supabase } from '@/lib/supabase';
@@ -657,6 +659,32 @@ export default function HomeScreen() {
   const batteryOptPrompt = useBatteryOptPrompt(currentUserId);
   const [navAlert, setNavAlert] = useState<{ title: string; location: string; startMs: number } | null>(null);
   const [showIntegrations, setShowIntegrations] = useState(false);
+  const [webViewUrl, setWebViewUrl] = useState<string | null>(null);
+
+  // Opens a mynaavi.com management page inside the app via react-native-webview.
+  // Uses an embedded Modal — the app stays in the foreground, Transistorsoft
+  // foreground service is never killed (the V221 lesson: Linking.openURL
+  // and WebBrowser.openBrowserAsync both background the app).
+  const openWebView = async (path: string) => {
+    try {
+      const { data: { session } } = await supabase!.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+      setWebViewUrl(`https://mynaavi.com/${path}?token=${encodeURIComponent(token)}`);
+    } catch {
+      // If session fetch fails, fall back silently
+    }
+  };
+
+  const closeWebView = () => {
+    setWebViewUrl(null);
+    // Re-sync geofences so any rules reactivated/deleted in the WebView
+    // are reflected in the SDK immediately (same as native alerts screen does
+    // after a reactivate tap).
+    getSessionWithTimeout().then(session => {
+      if (session?.user?.id) syncGeofencesForUser(session.user.id).catch(() => {});
+    }).catch(() => {});
+  };
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
 
@@ -1355,9 +1383,9 @@ export default function HomeScreen() {
           headerLeft: () => null,
           headerRight: () => (
             <TopBarMenu items={[
-              { label: 'Alerts',   onPress: () => router.push('/alerts') },
-              { label: 'Lists',    onPress: () => router.push('/lists') },
-              { label: 'Notes',    onPress: () => router.push('/notes') },
+              { label: 'Alerts',   onPress: () => openWebView('alerts.html') },
+              { label: 'Lists',    onPress: () => openWebView('lists.html') },
+              { label: 'Notes',    onPress: () => openWebView('notes.html') },
               { label: 'Info',     onPress: () => setShowIntegrations(true) },
               { label: 'Help',     onPress: () => router.push('/help') },
               { label: 'Settings', onPress: () => router.push('/settings') },
@@ -2482,6 +2510,32 @@ export default function HomeScreen() {
         onAccept={batteryOptPrompt.onAccept}
         onDecline={batteryOptPrompt.onDecline}
       />
+
+      {/* In-app WebView for Alerts / Lists / Notes management pages.
+          Uses react-native-webview so the app stays in the foreground —
+          Transistorsoft foreground service is never killed. JWT token is
+          passed as a URL param so mynaavi.com pages can authenticate. */}
+      <Modal
+        visible={!!webViewUrl}
+        animationType="slide"
+        onRequestClose={closeWebView}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#FAFAF7' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(28,28,30,0.10)' }}>
+            <TouchableOpacity onPress={closeWebView} style={{ paddingRight: 16 }}>
+              <Text style={{ fontSize: 16, color: '#5DCAA5', fontWeight: '600' }}>✕ Close</Text>
+            </TouchableOpacity>
+          </View>
+          {webViewUrl && (
+            <WebView
+              source={{ uri: webViewUrl }}
+              style={{ flex: 1 }}
+              startInLoadingState
+              javaScriptEnabled
+            />
+          )}
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
