@@ -286,15 +286,17 @@ async function resolveActionRule(
       ? String(settings?.work_address ?? '').trim()
       : String(settings?.home_address ?? '').trim();
     if (savedAddress) {
-      const savedLc = savedAddress.toLowerCase();
+      // Normalize whitespace for comparison — double spaces, trailing spaces etc.
+      const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+      const savedNorm = normalize(savedAddress);
       const { data: rules } = await supabase
         .from('action_rules')
         .select('id, label, trigger_config, enabled, trigger_type')
         .eq('user_id', userId)
         .eq('enabled', true);
       const matched = (rules ?? []).filter((r: any) => {
-        const place = String(r.trigger_config?.place_name ?? '').toLowerCase();
-        return place === savedLc || place.includes(savedLc) || savedLc.includes(place);
+        const place = normalize(String(r.trigger_config?.place_name ?? ''));
+        return place === savedNorm || place.includes(savedNorm) || savedNorm.includes(place);
       });
       if (matched.length === 1) {
         const r = matched[0] as any;
