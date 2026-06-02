@@ -157,7 +157,7 @@ serve(async (req) => {
       }
       const { error: updErr } = await admin
         .from('action_rules')
-        .update({ enabled: true, last_fired_at: null })
+        .update({ enabled: true, last_fired_at: null, last_entered_at: null, last_exited_at: null })
         .eq('id', body.rule_id);
       if (updErr) {
         return new Response(JSON.stringify({ error: updErr.message }), {

@@ -360,10 +360,12 @@ async function reArmLocationRule(
       client
         .from('action_rules')
         .update({
-          enabled:        true,
-          last_fired_at:  null,
-          one_shot:       newOneShot,
-          trigger_config: mergedTriggerConfig,
+          enabled:          true,
+          last_fired_at:    null,
+          last_entered_at:  null,
+          last_exited_at:   null,
+          one_shot:         newOneShot,
+          trigger_config:   mergedTriggerConfig,
         })
         .eq('id', existingRule.id),
       10_000,
