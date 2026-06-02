@@ -270,6 +270,46 @@ async function resolveActionRule(
   userId: string,
   refLc: string,
 ): Promise<Match[]> {
+  // Personal keyword resolution: "my office" / "office" / "work" → work_address
+  // "my home" / "home" / "house" → home_address
+  // Match against the saved address in user_settings first, then score that
+  // specific alert at 1.0 — avoids fuzzy collision with "Ashraf office" etc.
+  const isOfficeKeyword = /^(my\s+)?(office|work)$/.test(refLc);
+  const isHomeKeyword   = /^(my\s+)?(home|house|place)$/.test(refLc);
+  if (isOfficeKeyword || isHomeKeyword) {
+    const { data: settings } = await supabase
+      .from('user_settings')
+      .select('home_address, work_address')
+      .eq('user_id', userId)
+      .maybeSingle();
+    const savedAddress = isOfficeKeyword
+      ? String(settings?.work_address ?? '').trim()
+      : String(settings?.home_address ?? '').trim();
+    if (savedAddress) {
+      const savedLc = savedAddress.toLowerCase();
+      const { data: rules } = await supabase
+        .from('action_rules')
+        .select('id, label, trigger_config, enabled, trigger_type')
+        .eq('user_id', userId)
+        .eq('enabled', true);
+      const matched = (rules ?? []).filter((r: any) => {
+        const place = String(r.trigger_config?.place_name ?? '').toLowerCase();
+        return place === savedLc || place.includes(savedLc) || savedLc.includes(place);
+      });
+      if (matched.length === 1) {
+        const r = matched[0] as any;
+        console.log(`[resolve-entity-ref] personal keyword "${refLc}" → address match: ${r.label}`);
+        return [{
+          entity_type: 'action_rule',
+          entity_id:   r.id,
+          label:       r.label || r.trigger_config?.place_name || 'unnamed alert',
+          hint:        r.trigger_type || undefined,
+          score:       1.0,
+        }];
+      }
+    }
+  }
+
   // Pull enabled rules for the user; do the matching in JS so we can score
   // across label + trigger_config.place_name without complex SQL JSON ILIKE.
   // Rule counts per user are small (typically <30) — JS-side filter is fine.
