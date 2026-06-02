@@ -102,15 +102,31 @@ serve(async (req) => {
   try {
     const accessToken = await getNewAccessToken(tokenRow.refresh_token);
 
+    // Fetch MyNaavi contact group resource name so we can prioritize those contacts.
+    let myNaaviGroupResource: string | null = null;
+    try {
+      const groupsRes = await fetch('https://people.googleapis.com/v1/contactGroups?pageSize=100', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (groupsRes.ok) {
+        const groupsData = await groupsRes.json();
+        const groups = groupsData.contactGroups ?? [];
+        const myNaaviGroup = groups.find((g: any) =>
+          String(g.name || '').toLowerCase() === 'mynaavi' ||
+          String(g.formattedName || '').toLowerCase() === 'mynaavi'
+        );
+        if (myNaaviGroup) myNaaviGroupResource = myNaaviGroup.resourceName;
+        console.log(`[lookup-contact] MyNaavi group: ${myNaaviGroupResource ?? 'not found'}`);
+      }
+    } catch (e) {
+      console.warn('[lookup-contact] Could not fetch contact groups:', e);
+    }
+
     const url = new URL(PEOPLE_API);
     url.searchParams.set('query', name.trim());
-    // 2026-05-22 (Wael) — added 'addresses' to readMask so the voice server
-    // can resolve "Alert me when I arrive at Bob's home" without an extra
-    // Places lookup. People API returns addresses[] with type (home/work/
-    // other) and formattedValue. Backwards compatible: callers that only
-    // read name/email/phone keep working.
-    url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers,addresses');
-    url.searchParams.set('pageSize', '5');
+    // memberships added so we can detect MyNaavi-labeled contacts and sort them first.
+    url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers,addresses,memberships');
+    url.searchParams.set('pageSize', '10');
 
     const res = await fetch(url.toString(), {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -126,6 +142,20 @@ serve(async (req) => {
     const data = await res.json();
     console.log(`[lookup-contact] API response:`, JSON.stringify(data).slice(0, 300));
     let results = data.results ?? [];
+
+    // Sort: MyNaavi-labeled contacts first.
+    if (myNaaviGroupResource && results.length > 1) {
+      results = results.sort((a: any, b: any) => {
+        const aIsMyNaavi = (a.person?.memberships ?? []).some((m: any) =>
+          m.contactGroupMembership?.contactGroupResourceName === myNaaviGroupResource
+        );
+        const bIsMyNaavi = (b.person?.memberships ?? []).some((m: any) =>
+          m.contactGroupMembership?.contactGroupResourceName === myNaaviGroupResource
+        );
+        return (bIsMyNaavi ? 1 : 0) - (aIsMyNaavi ? 1 : 0);
+      });
+      console.log(`[lookup-contact] Sorted — MyNaavi contacts first`);
+    }
 
     // Fallback: search other contacts (people you've emailed)
     if (results.length === 0) {
@@ -165,10 +195,17 @@ serve(async (req) => {
     const contacts = results.map((r: any) => {
       const person = r.person ?? {};
       const addrs = Array.isArray(person.addresses) ? person.addresses : [];
+      const memberships = Array.isArray(person.memberships) ? person.memberships : [];
+      const isMyNaavi = myNaaviGroupResource
+        ? memberships.some((m: any) =>
+            m.contactGroupMembership?.contactGroupResourceName === myNaaviGroupResource
+          )
+        : false;
       return {
-        name:  person.names?.[0]?.displayName ?? name,
-        email: person.emailAddresses?.[0]?.value ?? null,
-        phone: person.phoneNumbers?.[0]?.value ?? null,
+        name:             person.names?.[0]?.displayName ?? name,
+        email:            person.emailAddresses?.[0]?.value ?? null,
+        phone:            person.phoneNumbers?.[0]?.value ?? null,
+        mynaavi_community: isMyNaavi,
         addresses: addrs.map((a: any) => ({
           type: String(a?.type || a?.formattedType || 'other').toLowerCase(),
           formatted: String(a?.formattedValue || '').trim(),
