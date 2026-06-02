@@ -1,57 +1,44 @@
-# Session Handoff — 2026-06-02 | Post-Build 226 | Staff Portal Login Blocked
+# Session Handoff — 2026-06-02 | Post-Build 226 | Staff Portal Login — STILL BROKEN
 
-## What Was Attempted This Session
+## Honest Summary
 
-### Staff Portal Login Fix
-Goal: fix the staff portal magic link login that was redirecting back to the login form.
-
-**Work done:**
-- Fixed token hash parsing in `index.html` — replaced regex with `URLSearchParams(hash.substring(1))` (more reliable)
-- Added `localStorage` session persistence — token saved on successful login, survives page refresh
-- Added temporary debug bar to diagnose token parsing
-- Fixed Supabase Site URL — was set to `wael.aggan@gmail.com` (an email address); corrected to `https://mynaavi.com`
-- Configured Postmark SMTP in Supabase Auth — `smtp.postmarkapp.com`, port 587, `noreply@mynaavi.com` sender, Postmark server token as username + password
-- Added `wael@mynaavi.com` to `support_staff` table (new staff member)
-- Created `wael@mynaavi.com` as a Supabase auth user
-
-**Result: FAILED — staff portal login still not working**
+The staff portal login was broken at the start of this session. It is still broken at the end. Nothing was fixed.
 
 ---
 
-## Root Cause Investigation
+## What Was Attempted (and failed)
 
-### What works:
-- Postmark SMTP is confirmed working ✅ — magic link email received from `MyNaavi <noreply@mynaavi.com>` signed by `mynaavi.com`
-- Redirect IS happening to `staff.mynaavi.com` ✅
-- Token IS arriving in the URL hash ✅
-- `check-staff` returns `authorized: true` ✅ (confirmed from previous session)
+1. **Token hash parsing rewrite** — replaced regex with `URLSearchParams(hash.substring(1))`. Did not fix login.
 
-### What fails:
-- Every magic link click returns `otp_expired` error in the URL hash immediately
-- URL on redirect: `staff.mynaavi.com/#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired`
-- Link expires even when clicked immediately after receipt
+2. **Added localStorage session persistence** — token saved on successful login. Irrelevant since login never succeeds.
 
-### Suspected cause:
-Supabase OTP expiry may be set to an extremely short value. The rate limits page was not reached (404 on auth/general). **Next session must check OTP expiry setting** in Supabase Auth settings.
+3. **Added debug bar** — confirmed the page is loading fresh code. The bar showed the hash contains `otp_expired` error, not an `access_token`.
 
-Secondary possibility: Postmark is still in test/review mode — the account was submitted for review 20+ hours ago but not yet approved. In test mode, Postmark may be delivering emails but Supabase may be generating short-lived tokens for unverified flows.
+4. **Fixed Supabase Site URL** — was set to `wael.aggan@gmail.com`. Corrected to `https://mynaavi.com`. Did not fix login.
+
+5. **Configured Postmark SMTP** — email delivery now confirmed working (magic link arrives from `noreply@mynaavi.com`). But every link arrives already expired (`otp_expired` error in hash).
+
+6. **Added `wael@mynaavi.com` to support_staff** — to work around Postmark test-mode restriction. Did not fix login.
+
+7. **Created `wael@mynaavi.com` as Supabase auth user** — to unblock "Signups not allowed for otp" error. Did not fix login.
+
+---
+
+## Actual Root Cause — NOT YET IDENTIFIED
+
+Every magic link arrives with `otp_expired` immediately on click. The OTP expiry setting in Supabase has not been found or checked. This is the most likely root cause and was not resolved this session.
+
+**Next session must do this first:**
+- Find the OTP expiry setting in Supabase Auth
+- If it is set abnormally short, increase it to 3600 seconds (1 hour)
+- Try: `https://supabase.com/dashboard/project/hhgyppbxgmjrwdpdubcx/auth/rate-limits` and scroll to find OTP expiry
 
 ---
 
 ## Postmark Status
-- Account submitted for review 20+ hours ago — no approval yet as of session close
-- SMTP IS delivering emails (confirmed)
-- Once Postmark approves the account, can send to any external address (not just mynaavi.com domain)
-- `mynaavi2207@gmail.com` (original staff account) will work once approved
-
----
-
-## Supabase SMTP Config (saved, do not re-enter)
-- Host: `smtp.postmarkapp.com`
-- Port: `587`
-- Sender: `noreply@mynaavi.com` / MyNaavi
-- Username + Password: Postmark server token `9bb09416-c04c-4061-ab5a-491eb0efc527`
-- Minimum interval: 60 seconds
+- Account submitted for review 20+ hours ago — not yet approved
+- SMTP delivers emails (confirmed) but Postmark is still in test mode
+- Once approved: `mynaavi2207@gmail.com` will work as a staff login email again
 
 ---
 
@@ -61,23 +48,18 @@ Secondary possibility: Postmark is still in test/review mode — the account was
 
 ---
 
-## Next Session — Staff Portal Fix Priority
-
-1. **Check OTP expiry** — go to Supabase Auth settings and find the OTP expiry value. If it's very short (< 60s), increase it to 3600 (1 hour).
-   - Try: `https://supabase.com/dashboard/project/hhgyppbxgmjrwdpdubcx/auth/rate-limits` and scroll for OTP expiry
-   - Or SQL: `SELECT * FROM auth.config` if accessible
-
-2. **Check Postmark approval** — go to `https://account.postmarkapp.com` and check if "We're reviewing your account" banner is gone
-
-3. **Remove debug bar** from `naavi-staff/index.html` once login is confirmed working
+## Supabase SMTP Config (in place)
+- Host: `smtp.postmarkapp.com` / Port: `587`
+- Sender: `noreply@mynaavi.com` / MyNaavi
+- Username + Password: Postmark server token `9bb09416-c04c-4061-ab5a-491eb0efc527`
 
 ---
 
-## Other Open Items (unchanged from prior handoff)
-
-- Full Naavi functionality testing — not started this session
+## Other Open Items (unchanged)
+- Full Naavi functionality testing — not started
 - Re-arm drive test — not done
 - V226 production drive test — not done
+- Debug bar still in `naavi-staff/index.html` — remove once login works
 
 ---
 
