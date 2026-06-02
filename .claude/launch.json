@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mynaavi-website",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "mynaavi-website", "--port", "3001", "--no-clipboard"],
+      "port": 3001
+    },
+    {
+      "name": "naavi-staff",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "C:\\Users\\waela\\OneDrive\\Desktop\\naavi-staff", "--port", "3002", "--no-clipboard"],
+      "port": 3002
+    }
+  ]
+}
