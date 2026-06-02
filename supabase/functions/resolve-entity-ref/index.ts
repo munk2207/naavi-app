@@ -295,11 +295,19 @@ async function resolveActionRule(
     const labelStem = stem(label);
     const placeStem = stem(place);
     let score = 0;
+    // Strip common label prefixes to get the meaningful part for matching.
+    // e.g. "Alert when arriving at office" → "office"
+    const labelCore = label
+      .replace(/^alert\s+(when\s+)?(arriving|leaving|every\s+time\s+i\s+arrive)\s+(at\s+)?/i, '')
+      .replace(/^alert\s+/i, '')
+      .trim();
+    const labelCoreStem = stem(labelCore);
+
     // Exact match strictly beats stem-equal match so "grocery" doesn't tie
     // with "groceries" — caller treats top-tied scores as ambiguous, so this
     // separation matters for picking a single winner when both exist.
-    if (label === refLc || place === refLc) score = 1.0;
-    else if (labelStem === refStem || placeStem === refStem) score = 0.9;
+    if (label === refLc || place === refLc || labelCore === refLc) score = 1.0;
+    else if (labelStem === refStem || placeStem === refStem || labelCoreStem === refStem) score = 0.9;
     else if (label.includes(refLc) || place.includes(refLc) ||
              label.includes(refStem) || place.includes(refStem)) score = 0.7;
     else if (refTokens.length > 0) {
