@@ -2616,8 +2616,41 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       const enabled = match.enabled !== false;
                       locationIntercepted = true;
                       if (enabled) {
-                        // Already active — point user at the Alerts UI to
-                        // edit or remove. Same message as before.
+                        // Check if the new action adds tasks, list_name, or body to existing alert.
+                        // If so — merge into the existing rule instead of blocking.
+                        const newTasks    = Array.isArray(action.action_config?.tasks) ? action.action_config.tasks : [];
+                        const newListName = String(action.action_config?.list_name ?? '').trim();
+                        const newBody     = String(action.action_config?.body ?? '').trim();
+                        const hasNewContent = newTasks.length > 0 || newListName || newBody;
+
+                        if (hasNewContent && supabase) {
+                          // Merge new content into existing alert's action_config
+                          const existingConfig = match.action_config ?? {};
+                          const mergedConfig: any = { ...existingConfig };
+                          if (newTasks.length > 0) {
+                            const existingTasks = Array.isArray(existingConfig.tasks) ? existingConfig.tasks : [];
+                            mergedConfig.tasks = [...new Set([...existingTasks, ...newTasks])];
+                          }
+                          if (newListName) mergedConfig.list_name = newListName;
+                          if (newBody && newBody !== existingConfig.body) mergedConfig.body = newBody;
+
+                          const { error: updateErr } = await supabase
+                            .from('action_rules')
+                            .update({ action_config: mergedConfig })
+                            .eq('id', match.id);
+
+                          if (!updateErr) {
+                            const addedDesc = newListName ? `your ${newListName} list` : newTasks.join(', ') || 'reminder';
+                            turnSpeechOverride = `Got it — I've added ${addedDesc} to your existing alert for ${match.trigger_config?.place_name || placeName}.`;
+                            console.log(`[orch:loc:memory-hit] merged new content into rule ${match.id}`);
+                          } else {
+                            console.error('[orch:loc:memory-hit] merge update failed:', updateErr.message);
+                            turnSpeechOverride = `You already have an alert for ${match.trigger_config?.place_name || placeName}. Tap Alerts to update it.`;
+                          }
+                          continue;
+                        }
+
+                        // No new content — just inform user alert exists.
                         const mode = match.one_shot ? 'one-time' : 'recurring';
                         const addrSuffix = (match.trigger_config?.address)
                           ? ` at ${String(match.trigger_config.address).split(',')[0]?.trim()}`
