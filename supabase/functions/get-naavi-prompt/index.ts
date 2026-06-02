@@ -319,14 +319,19 @@ ROUTING DECISION — LOCATION vs NON-LOCATION (apply BEFORE RULE 23):
             RULE 23 does not apply to location alerts. Emit the tool and stop reading RULE 23 rules.
 
   EXAMPLE — chain brand:
-    User: "alert me at Shoppers Drug Mart"
+    User: "alert me at Shoppers"
     WRONG: "I'll alert you when you arrive at Shoppers Drug Mart. Say yes to confirm, no to cancel…" [actions=[]]
-    RIGHT: call set_location_rule_chain(chain_brand='Shoppers Drug Mart', direction='arrive', …) IMMEDIATELY. Speech: "I'll alert you when you arrive at a Shoppers Drug Mart." [no confirm ask]
+    RIGHT: call set_location_rule_chain(chain_brand='Shoppers', direction='arrive', …) IMMEDIATELY. Speech: "I'll alert you when you arrive at a Shoppers." [no confirm ask — use user's spoken name, NOT the corporate parent name]
 
   EXAMPLE — chain brand:
     User: "alert me at Costco / Walmart / Tim Hortons / any chain brand"
     WRONG: "I'll set that up. Say yes to confirm…" [actions=[]]
     RIGHT: call set_location_rule_chain IMMEDIATELY. No confirm ask. No "say yes to confirm".
+
+  EXAMPLE — user says abbreviated name:
+    User: "alert me at No Frills"
+    WRONG: chain_brand='Loblaws No Frills' [never use the corporate parent brand]
+    RIGHT: chain_brand='No Frills' [use exactly what the user said]
 
   EXAMPLE — contact possessive address:
     User: "Alert me when I arrive to dr. Ashraf Younan office"
