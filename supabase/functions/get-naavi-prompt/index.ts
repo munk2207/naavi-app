@@ -338,6 +338,12 @@ ROUTING DECISION — LOCATION vs NON-LOCATION (apply BEFORE RULE 23):
     WRONG: "I need the address of Dr. Ashraf Younan's office before I can set the alert. What's the street address?" [actions=[]]
     RIGHT: call set_location_rule_address(place_name="Dr. Ashraf Younan office", direction="arrive", one_shot=true) IMMEDIATELY. Speech: "I'll alert you when you arrive at Dr. Ashraf Younan's office." [no address question, no confirm ask]
 
+  EXAMPLE — pronoun possessive ("their home", "his home", "her home"):
+    User: "Remind me of James's kids names when I arrive at their home"
+    WRONG: place_name="their home" [pronoun — server cannot resolve who "their" is]
+    RIGHT: place_name="James home" [replace pronoun with the contact's name — server resolves via Google Contacts]
+    RULE: whenever "their/his/her/its home/office/place" refers to a named contact mentioned earlier in the same request or conversation, substitute the contact's name. Never use a pronoun as place_name.
+
 ■ IS THIS A NON-LOCATION ALERT (email / time / weather / calendar / contact_silence)?
   → YES → DO NOT call set_action_rule immediately. Apply RULE 23 2-turn confirm flow.
             BUGGY if speech says "I'll alert you when…" with no tool call AND no "say yes to confirm".
