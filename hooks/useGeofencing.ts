@@ -245,7 +245,7 @@ function ensureReady(): Promise<void> {
       // diagnostic only; not needed in production. Re-enable temporarily by
       // setting true if a future geofence-not-firing incident needs
       // audible confirmation that the native SDK detected the transition.
-      debug: true,
+      debug: false,
 
       // V57.17 — Native HTTP autosync (Config.url). The SDK posts every
       // persisted geofence event directly to our webhook from native code,
@@ -731,7 +731,7 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
           identifier: rule.id,
           latitude:  resolvedLat,
           longitude: resolvedLng,
-          radius:    typeof cfg.radius_meters === 'number' ? cfg.radius_meters : 100,
+          radius:    typeof cfg.radius_meters === 'number' ? cfg.radius_meters : 300,
           notifyOnEntry: direction !== 'leave',
           notifyOnExit:  direction === 'leave',
         });

@@ -910,7 +910,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                 address:       pending.resolved.address ?? null,
                 radius_meters: pending.resolved.radius_meters
                   ?? (pending.originalAction?.trigger_config as any)?.radius_meters
-                  ?? 150,
+                  ?? 300,
                 one_shot:      pending.originalAction?.one_shot ?? (dupe.one_shot === true),
               });
               if (!armResult.success) {
@@ -944,7 +944,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           resolved_lng: pending.resolved.lng,
           radius_meters: pending.resolved.radius_meters
             ?? (pending.originalAction?.trigger_config as any)?.radius_meters
-            ?? 150,
+            ?? 300,
         };
         // V57.18 — location alerts default to RECURRING (one_shot=false). See
         // matching note in the SET_ACTION_RULE intercept below.
@@ -2697,7 +2697,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       resolved_lng: data.lng,
                       radius_meters: data.radius_meters
                         ?? (action.trigger_config as any)?.radius_meters
-                        ?? 150,
+                        ?? 300,
                     };
                     // V57.18 — location alerts default to RECURRING (one_shot=false).
                     // Most users create alerts for places they visit regularly
@@ -2750,7 +2750,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                           const armResult = await reArmLocationRule(supabase!, dupe, {
                             place_name:    data.place_name,
                             address:       data.address ?? null,
-                            radius_meters: data.radius_meters ?? (action.trigger_config as any)?.radius_meters ?? 150,
+                            radius_meters: data.radius_meters ?? (action.trigger_config as any)?.radius_meters ?? 300,
                             one_shot:      action.one_shot ?? (dupe.one_shot === true),
                           });
                           turnSpeechOverride = armResult.speech;
