@@ -2560,7 +2560,13 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       continue;
                     }
                     const contact = ranked[0].c;
-                    const addr = (contact.addresses || []).find((a: any) => wantedTypes.includes(String(a?.type || '').toLowerCase()));
+                    // Find address by wanted type first; fall back to ANY address if
+                    // the contact only has one address saved without a type label.
+                    let addr = (contact.addresses || []).find((a: any) => wantedTypes.includes(String(a?.type || '').toLowerCase()));
+                    if (!addr && (contact.addresses || []).length === 1) {
+                      addr = contact.addresses[0]; // only one address — use it regardless of type
+                      console.log(`[orch:loc:possessive] no typed address, using only address on "${contact.name}"`);
+                    }
                     console.log(`[orch:loc:possessive] ranked: ${ranked.map((r: any) => `${r.c.name}(addrs=${(r.c.addresses||[]).length})`).join(', ')} -> picked "${contact.name}"`);
                     if (!addr) {
                       const kindLabel = (cKind === 'office' || cKind === 'work') ? 'office' : 'home';
