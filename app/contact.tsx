@@ -31,7 +31,8 @@ import { supabase } from '@/lib/supabase';
 import { queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 import { suggestFaq, faqUrl, type FaqEntry } from '@/lib/faq';
 
-const FORMSPREE_URL = 'https://formspree.io/f/xgorryye';
+const SUPABASE_URL  = 'https://hhgyppbxgmjrwdpdubcx.supabase.co';
+const SUPABASE_ANON = 'sb_publishable_Aq3x_es0Eh3WJcLJOV9l9g_gt0G0gUQ';
 
 export default function ContactScreen() {
   const router = useRouter();
@@ -82,24 +83,29 @@ export default function ContactScreen() {
     setSubmitting(true);
     try {
       const appVersion = `${Constants.expoConfig?.version ?? '?'} (build ${Constants.expoConfig?.android?.versionCode ?? '?'})`;
-      const body = new URLSearchParams();
-      body.append('message',       m);
-      body.append('email',         email.trim());
-      body.append('app_version',   appVersion);
-      body.append('platform',      `${Platform.OS} ${Platform.Version}`);
-      body.append('user_id',       userId);
-      body.append('user_name',     userName);
-      body.append('submitted_at',  new Date().toISOString());
-      body.append('_subject',      `MyNaavi support — ${appVersion}`);
+      const session = await getSessionWithTimeout();
+      const authToken = session?.access_token ?? SUPABASE_ANON;
 
-      const res = await fetch(FORMSPREE_URL, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/ingest-ticket`, {
         method: 'POST',
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body.toString(),
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON,
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          source_channel:  'mobile-contact',
+          subject:         m.slice(0, 80),
+          body:            m,
+          reporter_email:  email.trim(),
+          reporter_name:   userName || undefined,
+          user_id:         userId   || undefined,
+          context:         `app_version=${appVersion} platform=${Platform.OS} ${Platform.Version}`,
+        }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || `Formspree returned ${res.status}`);
+        throw new Error(data?.error || `Submit failed ${res.status}`);
       }
       setSuccess(true);
     } catch (err) {
