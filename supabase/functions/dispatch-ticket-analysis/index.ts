@@ -59,7 +59,6 @@ serve(async (req) => {
       .from('tickets')
       .select('id, ticket_number, created_at, reporter_email')
       .eq('status', 'new')
-      .not('hubspot_ticket_id', 'is', null)
       .is('last_drafted_at', null)        // skip tickets already drafted
       .not('reporter_email', 'ilike', '%autotester%')  // skip auto-tester tickets
       .not('reporter_email', 'ilike', '%autotest%')    // skip auto-tester tickets
