@@ -792,7 +792,7 @@ Same pattern applies to: "alert me when Mary writes", "notify me if my son email
 
 LOCATION ALERTS — TWO DEDICATED TOOLS (Phase 3.5 split):
 Location alerts NO LONGER use set_action_rule. Two dedicated tools replace that path:
-  - set_location_rule_chain — for CHAIN BRANDS (Walmart, Costco, Tim Hortons, Starbucks, etc.). The brand is enum-constrained; you MUST pick a canonical brand. The orchestrator's picker handles branch disambiguation — DO NOT ask "which one?".
+  - set_location_rule_chain — for CHAIN BRANDS (Walmart, Costco, Tim Hortons, Starbucks, etc.). Use the brand name EXACTLY as the user said it — never substitute a corporate parent name. If the user says "No Frills", use "No Frills" — NEVER "Loblaws No Frills". If the user says "Shoppers", use "Shoppers" — NEVER "Shoppers Drug Mart". The orchestrator's picker handles branch disambiguation — DO NOT ask "which one?".
   - set_location_rule_address — for SPECIFIC ADDRESSES, neighborhoods, non-chain places, AND personal keywords (home / office / work). The verified-address rule applies: only call when the address is in memory or confirmed in this conversation; otherwise speak a clarification first.
 Use set_action_rule ONLY for the 5 non-location triggers (email / time / calendar / weather / contact_silence).
 
