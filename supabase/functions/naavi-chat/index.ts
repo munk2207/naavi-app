@@ -2530,6 +2530,71 @@ Deno.serve(async (req) => {
     // pass-through is now a no-op for typical responses. Kept for safety.
     rawText = normalizeRawText(rawText);
 
+    // ── Pending actions queue — cross-turn action preservation ───────────────
+    // When Claude asks a clarification question (e.g. "Which Bob?") while
+    // processing a multi-action request, some actions may not be emitted in
+    // this turn. We save them to pending_actions so they survive across turns.
+    //
+    // Detection: speech ends with a question AND fewer actions were emitted
+    // than the conversation history suggests were requested (multi-action turn).
+    // Retrieval: on the NEXT turn, if speech resolves the clarification and
+    // new actions arrive, merge the stored deferred actions.
+    if (userId && supabase) {
+      try {
+        const parsedRaw = JSON.parse(rawText);
+        const currentActions: any[] = parsedRaw.actions ?? [];
+        const currentSpeech: string = parsedRaw.speech ?? '';
+
+        // Step A: Retrieve any stored pending actions from a previous clarification turn
+        const { data: pendingRow } = await supabase
+          .from('pending_actions')
+          .select('*')
+          .eq('user_id', userId)
+          .gt('expires_at', new Date().toISOString())
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (pendingRow && currentActions.length > 0) {
+          // User resolved the clarification — merge deferred actions with current ones
+          const deferred: any[] = pendingRow.actions ?? [];
+          // Dedupe by action type + key fields to avoid duplicates
+          const currentTypes = new Set(currentActions.map((a: any) => `${a.type}:${a.summary ?? a.place_name ?? a.to ?? ''}`));
+          const toAdd = deferred.filter((a: any) => {
+            const key = `${a.type}:${a.summary ?? a.trigger_config?.place_name ?? a.to ?? ''}`;
+            return !currentTypes.has(key);
+          });
+          if (toAdd.length > 0) {
+            parsedRaw.actions = [...currentActions, ...toAdd];
+            rawText = JSON.stringify(parsedRaw);
+            console.log(`[pending_actions] restored ${toAdd.length} deferred action(s): ${toAdd.map((a: any) => a.type).join(', ')}`);
+          }
+          // Delete the stored record
+          await supabase.from('pending_actions').delete().eq('id', pendingRow.id);
+          console.log(`[pending_actions] cleared pending record ${pendingRow.id}`);
+        } else if (!pendingRow && currentActions.length > 0 && currentSpeech.includes('?')) {
+          // Step B: Claude asked a clarification question this turn — store actions for next turn
+          // Only store if there are multiple actions (multi-action request) or speech asks which contact
+          const isContactQuestion = /which (one|contact|bob|sarah|james|\w+)\??/i.test(currentSpeech) ||
+                                    /i found \d+ contacts/i.test(currentSpeech) ||
+                                    /need.*clarif/i.test(currentSpeech);
+          const isMultiAction = currentActions.length >= 2;
+
+          if (isContactQuestion || isMultiAction) {
+            await supabase.from('pending_actions').upsert({
+              user_id:    userId,
+              actions:    currentActions,
+              context:    userText.slice(0, 500),
+              expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+            });
+            console.log(`[pending_actions] stored ${currentActions.length} action(s) for next clarification turn`);
+          }
+        }
+      } catch (paErr) {
+        console.warn('[pending_actions] non-fatal error:', paErr instanceof Error ? paErr.message : String(paErr));
+      }
+    }
+
     return jsonResponse({ rawText });
 
   } catch (err) {
