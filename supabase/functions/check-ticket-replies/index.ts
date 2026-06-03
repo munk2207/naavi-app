@@ -161,6 +161,19 @@ Deno.serve(async (req) => {
         const fromName   = fromMatch?.[1]?.trim() ?? '';
         const fromEmail  = fromMatch?.[2]?.trim() ?? fromHdr;
 
+        // ── Dedup: skip if this message_id already in replies ────────
+        const existingReplies = Array.isArray(ticket.replies) ? ticket.replies : [];
+        if (existingReplies.some((r: any) => r.message_id === msgId)) {
+          console.log(`[check-ticket-replies] message ${msgId} already in replies for ticket #${ticketNumber} — skipping`);
+          // Still mark as read so we don't keep picking it up
+          await fetch(`${GMAIL_API}/messages/${msgId}/modify`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ removeLabelIds: ['UNREAD'] }),
+          });
+          continue;
+        }
+
         // ── Append reply to tickets.replies ──────────────────────────
         const newReply = {
           at:         new Date().toISOString(),
@@ -170,9 +183,7 @@ Deno.serve(async (req) => {
           body:       body.trim(),
           message_id: msgId,
         };
-        const replies = Array.isArray(ticket.replies)
-          ? [...ticket.replies, newReply]
-          : [newReply];
+        const replies = [...existingReplies, newReply];
 
         const auditEntry = {
           at:          new Date().toISOString(),
