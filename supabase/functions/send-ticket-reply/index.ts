@@ -71,8 +71,10 @@ Deno.serve(async (req) => {
     if (!pmToken) return json({ error: 'POSTMARK_SERVER_TOKEN not set' }, 500);
 
     const emailSubject = `Re: Ticket #${ticket.ticket_number} — ${ticket.subject}`.slice(0, 200);
-    const textBody     = `${reply_body.trim()}\n\n— MyNaavi Team`;
-    const htmlBody     = `<p>${reply_body.trim().replace(/\n/g, '<br>')}</p><p>— MyNaavi Team</p>`;
+    // Strip trailing signature if already present in the draft to avoid duplication.
+    const cleanBody    = reply_body.trim().replace(/\s*—\s*MyNaavi Team\s*$/i, '').trim();
+    const textBody     = `${cleanBody}\n\n— MyNaavi Team`;
+    const htmlBody     = `<p>${cleanBody.replace(/\n/g, '<br>')}</p><p>— MyNaavi Team</p>`;
 
     const pmRes = await fetch(`${POSTMARK_API}/email`, {
       method: 'POST',
