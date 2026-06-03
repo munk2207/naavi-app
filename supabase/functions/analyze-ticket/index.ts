@@ -85,7 +85,8 @@ serve(async (req) => {
     if (tErr || !ticket) return json({ error: `ticket not found: ${tErr?.message ?? 'no row'}` }, 404);
 
     // We don't draft for terminal-state tickets.
-    if (['sent', 'closed', 'cancelled'].includes(ticket.status)) {
+    // 'sent' is NOT terminal — customer may reply after staff sends.
+    if (['closed', 'cancelled'].includes(ticket.status)) {
       return json({ skipped: true, reason: `ticket status='${ticket.status}' — not drafting`, ticket_number: ticket.ticket_number });
     }
 
