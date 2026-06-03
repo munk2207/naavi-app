@@ -123,7 +123,7 @@ const ACTION_CONFIG = {
       description: 'Name of an existing user list. Items are looked up at fire time.',
     },
   },
-  required: ['body'],
+  required: [],
   additionalProperties: false,
 };
 
