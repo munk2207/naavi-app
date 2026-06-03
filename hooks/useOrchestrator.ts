@@ -2778,6 +2778,37 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                         const dupEnabled = dupe.enabled !== false;
                         locationIntercepted = true;
                         if (dupEnabled) {
+                          // Check if the new action adds tasks or list — merge instead of blocking
+                          const newTasks    = Array.isArray(action.action_config?.tasks) ? action.action_config.tasks : [];
+                          const newListName = String(action.action_config?.list_name ?? '').trim();
+                          const hasNewContent = newTasks.length > 0 || newListName;
+
+                          if (hasNewContent && supabase) {
+                            const existingConfig = dupe.action_config ?? {};
+                            const mergedConfig: any = { ...existingConfig };
+                            if (newTasks.length > 0) {
+                              const existingTasks = Array.isArray(existingConfig.tasks) ? existingConfig.tasks : [];
+                              mergedConfig.tasks = [...new Set([...existingTasks, ...newTasks])];
+                            }
+                            if (newListName) mergedConfig.list_name = newListName;
+
+                            const { error: updateErr } = await supabase
+                              .from('action_rules')
+                              .update({ action_config: mergedConfig })
+                              .eq('id', dupe.id);
+
+                            if (!updateErr) {
+                              const dupPlace = String(dupe.trigger_config?.place_name ?? data.place_name);
+                              const addedDesc = newListName ? `your ${newListName} list` : newTasks.join(', ');
+                              turnSpeechOverride = `Got it — I've added ${addedDesc} to your existing alert for ${dupPlace}.`;
+                              console.log(`[orch:loc:coord-hit] merged tasks into rule ${dupe.id}`);
+                            } else {
+                              console.error('[orch:loc:coord-hit] merge failed:', updateErr.message);
+                              turnSpeechOverride = `You already have an alert there. Tap Alerts to update it.`;
+                            }
+                            continue;
+                          }
+
                           const dupMode = dupe.one_shot ? 'one-time' : 'recurring';
                           const dupAddrSuffix = (dupe.trigger_config?.address)
                             ? ` at ${String(dupe.trigger_config.address).split(',')[0]?.trim()}`
