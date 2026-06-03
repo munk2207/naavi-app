@@ -167,11 +167,18 @@ serve(async (req) => {
     // ── Build the Claude prompt ──────────────────────────────────────
     // Include latest customer reply in evidence so Claude can judge close intent
     // Add latest customer reply to evidence for close-intent detection
+    // Strip quoted reply text (Gmail "On [date]... wrote:" patterns) so Claude
+    // reads only what the customer actually typed, not the full thread history.
     const replies = Array.isArray(ticket.replies) ? ticket.replies : [];
     const lastInbound = [...replies].reverse().find((r: any) => r.direction === 'inbound');
     if (lastInbound) {
+      const rawBody = String(lastInbound.body ?? '');
+      const strippedBody = rawBody
+        .replace(/\r\n/g, '\n')
+        .split(/\n(?:On .+wrote:|>.*)/m)[0]
+        .trim();
       (evidence as any).latest_customer_reply = {
-        body: lastInbound.body,
+        body: strippedBody || rawBody.slice(0, 500),
         at:   est(lastInbound.at),
       };
     }
