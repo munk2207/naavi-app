@@ -43,7 +43,8 @@ serve(async (req) => {
       .select('id, ticket_number, last_drafted_at, replies, status')
       .not('last_drafted_at', 'is', null)
       .not('replies', 'is', null)
-      .not('status', 'in', '("closed","cancelled")')
+      .neq('status', 'closed')
+      .neq('status', 'cancelled')
       .order('last_drafted_at', { ascending: true })
       .limit(BATCH_LIMIT * 3);
 
