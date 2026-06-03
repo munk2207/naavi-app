@@ -2623,28 +2623,20 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                         const newBody     = String(action.action_config?.body ?? '').trim();
                         const hasNewContent = newTasks.length > 0 || newListName || newBody;
 
-                        if (hasNewContent && supabase) {
-                          // Merge new content into existing alert's action_config
-                          const existingConfig = match.action_config ?? {};
-                          const mergedConfig: any = { ...existingConfig };
-                          if (newTasks.length > 0) {
-                            const existingTasks = Array.isArray(existingConfig.tasks) ? existingConfig.tasks : [];
-                            mergedConfig.tasks = [...new Set([...existingTasks, ...newTasks])];
-                          }
-                          if (newListName) mergedConfig.list_name = newListName;
-                          if (newBody && newBody !== existingConfig.body) mergedConfig.body = newBody;
-
-                          const { error: updateErr } = await supabase
-                            .from('action_rules')
-                            .update({ action_config: mergedConfig })
-                            .eq('id', match.id);
-
-                          if (!updateErr) {
+                        if (hasNewContent) {
+                          // Merge via manage-rules Edge Function (service_role) — direct client update
+                          // silently fails due to RLS on some setups.
+                          const { data: mergeData, error: mergeErr } = await invokeWithTimeout<any>(
+                            'manage-rules',
+                            { body: { op: 'merge_tasks', rule_id: match.id, tasks: newTasks.length > 0 ? newTasks : undefined, list_name: newListName || undefined } },
+                            10_000,
+                          );
+                          if (!mergeErr && mergeData?.ok) {
                             const addedDesc = newListName ? `your ${newListName} list` : newTasks.join(', ') || 'reminder';
                             turnSpeechOverride = `Got it — I've added ${addedDesc} to your existing alert for ${match.trigger_config?.place_name || placeName}.`;
                             console.log(`[orch:loc:memory-hit] merged new content into rule ${match.id}`);
                           } else {
-                            console.error('[orch:loc:memory-hit] merge update failed:', updateErr.message);
+                            console.error('[orch:loc:memory-hit] merge update failed:', mergeErr?.message);
                             turnSpeechOverride = `You already have an alert for ${match.trigger_config?.place_name || placeName}. Tap Alerts to update it.`;
                           }
                           continue;
@@ -2783,27 +2775,19 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                           const newListName = String(action.action_config?.list_name ?? '').trim();
                           const hasNewContent = newTasks.length > 0 || newListName;
 
-                          if (hasNewContent && supabase) {
-                            const existingConfig = dupe.action_config ?? {};
-                            const mergedConfig: any = { ...existingConfig };
-                            if (newTasks.length > 0) {
-                              const existingTasks = Array.isArray(existingConfig.tasks) ? existingConfig.tasks : [];
-                              mergedConfig.tasks = [...new Set([...existingTasks, ...newTasks])];
-                            }
-                            if (newListName) mergedConfig.list_name = newListName;
-
-                            const { error: updateErr } = await supabase
-                              .from('action_rules')
-                              .update({ action_config: mergedConfig })
-                              .eq('id', dupe.id);
-
-                            if (!updateErr) {
-                              const dupPlace = String(dupe.trigger_config?.place_name ?? data.place_name);
+                          if (hasNewContent) {
+                            const { data: mergeData, error: mergeErr } = await invokeWithTimeout<any>(
+                              'manage-rules',
+                              { body: { op: 'merge_tasks', rule_id: dupe.id, tasks: newTasks.length > 0 ? newTasks : undefined, list_name: newListName || undefined } },
+                              10_000,
+                            );
+                            const dupPlace = String(dupe.trigger_config?.place_name ?? data.place_name);
+                            if (!mergeErr && mergeData?.ok) {
                               const addedDesc = newListName ? `your ${newListName} list` : newTasks.join(', ');
                               turnSpeechOverride = `Got it — I've added ${addedDesc} to your existing alert for ${dupPlace}.`;
                               console.log(`[orch:loc:coord-hit] merged tasks into rule ${dupe.id}`);
                             } else {
-                              console.error('[orch:loc:coord-hit] merge failed:', updateErr.message);
+                              console.error('[orch:loc:coord-hit] merge failed:', mergeErr?.message);
                               turnSpeechOverride = `You already have an alert there. Tap Alerts to update it.`;
                             }
                             continue;
