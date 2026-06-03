@@ -119,12 +119,15 @@ Deno.serve(async (req) => {
     };
     const replies = Array.isArray(ticket.replies) ? [...ticket.replies, newReply] : [newReply];
 
+    // ── Auto-advance status: new → in_progress on first staff reply ────
+    const newStatus = ticket.status === 'new' ? 'in_progress' : ticket.status;
+
     // ── Append to audit_trail ────────────────────────────────────────
     const auditEntry = {
       at:          new Date().toISOString(),
       actor:       staff_email,
       from_status: ticket.status,
-      to_status:   ticket.status,
+      to_status:   newStatus,
       note:        `Reply sent to ${ticket.reporter_email} (MessageID: ${messageId})`,
     };
     const newAudit = Array.isArray(ticket.audit_trail)
@@ -134,7 +137,7 @@ Deno.serve(async (req) => {
     // ── Update ticket ────────────────────────────────────────────────
     const { error: uErr } = await admin
       .from('tickets')
-      .update({ replies, audit_trail: newAudit })
+      .update({ replies, audit_trail: newAudit, status: newStatus })
       .eq('id', ticket.id);
 
     if (uErr) {
