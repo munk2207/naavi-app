@@ -302,7 +302,8 @@ export default function AlertsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [expanded, setExpanded]     = useState<Record<string, boolean>>({});
   const [pendingDelete, setPendingDelete] = useState<ActionRule | null>(null);
-  const [deleting, setDeleting]     = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const deleting = deletingId !== null;
   const [error, setError]           = useState<string | null>(null);
   // Wave 2.5 M:N — each rule can have MULTIPLE attached lists.
   // Mapped by rule.id → array of attached lists (id + name). Rendered
@@ -541,7 +542,7 @@ export default function AlertsScreen() {
 
   const confirmDelete = async () => {
     if (!pendingDelete) return;
-    setDeleting(true);
+    setDeletingId(pendingDelete.id);
     try {
       if (!supabase) throw new Error('No Supabase client');
       const deleted = pendingDelete;
@@ -571,7 +572,7 @@ export default function AlertsScreen() {
     } catch (e: unknown) {
       setError(formatErrorForUser(e));
     } finally {
-      setDeleting(false);
+      setDeletingId(null);
     }
   };
 
@@ -752,7 +753,7 @@ export default function AlertsScreen() {
                           )}
                           <TouchableOpacity
                             style={[styles.actionBtn, styles.deleteBtn]}
-                            onPress={() => { setDeleting(false); setPendingDelete(rule); }}
+                            onPress={() => setPendingDelete(rule)}
                           >
                             <Ionicons name="trash" size={16} color="#fff" />
                             <Text style={styles.deleteBtnText}>Delete alert</Text>
@@ -793,9 +794,9 @@ export default function AlertsScreen() {
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnDanger]}
                 onPress={confirmDelete}
-                disabled={deleting}
+                disabled={deletingId === pendingDelete?.id}
               >
-                {deleting
+                {deletingId === pendingDelete?.id
                   ? <ActivityIndicator size="small" color="#fff" />
                   : <Text style={styles.modalBtnDangerText}>Delete</Text>}
               </TouchableOpacity>
