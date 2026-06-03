@@ -225,9 +225,11 @@ export const NAAVI_TOOLS: NaaviTool[] = [
       'Create a location-based alert for a CHAIN BRAND or franchise. Use this tool whenever the user references a chain by name — even without a specific branch ("alert me at Walmart", "remind me at Tim Hortons"). DO NOT ask "Which one?" / "Give me a street" — the orchestrator\'s picker presents nearby branches and the user chooses there. If the user already named a branch ("Costco Merivale", "Tim Hortons South Keys"), include the branch part in place_name; the picker dedupes against the cache.\n\n' +
       'Examples:\n' +
       '- "alert me at Walmart" → chain_brand="Walmart", place_name="" (or "Walmart").\n' +
-      '- "remind me to buy milk at Tim Hortons" → chain_brand="Tim Hortons", place_name="".\n' +
-      '- "alert me at Costco Merivale" → chain_brand="Costco", place_name="Costco Merivale".\n\n' +
-      'DO NOT use this tool for personal keywords (home / office / work) — those go through set_location_rule_address with place_name=keyword.',
+      '- "remind me to buy milk at Tim Hortons" → chain_brand="Tim Hortons", place_name="", action_config={tasks:["buy milk"], body:"Reminder"}.\n' +
+      '- "alert me at Costco Merivale" → chain_brand="Costco", place_name="Costco Merivale".\n' +
+      '- "remind me to call the doctor at Costco" → chain_brand="Costco", action_config={tasks:["call the doctor"], body:"Reminder"}.\n\n' +
+      'DO NOT use this tool for personal keywords (home / office / work) — those go through set_location_rule_address with place_name=keyword.\n' +
+      'IMPORTANT: When the user says "remind me with X at Y", ALWAYS put X in action_config.tasks[]. NEVER emit REMEMBER for location-triggered reminders.',
     input_schema: {
       type: 'object',
       properties: {
@@ -273,7 +275,10 @@ export const NAAVI_TOOLS: NaaviTool[] = [
       '- "alert me at 123 Maple St" with that address NOT in memory → do NOT call; ask the user to confirm the address first.\n' +
       '- "alert me when I arrive home" → CALL with place_name="home".\n' +
       '- "alert me at the cottage this weekend" with cottage in memory → CALL with place_name="the cottage", expiry=next Monday.\n' +
-      '- "alert me at Joe\'s place" with no prior context → do NOT call; ask "where is Joe\'s place?".',
+      '- "alert me at Joe\'s place" with no prior context → do NOT call; ask "where is Joe\'s place?".\n' +
+      '- "remind me with James kids names Sam and Lila when I arrive at James home" → CALL with place_name="James home", action_config={tasks:["James kids: Sam and Lila"], body:"Reminder"}.\n' +
+      '- "remind me to call the doctor when I arrive at the office" → CALL with place_name="office", action_config={tasks:["call the doctor"], body:"Reminder"}.\n' +
+      'IMPORTANT: When the user says "remind me with X when I arrive at Y", ALWAYS put X in action_config.tasks[]. NEVER emit REMEMBER for location-triggered reminders.',
     input_schema: {
       type: 'object',
       properties: {
