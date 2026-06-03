@@ -85,8 +85,10 @@ Deno.serve(async (req) => {
       .ilike('email', '%wael.aggan%')
       .maybeSingle();
 
-    if (!tokenRow?.refresh_token) {
-      // Fallback: look up by email in auth.users
+    let refreshToken: string | null = tokenRow?.refresh_token ?? null;
+
+    if (!refreshToken) {
+      // Fallback: look up by user_id from auth.users
       const { data: users } = await admin.auth.admin.listUsers();
       const wael = users?.users?.find(u => u.email === 'wael.aggan@gmail.com');
       if (!wael) return json({ error: 'wael user not found' }, 404);
@@ -97,10 +99,10 @@ Deno.serve(async (req) => {
         .eq('provider', 'google')
         .maybeSingle();
       if (!tr?.refresh_token) return json({ error: 'no google refresh token for wael' }, 404);
-      tokenRow!.refresh_token = tr.refresh_token;
+      refreshToken = tr.refresh_token;
     }
 
-    const accessToken = await getAccessToken(tokenRow.refresh_token);
+    const accessToken = await getAccessToken(refreshToken);
 
     // ── Get Gmail label id for "Support" ─────────────────────────────
     const labelsRes = await fetch(`${GMAIL_API}/labels`, {
