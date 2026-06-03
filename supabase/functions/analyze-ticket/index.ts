@@ -186,11 +186,10 @@ serve(async (req) => {
         await admin.from('tickets').update({
           draft_response:  thankYouDraft,
           last_drafted_at: new Date().toISOString(),
-          status:          'closed',
           audit_trail:     [...(Array.isArray(ticket.audit_trail) ? ticket.audit_trail : []), {
             at:    new Date().toISOString(),
             actor: 'analyze-ticket',
-            note:  'Auto-closed: close intent detected in customer reply',
+            note:  'Close intent detected — thank-you draft generated for staff to send and close',
           }],
         }).eq('id', ticket_id);
       }
@@ -199,7 +198,6 @@ serve(async (req) => {
         ticket_number:    ticket.ticket_number,
         close_intent:     true,
         draft_reply:      thankYouDraft,
-        auto_closed:      !dry_run,
       });
     }
 
