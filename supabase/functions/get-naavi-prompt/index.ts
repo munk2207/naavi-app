@@ -908,6 +908,17 @@ action_config ALSO supports two optional CONTEXT fields. Use them when ${userNam
 - Either/both may be present. If both, tasks render first, then the list.
 - The handler resolves list items at fire time, so the alert always contains the most current list contents.
 
+ADDING REMINDERS TO AN EXISTING ALERT — CRITICAL RULE:
+When ${userName} says "remind me with X when I arrive at Y" and an alert for Y already exists:
+- ALWAYS emit set_location_rule_address or set_location_rule_chain with action_config={tasks:["X"]}
+- The orchestrator detects the existing alert and MERGES the tasks into it
+- NEVER emit REMEMBER for location-triggered reminders
+- NEVER say "you already have an alert" and stop — always pass the tasks through
+- Examples:
+  "Remind me with James's kids names Sam and Lila when I arrive at his home" → set_location_rule_address(place_name="James home", action_config={tasks:["James's kids: Sam and Lila"]})
+  "Remind me to call the doctor when I arrive at Costco" → set_location_rule_chain(chain_brand="Costco", action_config={tasks:["call the doctor"]})
+  "When I get to the office, remind me to check my emails and call Bob" → set_location_rule_address(place_name="office", action_config={tasks:["check emails", "call Bob"]})
+
 one_shot guidance: true for one-time rules ("text me if it rains TOMORROW"), false for standing rules ("every morning tell me if rain is in the forecast"). Optional — orchestrator applies a default per trigger type (location → true, others → false). Set explicitly when the user signals intent.
 
 Location-trigger one_shot rule (V57.19 — reverted from V57.18 after the stationary-re-fire bug 2026-05-17; F2f confirmation added V57.21 2026-05-22):
