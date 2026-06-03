@@ -104,21 +104,11 @@ Deno.serve(async (req) => {
 
     const accessToken = await getAccessToken(refreshToken);
 
-    // ── Get Gmail label id for "Support" ─────────────────────────────
-    const labelsRes = await fetch(`${GMAIL_API}/labels`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    const labelsData = await labelsRes.json();
-    const supportLabel = (labelsData.labels ?? []).find(
-      (l: { name: string; id: string }) => l.name === SUPPORT_LABEL
-    );
-    if (!supportLabel) return json({ processed: 0, note: `Label "${SUPPORT_LABEL}" not found in Gmail` });
-    const labelId = supportLabel.id;
-
-    // ── List unread messages with Support label ───────────────────────
+    // ── List unread messages with Ticket # subject ───────────────────
+    // Search by subject pattern only — no label required. Customers reply
+    // directly to the thread; Gmail doesn't auto-label their replies.
     const listUrl = new URL(`${GMAIL_API}/messages`);
-    listUrl.searchParams.set('labelIds', labelId);
-    listUrl.searchParams.set('q', 'is:unread subject:"Re: Ticket #"');
+    listUrl.searchParams.set('q', 'is:unread subject:"Re: Ticket #" in:inbox');
     listUrl.searchParams.set('maxResults', '20');
     const listRes = await fetch(listUrl.toString(), {
       headers: { Authorization: `Bearer ${accessToken}` },
