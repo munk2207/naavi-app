@@ -157,24 +157,10 @@ serve(async (req) => {
       console.log(`[lookup-contact] Sorted — MyNaavi contacts first`);
     }
 
-    // Fallback: search other contacts (people you've emailed)
-    if (results.length === 0) {
-      const url2 = new URL('https://people.googleapis.com/v1/otherContacts:search');
-      url2.searchParams.set('query', name.trim());
-      // otherContacts readMask does NOT support 'addresses' (returns 400 if
-      // included) — those entries are auto-saved from email and never have
-      // addresses anyway. Only myContacts (above) supports addresses.
-      url2.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers');
-      url2.searchParams.set('pageSize', '5');
-      const res2 = await fetch(url2.toString(), {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (res2.ok) {
-        const data2 = await res2.json();
-        console.log(`[lookup-contact] otherContacts response:`, JSON.stringify(data2).slice(0, 300));
-        results = data2.results ?? [];
-      }
-    }
+    // NOTE: "other contacts" fallback removed 2026-06-03 (Wael).
+    // Other contacts are auto-saved email history, not saved contacts.
+    // They never have addresses and should never be used for possessive
+    // address resolution ("James home"). If not in real contacts → not found.
 
     if (results.length === 0) {
       console.log(`[lookup-contact] No results found for "${name}"`);
@@ -218,6 +204,7 @@ serve(async (req) => {
     const contact = contacts[0];
 
     console.log(`[lookup-contact] Found ${contacts.length} match(es); best: "${contact.name}" — ${contact.email ?? 'no email'}`);
+    console.log(`[lookup-contact] All matches: ${contacts.map((c: any) => `${c.name}(addrs=${c.addresses?.length ?? 0})`).join(', ')}`);
 
     return new Response(JSON.stringify({ contact, contacts }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
