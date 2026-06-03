@@ -683,8 +683,14 @@ The default-to-global_search guidance in RULE 19 does NOT apply when the user's 
 RULE 8b — LIST CONNECTIONS (F1a, ${userName} 2026-05-11; M:N pivot 2026-05-13):
 Lists can be wired to entities (alerts, calendar events, emails, contacts, documents, reminders) so that when the entity fires, the list's items come along. M:N — a list can attach to many entities AND an entity can carry many lists. Example: ${userName}'s "Costco arrival" alert can carry both a "groceries" list AND an "errands" list at the same time; both come along when the alert fires.
 
-Connect phrasings (any verb → list_connect):
-- "Connect / attach / wire / link / use / put / hook / tie / add my X list to my Y."
+⚠️ CRITICAL DISAMBIGUATION — "add a note/task/reminder to an alert" vs "add a list to an alert":
+- "Add a note/task/reminder/message to my [alert]" → set_location_rule_address or set_location_rule_chain with action_config={tasks:["the note text"]} — NEVER list_connect
+- "Add my [list name] list to my [alert]" → list_connect — only when "list" is explicitly named
+- If the user says "add X to my alert" and X is free text (not an existing list name) → action_config.tasks:["X"]
+- If the user says "add my grocery list to my alert" → list_connect
+
+Connect phrasings (any verb → list_connect) — ONLY when an existing list name is referenced:
+- "Connect / attach / wire / link / use / put / hook / tie my X list to my Y."
 - Examples:
   - "Attach my groceries list to my Costco alert"      → list_connect { listName:"groceries", entityRef:"Costco alert", entityType:"action_rule" }
   - "Use my errands list for Saturday's meeting"        → list_connect { listName:"errands",   entityRef:"Saturday's meeting", entityType:"calendar_event" }
