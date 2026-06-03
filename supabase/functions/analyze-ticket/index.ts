@@ -164,45 +164,19 @@ serve(async (req) => {
       evidence.recent_sent_messages = [];
     }
 
-    // ── Detect close intent in latest customer message ───────────────
-    // If the customer's latest inbound message says "close", "resolved",
-    // "thank you that's all", etc. — generate a thank-you closing draft
-    // and auto-close the ticket instead of a regular support reply.
-    const CLOSE_INTENT_RE = /\b(close|closed|closing|resolved|resolve|no\s+need|cancel|never\s+mind|nevermind|that'?s?\s+(all|it|fine|ok|okay|good)|thank\s+you\s+(that'?s?\s+all|so\s+much|for\s+your\s+help|for\s+the\s+help)|all\s+(good|set|resolved)|issue\s+(is\s+)?(resolved|fixed|gone)|it\s+(works?|worked|fixed)|fixed\s+now|sorted|no\s+longer\s+(an?\s+)?(issue|problem))\b/i;
-
+    // ── Build the Claude prompt ──────────────────────────────────────
+    // Include latest customer reply in evidence so Claude can judge close intent
+    // Add latest customer reply to evidence for close-intent detection
     const replies = Array.isArray(ticket.replies) ? ticket.replies : [];
     const lastInbound = [...replies].reverse().find((r: any) => r.direction === 'inbound');
-    const latestCustomerBody = lastInbound?.body ?? ticket.body ?? '';
-
-    if (CLOSE_INTENT_RE.test(latestCustomerBody)) {
-      console.log(`[analyze-ticket] close intent detected for ticket #${ticket.ticket_number}: "${latestCustomerBody.slice(0, 80)}"`);
-
-      const customerName = ticket.reporter_name?.split(' ')?.[0] || null;
-      const greeting = customerName && /^[A-Za-z]{2,20}$/.test(customerName) ? `Hi ${customerName},` : 'Hi,';
-
-      const thankYouDraft = `${greeting}\n\nThank you for letting us know — we're glad the issue is resolved! We'll go ahead and close this ticket.\n\nIf you ever need anything else, don't hesitate to reach out.\n\n— MyNaavi Team`;
-
-      if (!dry_run) {
-        await admin.from('tickets').update({
-          draft_response:  thankYouDraft,
-          last_drafted_at: new Date().toISOString(),
-          audit_trail:     [...(Array.isArray(ticket.audit_trail) ? ticket.audit_trail : []), {
-            at:    new Date().toISOString(),
-            actor: 'analyze-ticket',
-            note:  'Close intent detected — thank-you draft generated for staff to send and close',
-          }],
-        }).eq('id', ticket_id);
-      }
-
-      return json({
-        ticket_number:    ticket.ticket_number,
-        close_intent:     true,
-        draft_reply:      thankYouDraft,
-      });
+    if (lastInbound) {
+      (evidence as any).latest_customer_reply = {
+        body: lastInbound.body,
+        at:   est(lastInbound.at),
+      };
     }
 
-    // ── Build the Claude prompt ──────────────────────────────────────
-    const systemPrompt = `You are Naavi's support drafter. Your job is to draft a reply to a customer support ticket. The draft will be posted as an internal note on a HubSpot ticket; a human staff member will read it, edit if needed, then send to the customer via HubSpot's native Reply.
+    const systemPrompt = `You are Naavi's support drafter. Your job is to draft a reply to a customer support ticket. The draft will be posted as an internal note; a human staff member will read it, edit if needed, then send to the customer.
 
 THE RULE THAT GOVERNS YOUR DRAFT (CLAUDE.md 2026-05-20 — "no unverified claims in outbound messages"):
 
@@ -228,18 +202,29 @@ STYLE RULES — keep the draft tight and human:
 
 5. Signature is always exactly "— MyNaavi Team" on its own line at the bottom. Never "Naavi support", "Naavi team", "Customer Support", "— Wael", or anyone's individual name. The whole team responds, not a dedicated support role; the signature reflects that.
 
+CLOSE INTENT DETECTION — READ FIRST:
+Before drafting a support reply, read the latest_customer_reply in the evidence packet. If the customer's message signals they are satisfied, done, or no longer need help — regardless of exact wording — set close_intent: true and draft a brief, warm thank-you closing message instead of a support response. Examples of close intent (not exhaustive):
+- "I found the issue", "figured it out", "problem solved", "it's working now"
+- "close the ticket", "you can close this", "no need to continue"
+- "thanks, all good", "never mind", "disregard", "not needed anymore"
+- Any combination of gratitude + resolution signal
+
+When close_intent is true, the draft_reply should be: short (2-3 sentences), thank the customer, confirm the ticket will be closed, invite them to reach out again if needed.
+When close_intent is false, draft a normal support reply.
+
 OUTPUT FORMAT — you MUST respond with a single JSON object only (no prose around it):
 
 {
-  "draft_reply": "<the message to the customer — friendly, concise, action-oriented, signed exactly '— MyNaavi Team' on its own line at the bottom>",
+  "close_intent": true | false,
+  "draft_reply": "<the message to the customer — friendly, concise, signed exactly '— MyNaavi Team' on its own line at the bottom>",
   "claims_evidence": [
-    { "claim": "<short paraphrase of one factual claim in your draft>", "source": "<evidence section + specific row, e.g. 'action_rules row id=abc — trigger_type=location, enabled=true'>" },
+    { "claim": "<short paraphrase of one factual claim in your draft>", "source": "<evidence section + specific row>" },
     ...one entry per factual claim...
   ],
   "uncertainty_notes": "<what you don't know that may affect the reply, or empty string if nothing>"
 }
 
-If the ticket is a simple non-factual reply (e.g., a "thanks" or a feature request you can answer generically), claims_evidence can be empty array. If a factual answer would require evidence we don't have, say so in uncertainty_notes and write a draft that asks the customer for the missing info OR honestly says "we're investigating."`;
+If the ticket is a simple non-factual reply, claims_evidence can be empty array.`;
 
     const userMessage = `EVIDENCE PACKET (everything you may rely on):
 
@@ -296,9 +281,14 @@ Draft the reply now. JSON only — no prose, no markdown fences.`;
       actor:       'analyze-ticket',
       from_status: ticket.status,
       to_status:   ticket.status,
-      note:        `Draft saved (${evidenceCount} cited claims, ${parsed.draft_reply.length} chars).`,
+      note:        parsed.close_intent
+        ? `Close intent detected — thank-you closing draft generated for staff to send and close.`
+        : `Draft saved (${evidenceCount} cited claims, ${parsed.draft_reply.length} chars).`,
     };
     const newAudit = Array.isArray(ticket.audit_trail) ? [...ticket.audit_trail, auditEntry] : [auditEntry];
+
+    // When close intent detected, set status to 'investigating' so cron stops re-drafting
+    const newStatus = parsed.close_intent ? 'investigating' : ticket.status;
 
     const { error: uErr } = await admin
       .from('tickets')
@@ -306,6 +296,7 @@ Draft the reply now. JSON only — no prose, no markdown fences.`;
         draft_response:  parsed.draft_reply,
         last_drafted_at: new Date().toISOString(),
         audit_trail:     newAudit,
+        ...(parsed.close_intent ? { status: newStatus } : {}),
       })
       .eq('id', ticket.id);
     if (uErr) {
