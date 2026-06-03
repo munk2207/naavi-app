@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
     const replies = Array.isArray(ticket.replies) ? [...ticket.replies, newReply] : [newReply];
 
     // ── Auto-advance status: new → in_progress on first staff reply ────
-    const newStatus = ticket.status === 'new' ? 'in_progress' : ticket.status;
+    const newStatus = ticket.status === 'new' ? 'sent' : ticket.status;
 
     // ── Append to audit_trail ────────────────────────────────────────
     const auditEntry = {
