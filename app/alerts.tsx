@@ -752,7 +752,7 @@ export default function AlertsScreen() {
                           )}
                           <TouchableOpacity
                             style={[styles.actionBtn, styles.deleteBtn]}
-                            onPress={() => setPendingDelete(rule)}
+                            onPress={() => { setDeleting(false); setPendingDelete(rule); }}
                           >
                             <Ionicons name="trash" size={16} color="#fff" />
                             <Text style={styles.deleteBtnText}>Delete alert</Text>
