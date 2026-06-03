@@ -58,7 +58,7 @@ serve(async (req) => {
     const { data: tickets, error } = await admin
       .from('tickets')
       .select('id, ticket_number, created_at, reporter_email')
-      .eq('status', 'new')
+      .in('status', ['new', 'sent'])
       .is('last_drafted_at', null)        // skip tickets already drafted
       .not('reporter_email', 'ilike', '%autotester%')  // skip auto-tester tickets
       .not('reporter_email', 'ilike', '%autotest%')    // skip auto-tester tickets
