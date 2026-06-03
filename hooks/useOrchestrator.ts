@@ -308,6 +308,7 @@ function formatMoney(cents: number, currency: string | null): string {
 function formatPeriodPhrase(label: string): string {
   const k = (label || '').trim().toLowerCase();
   if (k === 'last month' || k === 'this month' || k === 'last year' || k === 'this year' || k === 'today' || k === 'yesterday') return k;
+  if (k === 'this week') return 'this week';
   if (k === 'past week' || k === 'last week' || k === 'past 7 days') return 'in the past week';
   if (k === 'past 30 days') return 'in the past 30 days';
   if (k === 'all time' || k === 'ever' || k === 'all') return 'in total';
@@ -1847,14 +1848,14 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                 const count = Number(data.invoice_count ?? 0);
                 const periodPhrase = formatPeriodPhrase(String(data.period_label ?? periodLabel));
                 if (count === 0) {
-                  turnSpeechOverride = `I don't see any ${vendor} invoices ${periodPhrase}. Forward the email to yourself if I'm missing one and I'll pick it up.`;
+                  turnSpeechOverride = `I don't see any ${vendor} charges ${periodPhrase}. Forward the email to yourself if I'm missing one and I'll pick it up.`;
                 } else {
                   const byCurrency = Array.isArray(data.by_currency) ? data.by_currency : [];
                   if (byCurrency.length <= 1) {
                     const amount = formatMoney(Number(data.total_cents ?? 0), data.currency ?? null);
                     turnSpeechOverride = count === 1
                       ? `${vendor} charged you ${amount} ${periodPhrase}.`
-                      : `${vendor} charged you ${amount} across ${count} invoices ${periodPhrase}.`;
+                      : `${vendor} charged you ${amount} across ${count} charges ${periodPhrase}.`;
                   } else {
                     const parts = byCurrency.map((b: any) => `${formatMoney(Number(b.total_cents ?? 0), String(b.currency ?? ''))}`);
                     turnSpeechOverride = `${vendor} charged you ${parts.join(' plus ')} ${periodPhrase}.`;
@@ -2610,7 +2611,13 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                     const spokenNormalized = normalizePlaceName(placeName);
                     const match = (Array.isArray(existingRows) ? existingRows : []).find((r: any) => {
                       const rPlace = normalizePlaceName(String(r?.trigger_config?.place_name || ''));
-                      return rPlace.length > 0 && rPlace === spokenNormalized;
+                      if (rPlace.length > 0 && rPlace === spokenNormalized) return true;
+                      // Also match against the alert's label — user may say "my Mercedes alert"
+                      // when the place_name is "Mercedes-Benz of Ottawa". Strip common suffixes
+                      // like "alert" before comparing so "mercedes alert" matches "mercedes benz".
+                      const rLabel = normalizePlaceName(String(r?.label || ''));
+                      const spokenNoAlert = normalizePlaceName(placeName.replace(/\balert\b/gi, '').trim());
+                      return rLabel.length > 0 && spokenNoAlert.length > 2 && rLabel.includes(spokenNoAlert);
                     }) as any;
                     if (match) {
                       const enabled = match.enabled !== false;
