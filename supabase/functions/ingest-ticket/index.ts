@@ -213,29 +213,28 @@ serve(async (req) => {
     // ── Send acknowledgment email to customer (Postmark) ────────────
     if (reporterEmail && pmToken) {
       const firstName = reporterName.split(/\s+/)[0] || 'there';
+      const submittedDate = new Date().toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
       const ackText =
         `Hi ${firstName},\n\n` +
-        `Thank you for contacting Naavi. Your ticket has been received and is being reviewed by our team. ` +
-        `We'll get back to you within two business days.\n\n` +
+        `Thank you for reaching out to MyNaavi. We've received your support request and a member of our team will follow up within 2 business days.\n\n` +
         `To add more details or follow up, simply reply to this email.\n\n` +
-        `Request details\n` +
-        `Contact email: ${reporterEmail}\n` +
-        `Date submitted: ${new Date().toLocaleDateString('en-CA')}\n` +
-        `Ticket: Ticket #${ticket.ticket_number}\n` +
-        `Ticket description: ${body.slice(0, 200)}\n\n` +
-        `Best regards,\nMyNaavi Team`;
+        `── Your ticket details ──────────────────\n` +
+        `Ticket #${ticket.ticket_number}\n` +
+        `Submitted: ${submittedDate}\n` +
+        `Description: ${body.slice(0, 200)}\n` +
+        `────────────────────────────────────────\n\n` +
+        `— MyNaavi Team`;
 
       const ackHtml =
         `<p>Hi ${firstName},</p>` +
-        `<p>Thank you for contacting Naavi. Your ticket has been received and is being reviewed by our team. ` +
-        `We'll get back to you within two business days.</p>` +
+        `<p>Thank you for reaching out to MyNaavi. We've received your support request and a member of our team will follow up within 2 business days.</p>` +
         `<p>To add more details or follow up, simply reply to this email.</p>` +
-        `<p><strong>Request details</strong><br>` +
-        `Contact email: ${reporterEmail}<br>` +
-        `Date submitted: ${new Date().toLocaleDateString('en-CA')}<br>` +
-        `Ticket: Ticket #${ticket.ticket_number}<br>` +
-        `Ticket description: ${body.slice(0, 200)}</p>` +
-        `<p>Best regards,<br>MyNaavi Team</p>`;
+        `<table style="border-collapse:collapse;width:100%;max-width:480px;background:#f9f9f7;border-radius:8px;padding:16px;font-size:14px;">` +
+        `<tr><td colspan="2" style="padding:8px 12px;font-weight:700;border-bottom:1px solid #e0e0e0;">Ticket #${ticket.ticket_number}</td></tr>` +
+        `<tr><td style="padding:6px 12px;color:#666;width:120px;">Submitted</td><td style="padding:6px 12px;">${submittedDate}</td></tr>` +
+        `<tr><td style="padding:6px 12px;color:#666;vertical-align:top;">Description</td><td style="padding:6px 12px;">${body.slice(0, 200)}</td></tr>` +
+        `</table>` +
+        `<br><p>— MyNaavi Team</p>`;
 
       try {
         await sendEmail(pmToken, {
@@ -243,7 +242,7 @@ serve(async (req) => {
           fromName: SUPPORT_NAME,
           to:       reporterEmail,
           toName:   reporterName || undefined,
-          subject:  `Your ticket 'Ticket #${ticket.ticket_number}' has been received`,
+          subject:  `MyNaavi Support — Ticket #${ticket.ticket_number} received`,
           textBody: ackText,
           htmlBody: ackHtml,
           replyTo:  SUPPORT_EMAIL,
