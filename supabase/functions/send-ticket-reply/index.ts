@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
         Subject:       emailSubject,
         TextBody:      textBody,
         HtmlBody:      htmlBody,
-        ReplyTo:       SUPPORT_EMAIL,
+        ReplyTo:       'wael.aggan@gmail.com',
         Tag:           'ticket-reply',
         MessageStream: 'outbound',
       }),
