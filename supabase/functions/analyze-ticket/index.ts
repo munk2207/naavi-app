@@ -164,6 +164,45 @@ serve(async (req) => {
       evidence.recent_sent_messages = [];
     }
 
+    // ── Detect close intent in latest customer message ───────────────
+    // If the customer's latest inbound message says "close", "resolved",
+    // "thank you that's all", etc. — generate a thank-you closing draft
+    // and auto-close the ticket instead of a regular support reply.
+    const CLOSE_INTENT_RE = /\b(close|closed|closing|resolved|resolve|no\s+need|cancel|never\s+mind|nevermind|that'?s?\s+(all|it|fine|ok|okay|good)|thank\s+you\s+(that'?s?\s+all|so\s+much|for\s+your\s+help|for\s+the\s+help)|all\s+(good|set|resolved)|issue\s+(is\s+)?(resolved|fixed|gone)|it\s+(works?|worked|fixed)|fixed\s+now|sorted|no\s+longer\s+(an?\s+)?(issue|problem))\b/i;
+
+    const replies = Array.isArray(ticket.replies) ? ticket.replies : [];
+    const lastInbound = [...replies].reverse().find((r: any) => r.direction === 'inbound');
+    const latestCustomerBody = lastInbound?.body ?? ticket.body ?? '';
+
+    if (CLOSE_INTENT_RE.test(latestCustomerBody)) {
+      console.log(`[analyze-ticket] close intent detected for ticket #${ticket.ticket_number}: "${latestCustomerBody.slice(0, 80)}"`);
+
+      const customerName = ticket.reporter_name?.split(' ')?.[0] || null;
+      const greeting = customerName && /^[A-Za-z]{2,20}$/.test(customerName) ? `Hi ${customerName},` : 'Hi,';
+
+      const thankYouDraft = `${greeting}\n\nThank you for letting us know — we're glad the issue is resolved! We'll go ahead and close this ticket.\n\nIf you ever need anything else, don't hesitate to reach out.\n\n— MyNaavi Team`;
+
+      if (!dry_run) {
+        await admin.from('tickets').update({
+          draft_response:  thankYouDraft,
+          last_drafted_at: new Date().toISOString(),
+          status:          'closed',
+          audit_trail:     [...(Array.isArray(ticket.audit_trail) ? ticket.audit_trail : []), {
+            at:    new Date().toISOString(),
+            actor: 'analyze-ticket',
+            note:  'Auto-closed: close intent detected in customer reply',
+          }],
+        }).eq('id', ticket_id);
+      }
+
+      return json({
+        ticket_number:    ticket.ticket_number,
+        close_intent:     true,
+        draft_reply:      thankYouDraft,
+        auto_closed:      !dry_run,
+      });
+    }
+
     // ── Build the Claude prompt ──────────────────────────────────────
     const systemPrompt = `You are Naavi's support drafter. Your job is to draft a reply to a customer support ticket. The draft will be posted as an internal note on a HubSpot ticket; a human staff member will read it, edit if needed, then send to the customer via HubSpot's native Reply.
 
