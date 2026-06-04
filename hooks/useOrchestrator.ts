@@ -2612,12 +2612,18 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                     const match = (Array.isArray(existingRows) ? existingRows : []).find((r: any) => {
                       const rPlace = normalizePlaceName(String(r?.trigger_config?.place_name || ''));
                       if (rPlace.length > 0 && rPlace === spokenNormalized) return true;
-                      // Also match against the alert's label — user may say "my Mercedes alert"
-                      // when the place_name is "Mercedes-Benz of Ottawa". Strip common suffixes
-                      // like "alert" before comparing so "mercedes alert" matches "mercedes benz".
-                      const rLabel = normalizePlaceName(String(r?.label || ''));
+                      // Also match against the alert's label or place_name — user may say
+                      // "my Mercedes alert" when the place_name is "Mercedes-Benz Ottawa Downtown".
+                      // Strip "alert" before comparing: "mercedes alert" → "mercedes"
+                      // then check if label OR place_name contains that word.
+                      // Strip "alert" suffix and check if the stored place_name
+                      // contains the spoken keyword — "mercedes alert" → "mercedes"
+                      // matches "mercedes-benz ottawa downtown".
+                      // NOTE: do NOT match against label — labels share common words
+                      // like "office" across multiple alerts and produce wrong matches.
                       const spokenNoAlert = normalizePlaceName(placeName.replace(/\balert\b/gi, '').trim());
-                      return rLabel.length > 0 && spokenNoAlert.length > 2 && rLabel.includes(spokenNoAlert);
+                      if (spokenNoAlert.length > 2 && rPlace.length > 0 && rPlace.includes(spokenNoAlert)) return true;
+                      return false;
                     }) as any;
                     if (match) {
                       const enabled = match.enabled !== false;
