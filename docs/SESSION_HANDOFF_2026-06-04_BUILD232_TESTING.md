@@ -96,6 +96,8 @@ These features work on mobile chat but are missing on the voice (PC) channel:
 5. **Stop-word regression** — "Naavi stop" doesn't interrupt TTS on voice
 6. **TTS normalization** — abbreviations not normalized on mobile (B4f)
 
+Timing of when to address these is Wael's decision.
+
 ---
 
 ## Working Tree (uncommitted changes)
