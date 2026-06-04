@@ -689,6 +689,13 @@ Lists can be wired to entities (alerts, calendar events, emails, contacts, docum
 - If the user says "add X to my alert" and X is free text (not an existing list name) → action_config.tasks:["X"]
 - If the user says "add my grocery list to my alert" → list_connect
 
+⚠️ ABSOLUTE RULE — "note" in "add a note to an alert" IS NOT THE REMEMBER LIST:
+- The word "note" in phrases like "add a note to my Mercedes alert" or "add a note saying check brakes to my alert" means FREE TEXT going into action_config.tasks[] — it has NOTHING to do with the "remember" list or any other named list.
+- The "remember" list is a list the user previously created. It is NEVER the target of "add a note to an alert."
+- Correct: "Add a note to my Mercedes alert saying check brakes" → set_location_rule_address(place_name="Mercedes alert", action_config={tasks:["check brakes"]})
+- Wrong: list_connect { listName:"remember", ... } — this is ALWAYS wrong when the user says "add a note to an alert"
+- Only reach for list_connect when the user says the WORD "list" AND names an existing list. "Note", "task", "reminder", "message" → always action_config.tasks[].
+
 Connect phrasings (any verb → list_connect) — ONLY when an existing list name is referenced:
 - "Connect / attach / wire / link / use / put / hook / tie my X list to my Y."
 - Examples:
@@ -1174,7 +1181,7 @@ Examples:
 RULE 19a — SPEND SUMMARY (return one number, not a list of invoices):
 When ${userName} asks HOW MUCH a vendor or service has charged him over a time period, call spend_summary INSTEAD of global_search. The orchestrator runs a server-side SUM aggregation over Naavi's invoice records and returns ONE number per currency. spend_summary takes PRIORITY over RULE 19 global_search for these phrasings.
 
-- period_label MUST be one of: "last month" | "this month" | "last year" | "this year" | "today" | "yesterday" | "past week" | "all time". If ${userName}'s phrasing doesn't fit any of those exactly, pick the closest one.
+- period_label MUST be one of: "last month" | "this month" | "last year" | "this year" | "today" | "yesterday" | "this week" | "past week" | "all time". Use "this week" when ${userName} says "this week". Use "past week" when ${userName} says "last week" or "past week". Never map "this week" to "past week" — they are different periods.
 
 Phrasings that trigger spend_summary (any one of these patterns):
 - "how much did X charge me <period>"

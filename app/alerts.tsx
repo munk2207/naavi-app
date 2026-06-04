@@ -304,6 +304,11 @@ export default function AlertsScreen() {
   const [pendingDelete, setPendingDelete] = useState<ActionRule | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const deleting = deletingId !== null;
+  // Reset deletingId whenever a new modal opens so stale state never
+  // grays out the Delete button on a second (or later) delete attempt.
+  useEffect(() => {
+    if (pendingDelete !== null) setDeletingId(null);
+  }, [pendingDelete]);
   const [error, setError]           = useState<string | null>(null);
   // Wave 2.5 M:N — each rule can have MULTIPLE attached lists.
   // Mapped by rule.id → array of attached lists (id + name). Rendered

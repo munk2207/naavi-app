@@ -121,6 +121,14 @@ function resolvePeriod(label: string, tz: string): { start: string; end: string;
     const ydD = new Date(Y, M - 1, D - 1);
     return { start: localStartOfDay(ydD.getFullYear(), ydD.getMonth() + 1, ydD.getDate()), end: localStartOfDay(Y, M, D), resolvedLabel: 'yesterday' };
   }
+  if (k === 'this week') {
+    // Monday of the current week through end of today
+    const dayOfWeek = new Date(Date.UTC(Y, M - 1, D)).getDay(); // 0=Sun,1=Mon,...
+    const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const monday = new Date(Y, M - 1, D - daysFromMonday);
+    const tmrD = new Date(Y, M - 1, D + 1);
+    return { start: localStartOfDay(monday.getFullYear(), monday.getMonth() + 1, monday.getDate()), end: localStartOfDay(tmrD.getFullYear(), tmrD.getMonth() + 1, tmrD.getDate()), resolvedLabel: 'this week' };
+  }
   if (k === 'last week' || k === 'past week' || k === 'past 7 days') {
     const past = new Date(Y, M - 1, D - 7);
     const tmrD = new Date(Y, M - 1, D + 1);

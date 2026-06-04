@@ -219,8 +219,8 @@ serve(async (req) => {
       // category:primary filter applies to both cron and backfill so the
       // gmail_messages cache only ever holds Primary email going forward.
       const query = beforeTs !== null
-        ? `after:${cutoffTs} before:${beforeTs} category:primary`
-        : `after:${cutoffTs} category:primary`;
+        ? `after:${cutoffTs} before:${beforeTs} (category:primary OR category:updates)`
+        : `after:${cutoffTs} (category:primary OR category:updates)`;
 
       // Paginate through Gmail's 500-per-page list. In cron mode (7 days)
       // we cap at 500 messages; in backfill mode we fetch everything in the
@@ -350,11 +350,11 @@ serve(async (req) => {
 
         if (!error) count++;
 
-        // Fire-and-forget action extraction for every tier-1 email. The
-        // extract-email-actions function writes to email_actions (which the
-        // morning brief reads). We do NOT await — sync-gmail must stay fast;
-        // extraction per email can take 2-3s against Claude.
-        if (!error && isTier1) {
+        // Fire-and-forget action extraction for every non-marketing email.
+        // Tier-1 is a ranking signal, not a processing gate — receipts and
+        // invoices from non-institutional senders still need to be harvested.
+        // Marketing (Promotions / Social / Forums) is the real exclusion gate.
+        if (!error && !isMarketing) {
           fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/extract-email-actions`, {
             method: 'POST',
             headers: {

@@ -74,11 +74,9 @@ serve(async (req) => {
       throw new Error(`Email not found: ${fetchErr?.message ?? 'no row'}`);
     }
 
-    if (!msg.is_tier1) {
-      return new Response(JSON.stringify({ action: null, reason: 'not_tier1' }), {
-        headers: { ...corsHeaders, 'content-type': 'application/json' },
-      });
-    }
+    // Tier-1 is a ranking signal, not a processing gate. Non-tier-1 emails
+    // (e.g. receipts from SaaS billing that aren't in the institutional list)
+    // still need action extraction and attachment harvesting.
 
     // Today's date — anchor relative dates in the email ("due tomorrow", "in 2 weeks").
     const todayParts = new Intl.DateTimeFormat('en-CA', {
@@ -111,7 +109,7 @@ serve(async (req) => {
     // changing what surfaces in the morning brief.
     const ACTIONABLE_KEYWORDS = [
       // bills / payments
-      'invoice', 'bill', 'payment', 'due', 'balance', 'overdue', 'amount owed',
+      'invoice', 'receipt', 'bill', 'payment', 'charge', 'charged', 'due', 'balance', 'overdue', 'amount owed',
       // appointments / scheduling
       'appointment', 'meeting', 'reminder', 'scheduled', 'confirmed for',
       'reschedule', 'cancelled', 'canceled',

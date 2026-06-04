@@ -436,6 +436,12 @@ const CALENDAR_INTENT_RE =
 const EMAIL_QUERY_INTENT_RE =
   /\b(email|emails|inbox|new\s*mail|mailbox|did\s+\w+\s+(email|mail|message|write|send)|any\s+(messages?|mail|emails?)|new\s+messages?|unread|just\s+(got|received)|did\s+i\s+(get|receive))\b/i;
 
+// F5c — billing intent regex. "How much did X charge me", "what did X bill me",
+// "how much have I spent on X" — triggers a pipeline sync fire-and-forget so
+// spend_summary finds documents on the next ask even if receipts just arrived.
+const BILLING_INTENT_RE =
+  /\b(how\s+much|what\s+did|what\s+has|how\s+have|how\s+many\s+dollars?).{0,40}(charge|bill|cost|invoice|receipt|charged|billed|spent|pay|paid)\b/i;
+
 // ── B6e — calendar-read pre-Claude bypass ─────────────────────────────────────
 // Discovered 2026-05-26 (Wael) via b6e-diag capture. Haiku at a 111 KB prompt
 // reliably misroutes "what is on my calendar this week?" to LIST_READ /
@@ -931,9 +937,9 @@ async function fetchLiveRecentEmails(
     // Party email at position #11 of 31 messages in the 24h window, which
     // pushed it OUT of the live-overlay. 30 covers a busier inbox without
     // adding meaningful per-call cost (Gmail metadata fetch is parallel).
-    // Wael 2026-05-10: Primary tab only — Naavi treats other Gmail
-    // categories (Promotions / Updates / Social / Forums) as irrelevant.
-    const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=newer_than:1d+category:primary&maxResults=30`;
+    // Sync both Primary and Updates tabs — billing receipts (Anthropic, Stripe,
+    // etc.) land in Updates, not Primary. Promotions/Social/Forums still excluded.
+    const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=newer_than:1d+(category:primary+OR+category:updates)&maxResults=30`;
     const listRes = await fetch(listUrl, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -947,6 +953,37 @@ async function fetchLiveRecentEmails(
       .map(m => m.id)
       .filter((id): id is string => typeof id === 'string');
     if (messageIds.length === 0) return [];
+
+    // F5c — pipeline trigger for newly-surfaced emails.
+    // Check which IDs are not yet in gmail_messages. For any that are new,
+    // fire-and-forget a targeted sync-gmail so the full pipeline runs
+    // (extract-email-actions → harvest-attachment → extract-document-text)
+    // in the background. The current question uses the metadata below;
+    // follow-up billing/document questions will find the processed results.
+    try {
+      const { data: existingRows } = await supabase
+        .from('gmail_messages')
+        .select('gmail_message_id')
+        .eq('user_id', userId)
+        .in('gmail_message_id', messageIds);
+      const existingIds = new Set((existingRows ?? []).map((r: { gmail_message_id: string }) => r.gmail_message_id));
+      const newIds = messageIds.filter(id => !existingIds.has(id));
+      if (newIds.length > 0) {
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+        const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+        fetch(`${supabaseUrl}/functions/v1/sync-gmail`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${serviceKey}`,
+          },
+          body: JSON.stringify({ target_user_id: userId, days_back: 1 }),
+        }).catch((e: Error) => console.warn('[fetchLiveRecentEmails] pipeline trigger failed:', e?.message ?? e));
+        console.log(`[fetchLiveRecentEmails] triggered pipeline for ${newIds.length} new email(s)`);
+      }
+    } catch (pipelineErr) {
+      console.warn('[fetchLiveRecentEmails] pipeline check failed:', (pipelineErr as Error)?.message ?? pipelineErr);
+    }
 
     // For each message, metadata-only fetch (From / Subject / Date headers + snippet).
     // Cap matches the Gmail list maxResults (30 — see comment on listUrl above).
@@ -2005,6 +2042,29 @@ Deno.serve(async (req) => {
               return `- From ${senderShort}: ${subject}${when}${tail}`;
             }).join('\n');
         system = system + liveEmailSection;
+      }
+    }
+
+    // F5c — Billing intent pipeline trigger. When the user asks a spending/
+    // billing question, fire-and-forget a targeted sync-gmail so the pipeline
+    // (extract-email-actions → harvest-attachment → extract-document-text)
+    // runs in the background. spend_summary will find the documents on the
+    // next ask even if receipts only just arrived in the inbox.
+    if (userId && BILLING_INTENT_RE.test(userText)) {
+      try {
+        const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+        const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+        fetch(`${supabaseUrl}/functions/v1/sync-gmail`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${serviceKey}`,
+          },
+          body: JSON.stringify({ target_user_id: userId, days_back: 1 }),
+        }).catch((e: Error) => console.warn('[F5c] billing pipeline trigger failed:', e?.message ?? e));
+        console.log(`[timing] ${elapsed()} | F5c — billing intent detected, pipeline sync triggered for user ${userId?.slice(0, 8)}`);
+      } catch (e) {
+        console.warn('[F5c] billing trigger error:', (e as Error)?.message ?? e);
       }
     }
 

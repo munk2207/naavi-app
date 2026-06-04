@@ -77,6 +77,24 @@ export const INSTITUTIONAL_DOMAINS: string[] = [
   // Healthcare (partial; add per user as learned)
   'ontariohealth.ca',
   'ehealthontario.ca',
+
+  // Billing & payment processors — receipts/invoices always worth harvesting
+  'stripe.com',
+  'invoices.stripe.com',
+  'anthropic.com',
+  'paypal.com',
+  'intuit.com',
+  'quickbooks.intuit.com',
+  'freshbooks.com',
+  'wave.com',
+  'shopify.com',
+  'etransfer.com',
+  'interac.ca',
+  'amazon.ca',
+  'amazon.com',
+  'microsoft.com',
+  'google.com',
+  'apple.com',
 ];
 
 export function isInstitutionalEmail(email: string | null | undefined): boolean {

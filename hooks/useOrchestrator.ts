@@ -2596,7 +2596,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                     const { data: existingRows } = await queryWithTimeout(
                       supabase!
                         .from('action_rules')
-                        .select('id, trigger_config, one_shot, enabled')
+                        .select('id, label, trigger_config, one_shot, enabled')
                         .eq('user_id', session.user.id)
                         .eq('trigger_type', 'location'),
                       10_000,

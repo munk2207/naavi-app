@@ -1383,9 +1383,9 @@ export default function HomeScreen() {
           headerLeft: () => null,
           headerRight: () => (
             <TopBarMenu items={[
-              { label: 'Alerts',   onPress: () => openWebView('alerts.html') },
-              { label: 'Lists',    onPress: () => openWebView('lists.html') },
-              { label: 'Notes',    onPress: () => openWebView('notes.html') },
+              { label: 'Alerts',   onPress: () => router.push('/alerts') },
+              { label: 'Lists',    onPress: () => router.push('/lists') },
+              { label: 'Notes',    onPress: () => router.push('/notes') },
               { label: 'Info',     onPress: () => setShowIntegrations(true) },
               { label: 'Help',     onPress: () => router.push('/help') },
               { label: 'Settings', onPress: () => router.push('/settings') },
@@ -2313,7 +2313,7 @@ export default function HomeScreen() {
               />
             </View>
             {/* Row 2 — Meet + Free on the left, Mic/Send toggle far right. */}
-            <View style={styles.actionButtonsRow}>
+            <View style={[styles.actionButtonsRow, !(orangeVisible && orangeLabel) && { justifyContent: 'flex-end' }]}>
               {/* Stop — far left, in-flow (replaces the old absolute-positioned float).
                   Visible during thinking / speaking / answer_active.
                   Sits on the far left; right-side buttons stay right-aligned via actionButtonsRight. */}
