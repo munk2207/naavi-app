@@ -1644,17 +1644,27 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       // so the synthesized action gets the truthful answer.
       const LIST_RULES_INTENT_RE =
         /\b(?:list|show|what(?:'s|\s+are|\s+do\s+i\s+have)|how many|tell me about|do i have)\s+(?:my\s+|the\s+)?(?:active\s+|current\s+|all\s+)?(?:alerts?|rules?|reminders?|notifications?)\b/i;
+
+      // Extract type keywords from the user message for LIST_RULES filtering.
+      // Applied to both the backstop (Claude didn't emit LIST_RULES) AND to
+      // Claude's own LIST_RULES action (Claude emitted it but without a match).
+      const listTypeWords = (userMessage.toLowerCase().match(/\b(email|contact|location|time|weather|calendar)\b/g) ?? []);
+      const listTypeMatch = [...new Set(listTypeWords)].join(' ');
+
       if (
         LIST_RULES_INTENT_RE.test(userMessage) &&
         !dedupedActions.some(a => a.type === 'LIST_RULES')
       ) {
-        // Extract trigger-type keywords from the user message so the backstop
-        // respects type filters: "list my email alerts" → match:"email",
-        // "list my contact and email alerts" → match:"contact email".
-        const typeWords = (userMessage.toLowerCase().match(/\b(email|contact|location|time|weather|calendar)\b/g) ?? []);
-        const backstopMatch = [...new Set(typeWords)].join(' ');
-        console.log(`[Orchestrator] B1b backstop — synthesizing LIST_RULES | match="${backstopMatch}"`);
-        dedupedActions.push({ type: 'LIST_RULES', match: backstopMatch || undefined } as NaaviAction);
+        console.log(`[Orchestrator] B1b backstop — synthesizing LIST_RULES | match="${listTypeMatch}"`);
+        dedupedActions.push({ type: 'LIST_RULES', match: listTypeMatch || undefined } as NaaviAction);
+      } else if (listTypeMatch) {
+        // Claude emitted LIST_RULES but without a match — inject the type filter
+        // from the user message so "list my email alerts" doesn't return everything.
+        const existing = dedupedActions.find(a => a.type === 'LIST_RULES') as any;
+        if (existing && !existing.match) {
+          existing.match = listTypeMatch;
+          console.log(`[Orchestrator] B1b inject — LIST_RULES match injected from user message: "${listTypeMatch}"`);
+        }
       }
 
       for (const action of dedupedActions) {
