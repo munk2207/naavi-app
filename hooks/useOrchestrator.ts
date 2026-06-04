@@ -1648,8 +1648,13 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         LIST_RULES_INTENT_RE.test(userMessage) &&
         !dedupedActions.some(a => a.type === 'LIST_RULES')
       ) {
-        console.log('[Orchestrator] B1b backstop — user asked to list alerts but no LIST_RULES action; synthesizing one');
-        dedupedActions.push({ type: 'LIST_RULES' } as NaaviAction);
+        // Extract trigger-type keywords from the user message so the backstop
+        // respects type filters: "list my email alerts" → match:"email",
+        // "list my contact and email alerts" → match:"contact email".
+        const typeWords = (userMessage.toLowerCase().match(/\b(email|contact|location|time|weather|calendar)\b/g) ?? []);
+        const backstopMatch = [...new Set(typeWords)].join(' ');
+        console.log(`[Orchestrator] B1b backstop — synthesizing LIST_RULES | match="${backstopMatch}"`);
+        dedupedActions.push({ type: 'LIST_RULES', match: backstopMatch || undefined } as NaaviAction);
       }
 
       for (const action of dedupedActions) {
@@ -2058,11 +2063,15 @@ const oneShot = pending.originalAction?.one_shot ?? true;
             const filtered = match
               ? allRules.filter(r => {
                   const hay = JSON.stringify({
+                    trigger_type: r.trigger_type,
                     label: r.label,
                     trigger_config: r.trigger_config,
                     action_config: r.action_config,
                   }).toLowerCase();
-                  return hay.includes(match);
+                  // Support multi-word match: each word is a separate needle.
+                  // "contact email" → needle "contact" OR "email" must appear.
+                  const needles = match.split(/\s+/).filter(Boolean);
+                  return needles.some(n => hay.includes(n));
                 })
               : allRules;
             if (filtered.length === 0) {
