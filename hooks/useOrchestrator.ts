@@ -2552,6 +2552,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                 // 2026-05-22 v86 — apostrophe-s is OPTIONAL (Wael feedback:
                 // "people say 'Sam home' not 'Sam's home'"). Voice parity.
                 const possessive = placeName.match(/^([A-Za-z][A-Za-z'\-]+(?:\s+[A-Za-z][A-Za-z'\-]+)?)(?:['’]s)?\s+(home|house|place|office|work)\s*$/i);
+                remoteLog(diagSession, 'loc-placeName', { placeName, hasPossessive: !!possessive });
                 if (possessive) {
                   const cName = possessive[1].trim();
                   const cKind = possessive[2].toLowerCase();
@@ -2611,6 +2612,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                     console.log(`[orch:loc:possessive] resolved to "${placeName}" from contact "${contact.name}"`);
                   } catch (err: any) {
                     console.error('[orch:loc:possessive] lookup failed:', err?.message || err);
+                    remoteLog(diagSession, 'loc-possessive-catch', { err: String(err?.message || err).slice(0, 200) });
                     // Fall through; resolve-place will fail gracefully.
                   }
                 }
@@ -2743,6 +2745,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                   // Fall through — let downstream sync decide what to do.
                 }
                 try {
+                  remoteLog(diagSession, 'loc-resolve-place-start', { placeName, hasPossessive: !!possessiveContactSource, url: `${SUPABASE_URL}/functions/v1/resolve-place` });
                   const res = await fetchWithTimeout(`${SUPABASE_URL}/functions/v1/resolve-place`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON}` },
@@ -3086,6 +3089,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                   continue;
                 } catch (err) {
                   console.error('[Orchestrator] resolve-place fetch failed:', err);
+                  remoteLog(diagSession, 'loc-resolve-place-catch', { placeName, err: String((err as any)?.message || err).slice(0, 200) });
                   locationIntercepted = true;
                   turnSpeechOverride = "Couldn't reach the location service. Try again in a moment.";
                   continue;
