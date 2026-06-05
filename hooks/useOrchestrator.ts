@@ -591,6 +591,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     // user can confirm or cancel a pending draft by typing rather than
     // only by tapping the DraftCard buttons. Previously "Send." was
     // cleared here then sent to Claude, which did nothing with it.
+    remoteLog(diagSession, 'send-pending-check', { hasPending: !!pendingActionRef.current, msg: userMessage.slice(0, 20) });
     if (pendingActionRef.current) {
       const trimmedMsg = userMessage.trim();
       if (AFFIRMATIVE_RE.test(trimmedMsg)) {
@@ -3487,6 +3488,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
 
           pendingActionRef.current = pending;
           setPendingAction(pending);
+          remoteLog(diagSession, 'draft-pending-set', { to, channel, hasEmail: !!resolvedEmail, hasPhone: !!resolvedPhone });
         }
       }
 
