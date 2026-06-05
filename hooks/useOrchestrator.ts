@@ -2607,7 +2607,14 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       console.log(`[orch:loc:possessive] picked "${contact.name}" has no ${wantedTypes.join('/')} address`);
                       continue;
                     }
-                    placeName = String(addr.formatted || '').replace(/\n+/g, ', ').replace(/\s*,\s*,\s*/g, ', ').trim();
+                    placeName = String(addr.formattedValue || addr.formatted || '').replace(/\n+/g, ', ').replace(/\s*,\s*,\s*/g, ', ').trim();
+                    if (!placeName) {
+                      const kindLabel = (cKind === 'office' || cKind === 'work') ? 'office' : 'home';
+                      locationIntercepted = true;
+                      turnSpeechOverride = `I found ${contact.name} in your contacts but the ${kindLabel} address isn't filled in. Open the contact card and add the address, then try again.`;
+                      console.log(`[orch:loc:possessive] addr.formattedValue/formatted was empty for "${contact.name}"`);
+                      continue;
+                    }
                     possessiveContactSource = { name: contact.name, kind: (cKind === 'office' || cKind === 'work') ? 'office' : 'home' };
                     console.log(`[orch:loc:possessive] resolved to "${placeName}" from contact "${contact.name}"`);
                   } catch (err: any) {
@@ -2981,23 +2988,66 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                     } catch (err) {
                       console.error('[orch:loc:possessive] permission check threw:', err);
                     }
-                    const { ok: cOk, ruleId: cRuleId, reactivated: cReactivated, alreadyExists: cAlreadyExists } = await commitPending(session.user.id, 'confirmed');
+                    // commitPending is out of scope here — inline the insert.
                     pendingLocationRef.current = null;
                     locationIntercepted = true;
-                    if (cAlreadyExists) {
-                      const existingMode = cAlreadyExists.oneShot ? 'one-time' : 'recurring';
-                      const addrSuffix = cAlreadyExists.address ? ` at ${String(cAlreadyExists.address).split(',')[0]?.trim()}` : '';
-                      turnSpeechOverride = `You already have a ${existingMode} alert for ${cAlreadyExists.placeName}${addrSuffix}. Say "list my alerts" if you want to change or remove it.`;
+                    const cOneShot = action.one_shot ?? true;
+                    const cTriggerConfig = {
+                      ...(action.trigger_config ?? {}),
+                      place_name:    data.place_name,
+                      address:       data.address ?? null,
+                      resolved_lat:  data.lat,
+                      resolved_lng:  data.lng,
+                      radius_meters: data.radius_meters ?? (action.trigger_config as any)?.radius_meters ?? 300,
+                    };
+                    // Pre-check for coord dupe
+                    const epsilon = 0.00001;
+                    const { data: existingForPoss } = await queryWithTimeout(
+                      supabase!.from('action_rules').select('id, trigger_config, one_shot, enabled').eq('user_id', session.user.id).eq('trigger_type', 'location'),
+                      10_000, 'possessive-dupe-check',
+                    );
+                    const posssDupe = Array.isArray(existingForPoss) ? existingForPoss.find((r: any) => {
+                      const rLat = r?.trigger_config?.resolved_lat;
+                      const rLng = r?.trigger_config?.resolved_lng;
+                      if (typeof rLat !== 'number' || typeof rLng !== 'number') return false;
+                      return Math.abs(rLat - data.lat) < epsilon && Math.abs(rLng - data.lng) < epsilon;
+                    }) : null;
+                    if (posssDupe?.enabled !== false && posssDupe) {
+                      const newTasks = Array.isArray((action.action_config as any)?.tasks) ? (action.action_config as any).tasks as string[] : [];
+                      const newListName = String((action.action_config as any)?.list_name ?? '').trim();
+                      if (newTasks.length > 0 || newListName) {
+                        const { data: mergeData, error: mergeErr } = await invokeWithTimeout<any>('manage-rules', { body: { op: 'merge_tasks', rule_id: posssDupe.id, tasks: newTasks.length > 0 ? newTasks : undefined, list_name: newListName || undefined } }, 10_000);
+                        if (!mergeErr && mergeData?.ok) {
+                          const addedDesc = newListName ? `your ${newListName} list` : newTasks.join(', ') || 'the reminder';
+                          turnSpeechOverride = `Got it — I've added ${addedDesc} to your existing alert for ${data.place_name}.`;
+                        } else {
+                          turnSpeechOverride = `You already have an alert for ${data.place_name}. Say "list my alerts" to manage it.`;
+                        }
+                      } else {
+                        const existingMode = posssDupe.one_shot ? 'one-time' : 'recurring';
+                        turnSpeechOverride = `You already have a ${existingMode} alert for ${data.place_name}. Say "list my alerts" to manage it.`;
+                      }
                     } else {
-                      const oneShot = action.one_shot ?? true;
-                      const modeText = oneShot ? 'one time' : 'every time';
-                      turnSpeechOverride = cOk
-                        ? cReactivated
-                          ? `Your previous alert for ${data.place_name} was re-enabled — ${modeText} you arrive.`
-                          : `Alert set — ${modeText} you arrive at ${data.place_name}.`
-                        : `Couldn't save the rule — something went wrong. Try again?`;
-                      if (cOk && cRuleId) {
-                        turnLocationRules.push({ ruleId: cRuleId, placeName: data.place_name, address: data.address ?? null, oneShot: action.one_shot ?? true });
+                      const { data: insertedRule, error: insertErr } = await queryWithTimeout(
+                        supabase!.from('action_rules').insert({
+                          user_id:        session.user.id,
+                          trigger_type:   'location',
+                          trigger_config: cTriggerConfig,
+                          action_type:    String(action.action_type ?? 'sms'),
+                          action_config:  action.action_config ?? {},
+                          label:          String(action.label ?? 'Location alert'),
+                          one_shot:       cOneShot,
+                        }).select('id').single(),
+                        15_000, 'possessive-insert-location-rule',
+                      );
+                      const modeText = cOneShot ? 'one time' : 'every time';
+                      if (!insertErr && insertedRule?.id) {
+                        turnSpeechOverride = `Alert set — ${modeText} you arrive at ${data.place_name}.`;
+                        turnLocationRules.push({ ruleId: String(insertedRule.id), placeName: data.place_name, address: data.address ?? null, oneShot: cOneShot });
+                        import('@/hooks/useGeofencing').then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id)).catch(() => {});
+                        maybePromptBatteryExemption().catch(() => {});
+                      } else {
+                        turnSpeechOverride = `Couldn't save the alert — something went wrong. Try again?`;
                       }
                     }
                     continue;
