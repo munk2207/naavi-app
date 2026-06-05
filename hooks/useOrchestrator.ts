@@ -3024,86 +3024,15 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       attempts: 1,
                       createdAt: Date.now(),
                     };
-                    try {
-                      const bgInitial = await Location.getBackgroundPermissionsAsync();
-                      if (bgInitial.status !== 'granted') {
-                        const fgReq = await Location.requestForegroundPermissionsAsync();
-                        if (fgReq.status === 'granted') {
-                          await Location.requestBackgroundPermissionsAsync();
-                        }
-                        const bgFinal = await Location.getBackgroundPermissionsAsync();
-                        if (bgFinal.status !== 'granted') {
-                          pendingLocationRef.current = null;
-                          locationIntercepted = true;
-                          turnSpeechOverride = `Please pick 'Allow all the time' so I can alert you at ${data.place_name}.`;
-                          continue;
-                        }
-                      }
-                    } catch (err) {
-                      console.error('[orch:loc:possessive] permission check threw:', err);
-                    }
-                    // commitPending is out of scope here — inline the insert.
-                    pendingLocationRef.current = null;
+                    // Rule 12 pre-confirmation — show the resolved address and ask Yes/No.
+                    // The isYes && pending.resolved handler at the top of send() commits it.
                     locationIntercepted = true;
-                    const cOneShot = action.one_shot ?? true;
-                    const cTriggerConfig = {
-                      ...(action.trigger_config ?? {}),
-                      place_name:    data.place_name,
-                      address:       data.address ?? null,
-                      resolved_lat:  data.lat,
-                      resolved_lng:  data.lng,
-                      radius_meters: data.radius_meters ?? (action.trigger_config as any)?.radius_meters ?? 300,
-                    };
-                    // Pre-check for coord dupe
-                    const epsilon = 0.00001;
-                    const { data: existingForPoss } = await queryWithTimeout(
-                      supabase!.from('action_rules').select('id, trigger_config, one_shot, enabled').eq('user_id', session.user.id).eq('trigger_type', 'location'),
-                      10_000, 'possessive-dupe-check',
-                    );
-                    const posssDupe = Array.isArray(existingForPoss) ? existingForPoss.find((r: any) => {
-                      const rLat = r?.trigger_config?.resolved_lat;
-                      const rLng = r?.trigger_config?.resolved_lng;
-                      if (typeof rLat !== 'number' || typeof rLng !== 'number') return false;
-                      return Math.abs(rLat - data.lat) < epsilon && Math.abs(rLng - data.lng) < epsilon;
-                    }) : null;
-                    if (posssDupe?.enabled !== false && posssDupe) {
-                      const newTasks = Array.isArray((action.action_config as any)?.tasks) ? (action.action_config as any).tasks as string[] : [];
-                      const newListName = String((action.action_config as any)?.list_name ?? '').trim();
-                      if (newTasks.length > 0 || newListName) {
-                        const { data: mergeData, error: mergeErr } = await invokeWithTimeout<any>('manage-rules', { body: { op: 'merge_tasks', rule_id: posssDupe.id, tasks: newTasks.length > 0 ? newTasks : undefined, list_name: newListName || undefined } }, 10_000);
-                        if (!mergeErr && mergeData?.ok) {
-                          const addedDesc = newListName ? `your ${newListName} list` : newTasks.join(', ') || 'the reminder';
-                          turnSpeechOverride = `Got it — I've added ${addedDesc} to your existing alert for ${data.place_name}.`;
-                        } else {
-                          turnSpeechOverride = `You already have an alert for ${data.place_name}. Say "list my alerts" to manage it.`;
-                        }
-                      } else {
-                        const existingMode = posssDupe.one_shot ? 'one-time' : 'recurring';
-                        turnSpeechOverride = `You already have a ${existingMode} alert for ${data.place_name}. Say "list my alerts" to manage it.`;
-                      }
-                    } else {
-                      const { data: insertedRule, error: insertErr } = await queryWithTimeout(
-                        supabase!.from('action_rules').insert({
-                          user_id:        session.user.id,
-                          trigger_type:   'location',
-                          trigger_config: cTriggerConfig,
-                          action_type:    String(action.action_type ?? 'sms'),
-                          action_config:  action.action_config ?? {},
-                          label:          String(action.label ?? 'Location alert'),
-                          one_shot:       cOneShot,
-                        }).select('id').single(),
-                        15_000, 'possessive-insert-location-rule',
-                      );
-                      const modeText = cOneShot ? 'one time' : 'every time';
-                      if (!insertErr && insertedRule?.id) {
-                        turnSpeechOverride = `Alert set — ${modeText} you arrive at ${data.place_name}.`;
-                        turnLocationRules.push({ ruleId: String(insertedRule.id), placeName: data.place_name, address: data.address ?? null, oneShot: cOneShot });
-                        import('@/hooks/useGeofencing').then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id)).catch(() => {});
-                        maybePromptBatteryExemption().catch(() => {});
-                      } else {
-                        turnSpeechOverride = `Couldn't save the alert — something went wrong. Try again?`;
-                      }
-                    }
+                    const addrDisplay = data.address && data.address !== data.place_name
+                      ? `${data.place_name} at ${data.address.split(',')[0]?.trim()}`
+                      : data.place_name;
+                    const newTasksPreview = Array.isArray((action.action_config as any)?.tasks) ? (action.action_config as any).tasks as string[] : [];
+                    const taskSuffix = newTasksPreview.length > 0 ? ` with a reminder: ${newTasksPreview.join(', ')}` : '';
+                    turnSpeechOverride = `I'll set an alert for ${possessiveContactSource.name}'s ${possessiveContactSource.kind} — ${addrDisplay}${taskSuffix}. Say yes to confirm, cancel to skip.`;
                     continue;
                   }
 
