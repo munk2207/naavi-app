@@ -3240,7 +3240,10 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       let displaySpeech = (typeof response.display === 'string' && response.display.trim().length > 0)
         ? response.display
         : response.speech;
-      // "Say yes to send" kept in display speech — user needs to see the confirmation prompt.
+      // Strip "Say yes to send" from displayed text — Robert uses the Send button on the DraftCard.
+      if (!handsfreeRef.current && turnDrafts.some(d => isConfirmable(d))) {
+        displaySpeech = displaySpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
+      }
       // Location rule intercept — always wins over Claude's speech.
       if (turnSpeechOverride !== null) {
         displaySpeech = turnSpeechOverride;
@@ -3382,7 +3385,10 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         finalSpeech += ` I didn't find anything for ${turnGlobalSearch!.query}.`;
       }
 
-      // "Say yes to send" kept in final speech — user confirms via Yes/No in chat.
+      // Strip "Say yes to send" from TTS — Robert uses the Send button on the DraftCard.
+      if (!handsfreeRef.current && turnDrafts.some(d => isConfirmable(d))) {
+        finalSpeech = finalSpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
+      }
       // V57.11.2 — align spoken "Leave by" with the card's computed leave time.
       // V57.11.5 — strip Claude's hallucinated duration ("About 15 minutes
       // from here" when the actual is 21 min) and match "Leave by" with or
