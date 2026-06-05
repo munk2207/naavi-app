@@ -870,6 +870,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         ok: boolean;
         ruleId: string | null;
         reactivated?: boolean;
+        merged?: boolean;
         alreadyExists?: { ruleId: string; placeName: string; address: string | null; oneShot: boolean; enabled: boolean };
       }> => {
         if (!pending.resolved) return { ok: false, ruleId: null };
@@ -921,7 +922,19 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               }
               return { ok: true, ruleId: armResult.ruleId, reactivated: true };
             }
-            // Enabled dupe — user already has an active alert here.
+            // Enabled dupe — merge tasks/list if new content, otherwise inform user.
+            const newTasks    = Array.isArray(pending.originalAction?.action_config?.tasks) ? (pending.originalAction!.action_config as any).tasks as string[] : [];
+            const newListName = String((pending.originalAction?.action_config as any)?.list_name ?? '').trim();
+            if (newTasks.length > 0 || newListName) {
+              const { data: mergeData, error: mergeErr } = await invokeWithTimeout<any>(
+                'manage-rules',
+                { body: { op: 'merge_tasks', rule_id: dupe.id, tasks: newTasks.length > 0 ? newTasks : undefined, list_name: newListName || undefined } },
+                10_000,
+              );
+              if (!mergeErr && mergeData?.ok) {
+                return { ok: true, ruleId: String(dupe.id), reactivated: false, merged: true };
+              }
+            }
             return {
               ok: false,
               ruleId: null,
@@ -1096,7 +1109,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         } catch (err) {
           console.error('[orch:loc:pending] permission check threw:', err);
         }
-        const { ok, ruleId, reactivated, alreadyExists } = await commitPending(session.user.id, 'confirmed');
+        const { ok, ruleId, reactivated, merged, alreadyExists } = await commitPending(session.user.id, 'confirmed');
         // Enabled dupe — user already has an active alert here.
         if (alreadyExists) {
           const existingMode = alreadyExists.oneShot ? 'one-time' : 'recurring';
@@ -1107,22 +1120,16 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           emitPendingTurn(`You already have a ${existingMode} alert for ${alreadyExists.placeName}${addrSuffix}. Say "list my alerts" if you want to change or remove it.`);
           return;
         }
-        // V57.4 — speech now states one-time vs every-time so Robert always
-        // knows which mode the rule is in.
-        // V57.19 — reverted from V57.18 default flip after the 2026-05-17
-// stationary-re-fire bug. Wael received a phantom "you arrived home" alert
-// while sitting at home (never moved). Root cause: SDK re-fires ENTER
-// opportunistically on a stationary device, and the V57.18 recurring-by-
-// default meant each re-fire fanouts. one_shot=true (one-time) default
-// auto-disables the rule after first fire — re-fires fanout nothing.
-// User says "every time" / "always" / "whenever" → one_shot:false (recurring,
-// guarded by the V57.17/V57.18 state machine).
 const oneShot = pending.originalAction?.one_shot ?? true;
         const modeText = oneShot ? 'one time' : 'every time';
+        const newTasks = Array.isArray((pending.originalAction?.action_config as any)?.tasks) ? (pending.originalAction!.action_config as any).tasks as string[] : [];
+        const newListName = String((pending.originalAction?.action_config as any)?.list_name ?? '').trim();
         const speech = ok
-          ? reactivated
-            ? `Your previous alert for ${pending.resolved.place_name} was re-enabled — ${modeText} you arrive.`
-            : `Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.`
+          ? merged
+            ? `Got it — I've added ${newListName ? `your ${newListName} list` : newTasks.join(', ') || 'the reminder'} to your existing alert for ${pending.resolved.place_name}.`
+            : reactivated
+              ? `Your previous alert for ${pending.resolved.place_name} was re-enabled — ${modeText} you arrive.`
+              : `Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.`
           : `Couldn't save the rule — something went wrong. Try again?`;
         // V57.4 Part B — attach the toggle card when the rule was saved.
         // V57.13.4 — also pass address so the card shows the street segment.
@@ -1792,6 +1799,10 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         }
 
         if (action.type === 'GLOBAL_SEARCH') {
+          // Skip search when a draft is already in this turn — Claude sometimes
+          // emits both together using the full user message as the query, which
+          // produces irrelevant contact results alongside the draft card.
+          if (turnDrafts.length > 0) continue;
           // Cross-source search: calls global-search Edge Function, which
           // fans out to knowledge, rules, sent_messages, contacts, lists,
           // calendar, and gmail adapters and returns a ranked list.
@@ -2933,7 +2944,63 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                     continue;
                   }
 
-                  // 2. Fresh resolve → defer to next turn for user confirmation.
+                  // 2a. Address came from contact card — already verified, skip picker.
+                  if (data?.status === 'ok' && possessiveContactSource) {
+                    pendingLocationRef.current = {
+                      originalAction: action,
+                      placeName,
+                      resolved: {
+                        place_name:      data.place_name,
+                        address:         data.address,
+                        lat:             data.lat,
+                        lng:             data.lng,
+                        canonical_alias: data.canonical_alias,
+                        radius_meters:   data.radius_meters,
+                      },
+                      attempts: 1,
+                      createdAt: Date.now(),
+                    };
+                    try {
+                      const bgInitial = await Location.getBackgroundPermissionsAsync();
+                      if (bgInitial.status !== 'granted') {
+                        const fgReq = await Location.requestForegroundPermissionsAsync();
+                        if (fgReq.status === 'granted') {
+                          await Location.requestBackgroundPermissionsAsync();
+                        }
+                        const bgFinal = await Location.getBackgroundPermissionsAsync();
+                        if (bgFinal.status !== 'granted') {
+                          pendingLocationRef.current = null;
+                          locationIntercepted = true;
+                          turnSpeechOverride = `Please pick 'Allow all the time' so I can alert you at ${data.place_name}.`;
+                          continue;
+                        }
+                      }
+                    } catch (err) {
+                      console.error('[orch:loc:possessive] permission check threw:', err);
+                    }
+                    const { ok: cOk, ruleId: cRuleId, reactivated: cReactivated, alreadyExists: cAlreadyExists } = await commitPending(session.user.id, 'confirmed');
+                    pendingLocationRef.current = null;
+                    locationIntercepted = true;
+                    if (cAlreadyExists) {
+                      const existingMode = cAlreadyExists.oneShot ? 'one-time' : 'recurring';
+                      const addrSuffix = cAlreadyExists.address ? ` at ${String(cAlreadyExists.address).split(',')[0]?.trim()}` : '';
+                      turnSpeechOverride = `You already have a ${existingMode} alert for ${cAlreadyExists.placeName}${addrSuffix}. Say "list my alerts" if you want to change or remove it.`;
+                    } else {
+                      const oneShot = action.one_shot ?? true;
+                      const modeText = oneShot ? 'one time' : 'every time';
+                      turnSpeechOverride = cOk
+                        ? cReactivated
+                          ? `Your previous alert for ${data.place_name} was re-enabled — ${modeText} you arrive.`
+                          : `Alert set — ${modeText} you arrive at ${data.place_name}.`
+                        : `Couldn't save the rule — something went wrong. Try again?`;
+                      if (cOk && cRuleId) {
+                        turnLocationRules.push({ ruleId: cRuleId, placeName: data.place_name, address: data.address ?? null, oneShot: action.one_shot ?? true });
+                      }
+                    }
+                    continue;
+                  }
+
+                  // 2b. Fresh resolve → defer to next turn for user confirmation.
                   if (data?.status === 'ok' && data.source === 'fresh') {
                     pendingLocationRef.current = {
                       originalAction: action,
@@ -2950,7 +3017,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       createdAt: Date.now(), // V57.12.1 Bug B
                     };
                     locationIntercepted = true;
-                    turnSpeechOverride = `Found ${data.place_name}${data.address ? ' at ' + data.address : ''}. Say yes to set the alert, cancel to skip, or give me a different area.`;
+                    turnSpeechOverride = `Found ${data.place_name}${data.address && data.address !== data.place_name ? ' at ' + data.address : ''}. Say yes to set the alert, cancel to skip, or give me a different area.`;
                     continue;
                   }
 
@@ -3118,10 +3185,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       let displaySpeech = (typeof response.display === 'string' && response.display.trim().length > 0)
         ? response.display
         : response.speech;
-      // Strip "Say yes to send" from displayed text when not in hands-free
-      if (!handsfreeRef.current && turnDrafts.some(d => isConfirmable(d))) {
-        displaySpeech = displaySpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
-      }
+      // "Say yes to send" kept in display speech — user needs to see the confirmation prompt.
       // Location rule intercept — always wins over Claude's speech.
       if (turnSpeechOverride !== null) {
         displaySpeech = turnSpeechOverride;
@@ -3263,10 +3327,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         finalSpeech += ` I didn't find anything for ${turnGlobalSearch!.query}.`;
       }
 
-      // Strip "Say yes to send" prompt when not in hands-free (Robert uses the Send button)
-      if (!handsfreeRef.current && turnDrafts.some(d => isConfirmable(d))) {
-        finalSpeech = finalSpeech.replace(/\.?\s*Say yes to send,? or tell me what to change\.?/gi, '.').trim();
-      }
+      // "Say yes to send" kept in final speech — user confirms via Yes/No in chat.
       // V57.11.2 — align spoken "Leave by" with the card's computed leave time.
       // V57.11.5 — strip Claude's hallucinated duration ("About 15 minutes
       // from here" when the actual is 21 min) and match "Leave by" with or

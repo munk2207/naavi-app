@@ -398,7 +398,10 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
                  : null;
       if (!phone) {
         const contact = await lookupContact(to);
-        phone = contact?.phone ?? null;
+        if (contact?.phone) {
+          const s = contact.phone.replace(/[^+\d]/g, '');
+          phone = s.startsWith('+') ? s : s.length === 10 ? `+1${s}` : s.length >= 7 ? `+${s}` : null;
+        }
       }
       if (!phone) {
         setSending(false);

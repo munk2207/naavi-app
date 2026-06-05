@@ -112,7 +112,7 @@ export const truthAtUserLayerTests: TestCase[] = [
       //   "I don't have an email ..."
       //   "there's no email ..."
       const NEGATE_EMAIL =
-        /\b(?:no\s+emails?|don'?t\s+(?:have|see)\s+(?:any\s+|an\s+|the\s+)?emails?|do\s+not\s+(?:have|see)\s+(?:any\s+|an\s+|the\s+)?emails?|there'?s?\s+no\s+emails?|no\s+such\s+emails?)\b/i;
+        /\b(?:no\s+emails?|don'?t\s+(?:have|see)\s+(?:any\s+|an\s+|the\s+)?emails?|do\s+not\s+(?:have|see)\s+(?:any\s+|an\s+|the\s+)?emails?|there'?s?\s+no\s+emails?|no\s+such\s+emails?|don'?t\s+have\s+anything|nothing\s+saved|haven'?t\s+(?:found|seen)\s+(?:any\s+)?emails?)\b/i;
       expectMatch(
         speech,
         NEGATE_EMAIL,
