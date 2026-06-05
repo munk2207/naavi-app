@@ -591,7 +591,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     // user can confirm or cancel a pending draft by typing rather than
     // only by tapping the DraftCard buttons. Previously "Send." was
     // cleared here then sent to Claude, which did nothing with it.
-    remoteLog(diagSession, 'send-pending-check', { hasPending: !!pendingActionRef.current, msg: userMessage.slice(0, 20) });
     if (pendingActionRef.current) {
       const trimmedMsg = userMessage.trim();
       if (AFFIRMATIVE_RE.test(trimmedMsg)) {
@@ -648,6 +647,60 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         // let Claude handle the message normally (edit flow).
         pendingActionRef.current = null;
         setPendingAction(null);
+      }
+    } else if (AFFIRMATIVE_RE.test(userMessage.trim())) {
+      // Fallback: pendingActionRef is null but user typed Yes.
+      // Check if the last turn has an unsent confirmable draft.
+      const lastTurn = turns[turns.length - 1];
+      const lastDraft = lastTurn?.drafts?.find(d => isConfirmable(d) && !(d as any)._voiceConfirmed);
+      if (lastDraft) {
+        const dChannel = String((lastDraft as any).channel ?? 'email').toLowerCase();
+        const dTo = String((lastDraft as any).to ?? '').trim();
+        const dIsMsg = dChannel === 'sms' || dChannel === 'whatsapp';
+        let dPhone: string | null = null;
+        let dEmail: string | null = null;
+        if (dIsMsg) {
+          const s = dTo.replace(/[^+\d]/g, '');
+          dPhone = s.startsWith('+') ? s : /^\d{10}$/.test(s) ? `+1${s}` : /^\d{7,15}$/.test(s) ? `+${s}` : null;
+          if (!dPhone) { const c = await lookupContact(dTo); if (c?.phone) { const s2 = c.phone.replace(/[^+\d]/g, ''); dPhone = s2.startsWith('+') ? s2 : s2.length === 10 ? `+1${s2}` : s2.length >= 7 ? `+${s2}` : null; } }
+        } else {
+          dEmail = dTo.includes('@') ? dTo : null;
+          if (!dEmail) { const c = await lookupContact(dTo); dEmail = c?.email ?? null; }
+        }
+        if ((dIsMsg && dPhone) || (!dIsMsg && dEmail)) {
+          setStatus('speaking');
+          try {
+            let dResult: { ok: boolean; speech: string };
+            if (dIsMsg) {
+              const { data: dData, error: dErr } = await invokeWithTimeout('send-sms', { body: { to: dPhone, body: String((lastDraft as any).body ?? ''), channel: dChannel } }, 30_000);
+              dResult = { ok: !dErr && !!dData?.success, speech: !dErr && dData?.success ? SPEECH.SENT : SPEECH.GENERIC_ERROR };
+            } else {
+              const dR = await registry.email.send({ to: [{ name: dEmail !== dTo ? dTo : '', email: dEmail! }], subject: String((lastDraft as any).subject ?? ''), body: String((lastDraft as any).body ?? '') });
+              dResult = { ok: dR.success, speech: dR.success ? SPEECH.SENT : SPEECH.GENERIC_ERROR };
+            }
+            if (dResult.ok) {
+              setTurns(prev => {
+                const updated = [...prev];
+                const lastIdx = updated.length - 1;
+                if (lastIdx >= 0) {
+                  const di = updated[lastIdx].drafts.findIndex(d => d === lastDraft);
+                  if (di >= 0) {
+                    const ud = [...updated[lastIdx].drafts];
+                    ud[di] = { ...ud[di], _voiceConfirmed: true };
+                    updated[lastIdx] = { ...updated[lastIdx], drafts: ud };
+                  }
+                }
+                return updated;
+              });
+            }
+            await speakResponse(dResult.speech, language);
+          } catch (e) {
+            console.error('[send] draft-fallback error:', e);
+            await speakResponse(SPEECH.GENERIC_ERROR, language);
+          }
+          setStatus('idle');
+          return;
+        }
       }
     }
 
@@ -3494,7 +3547,6 @@ const oneShot = pending.originalAction?.one_shot ?? true;
 
           pendingActionRef.current = pending;
           setPendingAction(pending);
-          remoteLog(diagSession, 'draft-pending-set', { to, channel, hasEmail: !!resolvedEmail, hasPhone: !!resolvedPhone });
         }
       }
 
