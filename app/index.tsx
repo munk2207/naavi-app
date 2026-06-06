@@ -326,6 +326,11 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState((action as any)._voiceConfirmed === true);
   const [sendError, setSendError] = useState<string | null>(null);
+
+  // Sync sent state when _voiceConfirmed changes (e.g. after Yes intercept sets it).
+  React.useEffect(() => {
+    if ((action as any)._voiceConfirmed === true) setSent(true);
+  }, [(action as any)._voiceConfirmed]);
   const [resolvedContact, setResolvedContact] = useState<string | null>(null);
 
   // Email recipient resolution (Session 26 design lock).
