@@ -1704,7 +1704,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       // Claude can't see them. The handler queries action_rules directly,
       // so the synthesized action gets the truthful answer.
       const LIST_RULES_INTENT_RE =
-        /\b(?:list|show|what(?:'s|\s+are|\s+do\s+i\s+have)|how many|tell me about|do i have)\s+(?:my\s+|the\s+)?(?:active\s+|current\s+|all\s+)?(?:email\s+|location\s+|contact\s+|time\s+|weather\s+|calendar\s+)?(?:alerts?|rules?|reminders?|notifications?)\b/i;
+        /\b(?:list|show|what(?:'s|\s+are|\s+do\s+i\s+have)|how many|tell me about|do i have)\s+(?:me\s+|my\s+|the\s+)?(?:active\s+|current\s+|all\s+)?(?:email\s+|location\s+|contact\s+|time\s+|weather\s+|calendar\s+)?(?:alerts?|rules?|reminders?|notifications?)\b/i;
 
       // Extract type keywords from the user message for LIST_RULES filtering.
       // Applied to both the backstop (Claude didn't emit LIST_RULES) AND to
