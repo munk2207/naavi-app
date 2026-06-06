@@ -81,7 +81,7 @@ export const session2026_05_27Tests: TestCase[] = [
     id: 'b6d.prompt-version-bumped-to-v98',
     category: 'b6d',
     description:
-      'B6d/Nav-disambiguation — PROMPT_VERSION must be 2026-05-30-v104-no-fabricated-contact-suggestions (latest live version). ' +
+      'B6d/Nav-disambiguation — PROMPT_VERSION must be 2026-06-06-v105-numbered-lists-final-reminder (latest live version). ' +
       'Updated from v101 → v102 when community two-phase search framing rule was added (2026-05-29).',
     timeoutMs: 15_000,
     async run(ctx) {
@@ -92,8 +92,8 @@ export const session2026_05_27Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-05-30-v104-no-fabricated-contact-suggestions',
-        `Expected version "2026-05-30-v104-no-fabricated-contact-suggestions", got "${version}"`,
+        version === '2026-06-06-v105-numbered-lists-final-reminder',
+        `Expected version "2026-06-06-v105-numbered-lists-final-reminder", got "${version}"`,
       );
     },
   },

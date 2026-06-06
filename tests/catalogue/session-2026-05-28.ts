@@ -138,7 +138,7 @@ export const session2026_05_28Tests: TestCase[] = [
   {
     id: 'session-2026-05-28.b6d-prompt-version-v100',
     category: 'session-2026-05-28',
-    description: 'Nav-disambiguation v101 — PROMPT_VERSION must be 2026-05-30-v104-no-fabricated-contact-suggestions',
+    description: 'Nav-disambiguation v101 — PROMPT_VERSION must be 2026-06-06-v105-numbered-lists-final-reminder',
     timeoutMs: 15_000,
     async run(ctx) {
       const { status, data } = await adapters.call(
@@ -148,8 +148,8 @@ export const session2026_05_28Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-05-30-v104-no-fabricated-contact-suggestions',
-        `Expected version "2026-05-30-v104-no-fabricated-contact-suggestions", got "${version}"`,
+        version === '2026-06-06-v105-numbered-lists-final-reminder',
+        `Expected version "2026-06-06-v105-numbered-lists-final-reminder", got "${version}"`,
       );
     },
   },

@@ -868,6 +868,44 @@ export const promptRegressionTests: TestCase[] = [
   },
 
   {
+    id: 'prompt-regression.b6d-informational-list-numbered',
+    category: 'prompt-regression',
+    description: 'B6d v105 — when Claude lists multiple items (e.g. 2 lists), display must use numbered list never bullets',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'what lists do I have?' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      const rawText = data?.rawText ?? '';
+      ctx.log(`rawText: ${rawText.slice(0, 500)}…`);
+
+      let display = '';
+      try {
+        const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+        const parsed = JSON.parse(cleaned);
+        display = typeof parsed.display === 'string' ? parsed.display : '';
+      } catch { /* non-JSON reply */ }
+
+      if (!display) {
+        ctx.log('No display field — skipping format check');
+        return;
+      }
+      ctx.log(`display: ${JSON.stringify(display.slice(0, 300))}`);
+
+      expectTruthy(
+        !/•/.test(display),
+        `B6d: display contains bullet glyph "•". display: ${JSON.stringify(display.slice(0, 300))}`,
+      );
+      expectTruthy(
+        !/(^|\n)\s*[-*]\s+\S/.test(display),
+        `B6d: display contains markdown bullet. display: ${JSON.stringify(display.slice(0, 300))}`,
+      );
+    },
+  },
+
+  {
     id: 'prompt-regression.b6d-list-rules-display-numbered',
     category: 'prompt-regression',
     description: 'B6d v99 — list_rules response display field must use numbered list, never bullets (when user has 2+ alerts)',

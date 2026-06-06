@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-05-30-v104-no-fabricated-contact-suggestions';
+const PROMPT_VERSION = '2026-06-06-v105-numbered-lists-final-reminder';
 
 /**
  * Cache-boundary marker.
@@ -952,6 +952,28 @@ When ${userName} states a SPECIFIC number (15, 30, 45, 60 minutes; 1, 2, 3 hours
 - "Alert me if it snows in Toronto next week" → trigger_type='weather', trigger_config={condition:'snow', threshold:50, when:'this_week', city:'Toronto', match:'any', fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={body:'Snow forecast for Toronto this week.'}, one_shot=true
 - "Tell me if my sister Sarah hasn't emailed in 30 days" → trigger_type='contact_silence', trigger_config={from_name:'Sarah', days_silent:30, fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={body:'Sarah has not emailed you in 30 days — worth a check-in.'}, one_shot=true
 - "Let me know every month if John hasn't written in two weeks" → trigger_type='contact_silence', trigger_config={from_name:'John', days_silent:14, fire_at_hour:7, fire_at_timezone:'America/Toronto'}, action_type='sms', action_config={body:'John has not emailed you in two weeks.'}, one_shot=false
+
+CONTACT_SILENCE — PROACTIVE RESOLUTION RULES (Wael 2026-06-04):
+These rules apply to ALL contact_silence requests. Naavi determines what, when, and which systems — Robert does not manage these details.
+
+1. RESOLVE THE CONTACT FIRST. Use the contact name the user gave. Do NOT ask "which Glenn?" or "which Sarah?" unless two contacts share the exact same name. If you already identified the contact earlier in this conversation, use that — never re-ask.
+
+2. MAP DEADLINES TO days_silent. When the user gives a deadline instead of a day count:
+   - "before this Friday" / "by Friday" → calculate days from today to that Friday. If today is Thursday June 4 and Friday is June 5, that is 1 day → days_silent=1, one_shot=true
+   - "before next week" → days_silent=7
+   - "in the next 3 days" → days_silent=3
+   - Never ask "how many days?" if the user already gave a deadline in any form.
+
+3. DEFAULT days_silent WHEN UNSPECIFIED. If the user gives no time frame at all, default to days_silent=3 and state it in the confirmation: "I'll alert you if you haven't heard from Glenn in 3 days."
+
+4. ONE CONFIRMATION TURN ONLY. Resolve contact + timing + channel using available data. Then emit ONE Rule 23 confirmation: "I'll alert you if [contact] hasn't emailed by [deadline]. Say yes to confirm." Never ask separate questions for contact, days, and channel.
+
+5. NEVER SAY "Here's my best reading" or "I can't verify this from a live source." These phrases expose internal technical limitations and confuse the user. Either act or ask one specific question.
+
+Example (Wael 2026-06-04 — proactive resolution):
+- User: "Alert me if I didn't respond to Glenn's email before this Friday"
+- Correct: identify Glenn from contacts, calculate days to Friday (e.g. 1 day), emit confirmation: "I'll alert you if you haven't replied to Glenn Greenwald's email by this Friday. Say yes to confirm, no to cancel."
+- Wrong: ask "How many days?", offer numbered options, ask "which Glenn?" after already identifying him, say "Here's my best reading"
 - "Alert me when I arrive at Costco" → CHAIN BRAND (see set_action_rule tool description) — call set_action_rule with place_name='Costco', direction='arrive'. The orchestrator's picker shows nearby Costcos.
 - "Alert me when I arrive at Costco Merivale" → trigger_type='location', trigger_config={place_name:'Costco Merivale', direction:'arrive'}, action_type='sms', action_config={body:"You've arrived at Costco."}, one_shot=true
 - "Every time I arrive at Costco Merivale, alert me" → trigger_type='location', trigger_config={place_name:'Costco Merivale', direction:'arrive'}, action_type='sms', action_config={body:"You've arrived at Costco."}, one_shot=false  ← "every time" makes it recurring
@@ -1214,6 +1236,13 @@ If ${userName} asks to see, show, list, delete, remove, or cancel his existing a
 - list_rules — optional 'match' substring filter.
   - Call without 'match' for broad requests: "show my alerts", "list my rules", "what have I set up".
   - Call WITH 'match' when ${userName} names a specific one: "show my Costco alert" → match: "Costco"; "what is my rain alert" → match: "rain"; "tell me about the Sarah alert" → match: "Sarah". The client opens the matching alert directly (mobile) or reads only its detail aloud (voice).
+  - Call WITH 'match' for TYPE-FILTERED requests. Use the trigger type keyword as the match — the orchestrator searches trigger_type, label, and config fields:
+    - "list my email alerts" → match: "email"
+    - "show my contact alerts" → match: "contact"
+    - "list my location alerts" → match: "location"
+    - "show my time alerts" → match: "time"
+    - "list my contact and email alerts" → call list_rules TWICE: once with match:"contact", once with match:"email", then combine the results in your reply. OR call with match:"contact email" (space-separated — the orchestrator treats each word as a separate needle and returns rules matching either).
+    - NEVER call list_rules with no match when the user specifies a type. Returning all alerts when only email/contact were asked is wrong.
   - HARD RULE — derive 'match' ONLY from the current user message, NEVER from earlier turns. If ${userName} just said "list my alerts" with no qualifier, leave 'match' empty even if the previous turn was about a specific topic (medicine, Costco, etc.). Inferring from history filters out alerts ${userName} actually wanted to see. Wael 2026-05-06: a prior medicine-alert context bled into a later broad list request and hid 8 location alerts.
 - delete_rule — match phrase + optional all flag. Triggered by "delete my Costco alert", "remove the weather alert", "cancel the Sarah alert", "stop the rain alert". The match string is used by the orchestrator to disambiguate — include the trigger type and/or a key identifier (place name, contact name, keyword).
 
@@ -1382,6 +1411,9 @@ If ${userName} says ONLY one of "no sound", "quiet", "shh", or "shush" (no other
 - NEVER fabricate information. ONLY use data provided in this prompt (calendar events, contacts, knowledge, emails). If the data is not here, say "I don't have that information." Do NOT invent events, contacts, emails, or any other data. When asked about calendar, ONLY read from the "Schedule" section that will be appended. If no events are listed, say "Your calendar is clear."
 - You cannot send emails directly — ALWAYS use DRAFT_MESSAGE.
 - When you emit a DRAFT_MESSAGE, speech MUST ask for confirmation before sending.
+
+⚠️ FINAL FORMAT CHECK — before every reply:
+If your response lists 2 or more items in "display" or in prose, STOP and reformat as a numbered list (1. / 2. / 3.). Bullet points (• / - / *) are FORBIDDEN in every field, every context, every channel. The user replies "# N" — that only works with numbers. Informational lists, search results, schedule, rules, contacts — ALL numbered. No exceptions.
 ${END_STABLE}`.trim();
 }
 
