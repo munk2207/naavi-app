@@ -51,14 +51,32 @@ Two new qaStates added to `naavi-voice-server/src/index.js`:
 
 ---
 
+## Voice Experiments — Tried and Reverted
+
+### Andromeda on phone calls — REVERTED
+- Switched `textToMulaw` and `createPlayToken` from `aura-hera-en` → `aura-2-andromeda-en`
+- Problem: Andromeda (Aura-2) full-buffer generation takes 2-4s vs <1s for Hera (Aura-1)
+- Streaming TTS attempted (`streamTTSToTwilio` with 160-byte chunks) — voice quality unacceptable, delay worse
+- **Decision: phone calls stay on Hera (`aura-hera-en`)** — fast, clean, no delay
+- Website stays on Andromeda — two voices, two surfaces, by design
+
+### Demo line (1-888-91-NAAVI) — Hera assessed, NOT recommended
+- Demo line runs on Polly Joanna (Twilio built-in, instant playback)
+- Root cause of prior Cora failure (8.6s) was Deepgram fetch latency — applies to ALL Deepgram voices
+- Hera is faster (Aura-1) but still requires live Deepgram HTTP call → same latency problem
+- **Right fix when ready: pre-baked static MP3s recorded with Hera, served as files**
+- Demo line stays on Polly Joanna until that work is done
+
+---
+
 ## State
-- Voice server: Railway **ACTIVE** ✅, commit `d4fee83`
+- Voice server: Railway **ACTIVE** ✅, commit `a1283db`
 - Auto-tester: **226/226** ✅
 - No AAB this session (voice server only)
-- Next versionCode: **238**
+- Next versionCode: **238** (no mobile changes this session — next AAB stays at 238)
 
 ## Next Session Priorities
 
-1. **Build 238** — if any mobile changes are ready
-2. **Bare-name intercept** — when Deepgram drops "find" and transcribes just "Fatima.", route to confirmation flow instead of Claude (currently falls through to Claude which hallucinates)
+1. **End-to-end test V237 (build 237)** — full test pass across all features before any new work
+2. **Bare-name intercept** — when Deepgram drops "find" and transcribes just "Fatima.", route to confirmation flow instead of Claude (falls through to hallucination currently)
 3. **Holding list** — review `docs/HOLDING_LIST_CLASSIFICATION_2026-05-08.md` for next item
