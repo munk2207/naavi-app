@@ -36,7 +36,8 @@ interface DeleteRequest      { op: 'delete';      user_id?: string; rule_id: str
 interface ReactivateRequest  { op: 'reactivate';  user_id?: string; rule_id: string; }
 interface MergeTasksRequest   { op: 'merge_tasks';   user_id?: string; rule_id: string; tasks?: string[]; list_name?: string; }
 interface ReplaceTasksRequest { op: 'replace_tasks'; user_id?: string; rule_id: string; tasks: string[]; }
-type RulesRequest = ListRequest | DeleteRequest | ReactivateRequest | MergeTasksRequest | ReplaceTasksRequest;
+interface CreateRuleRequest   { op: 'create'; user_id?: string; trigger_type: string; trigger_config: Record<string, unknown>; action_type: string; action_config: Record<string, unknown>; label: string; one_shot: boolean; }
+type RulesRequest = ListRequest | DeleteRequest | ReactivateRequest | MergeTasksRequest | ReplaceTasksRequest | CreateRuleRequest;
 
 async function resolveUserId(req: Request, bodyUserId?: string): Promise<string | null> {
   // (a) JWT path — app caller with Authorization header
@@ -240,7 +241,35 @@ serve(async (req) => {
       });
     }
 
-    return new Response(JSON.stringify({ error: "op must be 'list', 'delete', 'reactivate', 'merge_tasks', or 'replace_tasks'" }), {
+    if (body.op === 'create') {
+      // Service-role insert — bypasses RLS that blocks direct client writes.
+      // Used by useOrchestrator for non-location SET_ACTION_RULE actions
+      // (time, weather, calendar, contact_silence triggers).
+      const { data: inserted, error: insErr } = await admin
+        .from('action_rules')
+        .insert({
+          user_id:        userId,
+          trigger_type:   body.trigger_type,
+          trigger_config: body.trigger_config ?? {},
+          action_type:    body.action_type,
+          action_config:  body.action_config ?? {},
+          label:          body.label ?? 'Action rule',
+          one_shot:       body.one_shot ?? true,
+          enabled:        true,
+        })
+        .select('id')
+        .single();
+      if (insErr) {
+        return new Response(JSON.stringify({ error: insErr.message }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, id: (inserted as any)?.id }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({ error: "op must be 'list', 'delete', 'reactivate', 'merge_tasks', 'replace_tasks', or 'create'" }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {

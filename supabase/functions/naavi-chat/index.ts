@@ -1056,6 +1056,51 @@ interface MobileBriefItem {
   urgent?: boolean;
 }
 
+// ─── Prompt cache ─────────────────────────────────────────────────────────────
+// get-naavi-prompt is fetched on every message — ~150-250ms per call.
+// Cache the result per channel for 5 minutes. Deno isolates share module-level
+// memory across requests on the same instance, so most requests hit the cache.
+// TTL is short enough that prompt changes (deployed via supabase functions deploy)
+// take effect within one cache window without a restart.
+const PROMPT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const promptCache = new Map<string, { prompt: string; fetchedAt: number }>();
+
+async function fetchBasePrompt(
+  channel: 'app' | 'voice',
+  userName: string,
+  userPhone: string,
+): Promise<string | null> {
+  // Cache key: channel only (userName/userPhone vary per user but the base
+  // prompt template is the same — user-specific values are injected server-side
+  // by get-naavi-prompt itself, so they don't affect cacheability here).
+  const cacheKey = channel;
+  const cached = promptCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < PROMPT_CACHE_TTL_MS) {
+    return cached.prompt;
+  }
+  const supaUrl = Deno.env.get('SUPABASE_URL')!;
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  try {
+    const res = await fetch(`${supaUrl}/functions/v1/get-naavi-prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+      body: JSON.stringify({ channel, userName, userPhone }),
+    });
+    if (!res.ok) {
+      console.warn('[promptCache] get-naavi-prompt non-200:', res.status);
+      return null;
+    }
+    const data = await res.json();
+    if (typeof data?.prompt === 'string' && data.prompt.length > 100) {
+      promptCache.set(cacheKey, { prompt: data.prompt, fetchedAt: Date.now() });
+      return data.prompt;
+    }
+  } catch (err) {
+    console.error('[promptCache] fetch failed:', (err as Error)?.message);
+  }
+  return null;
+}
+
 async function assembleSystemPromptServerSide(
   supabase: ReturnType<typeof createClient>,
   userId: string,
@@ -1090,34 +1135,14 @@ async function assembleSystemPromptServerSide(
     console.warn('[assembleSystemPrompt] user_settings lookup failed:', (err as Error)?.message);
   }
 
-  // 2. get-naavi-prompt → base canonical prompt (channel-tailored)
-  let base: string | null = null;
-  try {
-    const supaUrl = Deno.env.get('SUPABASE_URL')!;
-    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const promptRes = await fetch(`${supaUrl}/functions/v1/get-naavi-prompt`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${serviceKey}`,
-      },
-      body: JSON.stringify({
-        channel: opts.channel === 'voice' ? 'voice' : 'app',
-        userName,
-        userPhone,
-      }),
-    });
-    if (promptRes.ok) {
-      const promptData = await promptRes.json();
-      if (typeof promptData?.prompt === 'string' && promptData.prompt.length > 100) {
-        base = promptData.prompt;
-      }
-    } else {
-      console.warn('[assembleSystemPrompt] get-naavi-prompt non-200:', promptRes.status);
-    }
-  } catch (err) {
-    console.error('[assembleSystemPrompt] get-naavi-prompt fetch failed:', (err as Error)?.message);
-  }
+  // 2. get-naavi-prompt → base canonical prompt (channel-tailored).
+  //    fetchBasePrompt caches the result for 5 min — saves ~150-250ms on
+  //    every warm request (most requests in a session).
+  const base = await fetchBasePrompt(
+    opts.channel === 'voice' ? 'voice' : 'app',
+    userName,
+    userPhone,
+  );
 
   if (!base) return null;
 
@@ -1851,7 +1876,12 @@ Deno.serve(async (req) => {
     // Fast pre-filter: obvious conversational messages skip Haiku entirely.
     // Keeps the universal guarantee (nothing unclassified reaches Claude) while
     // eliminating the Haiku cost for greetings, thanks, and short follow-ups.
-    const FAST_CHAT_RE = /^\s*(hi|hello|hey|good\s*(morning|afternoon|evening|night)|thanks?|thank\s+you|ok|okay|great|perfect|sounds\s+good|got\s+it|understood|sure|bye|goodbye|see\s+you|later|awesome|nice|cool|wow|really|interesting|haha|lol|not\s+really|no\s+thanks|never\s+mind|that'?s\s+(ok|fine|great|all))\s*[.!?]?\s*$/i;
+    // FAST_CHAT_RE — messages that skip the classifier (no Haiku pre-call).
+    // Group A: short social/acknowledgement phrases.
+    // Group B: common question patterns that are clearly conversational and
+    //   never match a Level-A deterministic intent. Calendar/contact/list/
+    //   reminder reads are intentionally NOT here — the classifier handles them.
+    const FAST_CHAT_RE = /^\s*(hi|hello|hey|good\s*(morning|afternoon|evening|night)|thanks?|thank\s+you|ok|okay|great|perfect|sounds\s+good|got\s+it|understood|sure|bye|goodbye|see\s+you|later|awesome|nice|cool|wow|really|interesting|haha|lol|not\s+really|no\s+thanks|never\s+mind|that'?s\s+(ok|fine|great|all)|yes|yeah|yep|confirm|approved|go\s+ahead|do\s+it|please|no|nope|cancel|stop|what('?s|\s+is)\s+the\s+weather|how('?s|\s+is)\s+the\s+weather|what\s+should\s+i\s+wear|what\s+time\s+is\s+it|what\s+day\s+is\s+(it|today)|what('?s|\s+is)\s+(today|the\s+date)|tell\s+me\s+(a\s+joke|something)|how\s+are\s+you|are\s+you\s+there)\s*[.!?]?\s*$/i;
     // List-connection queries ("where is my X list connected?", "what list is on my X alert?")
     // require Claude's LIST_CONNECTION_QUERY action — bypass the classifier entirely.
     const LIST_CONNECTION_RE = /\b(where\s+is\s+.{0,30}connected|what\s+list(s)?\s+is\s+on\s+my|what\s+list(s)?\s+are\s+on\s+.{0,40}|connected\s+to\s+my\s+(alert|rule))\b/i;

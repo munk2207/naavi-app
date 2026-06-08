@@ -3183,8 +3183,11 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                   console.log('[Orchestrator] B4y: defaulted to_phone from user_settings:', actionConfig.to_phone);
                 }
               }
-              const { data: insertedRow, error } = await queryWithTimeout(
-                supabase.from('action_rules').insert({
+              // Route through manage-rules Edge Function (service_role) so the
+              // insert bypasses RLS that blocks direct client writes on action_rules.
+              const { data: createRes, error } = await invokeWithTimeout('manage-rules', {
+                body: {
+                  op:             'create',
                   user_id:        session.user.id,
                   trigger_type:   triggerType,
                   trigger_config: normalizedTriggerConfig,
@@ -3192,14 +3195,14 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                   action_config:  actionConfig,
                   label:          String(action.label ?? 'Action rule'),
                   one_shot:       action.one_shot ?? true,
-                }).select('id').single(),
-                15_000,
-                'insert-action-rule',
-              );
+                },
+              }, 15_000);
+              const insertedId = (createRes as any)?.id ?? null;
+              const insertedRow = insertedId ? { id: insertedId } : null;
               if (error) {
                 console.error('[Orchestrator] SET_ACTION_RULE failed:', error.message);
               } else {
-                console.log('[Orchestrator] SET_ACTION_RULE saved:', action.label);
+                console.log('[Orchestrator] SET_ACTION_RULE saved via manage-rules:', action.label);
                 // B4j — eager-create list + connection for the legacy
                 // list_name reference shape.
                 const listNameRef = String((actionConfig as any).list_name ?? '').trim();

@@ -752,6 +752,7 @@ export default function HomeScreen() {
   // a 1-line summary. User taps the summary to expand. Reduces cognitive
   // load on the chat page (Wael feedback 2026-04-29).
   const [expandedTurns, setExpandedTurns] = useState<Set<number>>(new Set());
+  const [chatCollapsed, setChatCollapsed] = useState(false);
   const [briefDays, setBriefDays] = useState<number>(1); // default: today only
 
   // Marketing-hook tip for the empty-brief state. Picked once per mount so it
@@ -1116,6 +1117,7 @@ export default function HomeScreen() {
   // Auto-scroll to bottom when new conversation turns arrive
   useEffect(() => {
     if (turns.length > 0) {
+      setChatCollapsed(false); // auto-expand when new message arrives
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     }
   }, [turns.length]);
@@ -1713,19 +1715,28 @@ export default function HomeScreen() {
           onLongPress={onChatLongPress}
           style={styles.flex}
         >
-          {/* "Clear Chat" button — right-aligned just below the header,
-              visible only during an active conversation. */}
-          {turns.length > 0 && (
+          {/* Collapse / expand chat history row */}
+          {turns.length > 0 && !chatCollapsed && (
             <View style={styles.clearChatRow}>
               <TouchableOpacity
                 style={styles.clearChatBtn}
-                onPress={clearHistory}
-                accessibilityLabel="Clear chat"
+                onPress={() => setChatCollapsed(true)}
+                accessibilityLabel="Collapse chat"
                 accessibilityRole="button"
               >
-                <Text style={styles.clearChatBtnText}>🗑 Clear Chat</Text>
+                <Text style={styles.clearChatBtnText}>⊖ Collapse Chat</Text>
               </TouchableOpacity>
             </View>
+          )}
+          {turns.length > 0 && chatCollapsed && (
+            <TouchableOpacity
+              style={styles.chatCollapsedBar}
+              onPress={() => setChatCollapsed(false)}
+              accessibilityLabel="Expand chat history"
+              accessibilityRole="button"
+            >
+              <Text style={styles.chatCollapsedBarText}>＋ {turns.length} message{turns.length === 1 ? '' : 's'} — tap to expand</Text>
+            </TouchableOpacity>
           )}
 
           {/* Morning brief — grouped by category */}
@@ -1812,7 +1823,7 @@ export default function HomeScreen() {
               Tap a collapsed bubble to expand it. Cards (drafts, alerts,
               prescriptions, etc.) ALWAYS stay visible regardless of collapse
               state — those are the actionable items Robert needs. */}
-          {turns.map((turn, ti) => {
+          {!chatCollapsed && turns.map((turn, ti) => {
             const isLatest = ti === turns.length - 1;
             const isCollapsed = !isLatest && !expandedTurns.has(ti);
             return (
@@ -2616,6 +2627,20 @@ const styles = StyleSheet.create({
   },
   clearChatBtnText: {
     color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  chatCollapsedBar: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    backgroundColor: '#2C2C2E',
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  chatCollapsedBarText: {
+    color: Colors.accent,
     fontSize: 13,
     fontWeight: '600',
   },
