@@ -328,7 +328,8 @@ Deno.serve(async (req) => {
 
     if (anchorWords.length > 0) {
       const anchorMatch = (r: SearchResult): boolean => {
-        const hay = ((r.title ?? '') + ' ' + (r.snippet ?? '')).toLowerCase();
+        const vendor = (r.metadata as any)?.vendor ?? '';
+        const hay = ((r.title ?? '') + ' ' + (r.snippet ?? '') + ' ' + vendor).toLowerCase();
         return anchorWords.some(a => hay.includes(a));
       };
       for (const src of Object.keys(byGroup)) {
