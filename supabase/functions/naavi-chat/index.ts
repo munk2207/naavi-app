@@ -2550,9 +2550,13 @@ Deno.serve(async (req) => {
     // Flag the response as best-effort so Robert knows it isn't a verified answer.
     // Only fires on spoken content (not fallback confirmations like "Alert set.").
     // Never overrides a server-side rejection message.
+    // Don't apply Path B disclosure when Claude is asking a clarification
+    // (speech ends with "?" — Claude is asking, not guessing).
+    const isClarificationResponse = speech.trimEnd().endsWith('?');
     if (
       pathB
       && !serverRejectionMessage
+      && !isClarificationResponse
       && speechBlocks.trim().length > 0
       && actions.every((a: any) => {
         // Don't add Path B disclosure if Claude is taking a state-changing action —
