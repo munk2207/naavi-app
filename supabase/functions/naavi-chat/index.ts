@@ -688,18 +688,42 @@ async function lookupContactsByName(
     if (results.length === 0) {
       const url2 = new URL('https://people.googleapis.com/v1/otherContacts:search');
       url2.searchParams.set('query', name.trim());
-      url2.searchParams.set('readMask', 'names,emailAddresses');
+      url2.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers');
       url2.searchParams.set('pageSize', '5');
       const res2 = await fetch(url2.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
       if (res2.ok) results = (await res2.json()).results ?? [];
     }
 
+    // searchContacts does not reliably return phoneNumbers — fetch full records via batchGet.
+    const resourceNames = results.map((r: any) => r.person?.resourceName).filter(Boolean);
+    const fullPersonMap: Record<string, any> = {};
+    if (resourceNames.length > 0) {
+      try {
+        const batchUrl = new URL('https://people.googleapis.com/v1/people:batchGet');
+        for (const rn of resourceNames) batchUrl.searchParams.append('resourceNames', rn);
+        batchUrl.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers');
+        const batchRes = await fetch(batchUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (batchRes.ok) {
+          const batchData = await batchRes.json();
+          for (const entry of batchData.responses ?? []) {
+            const p = entry.person;
+            if (p?.resourceName) fullPersonMap[p.resourceName] = p;
+          }
+        }
+      } catch (e) { /* fall back to searchContacts data */ }
+    }
+
     return results
-      .map((r: { person: { names?: { displayName: string }[]; emailAddresses?: { value: string }[] } }) => ({
-        name:  r.person.names?.[0]?.displayName ?? '',
-        email: r.person.emailAddresses?.[0]?.value ?? '',
-      }))
-      .filter((c: { name: string; email: string }) => c.name && c.email);
+      .map((r: any) => {
+        const rn = r.person?.resourceName ?? '';
+        const person = fullPersonMap[rn] ?? r.person ?? {};
+        return {
+          name:  person.names?.[0]?.displayName ?? '',
+          email: person.emailAddresses?.[0]?.value ?? '',
+          phone: person.phoneNumbers?.[0]?.value ?? '',
+        };
+      })
+      .filter((c: { name: string; email: string; phone: string }) => c.name && c.email);
 
   } catch (err) {
     console.error('[naavi-chat] Google Contacts lookup failed:', err);
@@ -2538,6 +2562,9 @@ Deno.serve(async (req) => {
           'SET_REMINDER','REMEMBER','DELETE_MEMORY','UPDATE_MORNING_CALL',
           'SCHEDULE_MEDICATION','ADD_CONTACT','SAVE_TO_DRIVE','LIST_CREATE',
           'LIST_ADD','LIST_REMOVE','DRAFT_MESSAGE',
+          // Live-source read actions — results ARE verified; no disclosure needed
+          'GLOBAL_SEARCH','SPEND_SUMMARY','LIST_RULES','LIST_READ',
+          'LIST_CONNECTION_QUERY','DRIVE_SEARCH',
         ]);
         return !stateChanging.has(a?.type);
       })
@@ -2550,6 +2577,23 @@ Deno.serve(async (req) => {
         `[naavi-chat] Bug E fallback fired — empty speech, ${actions.length} actions, ` +
         `first=${actions[0]?.type ?? '?'} → "${speech}"`
       );
+    }
+
+    // ── GLOBAL_SEARCH / DRIVE_SEARCH — strip filename narration from speech ──
+    // Claude sometimes enumerates filenames in its text block after seeing
+    // search results injected into the prompt (e.g. "In drive: 5597397956.pdf.
+    // In drive: 5587057721.pdf."). The card already shows every result — the
+    // speech must be a short headline only. Strip anything that looks like a
+    // filename enumeration (starts with a known source label pattern).
+    if (actions.some((a: any) => a?.type === 'GLOBAL_SEARCH' || a?.type === 'DRIVE_SEARCH')) {
+      // Keep only the first sentence before any filename/source enumeration.
+      // Pattern: "In drive:", "In email:", "In calendar:", "In contacts:", etc.
+      const SOURCE_ENUM_RE = /\s*\bin\s+(?:drive|email|calendar|contacts|lists?|rules?|sent|reminders?)\s*:/i;
+      const cutIdx = speech.search(SOURCE_ENUM_RE);
+      if (cutIdx > 0) {
+        speech = speech.slice(0, cutIdx).trim().replace(/[.,;]+$/, '') + '.';
+        console.log(`[naavi-chat] Stripped filename enumeration from GLOBAL_SEARCH speech`);
+      }
     }
 
     // ── ADD_TO_COMMUNITY — server-side execution ──────────────────────────

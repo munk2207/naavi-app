@@ -161,8 +161,27 @@ export const driveAdapter: SearchAdapter = {
     const variants = ctx.queryVariants;
 
     // ── Source 1 — documents table (harvested attachments) ─────────────────
-    const docsOr: string[] = [];
+    // Build search patterns from variants. Multi-word variants (e.g. "give me
+    // the details of google charges") will never match a field like
+    // extracted_summary="Google Invoice" — so we also include individual
+    // meaningful tokens (length >= 4, not a stop/noise word) as separate
+    // patterns. This lets "google charges" → find docs containing "google".
+    const QUERY_NOISE = new Set([
+      'give','tell','show','find','get','have','what','when','where','which',
+      'that','this','from','with','about','some','more','much','many',
+      'your','mine','last','next','this','been','will','would','could',
+      'here','there','into','onto','over','under','across',
+    ]);
+    const tokenSet = new Set<string>();
     for (const v of variants) {
+      for (const tok of v.split(/\s+/)) {
+        if (tok.length >= 4 && !QUERY_NOISE.has(tok)) tokenSet.add(tok);
+      }
+    }
+    const searchTerms = new Set([...variants, ...tokenSet]);
+
+    const docsOr: string[] = [];
+    for (const v of searchTerms) {
       const pat = `%${v}%`;
       docsOr.push(
         `file_name.ilike.${pat}`,
@@ -194,7 +213,7 @@ export const driveAdapter: SearchAdapter = {
     // summary, reference). Supabase .or() can't traverse an fk in one clause,
     // so we do a cheap second query via email_actions → document.
     const actionOr: string[] = [];
-    for (const v of variants) {
+    for (const v of searchTerms) {
       const pat = `%${v}%`;
       actionOr.push(
         `vendor.ilike.${pat}`,
