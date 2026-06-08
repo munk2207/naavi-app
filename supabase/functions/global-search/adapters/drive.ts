@@ -180,8 +180,16 @@ export const driveAdapter: SearchAdapter = {
     }
     const searchTerms = new Set([...variants, ...tokenSet]);
 
+    // Only use single-word tokens for ILIKE — multi-word phrases with spaces
+    // are unreliable in Supabase .or() URL encoding and never match short
+    // field values like vendor="Google" or document_type="invoice" anyway.
+    const singleWordTerms = new Set<string>();
+    for (const t of searchTerms) {
+      if (!t.includes(' ')) singleWordTerms.add(t);
+    }
+
     const docsOr: string[] = [];
-    for (const v of searchTerms) {
+    for (const v of singleWordTerms) {
       const pat = `%${v}%`;
       docsOr.push(
         `file_name.ilike.${pat}`,
@@ -213,7 +221,7 @@ export const driveAdapter: SearchAdapter = {
     // summary, reference). Supabase .or() can't traverse an fk in one clause,
     // so we do a cheap second query via email_actions → document.
     const actionOr: string[] = [];
-    for (const v of searchTerms) {
+    for (const v of singleWordTerms) {
       const pat = `%${v}%`;
       actionOr.push(
         `vendor.ilike.${pat}`,

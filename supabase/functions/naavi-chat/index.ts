@@ -2592,7 +2592,7 @@ Deno.serve(async (req) => {
     if (actions.some((a: any) => a?.type === 'GLOBAL_SEARCH' || a?.type === 'DRIVE_SEARCH')) {
       // Keep only the first sentence before any filename/source enumeration.
       // Pattern: "In drive:", "In email:", "In calendar:", "In contacts:", etc.
-      const SOURCE_ENUM_RE = /\s*\bin\s+(?:drive|email|calendar|contacts|lists?|rules?|sent|reminders?)\s*:/i;
+      const SOURCE_ENUM_RE = /\s*\bin\s+(?:drive|email(?:_actions)?|calendar|contacts|lists?|rules?|sent|reminders?)\s*:/i;
       const cutIdx = speech.search(SOURCE_ENUM_RE);
       if (cutIdx > 0) {
         speech = speech.slice(0, cutIdx).trim().replace(/[.,;]+$/, '') + '.';
