@@ -310,6 +310,45 @@ Deno.serve(async (req) => {
       );
     }
 
+    // ── Global anchor-term filter ────────────────────────────────────────────
+    // Query expansion maps invoice/bill/payment → "pay", which matches every
+    // billing result regardless of vendor. If the original query contains a
+    // specific non-generic word (e.g. "google", "bell", "anthropic"), require
+    // every result to contain it in title or snippet — otherwise irrelevant
+    // vendor results (Anthropic charges for a Google query) pollute the output.
+    const ANCHOR_NOISE = new Set([
+      'invoice','invoices','receipt','receipts','bill','bills','paid','charge',
+      'charges','payment','payments','detail','details','show','give','list',
+      'find','search','total','amount','much','what','have','from','this',
+      'last','month','year','week','today','time','all','the','my','me',
+      'get','tell','want','need','see','give','take',
+    ]);
+    const anchorWords = ctx.query.toLowerCase().split(/\s+/)
+      .filter(w => w.length >= 3 && !ANCHOR_NOISE.has(w));
+
+    if (anchorWords.length > 0) {
+      const anchorMatch = (r: SearchResult): boolean => {
+        const hay = ((r.title ?? '') + ' ' + (r.snippet ?? '')).toLowerCase();
+        return anchorWords.some(a => hay.includes(a));
+      };
+      for (const src of Object.keys(byGroup)) {
+        byGroup[src].results = byGroup[src].results.filter(anchorMatch);
+      }
+      const filteredFlat = flat.filter(anchorMatch);
+      const ranked = mergeAndRank(filteredFlat);
+      const total = Date.now() - t0;
+      console.log(
+        `[global-search] total=${total}ms hits=${ranked.length} (anchor-filtered by [${anchorWords.join(',')}]) sources=${runs.filter(r => r.results.length > 0).length}`,
+      );
+      return json({
+        query: ctx.query,
+        user_id: userId,
+        total_ms: total,
+        groups: byGroup,
+        ranked,
+      });
+    }
+
     const ranked = mergeAndRank(flat);
     const total = Date.now() - t0;
     console.log(

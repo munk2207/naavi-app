@@ -1899,6 +1899,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           // run the SUM and replace it with the actual total.
           const vendor = String(action.vendor ?? '').trim();
           const periodLabel = String(action.period_label ?? 'last month').trim().toLowerCase();
+          const spendMode: 'charged' | 'paid' = action.mode === 'paid' ? 'paid' : 'charged';
           // V57.10.3 — diagnostic + safety net. Wael 2026-05-01 saw
           // chat stall on "Let me add up..." with no follow-up. We now
           // log both the entry and exit of this handler so the next
@@ -1906,7 +1907,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           // we install a default fallback override so even if every
           // path below falls through silently, the user gets a clear
           // message instead of the LLM's forward-looking placeholder.
-          remoteLog(diagSession, 'orch-spend-summary-start', { vendor, periodLabel });
+          remoteLog(diagSession, 'orch-spend-summary-start', { vendor, periodLabel, spendMode });
           if (!turnSpeechOverride) {
             turnSpeechOverride = `I couldn't pull up your ${vendor || 'spend'} total right now. Try again in a moment.`;
           }
@@ -1918,6 +1919,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                 body: {
                   vendor,
                   period_label: periodLabel,
+                  mode: spendMode,
                   ...(userIdForBody ? { user_id: userIdForBody } : {}),
                 },
               }, 10_000);
@@ -1927,18 +1929,22 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               } else {
                 const count = Number(data.invoice_count ?? 0);
                 const periodPhrase = formatPeriodPhrase(String(data.period_label ?? periodLabel));
+                const verb = spendMode === 'paid' ? 'paid' : 'charged you';
                 if (count === 0) {
-                  turnSpeechOverride = `I don't see any ${vendor} charges ${periodPhrase}. Forward the email to yourself if I'm missing one and I'll pick it up.`;
+                  const zeroPhrase = spendMode === 'paid'
+                    ? `I don't see any ${vendor} receipts ${periodPhrase}.`
+                    : `I don't see any ${vendor} charges ${periodPhrase}. Forward the email to yourself if I'm missing one and I'll pick it up.`;
+                  turnSpeechOverride = zeroPhrase;
                 } else {
                   const byCurrency = Array.isArray(data.by_currency) ? data.by_currency : [];
                   if (byCurrency.length <= 1) {
                     const amount = formatMoney(Number(data.total_cents ?? 0), data.currency ?? null);
                     turnSpeechOverride = count === 1
-                      ? `${vendor} charged you ${amount} ${periodPhrase}.`
-                      : `${vendor} charged you ${amount} across ${count} charges ${periodPhrase}.`;
+                      ? `${vendor} ${verb} ${amount} ${periodPhrase}.`
+                      : `${vendor} ${verb} ${amount} across ${count} ${spendMode === 'paid' ? 'payments' : 'charges'} ${periodPhrase}.`;
                   } else {
                     const parts = byCurrency.map((b: any) => `${formatMoney(Number(b.total_cents ?? 0), String(b.currency ?? ''))}`);
-                    turnSpeechOverride = `${vendor} charged you ${parts.join(' plus ')} ${periodPhrase}.`;
+                    turnSpeechOverride = `${vendor} ${verb} ${parts.join(' plus ')} ${periodPhrase}.`;
                   }
                 }
               }
@@ -3264,25 +3270,11 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         turnGlobalSearch &&
         turnGlobalSearch.origin === 'claude-action';
       if (appendTailToDisplay && turnGlobalSearch!.results.length > 0) {
-        const labelFor = (src: string) => {
-          if (src === 'calendar') return 'calendar';
-          if (src === 'contacts') return 'contacts';
-          if (src === 'lists') return 'lists';
-          if (src === 'gmail') return 'email';
-          if (src === 'sent_messages') return 'sent messages';
-          if (src === 'rules') return 'automations';
-          if (src === 'knowledge') return 'memory';
-          return src;
-        };
-        const top = turnGlobalSearch!.results.slice(0, 3);
-        const phrases = top.map(r => {
-          const text = (r.snippet && r.snippet.trim()) || r.title;
-          return `In ${labelFor(r.source)}: ${text}`;
-        });
-        displaySpeech += ` ${phrases.join('. ')}.`;
-        if (turnGlobalSearch!.results.length > top.length) {
-          displaySpeech += ` Plus ${turnGlobalSearch!.results.length - top.length} more.`;
-        }
+        // Card shows every result — speech is already the headline from naavi-chat.
+        // Don't enumerate "In email: snippet. In drive: filename..." here.
+        // Just append a count so the bubble isn't a bare loading phrase.
+        const n = turnGlobalSearch!.results.length;
+        displaySpeech += n === 1 ? ' I found 1 result.' : ` I found ${n} results.`;
       } else if (appendTailToDisplay) {
         displaySpeech += ` I didn't find anything for ${turnGlobalSearch!.query}.`;
       }
@@ -3341,25 +3333,10 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         turnGlobalSearch &&
         turnGlobalSearch.origin === 'claude-action';
       if (appendTail && turnGlobalSearch!.results.length > 0) {
-        const labelFor = (src: string) => {
-          if (src === 'calendar') return 'calendar';
-          if (src === 'contacts') return 'contacts';
-          if (src === 'lists') return 'lists';
-          if (src === 'gmail') return 'email';
-          if (src === 'sent_messages') return 'sent messages';
-          if (src === 'rules') return 'automations';
-          if (src === 'knowledge') return 'memory';
-          return src;
-        };
-        const top = turnGlobalSearch!.results.slice(0, 3);
-        const phrases = top.map(r => {
-          const text = (r.snippet && r.snippet.trim()) || r.title;
-          return `In ${labelFor(r.source)}: ${text}`;
-        });
-        finalSpeech += ` ${phrases.join('. ')}.`;
-        if (turnGlobalSearch!.results.length > top.length) {
-          finalSpeech += ` Plus ${turnGlobalSearch!.results.length - top.length} more.`;
-        }
+        // Card shows every result — speech headline already set by naavi-chat.
+        // Don't enumerate sources/snippets in TTS; it reads like a file system.
+        const n = turnGlobalSearch!.results.length;
+        finalSpeech += n === 1 ? ' I found 1 result.' : ` I found ${n} results.`;
       } else if (appendTail) {
         finalSpeech += ` I didn't find anything for ${turnGlobalSearch!.query}.`;
       }
