@@ -226,10 +226,45 @@ export const driveAdapter: SearchAdapter = {
       linkedDocs = (ld ?? []) as unknown as DocRow[];
     }
 
-    // Dedupe docs on id
+    // Dedupe — primary key is file_name (catches DB duplicate rows for the
+    // same attachment), fallback to id so unnamed files still dedupe by row.
     const docById = new Map<string, DocRow>();
     for (const d of [...docs, ...linkedDocs]) {
-      if (d.id && !docById.has(d.id)) docById.set(d.id, d);
+      const key = d.file_name ?? d.id;
+      if (key && !docById.has(key)) docById.set(key, d);
+    }
+
+    // ── Anchor-term filter ─────────────────────────────────────────────────
+    // Synonyms and generic financial terms can match every document in the DB.
+    // If the query contains a specific content word (e.g. "Google", "Bell",
+    // "Anthropic") that is NOT a generic financial or noise term, require it
+    // to match in at least one field of each result — otherwise irrelevant
+    // documents (Ottawa parking, Enbridge, etc.) pollute vendor-specific queries.
+    const GENERIC_TERMS = new Set([
+      'invoice', 'invoices', 'receipt', 'receipts', 'bill', 'bills', 'paid',
+      'charge', 'charges', 'payment', 'payments', 'detail', 'details',
+      'show', 'give', 'list', 'find', 'search', 'total', 'amount',
+      'much', 'what', 'have', 'from', 'this', 'last', 'month', 'year',
+      'week', 'today', 'time', 'all', 'the', 'my', 'me',
+    ]);
+    const anchorTerms = q.toLowerCase()
+      .split(/\s+/)
+      .filter(w => w.length >= 3 && !GENERIC_TERMS.has(w));
+
+    if (anchorTerms.length > 0) {
+      const anchorMatch = (doc: DocRow): boolean => {
+        const hay = [
+          doc.file_name ?? '',
+          doc.extracted_summary ?? '',
+          doc.extracted_reference ?? '',
+          (doc.email_action as any)?.vendor ?? '',
+          (doc.email_action as any)?.summary ?? '',
+        ].join(' ').toLowerCase();
+        return anchorTerms.some(a => hay.includes(a));
+      };
+      for (const [id, doc] of docById) {
+        if (!anchorMatch(doc)) docById.delete(id);
+      }
     }
 
     // ── Source 2 — live Google Drive API search ────────────────────────────
@@ -380,8 +415,15 @@ export const driveAdapter: SearchAdapter = {
       }
     }
 
+    // Track file names already in hits (from docById) to dedup Drive API results
+    const seenFileNames = new Set<string>(
+      Array.from(docById.values()).map(d => d.file_name?.toLowerCase()).filter(Boolean) as string[]
+    );
+
     for (const f of driveFiles) {
       if (seenDriveIds.has(f.id)) continue; // already covered by harvested row
+      if (seenFileNames.has(f.name.toLowerCase())) continue; // same file name already in hits
+      seenFileNames.add(f.name.toLowerCase());
       const nameLower = f.name.toLowerCase();
 
       // Two scoring tiers — name match is high-confidence, body-only match is
