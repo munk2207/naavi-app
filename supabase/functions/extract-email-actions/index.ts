@@ -128,11 +128,26 @@ serve(async (req) => {
       // shipping (tier-1 from institutional)
       'delivered', 'shipped', 'tracking',
     ];
+    // Define fireHarvest early so it can be called from the pre-filter path too.
+    // harvest-attachment no-ops on emails without eligible attachments, so the
+    // overhead is just a single Gmail metadata call.
+    const fireHarvest = () => {
+      fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/harvest-attachment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        },
+        body: JSON.stringify({ user_id, gmail_message_id }),
+      }).catch(err => console.error('[extract-email-actions] harvest-attachment trigger failed:', err?.message ?? err));
+    };
+
     const lower = (msg.subject + ' ' + (msg.snippet ?? '') + ' ' + (msg.body_text ?? '').slice(0, 1500)).toLowerCase();
     const matchesActionable = ACTIONABLE_KEYWORDS.some(kw => lower.includes(kw));
 
     if (!matchesActionable) {
-      console.log(`[extract-email-actions] Pre-filter: no actionable keywords in email "${msg.subject?.slice(0, 60)}". Skipping Claude call.`);
+      console.log(`[extract-email-actions] Pre-filter: no actionable keywords in email "${msg.subject?.slice(0, 60)}". Skipping Claude call but still harvesting attachments.`);
+      fireHarvest();
       return new Response(JSON.stringify({ action: null, reason: 'pre_filter_no_keywords' }), {
         headers: { ...corsHeaders, 'content-type': 'application/json' },
       });
@@ -265,22 +280,6 @@ The user message will contain the email text under "EMAIL:".`;
           .eq('gmail_message_id', gmail_message_id);
       }
     }
-
-    // Fire-and-forget attachment harvest. Runs for every tier-1 email whether
-    // actionable or not — harvest-attachment no-ops on emails without any
-    // eligible attachments, so the overhead is a single Gmail metadata call.
-    // Running it AFTER extract-email-actions means the folder routing picks
-    // up this email's document_type (when one was extracted).
-    const fireHarvest = () => {
-      fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/harvest-attachment`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
-        },
-        body: JSON.stringify({ user_id, gmail_message_id }),
-      }).catch(err => console.error('[extract-email-actions] harvest-attachment trigger failed:', err?.message ?? err));
-    };
 
     if (!parsed?.is_actionable) {
       fireHarvest();

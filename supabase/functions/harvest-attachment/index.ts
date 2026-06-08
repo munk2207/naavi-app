@@ -268,13 +268,14 @@ serve(async (req) => {
       // email (same filename), skip. Drive issues a new file id on every
       // upload, so without this check repeated calls (backfill, retries,
       // cascade fires) create multiple physical copies in Drive.
-      const { data: existing } = await supabase
+      const { data: existingRows } = await supabase
         .from('documents')
         .select('drive_file_id, drive_web_view_link, document_type')
         .eq('user_id', user_id)
         .eq('gmail_message_id', gmail_message_id)
         .eq('file_name', leaf.filename)
-        .maybeSingle();
+        .limit(1);
+      const existing = existingRows?.[0] ?? null;
 
       if (existing?.drive_file_id) {
         skipped.push({
@@ -325,7 +326,7 @@ serve(async (req) => {
           drive_file_id: uploaded.id,
           drive_web_view_link: uploaded.webViewLink ?? null,
           source: 'gmail_attachment',
-        }, { onConflict: 'user_id,drive_file_id' });
+        }, { onConflict: 'user_id,gmail_message_id,file_name', ignoreDuplicates: true });
 
       if (insertErr) {
         skipped.push({ ...leaf, reason: `db_insert_failed: ${insertErr.message}`, drive_file_id: uploaded.id });
