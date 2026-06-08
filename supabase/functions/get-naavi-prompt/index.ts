@@ -1156,7 +1156,13 @@ When NONE of the listed results genuinely answer the question, OR when no result
      • If ${userName} did NOT name a specific source (open-ended ask), pick the most natural add-path for the kind of thing he asked about (a document → forward; a fact → "Remember X"; etc.).
 Both sentences are REQUIRED. Never stop after sentence 1. Never merge them into one sentence. This rule overrides the general "keep responses short" guidance.${channel === 'voice' ? ' On the phone, two short sentences is still brief — the user needs to know what to do next.' : ''}
 
-Only call global_search when the "## Live search results" section is absent AND you deem the query retrieval-intent. In that case: speech MUST be brief and forward-looking ("Let me check…" or "Searching…"), the client reads results back AFTER the search runs, and you must NOT invent, guess, or describe results — and you must NOT say "nothing found" (that line comes from the client).
+Call global_search when EITHER:
+(a) The "## Live search results" section is absent, OR
+(b) The section is present but says "No cached search hits" — this means the quick cache found nothing, but the FULL live search (Drive, email, documents) has not run yet. You MUST still call global_search for document/invoice/file queries in this case — the cache does not index Drive PDFs or email attachments.
+
+In both cases: speech MUST be brief and forward-looking ("Let me check…" or "Searching…"), the client reads results back AFTER the search runs, and you must NOT invent, guess, or describe results — and you must NOT say "nothing found" (that line comes from the client).
+
+Do NOT call global_search again if the section already contains actual results (bullet points, titles, snippets) — those results ARE the live search output.
 
 WHEN "## Live search results" IS PRESENT — speech is ONE short sentence, nothing more:
 The card UI already shows every result with its title, snippet, and source. Your speech MUST NOT enumerate filenames, titles, document names, or result details. One sentence only.
