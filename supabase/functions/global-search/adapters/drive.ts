@@ -220,8 +220,24 @@ export const driveAdapter: SearchAdapter = {
     // Also pull documents whose LINKED email_action matches a variant (vendor,
     // summary, reference). Supabase .or() can't traverse an fk in one clause,
     // so we do a cheap second query via email_actions → document.
+    // For the email_actions lookup, use ONLY specific (non-generic) terms.
+    // Generic synonyms like "pay" or "invoice" match every billing email_action
+    // in the DB; with LIMIT 5 the vendor-specific ones (e.g. Google) may be
+    // pushed off the page. Only filter by the vendor/content words the user
+    // actually named (e.g. "google", "bell", "anthropic").
+    const ACTION_GENERIC = new Set([
+      'pay','paid','invoice','invoices','receipt','receipts','bill','bills',
+      'charge','charges','payment','payments','amount','total','statement',
+      'statements','tax','warranty','delivery','appointment','renew','renewal',
+    ]);
+    const anchorOnlyTerms = [...singleWordTerms].filter(t => !ACTION_GENERIC.has(t) && t.length >= 3);
+
+    // Fall back to ALL singleWordTerms if no anchor words remain (avoids
+    // returning zero results when the query is purely generic like "invoices").
+    const actionTerms = anchorOnlyTerms.length > 0 ? anchorOnlyTerms : [...singleWordTerms];
+
     const actionOr: string[] = [];
-    for (const v of singleWordTerms) {
+    for (const v of actionTerms) {
       const pat = `%${v}%`;
       actionOr.push(
         `vendor.ilike.${pat}`,
@@ -235,7 +251,7 @@ export const driveAdapter: SearchAdapter = {
       .eq('user_id', ctx.userId)
       .eq('dismissed', false)
       .or(actionOr.join(','))
-      .limit(ctx.limit);
+      .limit(50);
     const actionIds = (linkedActions ?? []).map((a: { id: string }) => a.id);
 
     let linkedDocs: DocRow[] = [];
