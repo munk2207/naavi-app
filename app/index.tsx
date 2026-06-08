@@ -288,6 +288,47 @@ const intStyles = StyleSheet.create({
   },
 });
 
+// ─── Fetch today's time-based alerts for the brief ────────────────────────────
+// action_rules with trigger_type='time' that fire today become BriefItems
+// under the 'task' category — replacing the old pattern of creating a
+// calendar event for every "remind me at X" request.
+async function fetchTodayTimeAlerts(userId: string): Promise<BriefItem[]> {
+  try {
+    const { supabase: sb } = await import('@/lib/supabase');
+    if (!sb) return [];
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayEnd   = new Date(); todayEnd.setHours(23, 59, 59, 999);
+    const { data, error } = await sb
+      .from('action_rules')
+      .select('id, label, trigger_config, action_config')
+      .eq('user_id', userId)
+      .eq('trigger_type', 'time')
+      .eq('enabled', true);
+    if (error || !data) return [];
+    return (data as any[]).flatMap(rule => {
+      const dt: string | undefined = rule.trigger_config?.datetime ?? rule.trigger_config?.time;
+      if (!dt) return [];
+      const fireAt = new Date(dt);
+      if (isNaN(fireAt.getTime())) return [];
+      if (fireAt < todayStart || fireAt > todayEnd) return [];
+      const body: string = rule.action_config?.body ?? rule.label ?? 'Reminder';
+      const timeStr = fireAt.toLocaleTimeString('en-CA', {
+        timeZone: 'America/Toronto', hour: 'numeric', minute: '2-digit',
+      });
+      return [{
+        id: `time-alert-${rule.id}`,
+        category: 'task' as const,
+        title: body,
+        detail: `Alert at ${timeStr}`,
+        urgent: false,
+        startISO: fireAt.toISOString(),
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
 // ─── Enrich calendar events with travel time ──────────────────────────────────
 
 async function enrichWithTravelTime(items: BriefItem[]): Promise<BriefItem[]> {
@@ -967,15 +1008,16 @@ export default function HomeScreen() {
       fetchUpcomingEvents(7, currentUserId),
       fetchUpcomingBirthdays(currentUserId),
       registry.email.fetchImportant(currentUserId),
-    ]).then(async ([calendarItems, birthdayItems, emailItems]) => {
-      console.log('[Home] calendar:', calendarItems.length, 'birthdays:', birthdayItems.length, 'emails:', emailItems.length);
+      fetchTodayTimeAlerts(currentUserId),
+    ]).then(async ([calendarItems, birthdayItems, emailItems, timeAlerts]) => {
+      console.log('[Home] calendar:', calendarItems.length, 'birthdays:', birthdayItems.length, 'emails:', emailItems.length, 'time-alerts:', timeAlerts.length);
 
       // Enrich calendar events that have a location with travel time
       const enriched = await enrichWithTravelTime(calendarItems);
 
       setBrief(prev => {
         const weather = prev.find(i => i.id === 'weather');
-        return [...enriched, ...birthdayItems, ...emailItems.map(emailToBriefItem), ...(weather ? [weather] : [])];
+        return [...enriched, ...birthdayItems, ...emailItems.map(emailToBriefItem), ...timeAlerts, ...(weather ? [weather] : [])];
       });
     });
 
@@ -985,12 +1027,13 @@ export default function HomeScreen() {
           fetchUpcomingEvents(7, currentUserId),
           fetchUpcomingBirthdays(currentUserId),
           registry.email.fetchImportant(currentUserId),
+          fetchTodayTimeAlerts(currentUserId),
         ])
-      ).then(async ([fresh, freshBirthdays, freshEmails]) => {
+      ).then(async ([fresh, freshBirthdays, freshEmails, freshTimeAlerts]) => {
         const freshEnriched = await enrichWithTravelTime(fresh);
         setBrief(prev => {
           const weather = prev.find(i => i.id === 'weather');
-          return [...freshEnriched, ...freshBirthdays, ...freshEmails.map(emailToBriefItem), ...(weather ? [weather] : [])];
+          return [...freshEnriched, ...freshBirthdays, ...freshEmails.map(emailToBriefItem), ...freshTimeAlerts, ...(weather ? [weather] : [])];
         });
       }).catch(() => {});
 
@@ -1670,16 +1713,17 @@ export default function HomeScreen() {
           onLongPress={onChatLongPress}
           style={styles.flex}
         >
-          {/* "← Brief" chip — only appears during an active conversation so
-              Robert can bail back to the brief without scrolling. */}
+          {/* "Clear Chat" button — right-aligned just below the header,
+              visible only during an active conversation. */}
           {turns.length > 0 && (
-            <View style={styles.topBarRow}>
+            <View style={styles.clearChatRow}>
               <TouchableOpacity
-                style={styles.newChatBtn}
+                style={styles.clearChatBtn}
                 onPress={clearHistory}
-                accessibilityLabel="Return to brief"
+                accessibilityLabel="Clear chat"
+                accessibilityRole="button"
               >
-                <Text style={styles.newChatBtnText}>← Brief</Text>
+                <Text style={styles.clearChatBtnText}>🗑 Clear Chat</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1754,27 +1798,13 @@ export default function HomeScreen() {
                     once per mount via tipRef. */}
                 {(totalItems === 0 || hasOnlyWeather) && briefDays === 1 && (
                   <View style={styles.briefEmpty}>
-                    <Text style={styles.briefEmptyText}>Nothing on your plate today.</Text>
-                    <Text style={styles.briefEmptyTip}>{tipRef.current}</Text>
+                    <Text style={styles.briefEmptyText}>Your day is clear — I'm here whenever you need me. ✨</Text>
                   </View>
                 )}
               </View>
             );
           })()}
 
-          {/* "Clear chat" link — visible only when there's history.
-              V57.8 — explicit reset for Robert when the screen feels cluttered.
-              Wraps clearHistory() which resets turns + cards. */}
-          {turns.length > 0 && (
-            <TouchableOpacity
-              onPress={clearHistory}
-              style={styles.clearChatLink}
-              accessibilityLabel="Clear chat"
-              accessibilityRole="button"
-            >
-              <Text style={styles.clearChatLinkText}>✕ Clear chat</Text>
-            </TouchableOpacity>
-          )}
 
           {/* Conversation turns — each turn shows bubbles then its own cards.
               V57.8 — older turns auto-collapse to 1-line summaries to reduce
@@ -2572,16 +2602,22 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   // V57.8 — clear-chat link + collapsed-turn pill (chat page declutter)
-  clearChatLink: {
-    alignSelf: 'flex-end',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginBottom: 4,
+  clearChatRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
   },
-  clearChatLinkText: {
-    color: 'rgba(255,255,255,0.55)',
-    fontSize: 12,
-    fontWeight: '500',
+  clearChatBtn: {
+    backgroundColor: '#D94F4F',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  clearChatBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
   },
   collapsedTurn: {
     flexDirection: 'row',

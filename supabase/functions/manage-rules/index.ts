@@ -34,8 +34,9 @@ const corsHeaders = {
 interface ListRequest        { op: 'list';        user_id?: string; }
 interface DeleteRequest      { op: 'delete';      user_id?: string; rule_id: string; }
 interface ReactivateRequest  { op: 'reactivate';  user_id?: string; rule_id: string; }
-interface MergeTasksRequest  { op: 'merge_tasks'; user_id?: string; rule_id: string; tasks?: string[]; list_name?: string; }
-type RulesRequest = ListRequest | DeleteRequest | ReactivateRequest | MergeTasksRequest;
+interface MergeTasksRequest   { op: 'merge_tasks';   user_id?: string; rule_id: string; tasks?: string[]; list_name?: string; }
+interface ReplaceTasksRequest { op: 'replace_tasks'; user_id?: string; rule_id: string; tasks: string[]; }
+type RulesRequest = ListRequest | DeleteRequest | ReactivateRequest | MergeTasksRequest | ReplaceTasksRequest;
 
 async function resolveUserId(req: Request, bodyUserId?: string): Promise<string | null> {
   // (a) JWT path — app caller with Authorization header
@@ -208,7 +209,38 @@ serve(async (req) => {
       });
     }
 
-    return new Response(JSON.stringify({ error: "op must be 'list', 'delete', 'reactivate', or 'merge_tasks'" }), {
+    if (body.op === 'replace_tasks') {
+      if (!body.rule_id) {
+        return new Response(JSON.stringify({ error: 'rule_id is required for replace_tasks' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const { data: existing, error: ownErr } = await admin
+        .from('action_rules')
+        .select('id, user_id, action_config')
+        .eq('id', body.rule_id)
+        .maybeSingle();
+      if (ownErr || !existing || existing.user_id !== userId) {
+        return new Response(JSON.stringify({ error: 'Rule not found' }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const updatedConfig = { ...(existing.action_config ?? {}), tasks: body.tasks };
+      const { error: updErr } = await admin
+        .from('action_rules')
+        .update({ action_config: updatedConfig })
+        .eq('id', body.rule_id);
+      if (updErr) {
+        return new Response(JSON.stringify({ error: updErr.message }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true, action_config: updatedConfig }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({ error: "op must be 'list', 'delete', 'reactivate', 'merge_tasks', or 'replace_tasks'" }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {

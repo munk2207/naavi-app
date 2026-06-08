@@ -283,7 +283,7 @@ export default function RootLayout() {
           // render the chevron and let router.back() silently no-op if there's
           // nothing to pop. Root screens (index.tsx) explicitly set
           // headerLeft: () => null.
-          headerBackVisible: true,
+          headerBackVisible: false,
           headerLeft: () => (
             <TouchableOpacity
               onPress={() => router.back()}

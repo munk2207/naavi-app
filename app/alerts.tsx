@@ -283,12 +283,7 @@ function formatWhatHappens(r: ActionRule, userPhone: string | null, userEmail: s
 
   const extras: string[] = [];
   if (a.list_name) extras.push(`Plus items from your "${a.list_name}" list.`);
-  if (Array.isArray(a.tasks) && a.tasks.length > 0) {
-    const taskList = a.tasks.length === 1
-      ? `Plus a reminder: "${a.tasks[0]}".`
-      : `Plus ${a.tasks.length} reminders: ${a.tasks.map((t: string) => `"${t}"`).join(', ')}.`;
-    extras.push(taskList);
-  }
+  // Tasks are no longer rendered as text — they appear as deletable chips in the UI.
 
   return { channelsLine, bodyLine, extraLines: extras };
 }
@@ -319,6 +314,7 @@ export default function AlertsScreen() {
   // in flight, so multiple rows in the same expanded alert can detach
   // independently and show their own spinner.
   const [detachingKey, setDetachingKey] = useState<string | null>(null);
+  const [removingTaskKey, setRemovingTaskKey] = useState<string | null>(null);
   // 2026-05-19 (Wael) — user's own phone + email, used by detectIsSelf
   // so the "Naavi sends YOU" copy fires when an alert targets the user's
   // own channels (matching the server's report-location-event.ts logic).
@@ -545,6 +541,34 @@ export default function AlertsScreen() {
     }
   };
 
+  // Remove a single task (note) from action_config.tasks by index.
+  // Saves to DB via manage-rules and updates local state optimistically.
+  const onRemoveTask = async (rule: ActionRule, taskIndex: number) => {
+    const key = `${rule.id}:task:${taskIndex}`;
+    setRemovingTaskKey(key);
+    try {
+      const currentTasks: string[] = Array.isArray((rule.action_config as any)?.tasks)
+        ? [...(rule.action_config as any).tasks]
+        : [];
+      const updatedTasks = currentTasks.filter((_, i) => i !== taskIndex);
+      const { error: err } = await invokeWithTimeout('manage-rules', {
+        body: { op: 'replace_tasks', rule_id: rule.id, tasks: updatedTasks },
+      }, 15_000);
+      if (err) throw err;
+      // Optimistic local update
+      const updatedConfig = { ...(rule.action_config as any), tasks: updatedTasks };
+      setRules(prev => prev.map(r =>
+        r.id === rule.id
+          ? { ...r, action_config: updatedConfig }
+          : r,
+      ));
+    } catch (e: unknown) {
+      setError(formatErrorForUser(e));
+    } finally {
+      setRemovingTaskKey(null);
+    }
+  };
+
   const confirmDelete = async () => {
     if (!pendingDelete) return;
     setDeletingId(pendingDelete.id);
@@ -701,6 +725,39 @@ export default function AlertsScreen() {
                         {extraLines.map((line, i) => (
                           <Text key={i} style={styles.detailProse}>{line}</Text>
                         ))}
+                        {/* Notes chips — each task rendered as a deletable chip */}
+                        {(() => {
+                          const tasks: string[] = Array.isArray((rule.action_config as any)?.tasks)
+                            ? (rule.action_config as any).tasks
+                            : [];
+                          if (tasks.length === 0) return null;
+                          return (
+                            <>
+                              <Text style={[styles.detailHeader, { marginTop: 14 }]}>
+                                {tasks.length === 1 ? 'Note' : `Notes (${tasks.length})`}
+                              </Text>
+                              {tasks.map((task, idx) => {
+                                const tKey = `${rule.id}:task:${idx}`;
+                                return (
+                                  <View key={idx} style={styles.attachCard}>
+                                    <Ionicons name="document-text-outline" size={18} color={Colors.accent} style={{ marginRight: 10 }} />
+                                    <Text style={styles.attachCardName} numberOfLines={2}>{task}</Text>
+                                    <TouchableOpacity
+                                      onPress={() => onRemoveTask(rule, idx)}
+                                      disabled={removingTaskKey === tKey}
+                                      style={styles.attachDetachBtn}
+                                      accessibilityLabel={`Remove note "${task}" from this alert`}
+                                    >
+                                      {removingTaskKey === tKey
+                                        ? <ActivityIndicator size="small" color={Colors.textMuted} />
+                                        : <Ionicons name="close" size={20} color={Colors.error} />}
+                                    </TouchableOpacity>
+                                  </View>
+                                );
+                              })}
+                            </>
+                          );
+                        })()}
                         {/* 2026-05-19 (Wael) — ALWAYS render the "Attached lists"
                             section, even when empty. List details already shows
                             "Not attached to anything. Standalone list." for the
@@ -862,9 +919,9 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   groupTitle: {
-    color: Colors.textSecondary,
+    color: '#5DCAA5',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     marginBottom: 8,
