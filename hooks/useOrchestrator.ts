@@ -2563,6 +2563,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
             }
           }
         } else if (action.type === 'SET_ACTION_RULE') {
+          remoteLog(`[SET_ACTION_RULE] action received | trigger=${String((action as any).trigger_type)} | label=${String((action as any).label ?? '')}`);
           if (supabase) {
             const session = await getSessionWithTimeout();
             if (session?.user) {
@@ -3185,6 +3186,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               }
               // Route through manage-rules Edge Function (service_role) so the
               // insert bypasses RLS that blocks direct client writes on action_rules.
+              remoteLog(`[SET_ACTION_RULE] calling manage-rules create | trigger=${triggerType} | label=${String(action.label ?? '')} | userId=${session.user.id.slice(0,8)}`);
               const { data: createRes, error } = await invokeWithTimeout('manage-rules', {
                 body: {
                   op:             'create',
@@ -3197,6 +3199,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                   one_shot:       action.one_shot ?? true,
                 },
               }, 15_000);
+              remoteLog(`[SET_ACTION_RULE] manage-rules response | ok=${(createRes as any)?.ok} | id=${(createRes as any)?.id} | error=${JSON.stringify(error)}`);
               const insertedId = (createRes as any)?.id ?? null;
               const insertedRow = insertedId ? { id: insertedId } : null;
               if (error) {
