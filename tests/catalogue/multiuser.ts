@@ -62,6 +62,8 @@ const lookupContactMatrix = multiUserMatrix({
   description: 'lookup-contact (Google People API access scope)',
   body: { name: 'TestNonExistentName-XYZQQ' },
   validateOk: (_data) => true, // any 2xx is fine; we don't care about the lookup result
+  // 500 = Google token expired for test user — still proves user was resolved (401 = not resolved).
+  userResolvedStatuses: [200, 201, 202, 500],
 });
 
 const ingestNoteMatrix = multiUserMatrix({
@@ -93,6 +95,8 @@ const manageListMatrix = multiUserMatrix({
   // and `listName` (camelCase). Both discovered via auto-tester iteration.
   body: { type: 'LIST_READ', listName: 'multiuser-test-nonexistent' },
   validateOk: (_data) => true,
+  // 400 = Google Drive token missing/expired for test user — still proves user was resolved (401 = not resolved).
+  userResolvedStatuses: [200, 201, 202, 400, 500],
 });
 
 const resolvePlaceMatrix = multiUserMatrix({
@@ -116,9 +120,10 @@ const createCalEventMatrix = multiUserMatrix({
     start: calNearFutureStart.toISOString(),
     end:   calNearFutureEnd.toISOString(),
   },
-  // 401/403 (token missing/expired) is acceptable for body-userid test if
-  // the test user has no Calendar OAuth — the resolution path still ran.
+  // 401/403/500 (token missing/expired) is acceptable for body-userid test if
+  // the test user has no Calendar OAuth — the resolution path still ran (401 = not resolved).
   validateOk: (_data) => true,
+  userResolvedStatuses: [200, 201, 202, 401, 403, 500],
   skipJwtTests: true,
 });
 

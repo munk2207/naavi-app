@@ -299,9 +299,16 @@ async function pollUntilDone(matrixId, token, tokenMintedAt) {
         const executions = matrix.testExecutions || [];
         // INVALID / ERROR / CANCELLED = no executions ran → always a failure
         const terminalOk = state === 'FINISHED';
-        const allPassed  = terminalOk && executions.length > 0 && executions.every(e => e.state === 'FINISHED');
+        // Firebase outcome.summary values: SUCCESS, FAILURE, INCONCLUSIVE, SKIPPED
+        // Also check state === 'FINISHED' as fallback when outcome is absent
+        const allPassed  = terminalOk && executions.length > 0 && executions.every(e => {
+          const summary = e.outcome && e.outcome.summary;
+          return summary === 'SUCCESS' || (!summary && e.state === 'FINISHED');
+        });
         const outcome    = allPassed ? '✅ PASSED' : '❌ FAILED';
         const detail     = state !== 'FINISHED' ? ` (matrix state: ${state})` : '';
+        // Log raw outcomes for debugging
+        executions.forEach((e, i) => console.log(`  Device ${i+1}: state=${e.state} outcome=${e.outcome && e.outcome.summary}`));
         const msg        = `MyNaavi Firebase Test Lab ${outcome}${detail} — ${matrixId}`;
         console.log('\nTest complete:', msg);
         if (matrix.extendedInvalidMatrixDetails) {
@@ -329,16 +336,22 @@ async function pollUntilDone(matrixId, token, tokenMintedAt) {
   const mintedAt  = Date.now();
   console.log('     ✓ Token obtained');
 
-  // 2. Download APK
-  const tmpApk = path.join(os.tmpdir(), 'naavi-test.apk');
-  console.log(`\n2/5  Downloading APK from EAS…`);
-  console.log(`     ${APK_URL}`);
-  await downloadFile(APK_URL, tmpApk);
+  // 2. Download APK (or use local file)
+  const isLocalFile = !APK_URL.startsWith('http') && fs.existsSync(APK_URL);
+  const tmpApk = isLocalFile ? APK_URL : path.join(os.tmpdir(), 'naavi-test.apk');
+  if (isLocalFile) {
+    console.log(`\n2/5  Using local APK file…`);
+    console.log(`     ${APK_URL}`);
+  } else {
+    console.log(`\n2/5  Downloading APK from EAS…`);
+    console.log(`     ${APK_URL}`);
+    await downloadFile(APK_URL, tmpApk);
+  }
   const apkSizeMB = (fs.statSync(tmpApk).size / 1024 / 1024).toFixed(1);
-  console.log(`     ✓ APK downloaded (${apkSizeMB} MB) → ${tmpApk}`);
+  console.log(`     ✓ APK ready (${apkSizeMB} MB)`);
 
   // 3. Upload APK to GCS
-  const apkGcsName = `${GCS_FOLDER}/naavi-v207.apk`;
+  const apkGcsName = `${GCS_FOLDER}/naavi-v239.apk`;
   console.log(`\n3/5  Uploading APK to gs://${GCS_BUCKET}/${apkGcsName}…`);
   const apkUpload = await uploadToGCS(token, tmpApk, apkGcsName, 'application/vnd.android.package-archive');
   if (apkUpload.error) throw new Error(`APK upload failed: ${JSON.stringify(apkUpload.error)}`);

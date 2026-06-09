@@ -351,19 +351,21 @@ Rules that are already covered elsewhere are NOT duplicated here — see CONFIGU
 
 A short-lived 2026-05-16 suspension related to an Expo build error was removed 2026-05-22 (Wael) — run the suite unconditionally before every build. No future "temporary suspension" survives without simultaneously suspending all build commands.
 
-**15b. ⭐ FIREBASE TEST LAB — ON HOLD** (suspended 2026-05-30 by Wael). Firebase Test Lab is suspended until an end-to-end process for reviewing and acting on its findings is established. While suspended, Rule 15b does NOT block AAB builds — Rule 15 (auto-tester 100% green) remains the sole pre-build gate. Do NOT run Firebase Test Lab submissions until Wael explicitly lifts this hold.
+**15b. ⭐ FIREBASE TEST LAB IS A MANDATORY GATE BEFORE EVERY PRODUCTION AAB** (Wael 2026-05-29, hold lifted 2026-06-09). After `npm run test:auto` is 100% green and before `eas build --profile production`, the APK must be submitted to Firebase Test Lab. No exceptions.
 
-**Original rule (restored when hold is lifted): FIREBASE TEST LAB IS A MANDATORY GATE BEFORE EVERY PRODUCTION AAB** (Wael 2026-05-29). After `npm run test:auto` is 100% green and before `eas build --profile production`, a preview APK must be built and submitted to Firebase Test Lab. No exceptions.
+**Hold lifted 2026-06-09** — end-to-end process established and verified: robo script fixed, pass/fail detection corrected, Blaze plan active (no daily quota). Full run confirmed ✅ PASSED on Pixel 6 (Android 13) + Samsung Galaxy S22 (Android 14).
 
 **The process is fully automated — do NOT manually upload to Firebase Console:**
-1. Build preview APK: `eas build --profile preview` (from `C:\Users\waela\naavi-mobile`)
-2. Copy the URL from the build output — either the artifact URL (`https://expo.dev/artifacts/eas/...`) or the build page URL (`https://expo.dev/accounts/waggan/.../builds/<id>`). Both work — the script auto-resolves the artifact URL if given a build page URL.
-3. Submit to Firebase Test Lab: `node scripts/submit-firebase-test.js <url>`
-   - Downloads APK → uploads to GCS bucket `mynaavi-testlab-uploads` → submits test matrix
+1. Get an APK — either:
+   - Build a new preview APK: `eas build --profile preview` (from `C:\Users\waela\naavi-mobile`), OR
+   - Use an existing local APK file (e.g. downloaded from EAS)
+2. Submit to Firebase Test Lab: `node scripts/submit-firebase-test.js <url-or-local-path>`
+   - Accepts EAS artifact URL, EAS build page URL, or a local file path
+   - Uploads APK to GCS bucket `mynaavi-testlab-uploads` → submits test matrix
    - Devices: Pixel 6 (Android 13) + Samsung Galaxy S22 (Android 14)
    - Polls every 30 seconds; sends SMS to +1 613 769 7957 when done
-4. **Wait for SMS: ✅ PASSED** before building the production AAB
-5. If any device shows ❌ FAILED — investigate and fix before building production
+3. **Wait for SMS: ✅ PASSED** before building the production AAB
+4. If any device shows ❌ FAILED — investigate and fix before building production
 
 **Before running step 3:** update the GCS filename in `scripts/submit-firebase-test.js` to match the actual build version (currently hardcoded as `naavi-v205.apk`).
 

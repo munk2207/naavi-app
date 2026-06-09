@@ -77,7 +77,10 @@ async function trashDriveFile(
     .maybeSingle();
   if (tokenErr) return { ok: false, reason: `token_lookup_failed: ${tokenErr.message}` };
   if (!tokenRow || !(tokenRow as any).refresh_token) {
-    return { ok: false, reason: 'google_not_connected' };
+    // No Google token — skip Drive trash, proceed with DB delete.
+    // Drive file may become orphaned but user can't authenticate to clean it up anyway.
+    console.warn(`[manage-list-connections] no Google token for user ${userId} — skipping Drive trash, proceeding with DB delete`);
+    return { ok: true };
   }
 
   // Exchange refresh token for an access token.
@@ -93,7 +96,10 @@ async function trashDriveFile(
   });
   const tokenJson = await tokenRes.json();
   if (!tokenJson.access_token) {
-    return { ok: false, reason: `token_refresh_failed: ${JSON.stringify(tokenJson).slice(0, 200)}` };
+    // Token expired/revoked — skip Drive trash, proceed with DB delete.
+    // Orphaned Drive file is better than blocking list deletion.
+    console.warn(`[manage-list-connections] Google token refresh failed for user ${userId} — skipping Drive trash, proceeding with DB delete: ${JSON.stringify(tokenJson).slice(0, 200)}`);
+    return { ok: true };
   }
 
   // Drive API — files.update with trashed=true. Reversible from Drive
@@ -116,6 +122,13 @@ async function trashDriveFile(
   // 404 — file already gone. Treat as success so the orphaned DB row
   // can still be cleaned up (the divergence is healing itself).
   if (driveRes.status === 404) return { ok: true };
+
+  // 401/403 — token lacks Drive scope or file permission denied.
+  // Orphaned Drive file is better than blocking list deletion.
+  if (driveRes.status === 401 || driveRes.status === 403) {
+    console.warn(`[manage-list-connections] Drive trash returned ${driveRes.status} for user ${userId} — skipping trash, proceeding with DB delete`);
+    return { ok: true };
+  }
 
   const errText = await driveRes.text();
   return { ok: false, reason: `drive_${driveRes.status}: ${errText.slice(0, 200)}` };

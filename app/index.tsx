@@ -1425,6 +1425,69 @@ export default function HomeScreen() {
     error:           error ?? t('errors.apiError'),
   }[status];
 
+  // ── Dedicated sign-in screen ─────────────────────────────────────────────
+  if (!currentUserId) {
+    return (
+      <SafeAreaView style={styles.safe} edges={['bottom']}>
+        <Stack.Screen options={{ headerLeft: () => null, headerRight: () => null }} />
+        <View style={styles.signInScreen}>
+          {/* Sign in button */}
+          <TouchableOpacity
+            style={styles.floatingSignInBanner}
+            onPress={async () => {
+              try {
+                setSigningIn(true);
+                await signInWithGoogle();
+              } catch (e) {
+                console.error('[SignIn]', e);
+              } finally {
+                setSigningIn(false);
+              }
+            }}
+            disabled={signingIn}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="key" size={18} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.floatingSignInText}>
+              {signingIn ? 'Signing in…' : 'Sign in with Google'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Reason message */}
+          <Text style={styles.signInMessage}>
+            We ask you to sign in because MyNaavi acts on your behalf — checking your calendar, reading your emails, and saving to your Drive, always with your approval.
+          </Text>
+
+          {/* Firebase Test Lab bypass — preview builds only */}
+          {process.env.EXPO_PUBLIC_TEST_LOGIN_ENABLED === 'true' && (
+            <TouchableOpacity
+              testID="test-lab-sign-in"
+              style={[styles.floatingSignInBanner, { backgroundColor: '#555', marginTop: 16 }]}
+              onPress={async () => {
+                try {
+                  setSigningIn(true);
+                  await supabase.auth.signInWithPassword({
+                    email:    'firebase-testlab@mynaavi.com',
+                    password: 'TestLabNaavi2026!#',
+                  });
+                } catch (e) {
+                  console.error('[TestLogin]', e);
+                } finally {
+                  setSigningIn(false);
+                }
+              }}
+              disabled={signingIn}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="flask" size={18} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.floatingSignInText}>Test Lab Sign In</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       {/* Attach the 3-dot menu to the native header so it sits on the same row
@@ -1635,58 +1698,8 @@ export default function HomeScreen() {
           </View>
         </Modal>
 
-        {/* Floating sign-in banner — absolute positioned, doesn't shift page layout.
-            Shows only when the user is not yet signed in. */}
-        {!currentUserId && (
-          <TouchableOpacity
-            style={styles.floatingSignInBanner}
-            onPress={async () => {
-              try {
-                setSigningIn(true);
-                await signInWithGoogle();
-              } catch (e) {
-                console.error('[SignIn]', e);
-              } finally {
-                setSigningIn(false);
-              }
-            }}
-            disabled={signingIn}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="key" size={18} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.floatingSignInText} numberOfLines={1}>
-              {signingIn ? 'Signing in…' : 'Sign in with Google'}
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        {/* Firebase Test Lab bypass — preview builds only (EXPO_PUBLIC_TEST_LOGIN_ENABLED).
-            Never visible in production. Allows the Robo crawler to reach
-            authenticated screens without Google OAuth. */}
-        {!currentUserId && process.env.EXPO_PUBLIC_TEST_LOGIN_ENABLED === 'true' && (
-          <TouchableOpacity
-            testID="test-lab-sign-in"
-            style={[styles.floatingSignInBanner, { top: 70, backgroundColor: '#555' }]}
-            onPress={async () => {
-              try {
-                setSigningIn(true);
-                await supabase.auth.signInWithPassword({
-                  email:    'firebase-testlab@mynaavi.com',
-                  password: 'TestLabNaavi2026!#',
-                });
-              } catch (e) {
-                console.error('[TestLogin]', e);
-              } finally {
-                setSigningIn(false);
-              }
-            }}
-            disabled={signingIn}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="flask" size={18} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.floatingSignInText} numberOfLines={1}>Test Lab Sign In</Text>
-          </TouchableOpacity>
-        )}
+        {/* Sign-in is now handled by the dedicated sign-in screen rendered
+            before this return when !currentUserId. Nothing to render here. */}
 
         {/* V57.10.1 — persistent location-permission banner removed.
             Permission is now requested lazily, only the moment Robert
@@ -3519,9 +3532,20 @@ const styles = StyleSheet.create({
   // Floating sign-in banner — absolute-positioned pill that overlays the
   // scroll content. Visible only when the user isn't signed in. Kept short
   // so it doesn't dominate; tapping opens the Google sign-in flow.
+  signInScreen: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  signInMessage: {
+    marginTop: 24,
+    color: Colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 22,
+    textAlign: 'center',
+  },
   floatingSignInBanner: {
-    position: 'absolute',
-    top: 10,
     alignSelf: 'center',
     maxWidth: 380,
     flexDirection: 'row',
@@ -3531,7 +3555,6 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingVertical: 10,
     paddingHorizontal: 22,
-    zIndex: 100,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,

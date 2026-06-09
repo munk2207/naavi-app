@@ -33,7 +33,7 @@ export const calendarTests: TestCase[] = [
       // Skip cleanly when the test user's Google Calendar OAuth isn't
       // connected — that's a one-time manual setup, not a code bug.
       const errMsg = String(data?.error ?? '');
-      if (status === 401 || status === 403 || /token (refresh|expired|revoked|invalid)|invalid_grant/i.test(errMsg)) {
+      if (status === 401 || status === 403 || /token (refresh|expired|revoked|invalid)|invalid_grant|insufficient.*(scope|permission)|insufficientPermissions/i.test(errMsg)) {
         throw new TestSkippedError(
           `Google Calendar OAuth not connected for test user. Sign in to Google Calendar once with mynaavi2207@gmail.com to enable.`,
         );

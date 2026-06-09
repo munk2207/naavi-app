@@ -275,4 +275,56 @@ export const session20260608Tests: TestCase[] = [
       ctx.log(`PASS: datetime="${dt}" has timezone offset and is in the future`);
     },
   },
+
+  // ── Test 6: "alert me at [time]" must emit SET_ACTION_RULE not CREATE_EVENT ──
+  {
+    id: 's060608.time-alert-routes-to-action-rule-not-calendar',
+    category: 'chat',
+    description:
+      '"Alert me to call Bob at 11 PM" must emit SET_ACTION_RULE(trigger_type=time) ' +
+      'NOT create_event. Root cause: no time-alert examples in prompt caused Claude ' +
+      'to fall through to calendar. Fixed 2026-06-08 with explicit time alert examples ' +
+      'and a HARD RULE prohibiting create_event for time-based alerts.',
+    timeoutMs: 45_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'Alert me to call Bob today at 11 PM' }],
+        max_tokens: 512,
+      });
+      expect2xx(status, 'naavi-chat time alert');
+      ctx.log(`speech: ${data?.speech?.slice(0, 120) ?? '(none)'}`);
+      ctx.log(`actions: ${JSON.stringify(data?.actions ?? [])}`);
+
+      const actions: any[] = data?.actions ?? [];
+
+      // Must NOT emit create_event
+      const hasCalendar = actions.some((a: any) =>
+        (a.type ?? '').toUpperCase() === 'CREATE_EVENT',
+      );
+      if (hasCalendar) {
+        throw new Error(
+          '"Alert me to call Bob at 11 PM" emitted CREATE_EVENT — must be SET_ACTION_RULE(trigger_type=time). ' +
+          'This creates a Google Calendar entry that triggers its own notification, causing duplicate alerts.',
+        );
+      }
+
+      // Should emit SET_ACTION_RULE with trigger_type='time' OR a RULE 23 confirm turn
+      const hasActionRule = actions.some((a: any) =>
+        (a.type ?? '').toUpperCase() === 'SET_ACTION_RULE' &&
+        (a.trigger_type ?? '') === 'time',
+      );
+      const isConfirmTurn = actions.length === 0 && (data?.speech ?? '').toLowerCase().includes('confirm');
+
+      if (!hasActionRule && !isConfirmTurn) {
+        ctx.log(
+          `WARN: Expected SET_ACTION_RULE(trigger_type=time) or a confirm turn. ` +
+          `Got actions=${JSON.stringify(actions)}. Manual verification recommended.`,
+        );
+      } else if (hasActionRule) {
+        ctx.log('PASS: SET_ACTION_RULE(trigger_type=time) emitted — no calendar event');
+      } else {
+        ctx.log('PASS: RULE 23 confirm turn emitted — no calendar event');
+      }
+    },
+  },
 ];

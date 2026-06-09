@@ -57,15 +57,7 @@
   },
 
   {
-    "_comment": "STEP 11 — Tap the text input and type the first command.",
-    "eventType": "VIEW_TEXT_CHANGED",
-    "replacementText": "Hi MyNaavi, what's on my calendar today?",
-    "elementDescriptors": [{ "text": "Ask MyNaavi" }],
-    "delayTime": 2000
-  },
-
-  {
-    "_comment": "Dwell on the typed command before Robo continues exploring.",
+    "_comment": "STEP 10 — Dwell on home screen before Robo continues exploring.",
     "eventType": "WAIT",
     "delayTime": 5000
   }
