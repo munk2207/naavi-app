@@ -322,6 +322,9 @@ export default function AlertsScreen() {
   // "Naavi sends a contact a text message" — incorrect and confusing.
   const [userPhone, setUserPhone] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  // Collapsible category sections — all collapsed by default so Robert can
+  // see every category at a glance without scrolling through long lists.
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   // 2026-05-22 — B4n. Live geofence sync status for the warning banner.
   const [syncStatus, setSyncStatus] = useState<LastSyncStatus>(() => getLastSyncStatus());
   useEffect(() => {
@@ -674,10 +677,20 @@ export default function AlertsScreen() {
           </View>
         )}
 
-        {groups.map(({ type, rules: groupRules }) => (
+        {groups.map(({ type, rules: groupRules }) => {
+          const isCollapsed = collapsedSections[type] ?? true;
+          return (
           <View key={type} style={styles.group}>
-            <Text style={styles.groupTitle}>{groupLabel(type)}</Text>
-            {groupRules.map(rule => {
+            <TouchableOpacity
+              style={styles.groupHeader}
+              onPress={() => setCollapsedSections(prev => ({ ...prev, [type]: !isCollapsed }))}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.groupTitle}>{groupLabel(type)}</Text>
+              <Text style={styles.groupCount}>{groupRules.length}</Text>
+              <Text style={styles.groupArrow}>{isCollapsed ? '+' : '−'}</Text>
+            </TouchableOpacity>
+            {!isCollapsed && groupRules.map(rule => {
               const isOpen = !!expanded[rule.id];
               // 2026-05-22 — F2e. Disabled rules render greyed-out with
               // an "Expired" pill in the header. The expanded box adds a
@@ -828,7 +841,8 @@ export default function AlertsScreen() {
               );
             })}
           </View>
-        ))}
+          );
+        })}
       </ScrollView>
 
       {/* Delete confirmation modal */}
@@ -916,7 +930,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   group: {
-    marginBottom: 18,
+    marginBottom: 12,
+  },
+  groupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: Colors.bgElevated,
+    borderRadius: 12,
+    marginBottom: 8,
   },
   groupTitle: {
     color: '#5DCAA5',
@@ -924,8 +947,20 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
-    marginBottom: 8,
-    paddingHorizontal: 4,
+    flex: 1,
+  },
+  groupCount: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#5DCAA5',
+    marginRight: 10,
+    opacity: 0.7,
+  },
+  groupArrow: {
+    fontSize: 28,
+    fontWeight: '300',
+    color: '#5DCAA5',
+    lineHeight: 28,
   },
   row: {
     backgroundColor: Colors.bgElevated,
