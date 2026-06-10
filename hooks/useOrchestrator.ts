@@ -59,6 +59,7 @@ const AFFIRMATIVE_RE = /^(yes|yeah|yep|yup|sure|confirm|confirmed|correct|ok|oka
 // 2026-05-06 — pending-location state survived 31 min because his "cancel"
 // input variants kept missing the regex.
 const NEGATIVE_RE    = /^\s*(?:please\s+)?(no|nope|cancel|never ?mind|stop|forget it|don[']?t)\b/i;
+const POSITIVE_RE    = /^\s*(?:please\s+)?(yes|yeah|yep|yup|confirm|approved|go ahead|do it|ok|okay|sure|correct|right|that[''s]? right)\b/i;
 
 // Correction pattern — fired when the user wants to fix a mishear:
 //   "I meant Fatma", "I said Ahmed", "No, I meant Fatma", "Actually Costco",
@@ -519,6 +520,17 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     hasLocation: boolean;
   } | null>(null);
 
+  // B6h (2026-06-10) — single-match confirm-before-delete state. When the
+  // pre-Claude delete-intent intercept finds exactly 1 matching rule, it
+  // stashes it here and asks the user to confirm. On "yes" the deletion runs
+  // deterministically without going back to Claude (who confabulated "Done"
+  // without emitting DELETE_RULE — the demonstrated bug class).
+  const pendingConfirmDeleteRef = useRef<{
+    ruleId: string;
+    label: string;    // human-readable summary shown in the confirm prompt
+    isLocation: boolean;
+  } | null>(null);
+
   // B2l (2026-05-19) — re-sync geofences with the SDK after a delete so
   // the deleted rule's geofence is removed from the device. Otherwise the
   // SDK keeps firing orphan ENTERs that the server rejects silently at
@@ -788,6 +800,56 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           console.error('[Orchestrator] delete-all intercept failed:', err);
           // Fall through to normal Claude path on error
         }
+      }
+    }
+
+    // ── B6h: PENDING CONFIRM-DELETE — "yes" / "no" on a single-match ────────
+    // When the delete-intent intercept found exactly 1 matching rule, it asked
+    // the user to confirm. This intercept catches the response and either runs
+    // the deletion or cancels, without involving Claude at all.
+    if (pendingConfirmDeleteRef.current && supabase) {
+      const msg = userMessage.trim().toLowerCase();
+      const isYes    = POSITIVE_RE.test(msg);
+      const isCancel = NEGATIVE_RE.test(msg);
+      if (isYes) {
+        const { ruleId, label, isLocation } = pendingConfirmDeleteRef.current;
+        pendingConfirmDeleteRef.current = null;
+        try {
+          const res = await invokeWithTimeout('manage-rules', { body: { op: 'delete', rule_id: ruleId } }, 15_000);
+          const ok = !(res as any)?.error && (res as any)?.data?.ok === true;
+          if (ok && isLocation && supabase) {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user?.id) syncGeofencesAfterDelete(session.user.id);
+          }
+          const speech = ok
+            ? `Done — deleted ${label}.`
+            : `I couldn't delete that alert. Please try again.`;
+          if (isCancelled()) return;
+          setTurns(prev => [...prev, {
+            userMessage,
+            assistantSpeech: speech,
+            drafts: [], createdEvents: [], deletedEvents: [], savedDocs: [],
+            rememberedItems: [], driveFiles: [], navigationResults: [], listResults: [], locationRules: [],
+            globalSearch: undefined,
+            timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
+                     + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
+          }]);
+          setStatus('idle');
+        } catch (err) {
+          pendingConfirmDeleteRef.current = null;
+          if (isCancelled()) return;
+          console.error('[Orchestrator] B6h confirm-delete failed:', err);
+          setError(err instanceof Error ? err.message : String(err));
+          setStatus('error');
+        }
+        return;
+      } else if (isCancel) {
+        pendingConfirmDeleteRef.current = null;
+        // Fall through to Claude so the user can ask something else.
+      }
+      // Any other reply — treat as cancel + fall through.
+      else {
+        pendingConfirmDeleteRef.current = null;
       }
     }
 
@@ -1348,6 +1410,123 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       } // V57.12.1 — close the escape-or-process else wrapper
     }
     // ── end pending location handler ──────────────────────────────────────────
+
+    // ── B6h: DELETE-INTENT INTERCEPT ─────────────────────────────────────────
+    // Claude confabulated "Done — that alert was already deleted" without
+    // emitting DELETE_RULE (2026-06-10 live evidence). Fix: detect delete-alert
+    // intent here, fetch rules server-side, handle deterministically.
+    //   0 matches → tell user, no Claude round-trip.
+    //   1 match  → stash in pendingConfirmDeleteRef, ask for confirmation.
+    //   2+ matches → stash in pendingDeleteRef (existing disambiguation path).
+    const DELETE_ALERT_RE = /\b(delete|remove|cancel|clear)\b.{0,40}\b(alert|reminder|rule|notification)\b/i;
+    if (DELETE_ALERT_RE.test(userMessage) && supabase &&
+        !pendingConfirmDeleteRef.current && !pendingDeleteRef.current) {
+      try {
+        const { data: listData } = await invokeWithTimeout('manage-rules', { body: { op: 'list' } }, 15_000);
+        const allRules: Array<Record<string, any>> = Array.isArray((listData as any)?.rules) ? (listData as any).rules : [];
+        const raw = userMessage.trim().toLowerCase();
+        // Strip the verb + "alert/rule/reminder" so only the location/contact
+        // hint remains as the search needle.
+        const needle = raw
+          .replace(/\b(delete|remove|cancel|clear|my|the|an?|all|that)\b/gi, ' ')
+          .replace(/\b(alert|reminder|rule|notification|alerts|rules|reminders)s?\b/gi, ' ')
+          .replace(/\s+/g, ' ').trim();
+        const needles = needle.split(/\s+/).filter(n => n.length > 1);
+        const haystackFor = (r: Record<string, any>) => {
+          const parts: string[] = [String(r.trigger_type ?? ''), String(r.label ?? '')];
+          for (const v of Object.values(r.trigger_config ?? {})) {
+            if (v != null) parts.push(typeof v === 'string' ? v : JSON.stringify(v));
+          }
+          for (const v of Object.values(r.action_config ?? {})) {
+            if (v != null) parts.push(typeof v === 'string' ? v : JSON.stringify(v));
+          }
+          return parts.join(' ').toLowerCase();
+        };
+        const matches = needles.length === 0
+          ? allRules
+          : allRules.filter(r => { const h = haystackFor(r); return needles.every(n => h.includes(n)); });
+
+        if (matches.length === 0) {
+          const speech = needle
+            ? `I couldn't find an alert matching "${needle}".`
+            : "I don't see any alerts to delete.";
+          if (isCancelled()) return;
+          setTurns(prev => [...prev, {
+            userMessage, assistantSpeech: speech,
+            drafts: [], createdEvents: [], deletedEvents: [], savedDocs: [],
+            rememberedItems: [], driveFiles: [], navigationResults: [], listResults: [], locationRules: [],
+            globalSearch: undefined,
+            timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
+                     + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
+          }]);
+          setStatus('idle');
+          return;
+        }
+
+        const ruleLabel = (r: any): string => {
+          const tc = r.trigger_config ?? {};
+          if (tc.place_name) return `the ${tc.place_name}${tc.direction ? ` (${tc.direction})` : ''} alert`;
+          if (tc.from_name) return `the ${tc.from_name} email alert`;
+          if (tc.from_email) return `the alert from ${tc.from_email}`;
+          if (r.trigger_type === 'time') return `the ${tc.cron || tc.datetime || 'scheduled'} alert`;
+          if (r.label) return `the "${r.label}" alert`;
+          return `the ${r.trigger_type} alert`;
+        };
+
+        if (matches.length === 1) {
+          const rule = matches[0];
+          const label = ruleLabel(rule);
+          pendingConfirmDeleteRef.current = {
+            ruleId: String(rule.id),
+            label,
+            isLocation: rule.trigger_type === 'location',
+          };
+          const speech = `I'll delete ${label}. Say yes to confirm, or no to cancel.`;
+          if (isCancelled()) return;
+          setTurns(prev => [...prev, {
+            userMessage, assistantSpeech: speech,
+            drafts: [], createdEvents: [], deletedEvents: [], savedDocs: [],
+            rememberedItems: [], driveFiles: [], navigationResults: [], listResults: [], locationRules: [],
+            globalSearch: undefined,
+            timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
+                     + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
+          }]);
+          setStatus('idle');
+          return;
+        }
+
+        // Multiple matches — reuse existing disambiguation path.
+        const distinguishingHint = (r: any): string => {
+          const tc = r.trigger_config ?? {};
+          if (tc.place_name) return `${tc.place_name}${tc.direction ? ` (${tc.direction})` : ''}`;
+          if (tc.from_name) return `from ${tc.from_name}`;
+          if (r.label) return r.label;
+          return String(r.trigger_type ?? 'alert');
+        };
+        const hints = matches.slice(0, 3).map(r => `"${distinguishingHint(r)}"`);
+        const disambigSpeech = `I found ${matches.length} alerts matching. Which one — ${hints.join(', or ')}? Or say "all" to delete every match.`;
+        pendingDeleteRef.current = {
+          match: needle,
+          matchIds: matches.map(r => String(r.id)),
+          hasLocation: matches.some(r => r.trigger_type === 'location'),
+        };
+        if (isCancelled()) return;
+        setTurns(prev => [...prev, {
+          userMessage, assistantSpeech: disambigSpeech,
+          drafts: [], createdEvents: [], deletedEvents: [], savedDocs: [],
+          rememberedItems: [], driveFiles: [], navigationResults: [], listResults: [], locationRules: [],
+          globalSearch: undefined,
+          timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
+                   + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
+        }]);
+        setStatus('idle');
+        return;
+      } catch (err) {
+        console.error('[Orchestrator] B6h delete-intent intercept failed:', err);
+        // Fall through to Claude on intercept error.
+      }
+    }
+    // ── end B6h delete-intent intercept ──────────────────────────────────────
 
     // This turn's cards — collected during processing
     // Set to a string to override Claude's speech for this turn (used by the
