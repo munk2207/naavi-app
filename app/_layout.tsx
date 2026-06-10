@@ -5,6 +5,9 @@
 
 import { useEffect, useState } from 'react';
 import { Platform, View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
+import * as SplashScreen from 'expo-splash-screen';
+
+SplashScreen.preventAutoHideAsync();
 import { Stack, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -116,6 +119,10 @@ export default function RootLayout() {
   // Wire geofence lifecycle to the current user. Handles auth changes,
   // foreground re-sync, and owns the OS geofence registration.
   useGeofencing(userId);
+
+  useEffect(() => {
+    SplashScreen.hideAsync();
+  }, []);
 
   useEffect(() => {
     if (!supabase) return;
