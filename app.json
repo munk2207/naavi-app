@@ -11,6 +11,12 @@
     },
     "orientation": "default",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/mynaavi-logo-transparent.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0D0D0D"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "ca.naavi.app",
@@ -22,6 +28,10 @@
     },
     "android": {
       "versionCode": 241,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/mynaavi-logo-transparent.png",
+        "backgroundColor": "#0D0D0D"
+      },
       "softwareKeyboardLayoutMode": "pan",
       "package": "ca.naavi.app",
       "googleServicesFile": "./google-services.json",
