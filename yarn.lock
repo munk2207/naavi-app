@@ -1110,7 +1110,7 @@
     base64-js "^1.5.1"
     xmlbuilder "^15.1.1"
 
-"@expo/prebuild-config@^55.0.11", "@expo/prebuild-config@^55.0.18":
+"@expo/prebuild-config@^55.0.11":
   version "55.0.18"
   resolved "https://registry.npmjs.org/@expo/prebuild-config/-/prebuild-config-55.0.18.tgz"
   integrity sha512-2oKXyy5pyM87DJqXW5Z+Sakle6rApFFtpPhWOiNsOdoh6rOAD+EqVgyrs2OEEic8CE0tTt27w3SRfSZe/PZrxg==
@@ -3006,13 +3006,6 @@ expo-speech@~55.0.8:
   version "55.0.8"
   resolved "https://registry.npmjs.org/expo-speech/-/expo-speech-55.0.8.tgz"
   integrity sha512-RbQaCkzONPtOzTO/zCt2/K2gm6aGf2Ra2inqv6N4YYS5yUXR/g+ZoQxlqM0DWJOHWWtOtBEHV2QobydI3k04+A==
-
-expo-splash-screen@~55.0.21:
-  version "55.0.21"
-  resolved "https://registry.npmjs.org/expo-splash-screen/-/expo-splash-screen-55.0.21.tgz"
-  integrity sha512-hFGEap69ggCckbHIdDXMe5rqfBR9TwcnY5gBhyaACUxU64w827T6prOQcIvLmAdv00kp3Gqt7hgE+mNn37EF+A==
-  dependencies:
-    "@expo/prebuild-config" "^55.0.18"
 
 expo-sqlite@~55.0.10:
   version "55.0.10"
