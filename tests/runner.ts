@@ -61,6 +61,7 @@ import { session20260531F6aTests } from './catalogue/session-2026-05-31-f6a';
 import { session20260606Tests } from './catalogue/session-2026-06-06';
 import { session20260608Tests } from './catalogue/session-2026-06-08';
 import { session2026_06_09Tests } from './catalogue/session-2026-06-09';
+import { session2026_06_10Tests } from './catalogue/session-2026-06-10';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -157,6 +158,7 @@ const ALL_TESTS: TestCase[] = [
   ...session20260606Tests,
   ...session20260608Tests,
   ...session2026_06_09Tests,
+  ...session2026_06_10Tests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
