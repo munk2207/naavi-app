@@ -40,7 +40,6 @@
     "expo-updates": "~55.0.18",
     "expo-web-browser": "~55.0.14",
     "i18next": "^23.0.0",
-    "puppeteer": "^25.1.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-i18next": "^14.0.0",
