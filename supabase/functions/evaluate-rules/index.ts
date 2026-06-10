@@ -311,6 +311,8 @@ function findTimeTriggers(rule: ActionRule, now: Date): string[] {
 }
 
 // ── Calendar triggers ───────────────────────────────────────────────────────
+// Calls Google Calendar API live — no local calendar_items table exists.
+// Same pattern as naavi-chat's fetchLiveCalendarEvents.
 
 async function findCalendarTriggers(
   client: any,
@@ -324,8 +326,9 @@ async function findCalendarTriggers(
 
   if (!eventMatch) return [];
 
-  // Look for calendar events in the Google Calendar data stored in Supabase
-  // We check events starting within the trigger window
+  // The window of event start times we care about:
+  // 'before' → alert fires when event start is within [now, now+minutes]
+  // 'after'  → alert fires when event start was within [now-minutes, now]
   const windowStart = timing === 'before'
     ? now
     : new Date(now.getTime() - minutes * 60_000);
@@ -333,20 +336,83 @@ async function findCalendarTriggers(
     ? new Date(now.getTime() + minutes * 60_000)
     : now;
 
-  // Query calendar_items table for events matching the keyword
-  const { data: events, error } = await client
-    .from('calendar_items')
-    .select('id, title, start_time')
+  // Fetch Google access token from user_tokens
+  const { data: tokenRow } = await client
+    .from('user_tokens')
+    .select('refresh_token')
     .eq('user_id', rule.user_id)
-    .gte('start_time', windowStart.toISOString())
-    .lte('start_time', windowEnd.toISOString())
-    .limit(20);
+    .eq('provider', 'google')
+    .maybeSingle();
+  const refreshToken = tokenRow?.refresh_token as string | null;
+  if (!refreshToken) {
+    console.warn(`[evaluate-rules/calendar] No Google refresh token for user ${rule.user_id}`);
+    return [];
+  }
 
-  if (error || !events?.length) return [];
+  // Exchange refresh token for access token
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id:     Deno.env.get('GOOGLE_CLIENT_ID')     ?? '',
+      client_secret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '',
+      refresh_token: refreshToken,
+      grant_type:    'refresh_token',
+    }),
+  });
+  const tokenData = await tokenRes.json();
+  const accessToken = typeof tokenData?.access_token === 'string' ? tokenData.access_token : null;
+  if (!accessToken) {
+    console.warn(`[evaluate-rules/calendar] Failed to get Google access token for user ${rule.user_id}`);
+    return [];
+  }
 
-  return events
-    .filter((evt: any) => (evt.title ?? '').toLowerCase().includes(eventMatch))
-    .map((evt: any) => `cal_${evt.id}_${rule.id}`);
+  // Fetch events from all user calendars within the window
+  let calendarIds: string[] = [];
+  try {
+    const calListRes = await fetch(
+      'https://www.googleapis.com/calendar/v3/users/me/calendarList',
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (calListRes.ok) {
+      const calListData = await calListRes.json();
+      calendarIds = ((calListData?.items ?? []) as Array<{ id: string }>)
+        .map(c => c.id).filter(Boolean);
+    }
+  } catch { /* fall through to primary */ }
+  if (!calendarIds.length) calendarIds = ['primary'];
+
+  const allEvents: Array<{ id: string; summary: string; startTime: string }> = [];
+
+  await Promise.all(calendarIds.map(async (calId) => {
+    const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events`
+      + `?singleEvents=true&orderBy=startTime&maxResults=50`
+      + `&timeMin=${encodeURIComponent(windowStart.toISOString())}`
+      + `&timeMax=${encodeURIComponent(windowEnd.toISOString())}`;
+    try {
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!res.ok) return;
+      const data = await res.json();
+      for (const item of (data?.items ?? [])) {
+        const startTime = item.start?.dateTime ?? item.start?.date ?? '';
+        if (item.id && item.summary && startTime) {
+          allEvents.push({ id: item.id, summary: item.summary, startTime });
+        }
+      }
+    } catch { /* skip this calendar */ }
+  }));
+
+  // Dedup by event id (same event may appear on multiple calendars)
+  const seen = new Set<string>();
+  const unique = allEvents.filter(e => {
+    if (seen.has(e.id)) return false;
+    seen.add(e.id);
+    return true;
+  });
+
+  return unique
+    .filter(e => e.summary.toLowerCase().includes(eventMatch))
+    .map(e => `cal_${e.id}`);
 }
 
 // ── Weather triggers ────────────────────────────────────────────────────────

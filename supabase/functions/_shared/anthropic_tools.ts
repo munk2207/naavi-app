@@ -380,7 +380,7 @@ export const NAAVI_TOOLS: NaaviTool[] = [
       type: 'object',
       properties: {
         title: { type: 'string' },
-        datetime: { type: 'string', description: 'ISO 8601, must be future.' },
+        datetime: { type: 'string', description: 'ISO 8601 with timezone offset, America/Toronto (e.g. "2026-06-08T09:30:00-04:00"). Must be future. Never emit a naive datetime without an offset — the server compares against UTC and naive datetimes fire immediately.' },
         source: { type: 'string', description: 'Channel name (app/voice).' },
         phoneNumber: { type: 'string', description: "Default user's phone." },
         is_priority: { type: 'boolean' },
@@ -718,7 +718,7 @@ export const NAAVI_TOOLS: NaaviTool[] = [
   // 20. SPEND_SUMMARY
   {
     name: 'spend_summary',
-    description: 'Sum vendor invoices over a period and return one number per currency.',
+    description: 'Sum vendor charges or payments over a period and return one number per currency. Use mode="charged" (default) when the user asks what a vendor charged/billed them — counts invoices. Use mode="paid" when the user asks how much they paid/spent — counts receipts.',
     input_schema: {
       type: 'object',
       properties: {
@@ -735,6 +735,11 @@ export const NAAVI_TOOLS: NaaviTool[] = [
             'past week',
             'all time',
           ],
+        },
+        mode: {
+          type: 'string',
+          enum: ['charged', 'paid'],
+          description: '"charged" = invoices (what the vendor billed). "paid" = receipts (what left your account). Default is "charged".',
         },
       },
       required: ['vendor', 'period_label'],

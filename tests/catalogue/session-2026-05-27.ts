@@ -81,8 +81,8 @@ export const session2026_05_27Tests: TestCase[] = [
     id: 'b6d.prompt-version-bumped-to-v98',
     category: 'b6d',
     description:
-      'B6d/Nav-disambiguation — PROMPT_VERSION must be 2026-06-06-v105-numbered-lists-final-reminder (latest live version). ' +
-      'Updated from v101 → v102 when community two-phase search framing rule was added (2026-05-29).',
+      'B6d/Nav-disambiguation — PROMPT_VERSION must be 2026-06-09-v106-search-card-one-sentence (latest live version). ' +
+      'Updated from v105 → v106 when search-card one-sentence rule was strengthened (2026-06-09).',
     timeoutMs: 15_000,
     async run(ctx) {
       const { status, data } = await adapters.call(
@@ -92,8 +92,8 @@ export const session2026_05_27Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-06-06-v105-numbered-lists-final-reminder',
-        `Expected version "2026-06-06-v105-numbered-lists-final-reminder", got "${version}"`,
+        version === '2026-06-09-v106-search-card-one-sentence',
+        `Expected version "2026-06-09-v106-search-card-one-sentence", got "${version}"`,
       );
     },
   },

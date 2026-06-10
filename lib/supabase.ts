@@ -367,10 +367,36 @@ export async function saveReminder(reminder: {
     }
   }
 
+  // Safety net: if Claude emitted a naive datetime (no timezone suffix),
+  // treat it as America/Toronto and convert to UTC ISO. Without this,
+  // "2026-06-08T09:30:00" compares as < UTC now() and fires immediately.
+  let safeDateTime = reminder.datetime;
+  if (safeDateTime && !/[Zz]|[+-]\d{2}:\d{2}$/.test(safeDateTime)) {
+    // No timezone offset — assume America/Toronto (UTC-4 in summer, UTC-5 in winter).
+    // We use the JS Date + Intl trick: format the naive string as if it's Toronto time.
+    try {
+      const naive = new Date(safeDateTime + 'T00:00:00Z'); // parse date part
+      const timePart = safeDateTime.includes('T') ? safeDateTime.split('T')[1] : '00:00:00';
+      const datePart = safeDateTime.includes('T') ? safeDateTime.split('T')[0] : safeDateTime;
+      // Determine offset by checking DST: format a known Toronto date near the reminder.
+      const testDate = new Date(`${datePart}T12:00:00Z`);
+      const offset = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Toronto', timeZoneName: 'shortOffset',
+      }).formatToParts(testDate).find(p => p.type === 'timeZoneName')?.value ?? 'GMT-4';
+      // offset looks like "GMT-4" or "GMT-5"
+      const sign = offset.includes('-') ? '-' : '+';
+      const hours = offset.replace('GMT', '').replace('+','').replace('-','').padStart(2,'0');
+      safeDateTime = `${datePart}T${timePart}${sign}${hours}:00`;
+      console.log(`[Supabase] saveReminder: naive datetime corrected to ${safeDateTime}`);
+    } catch (err) {
+      console.error('[Supabase] saveReminder: timezone correction failed, using as-is:', err);
+    }
+  }
+
   const { error } = await queryWithTimeout(
     supabase.from('reminders').insert({
       title:        reminder.title,
-      datetime:     reminder.datetime,
+      datetime:     safeDateTime,
       source:       reminder.source,
       phone_number: phoneNumber || null,
       user_id:      userId ?? null,

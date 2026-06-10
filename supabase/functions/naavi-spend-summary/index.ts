@@ -172,6 +172,11 @@ serve(async (req) => {
     });
   }
 
+  // mode: 'charged' = count invoices (what vendor billed you)
+  //       'paid'    = count receipts (what actually left your account)
+  // Default is 'charged' — matches the natural question "how much did X charge me".
+  const mode: 'charged' | 'paid' = body?.mode === 'paid' ? 'paid' : 'charged';
+
   const tz: string = typeof body?.timezone === 'string' && body.timezone.length > 0 ? body.timezone : DEFAULT_TZ;
   // action_types is parsed but currently unused — the V2 source is
   // `documents` filtered by document_type. Kept in the contract for a
@@ -357,22 +362,29 @@ serve(async (req) => {
     const cents = typeof d.extracted_amount_cents === 'number' ? d.extracted_amount_cents : null;
     if (!cents || cents <= 0) { droppedNoAmount += 1; continue; }
 
-    // Document-type filter — RECEIPTS ONLY ("what the user actually paid").
+    // Document-type filter.
     //
-    // Why receipts and not invoices: vendors like Anthropic via Stripe send
-    // BOTH an invoice PDF (in vendor currency, USD) AND a receipt PDF (in
-    // the user's card currency, CAD) for the SAME charge. Counting both
-    // double-counts every transaction. Receipts are the canonical proof-
-    // of-payment record and reflect what actually came out of the card.
+    // mode='charged' (default) — count invoices: what the vendor billed.
+    //   File-name fallback: Stripe names invoice files "Invoice-*.pdf".
     //
-    // Haiku-misclassification fallback: extract-document-text occasionally
-    // labels a receipt as `other` (or null). When the file name starts
-    // with "Receipt" (Stripe convention), trust the file name over the
-    // type tag and count it.
+    // mode='paid' — count receipts: what actually left the user's account.
+    //   File-name fallback: Stripe names receipt files "Receipt-*.pdf".
+    //
+    // Vendors like Google only send invoices; vendors like Anthropic send
+    // both. Using mode='charged' correctly counts Google invoices and
+    // Anthropic invoices without double-counting (receipts are ignored).
     const dt = (d.document_type || '').toLowerCase();
     const fnLower = (d.file_name || '').toLowerCase();
-    const isReceipt = dt === 'receipt' || fnLower.startsWith('receipt');
-    if (!isReceipt) { droppedWrongType += 1; continue; }
+    let matchesMode: boolean;
+    if (mode === 'paid') {
+      matchesMode = dt === 'receipt' || fnLower.startsWith('receipt');
+    } else {
+      // charged: invoice type, or file name starts with Invoice, or no
+      // receipt/invoice prefix (plain numeric filenames like Google's)
+      matchesMode = dt === 'invoice' || fnLower.startsWith('invoice') ||
+        (!fnLower.startsWith('receipt') && (dt === 'invoice' || dt === 'other' || dt === ''));
+    }
+    if (!matchesMode) { droppedWrongType += 1; continue; }
 
     // Period filter — invoice date if extracted, else when we received it.
     const effectiveDateStr = d.extracted_date || d.created_at;
@@ -398,6 +410,7 @@ serve(async (req) => {
 
   const responsePayload: any = {
     vendor,
+    mode,
     period_label: resolvedLabel,
     period_start: periodStart,
     period_end: periodEnd,

@@ -1,20 +1,26 @@
 /**
- * Session 2026-06-09 — regression coverage for B4w mobile parity.
+ * Session 2026-06-09 — regression coverage for B4w + contacts address fix.
  *
- * B4w (mobile): naavi-chat had no bypass for contact attribute-search queries.
- * "Find a contact with postal code K1C5M3" would reach Claude (Haiku), which
- * fabricated contact names. The voice server had the bypass since 2026-05-27;
- * this session ports the same pattern to naavi-chat (Step 1.6).
+ * B4w (mobile): a server-side bypass was added to naavi-chat to prevent Claude
+ * fabricating contact names on postal-code queries. The bypass called
+ * global-search server-to-server, which timed out at 4 seconds and returned 0
+ * results — causing Naavi to say "I don't have a contact" when real contacts
+ * existed. The bypass was REMOVED from naavi-chat (2026-06-09) because the
+ * mobile orchestrator already runs global-search and passes real contact results
+ * to Claude before it answers — so the bypass was overriding correct results
+ * with a broken server-side call.
  *
- * Fix: naavi-chat Step 1.6 — detect Canadian postal-code contact queries,
- * call global-search contacts adapter server-side, return canonical honest-out
- * if 0 results. Zero LLM = zero confabulation.
+ * The voice server bypass is unaffected (voice has no orchestrator).
+ *
+ * contacts.ts fix (2026-06-09): addressTokenMatch was not matching postal codes
+ * stored in formattedValue with a space ("K1C 5M3") when the query arrived
+ * without a space ("K1C5M3"). Fixed by also comparing addrLower with spaces
+ * stripped against qNorm.
  *
  * Coverage gaps acknowledged (Rule 15a exception):
- *   B4w live round-trip: the bypass calls global-search which calls Google
- *   People API with the test user's token. A live test would need a contact
- *   with a known postal code. Covered here by static code check verifying
- *   the bypass block exists in naavi-chat; Wael verifies live on mobile.
+ *   Live round-trip postal-code search: requires a contact with a known postal
+ *   code in the test user's Google Contacts. Covered here by static code checks;
+ *   Wael verifies live on mobile.
  *
  * Run via `npm run test:auto`.
  */
@@ -30,42 +36,40 @@ const NAAVI_CHAT_PATH = join(
   'supabase', 'functions', 'naavi-chat', 'index.ts',
 );
 
+const CONTACTS_ADAPTER_PATH = join(
+  process.cwd(),
+  'supabase', 'functions', 'global-search', 'adapters', 'contacts.ts',
+);
+
 export const session2026_06_09Tests: TestCase[] = [
-  // ─── B4w mobile: bypass block exists in naavi-chat ─────────────────────────
+  // ─── B4w mobile: bypass removed from naavi-chat ────────────────────────────
   {
-    id: 'b4w.mobile-naavi-chat-has-postal-bypass',
-    description: 'naavi-chat has B4w contact postal-code bypass (Step 1.6)',
+    id: 'b4w.mobile-bypass-removed-from-naavi-chat',
+    description: 'naavi-chat does NOT contain the B4w postal-code bypass (removed 2026-06-09)',
     tags: ['b4w', 'trust', 'mobile-parity'],
     run: async () => {
       const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
       expectTruthy(
-        src.includes('B4w') && src.includes('POSTAL_RE') && src.includes('isContactAttrQuery'),
-        'naavi-chat must contain B4w postal-code bypass with POSTAL_RE + isContactAttrQuery'
-      );
-      expectTruthy(
-        src.includes("I don't have a contact with postal code"),
-        'naavi-chat must contain the canonical honest-out phrase for 0-result postal search'
+        !src.includes('B4w 2026-06-09'),
+        'naavi-chat must NOT contain the B4w bypass block — it was removed because the mobile orchestrator handles postal-code contact searches correctly'
       );
     },
   },
 
-  // ─── B4w mobile: bypass fires before Claude (Step 1.6 ordering) ─────────────
+  // ─── contacts.ts: addressTokenMatch handles space-stripped formattedValue ───
   {
-    id: 'b4w.mobile-bypass-before-claude',
-    description: 'naavi-chat B4w bypass is placed before the Claude call',
-    tags: ['b4w', 'trust', 'mobile-parity'],
+    id: 'b4w.contacts-adapter-addr-norm-fix',
+    description: 'contacts.ts addressTokenMatch uses addrNorm (space-stripped) for postal matching',
+    tags: ['b4w', 'contacts', 'address-match'],
     run: async () => {
-      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
-      // The main chat Claude call is at the second client.messages.create
-      // (first is classifyIntent helper). We verify the bypass string appears
-      // before the naavi-chat main handler's Claude call by checking it comes
-      // before the Step 2 comment that immediately precedes the main call.
-      const bypassIdx = src.indexOf('B4w 2026-06-09');
-      // Step 2 is the label just before the main Claude messages.create block
-      const step2Idx = src.indexOf('Step 2');
+      const src = readFileSync(CONTACTS_ADAPTER_PATH, 'utf8');
       expectTruthy(
-        bypassIdx > 0 && step2Idx > 0 && bypassIdx < step2Idx,
-        'B4w bypass block must appear before Step 2 (main Claude call) in naavi-chat'
+        src.includes('addrNorm') && src.includes('addrLower.replace(/\\s+/g,'),
+        'contacts.ts must strip spaces from formattedValue (addrNorm) before postal-code matching'
+      );
+      expectTruthy(
+        src.includes('addrNorm.includes(qNorm)'),
+        'contacts.ts must check addrNorm.includes(qNorm) to catch "K1C 5M3" in a full address string'
       );
     },
   },

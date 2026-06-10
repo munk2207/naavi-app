@@ -37,9 +37,10 @@ const CONTACT_GROUPS_API     = 'https://people.googleapis.com/v1/contactGroups';
 // Case-insensitive match — "MyNaavi", "mynaavi", "MYNAAVI" all work.
 const COMMUNITY_LABEL = 'mynaavi';
 
-// Cap on contacts fetched per source. Most users have < 500; more than that
-// would slow the search and the marginal hit rate is low.
-const MAX_CONTACTS_PER_SOURCE = 500;
+// No cap — fetch all pages until exhausted. Wael 2026-06-09: the 500-contact
+// cap was silently dropping contacts (e.g. "Wael Aggan") from search results.
+// The People API paginates at 1000/page; we loop until nextPageToken is gone.
+const MAX_CONTACTS_PER_SOURCE = Infinity;
 
 // Words that should never be treated as part of a contact name when the
 // query is tokenized. Wael 2026-05-22 — when Claude passed query="name Bob"
@@ -619,20 +620,27 @@ export const contactsAdapter: SearchAdapter = {
       // F2h — address/postal-code matching (Wael 2026-05-27).
       // Matches formattedValue, postalCode, and city against query tokens.
       // Postal codes are stripped of spaces before comparison ("K1A 0B1" → "k1a0b1").
+      // Bug fix 2026-06-09: formattedValue often contains the postal code with a
+      // space ("K1C 5M3"), but the query arrives without spaces ("K1C5M3"). The
+      // token "k1c5m3" never matched "k1c 5m3" via addrLower.includes(t).
+      // Fix: also compare addrLower with spaces stripped against qNorm.
       const addressTokenMatch = addresses.some(a => {
         const addrLower    = (a.formattedValue ?? '').toLowerCase();
+        const addrNorm     = addrLower.replace(/\s+/g, ''); // strip spaces for postal match
         const postalNorm   = (a.postalCode     ?? '').replace(/\s+/g, '').toLowerCase();
         const cityLower    = (a.city           ?? '').toLowerCase();
         const qNorm        = q.replace(/\s+/g, '').toLowerCase();
         // Direct postal-code match (strip spaces from both sides).
         if (postalNorm && qNorm.includes(postalNorm)) return true;
         if (postalNorm && postalNorm.includes(qNorm)) return true;
+        // Space-stripped formattedValue match — catches "K1C 5M3" in a full address string.
+        if (qNorm.length >= 6 && addrNorm.includes(qNorm)) return true;
         return (
           (tokens.size > 0 && [...tokens].some(t =>
-            addrLower.includes(t) || postalNorm.includes(t) || cityLower.includes(t),
+            addrLower.includes(t) || addrNorm.includes(t) || postalNorm.includes(t) || cityLower.includes(t),
           )) ||
           variants.some(v =>
-            addrLower.includes(v) || postalNorm.includes(v) || cityLower.includes(v),
+            addrLower.includes(v) || addrNorm.includes(v) || postalNorm.includes(v) || cityLower.includes(v),
           )
         );
       });

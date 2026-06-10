@@ -359,7 +359,23 @@ async function handleContacts(
     return wrap(`I could not find a contact named ${name} in your Google contacts.`);
   }
 
-  const person  = results[0].person;
+  // searchContacts does not reliably return phoneNumbers — fetch full record via batchGet.
+  const resourceName = results[0].person?.resourceName;
+  let person = results[0].person;
+  if (resourceName) {
+    try {
+      const batchUrl = new URL('https://people.googleapis.com/v1/people:batchGet');
+      batchUrl.searchParams.append('resourceNames', resourceName);
+      batchUrl.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers');
+      const batchRes = await fetch(batchUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (batchRes.ok) {
+        const batchData = await batchRes.json();
+        const full = batchData.responses?.[0]?.person;
+        if (full) person = full;
+      }
+    } catch (e) { /* fall back to searchContacts data */ }
+  }
+
   const fullName = person.names?.[0]?.displayName ?? name;
   const email    = person.emailAddresses?.[0]?.value;
   const phone    = person.phoneNumbers?.[0]?.value;

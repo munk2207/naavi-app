@@ -227,13 +227,48 @@ serve(async (req) => {
       .eq('user_id', user_id)
       .eq('gmail_message_id', gmail_message_id)
       .maybeSingle();
-    const documentTypeForFolder = actionRow?.document_type ?? 'other';
     const emailActionId = actionRow?.id ?? null;
+    // If email_actions has a classified document_type, use it.
+    // Otherwise fall back to filename-based detection — critical for vendors
+    // like Anthropic, Google, Bell that send PDF-only emails with empty body
+    // text (Claude never runs → no email_actions row → old code defaulted to
+    // 'other' for every attachment from these vendors).
+    const VALID_DOC_TYPES = new Set([
+      'invoice','receipt','warranty','contract','medical',
+      'statement','tax','ticket','notice','calendar','other',
+    ]);
+    function guessDocTypeFromFilename(filename: string): string {
+      const fn = filename.toLowerCase();
+      if (fn.startsWith('invoice') || fn.includes('-invoice-') || fn.includes('_invoice')) return 'invoice';
+      if (fn.startsWith('receipt') || fn.includes('-receipt-') || fn.includes('_receipt')) return 'receipt';
+      if (fn.startsWith('statement') || fn.startsWith('ebill') || fn.includes('_statement') || fn.includes('-statement')) return 'statement';
+      if (fn.startsWith('tax') || fn.includes('t4') || fn.includes('cra')) return 'tax';
+      if (fn.startsWith('warranty') || fn.includes('warranty')) return 'warranty';
+      if (fn.startsWith('contract') || fn.includes('agreement')) return 'contract';
+      if (fn.startsWith('medical') || fn.includes('lab') || fn.includes('prescription')) return 'medical';
+      if (fn.startsWith('ticket') || fn.includes('boarding') || fn.includes('itinerary')) return 'ticket';
+      if (fn.startsWith('notice')) return 'notice';
+      return 'other';
+    }
+    // Use email_action document_type when available and valid; else guess from filename.
+    // The per-attachment folder is determined per-leaf below so each file lands
+    // in the right subfolder independently.
+    const actionDocType = (actionRow?.document_type && VALID_DOC_TYPES.has(actionRow.document_type))
+      ? actionRow.document_type as string
+      : null;
 
-    // Ensure folder path MyNaavi/Documents/<category>/
-    const rootFolderId      = await findOrCreateFolder(accessToken, NAAVI_FOLDER_NAME);
-    const docsFolderId      = await findOrCreateFolder(accessToken, DOCUMENTS_FOLDER_NAME, rootFolderId);
-    const categoryFolderId  = await findOrCreateFolder(accessToken, documentTypeForFolder, docsFolderId);
+    // Ensure top-level folder path MyNaavi/Documents/ once — subfolders created per attachment.
+    const rootFolderId  = await findOrCreateFolder(accessToken, NAAVI_FOLDER_NAME);
+    const docsFolderId  = await findOrCreateFolder(accessToken, DOCUMENTS_FOLDER_NAME, rootFolderId);
+    // Cache subfolder IDs to avoid duplicate Drive API calls when multiple
+    // attachments in the same email go to the same subfolder.
+    const subfolderCache = new Map<string, string>();
+    async function getSubfolder(docType: string): Promise<string> {
+      if (subfolderCache.has(docType)) return subfolderCache.get(docType)!;
+      const id = await findOrCreateFolder(accessToken, docType, docsFolderId);
+      subfolderCache.set(docType, id);
+      return id;
+    }
 
     const processed: Array<Record<string, unknown>> = [];
     const skipped:   Array<Record<string, unknown>> = [];
@@ -303,10 +338,17 @@ serve(async (req) => {
         continue;
       }
 
+      // Determine this attachment's document type:
+      // 1. email_actions row (most authoritative — Claude classified it)
+      // 2. filename-based detection (catches Invoice-/Receipt-/EBill- etc.)
+      // 3. fallback 'other'
+      const leafDocType = actionDocType ?? guessDocTypeFromFilename(leaf.filename);
+      const leafFolderId = await getSubfolder(leafDocType);
+
       // Upload to Drive
       let uploaded: { id: string; webViewLink?: string };
       try {
-        uploaded = await uploadToDrive(accessToken, categoryFolderId, leaf.filename, leaf.mime_type, bytes);
+        uploaded = await uploadToDrive(accessToken, leafFolderId, leaf.filename, leaf.mime_type, bytes);
       } catch (err) {
         skipped.push({ ...leaf, reason: `drive_upload_failed: ${err instanceof Error ? err.message : String(err)}` });
         continue;
@@ -322,7 +364,7 @@ serve(async (req) => {
           file_name: leaf.filename,
           mime_type: leaf.mime_type,
           size_bytes: leaf.size_bytes,
-          document_type: documentTypeForFolder,
+          document_type: leafDocType,
           drive_file_id: uploaded.id,
           drive_web_view_link: uploaded.webViewLink ?? null,
           source: 'gmail_attachment',

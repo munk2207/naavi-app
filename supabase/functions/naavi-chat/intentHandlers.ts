@@ -192,13 +192,36 @@ async function _lookupContactsFromGoogle(
       if (res2.ok) results = ((await res2.json())?.results ?? []) as any[];
     }
 
+    // searchContacts does not reliably return phoneNumbers — fetch full records via batchGet.
+    const resourceNames = results.map((r: any) => r.person?.resourceName).filter(Boolean);
+    const fullPersonMap: Record<string, any> = {};
+    if (resourceNames.length > 0) {
+      try {
+        const batchUrl = new URL('https://people.googleapis.com/v1/people:batchGet');
+        for (const rn of resourceNames) batchUrl.searchParams.append('resourceNames', rn);
+        batchUrl.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers');
+        const batchRes = await fetch(batchUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (batchRes.ok) {
+          const batchData = await batchRes.json();
+          for (const entry of batchData.responses ?? []) {
+            const p = entry.person;
+            if (p?.resourceName) fullPersonMap[p.resourceName] = p;
+          }
+        }
+      } catch (e) { /* fall back to searchContacts data */ }
+    }
+
     return results
-      .map((r: any) => ({
-        name:         r.person?.names?.[0]?.displayName ?? '',
-        email:        r.person?.emailAddresses?.[0]?.value ?? '',
-        phone:        r.person?.phoneNumbers?.[0]?.value ?? '',
-        resourceName: r.person?.resourceName ?? '',
-      }))
+      .map((r: any) => {
+        const rn = r.person?.resourceName ?? '';
+        const person = fullPersonMap[rn] ?? r.person ?? {};
+        return {
+          name:         person.names?.[0]?.displayName ?? '',
+          email:        person.emailAddresses?.[0]?.value ?? '',
+          phone:        person.phoneNumbers?.[0]?.value ?? '',
+          resourceName: rn,
+        };
+      })
       .filter((c: ContactResult) => c.name);
   } catch (err) {
     console.error('[handleLookupContact] Google API error:', (err as Error)?.message);

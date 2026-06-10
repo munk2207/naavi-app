@@ -143,6 +143,23 @@ serve(async (req) => {
     console.log(`[lookup-contact] API response:`, JSON.stringify(data).slice(0, 300));
     let results = data.results ?? [];
 
+    // Filter: prefer exact first-name matches over prefix matches.
+    // "Sami" should not return Samiha and Samir — those start with the same
+    // letters but are different names. Only fall back to partial matches when
+    // no exact match exists.
+    if (results.length > 1) {
+      const queryFirst = name.trim().split(/\s+/)[0].toLowerCase();
+      const exactMatches = results.filter((r: any) => {
+        const displayName = String(r.person?.names?.[0]?.displayName ?? '').toLowerCase();
+        const firstName = displayName.split(/\s+/)[0];
+        return firstName === queryFirst;
+      });
+      if (exactMatches.length > 0) {
+        results = exactMatches;
+        console.log(`[lookup-contact] Filtered to ${results.length} exact first-name match(es) for "${queryFirst}"`);
+      }
+    }
+
     // Sort: MyNaavi-labeled contacts first.
     if (myNaaviGroupResource && results.length > 1) {
       results = results.sort((a: any, b: any) => {
@@ -162,11 +179,55 @@ serve(async (req) => {
     // They never have addresses and should never be used for possessive
     // address resolution ("James home"). If not in real contacts → not found.
 
+    // Phonetic fallback: if exact name returns 0 results, retry with a
+    // 5-char prefix. Covers Claude normalizing spoken names before calling
+    // lookup (e.g. "Fatma" → "Fatima" — prefix "Fatim"/"Fatma" → "Fatm" finds both).
+    if (results.length === 0 && name.trim().length >= 4) {
+      // Use first word only — avoids mangled multi-word strings like "fatma Fatma"
+      const firstName = name.trim().split(/\s+/)[0];
+      const prefix = firstName.slice(0, 5);
+      console.log(`[lookup-contact] No results for "${name}" — retrying with prefix "${prefix}"`);
+      const url2 = new URL(PEOPLE_API);
+      url2.searchParams.set('query', prefix);
+      url2.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers,addresses,memberships');
+      url2.searchParams.set('pageSize', '10');
+      const res2 = await fetch(url2.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (res2.ok) {
+        const data2 = await res2.json();
+        results = data2.results ?? [];
+        console.log(`[lookup-contact] Prefix fallback "${prefix}" → ${results.length} result(s)`);
+      }
+    }
+
     if (results.length === 0) {
       console.log(`[lookup-contact] No results found for "${name}"`);
       return new Response(JSON.stringify({ contact: null, contacts: [] }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // searchContacts returns limited fields — phoneNumbers is unreliable from
+    // that endpoint. Fetch full contact data for each result via people/get
+    // using the resource name, which reliably returns all personFields.
+    const resourceNames = results.map((r: any) => r.person?.resourceName).filter(Boolean);
+    let fullPersonMap: Record<string, any> = {};
+    if (resourceNames.length > 0) {
+      try {
+        const getUrl = new URL('https://people.googleapis.com/v1/people:batchGet');
+        for (const rn of resourceNames) getUrl.searchParams.append('resourceNames', rn);
+        getUrl.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers,addresses,memberships');
+        const getRes = await fetch(getUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (getRes.ok) {
+          const getData = await getRes.json();
+          for (const entry of getData.responses ?? []) {
+            const p = entry.person;
+            if (p?.resourceName) fullPersonMap[p.resourceName] = p;
+          }
+          console.log(`[lookup-contact] batchGet returned ${Object.keys(fullPersonMap).length} full contact(s)`);
+        }
+      } catch (e) {
+        console.warn('[lookup-contact] batchGet failed, falling back to searchContacts data:', e);
+      }
     }
 
     // Map all matches into Contact shape. Caller picks best (single match) or
@@ -179,7 +240,8 @@ serve(async (req) => {
     // separate Places lookup. Empty array if the contact has no addresses
     // (most do not).
     const contacts = results.map((r: any) => {
-      const person = r.person ?? {};
+      const resourceName = r.person?.resourceName;
+      const person = (resourceName && fullPersonMap[resourceName]) ?? r.person ?? {};
       const addrs = Array.isArray(person.addresses) ? person.addresses : [];
       const memberships = Array.isArray(person.memberships) ? person.memberships : [];
       const isMyNaavi = myNaaviGroupResource

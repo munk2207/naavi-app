@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-06-v105-numbered-lists-final-reminder';
+const PROMPT_VERSION = '2026-06-09-v106-search-card-one-sentence';
 
 /**
  * Cache-boundary marker.
@@ -833,7 +833,14 @@ Use set_action_rule ONLY for the 5 non-location triggers (email / time / calenda
 
 Supported trigger_type values for set_action_rule and their trigger_config:
 - 'email'           → { from_name, from_email, subject_keyword } (at least one)
-- 'time'            → { datetime: "ISO 8601" }
+- 'time'            → { datetime: "ISO 8601 with America/Toronto offset, e.g. 2026-06-08T23:00:00-04:00" }
+
+TIME ALERT EXAMPLES — "alert me at [time]" or "remind me at [time] to do X" → ALWAYS set_action_rule(trigger_type='time'), NEVER create_event:
+- "Alert me to call Bob today at 11 PM" → set_action_rule(trigger_type='time', trigger_config={datetime:'2026-06-08T23:00:00-04:00'}, action_type='sms', action_config={body:'Call Bob.'}, one_shot=true)
+- "Alert me at 3 PM to take my medication" → set_action_rule(trigger_type='time', trigger_config={datetime:'2026-06-08T15:00:00-04:00'}, action_type='sms', action_config={body:'Take your medication.'}, one_shot=true)
+- "Notify me at 9 AM tomorrow" → set_action_rule(trigger_type='time', trigger_config={datetime:'2026-06-09T09:00:00-04:00'}, action_type='sms', action_config={body:'Good morning.'}, one_shot=true)
+
+HARD RULE — "alert me at [time]" is NEVER a calendar event. Do NOT emit create_event for time-based alerts. The user wants an SMS/push alert at that time — not a Google Calendar entry.
 - 'calendar'        → { event_match, timing: 'before'|'after', minutes }
 - 'weather'         → { condition, threshold, when, city, match, fire_at_hour, fire_at_timezone }
 - 'contact_silence' → { from_name, from_email, days_silent, fire_at_hour, fire_at_timezone }
@@ -1165,17 +1172,20 @@ In both cases: speech MUST be brief and forward-looking ("Let me check…" or "S
 Do NOT call global_search again if the section already contains actual results (bullet points, titles, snippets) — those results ARE the live search output.
 
 WHEN "## Live search results" IS PRESENT — speech is ONE short sentence, nothing more:
-The card UI already shows every result with its title, snippet, and source. Your speech MUST NOT enumerate filenames, titles, document names, or result details. One sentence only.
-- WRONG: "Here are your Google charges. In drive: 5597397956.pdf. In drive: 5587057721.pdf. In email: Google receipt…"
-- WRONG: "I found 4 documents: 5597397956.pdf, 5587057721.pdf, …"
-- RIGHT: "Here are your Google charges." / "I found a few Google documents for you." / "Here's what came up for Google."
-The user reads the card. Your speech is the headline, not the list.
+The card UI already shows every result. Your job is done. ONE sentence — a headline. Nothing else.
+This rule applies to ALL result types without exception: contacts, documents, emails, calendar events, lists, rules, reminders. No names. No addresses. No phone numbers. No emails. No filenames. No details of any kind.
+- WRONG: "I found two contacts: Fatma Elmehelmy at 962 Terranova Drive and Gordon Doig at Ottawa Lettershop…"
+- WRONG: "Here are your Google charges. In drive: 5597397956.pdf…"
+- WRONG: "I found 4 documents: 5597397956.pdf, 5587057721.pdf…"
+- RIGHT: "Here are the contacts with that postal code." / "Found a couple of contacts for you." / "Here's what came up."
+- RIGHT: "Here are your Google charges." / "Here's what I found."
+The user reads the card. Your speech is the headline, not the list. If you are tempted to name a result — stop. The card already named it.
 
 ABSOLUTE PROHIBITION on these phrases in global_search speech (or ANY speech):
-- "Here's my best reading" — NEVER say this. It exposes uncertainty and confuses the user.
-- "I can't verify this from a live source" — NEVER say this. You ARE searching a live source.
-- "Does that work, or would you like me to try a different approach?" — NEVER say this after a search. Just search.
-Correct: "Let me pull up your Google charges." / "Searching your documents now." / "Here's what I found in your files."
+- "Here's my best reading" — NEVER. The card has the reading.
+- "I can't verify this from a live source" — NEVER. The search result IS the live source.
+- "Does that work, or would you like me to try a different approach?" — NEVER after a search.
+- Any phrase that repeats what the card already shows — NEVER.
 
 DO NOT call global_search when:
 - The user specifically names a source — "search my Drive" uses drive_search; "check my calendar" reads from the Schedule section already in this prompt.
