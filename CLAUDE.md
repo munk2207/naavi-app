@@ -364,8 +364,9 @@ A short-lived 2026-05-16 suspension related to an Expo build error was removed 2
    - Uploads APK to GCS bucket `mynaavi-testlab-uploads` → submits test matrix
    - Devices: Pixel 6 (Android 13) + Samsung Galaxy S22 (Android 14)
    - Polls every 30 seconds; sends SMS to +1 613 769 7957 when done
-3. **Wait for SMS: ✅ PASSED** before building the production AAB
-4. If any device shows ❌ FAILED — investigate and fix before building production
+3. **After receiving the SMS, ALWAYS verify the result directly in the Firebase Test Lab console: https://console.firebase.google.com/project/naavi-490516/testlab** — open the latest matrix and confirm ALL devices show ✅ (green checkmark). Do NOT trust the SMS alone. The SMS can say "PASSED" while the Test Lab page shows "2 devices failed." The Test Lab console result is ground truth.
+4. Only proceed to production AAB if the Test Lab console shows ALL devices passed with no failures.
+5. If any device shows ❌ FAILED — investigate and fix before building production
 
 **Before running step 3:** update the GCS filename in `scripts/submit-firebase-test.js` to match the actual build version (currently hardcoded as `naavi-v205.apk`).
 
