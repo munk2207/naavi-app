@@ -1672,6 +1672,54 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── Step 1.6 (B4w 2026-06-09): contact attribute-search bypass ───────────────
+    // Bug: "Find a contact with postal code K1C5M3" → Claude fabricates names.
+    // Fix: detect postal-code contact queries, run global-search server-side,
+    // return honest-out if 0 results. Zero LLM = zero confabulation.
+    // Voice server has had this bypass since 2026-05-27; this is mobile parity.
+    {
+      const POSTAL_RE = /\b([A-Z][0-9][A-Z]\s?[0-9][A-Z][0-9])\b/i;
+      const postalMatch = userText.match(POSTAL_RE);
+      const isContactAttrQuery =
+        /\bcontact\b/i.test(userText) ||
+        /\bwho\s+lives?\b/i.test(userText) ||
+        /\bfind\b.*\bpostal\b/i.test(userText) ||
+        /\bpostal\s+code\b/i.test(userText);
+
+      if (postalMatch && isContactAttrQuery) {
+        const postalCode = postalMatch[1].replace(/\s+/g, '').toUpperCase();
+        console.log(`[naavi-chat] B4w BYPASS: contact postal-code search for "${postalCode}"`);
+        try {
+          const gsRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/global-search`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+            },
+            body: JSON.stringify({ query: postalCode, user_id: userId, source_hint: 'contacts', limit: 10 }),
+          });
+          if (gsRes.ok) {
+            const gsData = await gsRes.json();
+            const hits = Array.isArray(gsData?.results) ? gsData.results : [];
+            const contactHits = hits.filter((h: any) => h.source === 'contacts');
+            let speech: string;
+            if (contactHits.length === 0) {
+              speech = `I don't have a contact with postal code ${postalCode.split('').join(' ')}.`;
+              console.log(`[naavi-chat] B4w BYPASS: no contact found for postal "${postalCode}"`);
+            } else {
+              const names = contactHits.map((h: any) => h.title).filter(Boolean);
+              const namePart = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+              speech = `Found ${contactHits.length === 1 ? 'one contact' : contactHits.length + ' contacts'} at postal code ${postalCode.split('').join(' ')}. ${namePart}.`;
+              console.log(`[naavi-chat] B4w BYPASS: found contacts: ${names.join(', ')}`);
+            }
+            return jsonResponse({ rawText: JSON.stringify({ speech, display: speech, actions: [], pendingThreads: [] }) });
+          }
+        } catch (err: any) {
+          console.error(`[naavi-chat] B4w BYPASS failed, falling through to Claude:`, err.message);
+        }
+      }
+    }
+
     // ── Step 1.4: Low-confidence intent confirmation resolver ─────────────────────
     // When the previous assistant turn asked "I think you're asking me to X — is that
     // right?" (low-confidence Layer 2), and Robert replies with yes or no, execute
