@@ -52,6 +52,11 @@
     },
     "plugins": [
       "expo-router",
+      ["expo-splash-screen", {
+        "backgroundColor": "#0D0D0D",
+        "image": "./assets/splash.png",
+        "resizeMode": "contain"
+      }],
       "expo-secure-store",
       "expo-sqlite",
       "expo-localization",
