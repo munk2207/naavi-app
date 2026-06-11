@@ -564,6 +564,13 @@ export const contactsAdapter: SearchAdapter = {
 
     console.log(`[contacts-adapter] searching ${all.length} contacts for "${q}" (tokens: ${[...tokens].join(',') || '∅'})`);
 
+    // Compute postalInQuery once for the whole search (not per contact).
+    const postalInQuery = (() => {
+      const qn = q.replace(/\s+/g, '').toLowerCase();
+      const m = qn.match(/([a-z]\d[a-z])(\d[a-z]\d)/);
+      return m ? m[1] + m[2] : null;
+    })();
+
     // ── 3. Score every contact, keep anything with a real match ────────────
     // Score: name 1.0, phone 0.85, email 0.7. Same weights as the old
     // Supabase adapter so mobile UI grouping stays consistent.
@@ -625,14 +632,6 @@ export const contactsAdapter: SearchAdapter = {
       // token "k1c5m3" never matched "k1c 5m3" via addrLower.includes(t).
       // Fix: also compare addrLower with spaces stripped against qNorm.
       // Bug fix 2026-06-11 (B7d): when query contains "K1C 5M3" (with space),
-      // tokensFromVariants splits it into ["k1c","5m3"]. Token "k1c" then matches
-      // every contact in that forward sortation area via postalNorm.includes("k1c").
-      // Fix: detect a Canadian postal code in the query and use ONLY the normalized
-      // exact match — never fall through to the broad token fallback.
-      const postalInQuery = (() => {
-        const m = q.match(/\b([A-Za-z]\d[A-Za-z])\s?(\d[A-Za-z]\d)\b/);
-        return m ? (m[1] + m[2]).toLowerCase() : null;
-      })();
       const addressTokenMatch = addresses.some(a => {
         const addrLower    = (a.formattedValue ?? '').toLowerCase();
         const addrNorm     = addrLower.replace(/\s+/g, ''); // strip spaces for postal match

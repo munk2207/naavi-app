@@ -25,6 +25,11 @@ const CONTACTS_ADAPTER_PATH = join(
   'supabase', 'functions', 'global-search', 'adapters', 'contacts.ts',
 );
 
+const GLOBAL_SEARCH_INDEX_PATH = join(
+  process.cwd(),
+  'supabase', 'functions', 'global-search', 'index.ts',
+);
+
 export const session2026_06_11Tests: TestCase[] = [
   {
     id: 'b7d.postal-code-regex-gate-present',
@@ -37,8 +42,8 @@ export const session2026_06_11Tests: TestCase[] = [
         'contacts adapter must define postalInQuery to detect postal code in query',
       );
       expectTruthy(
-        src.includes('[A-Za-z]\\d[A-Za-z]'),
-        'contacts adapter must use Canadian postal code regex ([A-Za-z]\\d[A-Za-z])',
+        src.includes('[a-z]\\d[a-z]') || src.includes('[A-Za-z]\\d[A-Za-z]'),
+        'contacts adapter must use Canadian postal code regex ([a-z]\\d[a-z] or [A-Za-z]\\d[A-Za-z])',
       );
     },
   },
@@ -102,6 +107,23 @@ export const session2026_06_11Tests: TestCase[] = [
       expectTruthy(
         normalize('K1A 0B1') !== extractFromQuery(q1),
         '"K1A 0B1" must NOT match a "K1C 5M3" query',
+      );
+    },
+  },
+  {
+    id: 'b4w.anchor-filter-normalizes-spaces',
+    description: 'B4w: anchor-term filter in index.ts strips spaces when matching anchor words against result snippets',
+    tags: ['b4w', 'global-search', 'postal-code'],
+    run: async () => {
+      const src = readFileSync(GLOBAL_SEARCH_INDEX_PATH, 'utf8');
+      // The fix: hayNorm and space-stripped anchor comparison must be present.
+      expectTruthy(
+        src.includes('hayNorm'),
+        'index.ts anchor filter must define hayNorm (space-stripped hay)',
+      );
+      expectTruthy(
+        src.includes('hayNorm.includes(a.replace'),
+        'index.ts anchor filter must check hayNorm against space-stripped anchor word',
       );
     },
   },

@@ -330,7 +330,8 @@ Deno.serve(async (req) => {
       const anchorMatch = (r: SearchResult): boolean => {
         const vendor = (r.metadata as any)?.vendor ?? '';
         const hay = ((r.title ?? '') + ' ' + (r.snippet ?? '') + ' ' + vendor).toLowerCase();
-        return anchorWords.some(a => hay.includes(a));
+        const hayNorm = hay.replace(/\s+/g, '');
+        return anchorWords.some(a => hay.includes(a) || hayNorm.includes(a.replace(/\s+/g, '')));
       };
       for (const src of Object.keys(byGroup)) {
         byGroup[src].results = byGroup[src].results.filter(anchorMatch);
