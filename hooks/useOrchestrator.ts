@@ -342,6 +342,7 @@ async function reArmLocationRule(
     address?: string | null;
     radius_meters?: number;
     one_shot?: boolean;
+    action_config?: Record<string, any>;
   },
 ): Promise<{ success: boolean; speech: string; ruleId: string | null }> {
   const baseTriggerConfig = existingRule?.trigger_config ?? {};
@@ -351,6 +352,11 @@ async function reArmLocationRule(
     ...(updates?.address !== undefined ? { address: updates.address } : {}),
     ...(updates?.radius_meters !== undefined ? { radius_meters: updates.radius_meters } : {}),
   };
+  // Merge new action_config over existing — preserves to_phone/to_email from
+  // the original rule while applying any new body/note from this request.
+  const mergedActionConfig = updates?.action_config
+    ? { ...(existingRule?.action_config ?? {}), ...updates.action_config }
+    : undefined;
   const newOneShot = updates?.one_shot ?? (existingRule?.one_shot === true);
   const placeName = String(mergedTriggerConfig.place_name ?? 'that place');
   const addrSuffix = mergedTriggerConfig.address
@@ -368,6 +374,7 @@ async function reArmLocationRule(
           last_exited_at:   null,
           one_shot:         newOneShot,
           trigger_config:   mergedTriggerConfig,
+          ...(mergedActionConfig ? { action_config: mergedActionConfig } : {}),
         })
         .eq('id', existingRule.id),
       10_000,
@@ -1032,6 +1039,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                   ?? (pending.originalAction?.trigger_config as any)?.radius_meters
                   ?? 300,
                 one_shot:      pending.originalAction?.one_shot ?? (dupe.one_shot === true),
+                action_config: pending.originalAction?.action_config as Record<string, any> | undefined,
               });
               if (!armResult.success) {
                 return { ok: false, ruleId: null };
@@ -3101,6 +3109,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                             address:       data.address ?? null,
                             radius_meters: data.radius_meters ?? (action.trigger_config as any)?.radius_meters ?? 300,
                             one_shot:      action.one_shot ?? (dupe.one_shot === true),
+                            action_config: action.action_config as Record<string, any> | undefined,
                           });
                           turnSpeechOverride = armResult.speech;
                           if (armResult.success) {

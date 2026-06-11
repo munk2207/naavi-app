@@ -121,6 +121,49 @@ export const session2026_06_11Tests: TestCase[] = [
       );
     },
   },
+  // ── Re-arm preserves new action_config note — 2026-06-11 ─────────────────
+  {
+    id: 'rearm.action-config-param-present',
+    description: 'reArmLocationRule accepts action_config param and merges it into the DB update',
+    tags: ['rearm', 'location', 'action-config'],
+    run: async () => {
+      const src = readFileSync(
+        join(process.cwd(), 'hooks', 'useOrchestrator.ts'),
+        'utf8',
+      );
+      // The function signature must include action_config
+      expectTruthy(
+        src.includes('action_config?: Record<string, any>'),
+        'reArmLocationRule must accept action_config in its updates param',
+      );
+      // The merge must spread existing over new
+      expectTruthy(
+        src.includes('mergedActionConfig') && src.includes('existingRule?.action_config'),
+        'reArmLocationRule must merge new action_config over existing rule action_config',
+      );
+      // The DB update must include the merged config when present
+      expectTruthy(
+        src.includes('mergedActionConfig ? { action_config: mergedActionConfig }'),
+        'reArmLocationRule DB update must include mergedActionConfig when provided',
+      );
+    },
+  },
+  {
+    id: 'rearm.picker-callsite-passes-action-config',
+    description: 'Picker re-arm call site passes originalAction.action_config to reArmLocationRule',
+    tags: ['rearm', 'location', 'picker'],
+    run: async () => {
+      const src = readFileSync(
+        join(process.cwd(), 'hooks', 'useOrchestrator.ts'),
+        'utf8',
+      );
+      expectTruthy(
+        src.includes('action_config: pending.originalAction?.action_config'),
+        'Picker re-arm call site must pass pending.originalAction.action_config',
+      );
+    },
+  },
+
   // ── Soft-delete (deactivate) alerts — 2026-06-11 ──────────────────────────
   {
     id: 'soft-delete.manage-rules-has-deactivate-op',
