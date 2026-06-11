@@ -1,5 +1,6 @@
 /**
- * Session 2026-06-11 — regression coverage for B7d (postal code search format mismatch).
+ * Session 2026-06-11 — regression coverage for B7d (postal code search format mismatch)
+ * and soft-delete / deactivate alerts (new bug 2026-06-11).
  *
  * B7d: Contact postal-code search failed when query format differed from stored format.
  * - "K1C5M3" (no space) failed to find contacts stored as "K1C 5M3"
@@ -16,6 +17,16 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+const MANAGE_RULES_PATH = join(
+  process.cwd(),
+  'supabase', 'functions', 'manage-rules', 'index.ts',
+);
+
+const ALERTS_SCREEN_PATH = join(
+  process.cwd(),
+  'app', 'alerts.tsx',
+);
 
 import { expectTruthy } from '../lib/assertions';
 import type { TestCase } from '../lib/types';
@@ -110,6 +121,76 @@ export const session2026_06_11Tests: TestCase[] = [
       );
     },
   },
+  // ── Soft-delete (deactivate) alerts — 2026-06-11 ──────────────────────────
+  {
+    id: 'soft-delete.manage-rules-has-deactivate-op',
+    description: 'manage-rules Edge Function has deactivate op that sets enabled=false',
+    tags: ['soft-delete', 'alerts', 'manage-rules'],
+    run: async () => {
+      const src = readFileSync(MANAGE_RULES_PATH, 'utf8');
+      expectTruthy(
+        src.includes("op: 'deactivate'") || src.includes('op === \'deactivate\'') || src.includes('body.op === \'deactivate\''),
+        'manage-rules must handle op=deactivate',
+      );
+      expectTruthy(
+        src.includes('enabled: false'),
+        'manage-rules deactivate must set enabled=false',
+      );
+    },
+  },
+  {
+    id: 'soft-delete.alerts-screen-calls-deactivate-not-delete',
+    description: 'alerts.tsx confirmDelete calls op=deactivate (soft-disable) not op=delete',
+    tags: ['soft-delete', 'alerts'],
+    run: async () => {
+      const src = readFileSync(ALERTS_SCREEN_PATH, 'utf8');
+      expectTruthy(
+        src.includes("op: 'deactivate'"),
+        'alerts.tsx confirmDelete must call manage-rules with op=deactivate',
+      );
+      // The old hard-delete path must not be used in confirmDelete.
+      // (op: 'delete' may still appear in comments — check no bare object literal)
+      const confirmDeleteBlock = src.slice(src.indexOf('const confirmDelete'), src.indexOf('const confirmDelete') + 800);
+      expectTruthy(
+        !confirmDeleteBlock.includes("op: 'delete'"),
+        'alerts.tsx confirmDelete must NOT use op=delete (hard delete)',
+      );
+    },
+  },
+  {
+    id: 'soft-delete.alerts-screen-keeps-row-on-disable',
+    description: 'alerts.tsx sets enabled=false on the row instead of filtering it out',
+    tags: ['soft-delete', 'alerts'],
+    run: async () => {
+      const src = readFileSync(ALERTS_SCREEN_PATH, 'utf8');
+      expectTruthy(
+        src.includes('enabled: false'),
+        'alerts.tsx must update the row to enabled=false after deactivate',
+      );
+      const confirmDeleteBlock = src.slice(src.indexOf('const confirmDelete'), src.indexOf('const confirmDelete') + 800);
+      expectTruthy(
+        !confirmDeleteBlock.includes('.filter(r => r.id !== deleted.id)'),
+        'alerts.tsx confirmDelete must NOT filter out the row (row must stay greyed)',
+      );
+    },
+  },
+  {
+    id: 'soft-delete.modal-text-updated',
+    description: 'alerts.tsx modal says "Disable alert?" not "Delete alert?"',
+    tags: ['soft-delete', 'alerts'],
+    run: async () => {
+      const src = readFileSync(ALERTS_SCREEN_PATH, 'utf8');
+      expectTruthy(
+        src.includes('Disable alert?'),
+        'alerts.tsx modal title must say "Disable alert?"',
+      );
+      expectTruthy(
+        src.includes('You can reactivate it any time'),
+        'alerts.tsx modal sub-text must say "You can reactivate it any time."',
+      );
+    },
+  },
+
   {
     id: 'b4w.anchor-filter-normalizes-spaces',
     description: 'B4w: anchor-term filter in index.ts strips spaces when matching anchor words against result snippets',

@@ -579,18 +579,19 @@ export default function AlertsScreen() {
       if (!supabase) throw new Error('No Supabase client');
       const deleted = pendingDelete;
       const { error: err } = await invokeWithTimeout('manage-rules', {
-        body: { op: 'delete', rule_id: deleted.id },
+        body: { op: 'deactivate', rule_id: deleted.id },
       }, 15_000);
       if (err) throw err;
-      setRules(prev => prev.filter(r => r.id !== deleted.id));
+      // Soft-disable: keep the row visible greyed with Reactivate button.
+      setRules(prev => prev.map(r => r.id === deleted.id ? { ...r, enabled: false } : r));
       setPendingDelete(null);
 
       // B2l fix (2026-05-19) — re-sync the Transistorsoft SDK so the
-      // deleted rule's geofence is removed from the device. Without
+      // disabled rule's geofence is removed from the device. Without
       // this, the SDK keeps the geofence registered and fires orphan
       // ENTER events that the server rejects silently at T1
       // (geofence-T1-rule-lookup-null). Only worth re-syncing for
-      // location rules; non-location deletes are a no-op for the SDK.
+      // location rules; non-location disables are a no-op for the SDK.
       if (deleted.trigger_type === 'location') {
         getSessionWithTimeout()
           .then(session => {
@@ -599,7 +600,7 @@ export default function AlertsScreen() {
               syncGeofencesForUser(session.user.id),
             );
           })
-          .catch(err => console.error('[alerts] sync after delete failed:', err));
+          .catch(err => console.error('[alerts] sync after disable failed:', err));
       }
     } catch (e: unknown) {
       setError(formatErrorForUser(e));
@@ -831,7 +832,7 @@ export default function AlertsScreen() {
                             onPress={() => setPendingDelete(rule)}
                           >
                             <Ionicons name="trash" size={16} color="#fff" />
-                            <Text style={styles.deleteBtnText}>Delete alert</Text>
+                            <Text style={styles.deleteBtnText}>Disable alert</Text>
                           </TouchableOpacity>
                         </View>
                       </View>
@@ -854,11 +855,11 @@ export default function AlertsScreen() {
       >
         <Pressable style={styles.modalBackdrop} onPress={() => !deleting && setPendingDelete(null)}>
           <Pressable style={styles.modalCard} onPress={e => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Delete alert?</Text>
+            <Text style={styles.modalTitle}>Disable alert?</Text>
             <Text style={styles.modalBody}>
               {pendingDelete ? formatTriggerSummary(pendingDelete) : ''}
             </Text>
-            <Text style={styles.modalSub}>This can't be undone.</Text>
+            <Text style={styles.modalSub}>You can reactivate it any time.</Text>
             <View style={styles.modalBtnRow}>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnSecondary]}
@@ -874,7 +875,7 @@ export default function AlertsScreen() {
               >
                 {deletingId === pendingDelete?.id
                   ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={styles.modalBtnDangerText}>Delete</Text>}
+                  : <Text style={styles.modalBtnDangerText}>Disable</Text>}
               </TouchableOpacity>
             </View>
           </Pressable>

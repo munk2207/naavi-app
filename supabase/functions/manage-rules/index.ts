@@ -33,11 +33,12 @@ const corsHeaders = {
 
 interface ListRequest        { op: 'list';        user_id?: string; }
 interface DeleteRequest      { op: 'delete';      user_id?: string; rule_id: string; }
+interface DeactivateRequest  { op: 'deactivate';  user_id?: string; rule_id: string; }
 interface ReactivateRequest  { op: 'reactivate';  user_id?: string; rule_id: string; }
 interface MergeTasksRequest   { op: 'merge_tasks';   user_id?: string; rule_id: string; tasks?: string[]; list_name?: string; }
 interface ReplaceTasksRequest { op: 'replace_tasks'; user_id?: string; rule_id: string; tasks: string[]; }
 interface CreateRuleRequest   { op: 'create'; user_id?: string; trigger_type: string; trigger_config: Record<string, unknown>; action_type: string; action_config: Record<string, unknown>; label: string; one_shot: boolean; }
-type RulesRequest = ListRequest | DeleteRequest | ReactivateRequest | MergeTasksRequest | ReplaceTasksRequest | CreateRuleRequest;
+type RulesRequest = ListRequest | DeleteRequest | DeactivateRequest | ReactivateRequest | MergeTasksRequest | ReplaceTasksRequest | CreateRuleRequest;
 
 async function resolveUserId(req: Request, bodyUserId?: string): Promise<string | null> {
   // (a) JWT path — app caller with Authorization header
@@ -172,6 +173,41 @@ serve(async (req) => {
       });
     }
 
+    if (body.op === 'deactivate') {
+      if (!body.rule_id) {
+        return new Response(JSON.stringify({ error: 'rule_id is required for deactivate' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const { data: existing, error: ownErr } = await admin
+        .from('action_rules')
+        .select('id, user_id')
+        .eq('id', body.rule_id)
+        .maybeSingle();
+      if (ownErr) {
+        return new Response(JSON.stringify({ error: ownErr.message }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      if (!existing || existing.user_id !== userId) {
+        return new Response(JSON.stringify({ error: 'Rule not found' }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const { error: updErr } = await admin
+        .from('action_rules')
+        .update({ enabled: false })
+        .eq('id', body.rule_id);
+      if (updErr) {
+        return new Response(JSON.stringify({ error: updErr.message }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     if (body.op === 'merge_tasks') {
       if (!body.rule_id) {
         return new Response(JSON.stringify({ error: 'rule_id is required for merge_tasks' }), {
@@ -269,7 +305,7 @@ serve(async (req) => {
       });
     }
 
-    return new Response(JSON.stringify({ error: "op must be 'list', 'delete', 'reactivate', 'merge_tasks', 'replace_tasks', or 'create'" }), {
+    return new Response(JSON.stringify({ error: "op must be 'list', 'delete', 'deactivate', 'reactivate', 'merge_tasks', 'replace_tasks', or 'create'" }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {
