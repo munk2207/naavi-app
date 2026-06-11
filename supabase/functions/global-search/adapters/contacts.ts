@@ -624,12 +624,27 @@ export const contactsAdapter: SearchAdapter = {
       // space ("K1C 5M3"), but the query arrives without spaces ("K1C5M3"). The
       // token "k1c5m3" never matched "k1c 5m3" via addrLower.includes(t).
       // Fix: also compare addrLower with spaces stripped against qNorm.
+      // Bug fix 2026-06-11 (B7d): when query contains "K1C 5M3" (with space),
+      // tokensFromVariants splits it into ["k1c","5m3"]. Token "k1c" then matches
+      // every contact in that forward sortation area via postalNorm.includes("k1c").
+      // Fix: detect a Canadian postal code in the query and use ONLY the normalized
+      // exact match — never fall through to the broad token fallback.
+      const postalInQuery = (() => {
+        const m = q.match(/\b([A-Za-z]\d[A-Za-z])\s?(\d[A-Za-z]\d)\b/);
+        return m ? (m[1] + m[2]).toLowerCase() : null;
+      })();
       const addressTokenMatch = addresses.some(a => {
         const addrLower    = (a.formattedValue ?? '').toLowerCase();
         const addrNorm     = addrLower.replace(/\s+/g, ''); // strip spaces for postal match
         const postalNorm   = (a.postalCode     ?? '').replace(/\s+/g, '').toLowerCase();
         const cityLower    = (a.city           ?? '').toLowerCase();
         const qNorm        = q.replace(/\s+/g, '').toLowerCase();
+        // If the query contains a Canadian postal code, match ONLY on exact normalized
+        // postal code. Skip the token fallback — tokens like "k1c" would match every
+        // contact in that forward sortation area (B7d fix 2026-06-11).
+        if (postalInQuery) {
+          return postalNorm === postalInQuery || addrNorm.includes(postalInQuery);
+        }
         // Direct postal-code match (strip spaces from both sides).
         if (postalNorm && qNorm.includes(postalNorm)) return true;
         if (postalNorm && postalNorm.includes(qNorm)) return true;
