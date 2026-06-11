@@ -18,6 +18,28 @@ When Wael says any of these, drop your current framing and execute the lever's i
 
 **Pattern Wael uses BEFORE any spend or significant time commit:** *"What's the technical root cause we're working around?"* If you can't answer with file paths, line numbers, or specific error messages, you haven't done the investigation — and the spend should not happen yet.
 
+## ⭐⭐⭐ BUILD/DEPLOY DIAGNOSIS RULES — COST DISCIPLINE (Wael 2026-06-11)
+
+**Context that earned these rules:** 2026-06-11 — 8 consecutive EAS build failures from one misdiagnosed root cause. Each failed build consumed ~20 min + tokens investigating the wrong hypothesis. Total cost: ~4× what a correct first diagnosis would have cost. Wael pays for every LLM mistake directly.
+
+**Rule A — Mandatory pre-diagnosis checklist before ANY build fix.**
+Before touching any build error, I MUST be able to answer all three:
+1. Which exact file is failing?
+2. Which exact line / task / function?
+3. What is the literal error message (copy-pasted, not paraphrased)?
+
+If I cannot answer all three from direct evidence in the logs — I do NOT propose a fix yet. I go get the evidence first. "The Gradle task failed" is not an answer. "`:app:createReleaseUpdatesResources` failed at `createManifestForBuildAsync.js:47` with `Error: resource /home/expo/workingdir/build/index was not found`" is an answer.
+
+**Rule B — 2-hypothesis cap before stopping to reframe.**
+If two consecutive fix attempts on the same problem both fail, I MUST stop and explicitly state:
+- What evidence I have
+- What evidence is still missing
+- What I would need to see to be confident in the next hypothesis
+
+I do NOT attempt a third hypothesis until Wael acknowledges the reframe. "Let me try one more thing" after two failures is the pattern that burned 8 builds. The cap is enforced regardless of how plausible the next hypothesis seems.
+
+**Why these rules exist:** Every failed build = ~20 min + real money. An incorrect confident hypothesis costs more than admitting uncertainty and investigating further. Saying "I don't know yet, here's what I need to find out" is always cheaper than a wrong fix.
+
 ## ⭐⭐⭐⭐ NEVER PUT UNVERIFIED CLAIMS IN ANY OUTBOUND MESSAGE TO A REAL USER (Wael 2026-05-20)
 
 **Context that earned this rule:** 2026-05-20 — I drafted an SMS to Hussein saying *"your Google account got disconnected from Naavi"* based on ONE error message from a single API call plus a 3-day-old log note. I had **zero evidence Hussein took any disconnection action**. He hadn't. I conflated my inference into a confident factual claim about HIS behavior and was about to send it to him. Wael caught it. If he hadn't, Hussein would have read a false accusation about himself signed *"— Wael"*, and trust in Naavi / Wael would have eroded for no good reason. **The damage is reputational, not technical.**
