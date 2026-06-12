@@ -942,12 +942,6 @@ export default function HomeScreen() {
   // ref. Listener can no longer duplicate.
   useEffect(() => {
     const sub = AppState.addEventListener('change', async (state) => {
-      // V57.12.4 Bug H instrumentation — log EVERY AppState change with
-      // a wall-clock timestamp so the next reproduction shows whether
-      // the app went background between SET_REMINDER and the crash. JS
-      // timers throttle when an Android RN app is in background, so a
-      // missing heartbeat between alive states could be an explanation.
-      remoteLog(newDiagSession(), 'app-state-change', { state });
       const uid = currentUserIdRef.current;
       if (state === 'active' && uid) {
         // V57.10.1 — banner hides when EITHER foreground or background
