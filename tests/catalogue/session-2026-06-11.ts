@@ -121,6 +121,45 @@ export const session2026_06_11Tests: TestCase[] = [
       );
     },
   },
+  // ── Voice: update note on already-enabled alert — 2026-06-11 ─────────────
+  {
+    id: 'note-update.pending-note-update-state-declared',
+    description: 'Voice server declares pendingNoteUpdate state for updating note on enabled alerts',
+    tags: ['note-update', 'voice', 'location'],
+    run: async () => {
+      const src = readFileSync(
+        join(process.cwd(), 'naavi-voice-server', 'src', 'index.js'),
+        'utf8',
+      );
+      expectTruthy(
+        src.includes('pendingNoteUpdate = null'),
+        'voice server must declare pendingNoteUpdate state variable',
+      );
+      expectTruthy(
+        src.includes('[pendingNoteUpdate]'),
+        'voice server must have a pendingNoteUpdate handler block',
+      );
+    },
+  },
+  {
+    id: 'note-update.enabled-branch-offers-update',
+    description: 'Voice server memory-hit enabled branch offers note update when new body differs',
+    tags: ['note-update', 'voice', 'location'],
+    run: async () => {
+      const src = readFileSync(
+        join(process.cwd(), 'naavi-voice-server', 'src', 'index.js'),
+        'utf8',
+      );
+      expectTruthy(
+        src.includes('newBody && newBody.toLowerCase() !=='),
+        'enabled memory-hit branch must compare newBody vs existingBody',
+      );
+      expectTruthy(
+        src.includes('Want me to update the message to'),
+        'enabled memory-hit branch must offer to update message when body differs',
+      );
+    },
+  },
   // ── Re-arm preserves new action_config note — 2026-06-11 ─────────────────
   {
     id: 'rearm.action-config-param-present',
