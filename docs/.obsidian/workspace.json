@@ -1,0 +1,199 @@
+{
+  "main": {
+    "id": "ab22373ec4c112c4",
+    "type": "split",
+    "children": [
+      {
+        "id": "abdd8ab9a4b22ae3",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "60b17251a71cab74",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "HOLDING_LIST_CLASSIFICATION_2026-06-11.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "HOLDING_LIST_CLASSIFICATION_2026-06-11"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "6b9290a1f8c1c321",
+    "type": "split",
+    "children": [
+      {
+        "id": "5c24890682e53160",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "3e19d774f6419c92",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "9f82b37a03cb64e6",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "holding",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "1b135e9158523055",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ],
+        "currentTab": 1
+      }
+    ],
+    "direction": "horizontal",
+    "width": 595.5
+  },
+  "right": {
+    "id": "3840bf85089f6851",
+    "type": "split",
+    "children": [
+      {
+        "id": "9c71d8d32554fdd2",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "2fa71a2ea1850914",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks"
+            }
+          },
+          {
+            "id": "3898b43525f535f5",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links"
+            }
+          },
+          {
+            "id": "191d62f64b19e1a3",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "469d70f6dd64798a",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "3e29788c98d977ab",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "60b17251a71cab74",
+  "lastOpenFiles": [
+    "HOLDING_LIST_CLASSIFICATION_2026-06-11.md.tmp.31020.6b8b4c50b828",
+    "HOLDING_LIST_CLASSIFICATION_2026-06-11.md.tmp.31020.5ae206f12745",
+    "SESSION_HANDOFF_2026-06-11_B4W_CLOSED.md",
+    "SESSION_HANDOFF_2026-06-11_B4W_CLOSED.md.tmp.12252.3109be4b5985",
+    "SESSION_HANDOFF_2026-06-11_B4W_POSTAL_NORMALIZATION_CONT.md",
+    "SESSION_HANDOFF_2026-06-11_B4W_POSTAL_NORMALIZATION_CONT.md.tmp.36528.8190efd5bf53",
+    "SESSION_HANDOFF_2026-06-11_B7D_POSTAL_NORMALIZATION.md",
+    "SESSION_HANDOFF_2026-06-11_B7D_POSTAL_NORMALIZATION.md.tmp.33264.061b7ea059c0",
+    "HOLDING_LIST_CLASSIFICATION_2026-06-11.md.tmp.33264.bee51d6ed27c",
+    "HOLDING_LIST_CLASSIFICATION_2026-06-11.md",
+    "HOLDING_LIST_CLASSIFICATION_2026-05-08.md.tmp.33264.f0a2d025fa85",
+    "HOLDING_LIST_CLASSIFICATION_2026-05-08.md"
+  ]
+}

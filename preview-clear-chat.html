@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Clear Chat Button Preview</title>
+  <style>
+    body {
+      background: #111;
+      font-family: 'Inter', sans-serif;
+      display: flex;
+      justify-content: center;
+      padding: 40px;
+    }
+
+    .phone {
+      width: 320px;
+      background: #1C1C1E;
+      border-radius: 32px;
+      overflow: hidden;
+      border: 2px solid #333;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header row: MyNaavi + 3 dots */
+    .phone-header {
+      background: #1C1C1E;
+      padding: 16px 16px 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .app-name { color: #5DCAA5; font-weight: 700; font-size: 18px; }
+    .dots { color: rgba(255,255,255,0.5); font-size: 22px; cursor: pointer; }
+
+    /* Sub-header: Clear Chat sits just below the 3-dot row, right-aligned */
+    .sub-header {
+      display: flex;
+      justify-content: flex-end;
+      padding: 0 16px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .clear-btn {
+      background: #D94F4F;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    /* Chat area */
+    .chat-area {
+      padding: 14px 16px;
+      flex: 1;
+      min-height: 380px;
+    }
+
+    .bubble-user {
+      background: #5DCAA5;
+      color: #000;
+      border-radius: 18px 18px 4px 18px;
+      padding: 10px 14px;
+      font-size: 14px;
+      margin-bottom: 8px;
+      max-width: 75%;
+      margin-left: auto;
+    }
+
+    .bubble-naavi {
+      background: #2C2C2E;
+      color: #fff;
+      border-radius: 18px 18px 18px 4px;
+      padding: 10px 14px;
+      font-size: 14px;
+      margin-bottom: 12px;
+      max-width: 80%;
+    }
+
+    /* Bottom input */
+    .input-bar {
+      background: #2C2C2E;
+      margin: 8px;
+      border-radius: 24px;
+      padding: 12px 16px;
+      color: rgba(255,255,255,0.3);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="phone">
+
+    <!-- Header -->
+    <div class="phone-header">
+      <span class="app-name">MyNaavi</span>
+      <span class="dots">⋮</span>
+    </div>
+
+    <!-- Clear Chat button just under the 3 dots -->
+    <div class="sub-header">
+      <button class="clear-btn">🗑 Clear Chat</button>
+    </div>
+
+    <!-- Chat -->
+    <div class="chat-area">
+      <div class="bubble-user">Alert me to call Bob today at 11 PM</div>
+      <div class="bubble-naavi">Done — I'll alert you to call Bob today at 11 PM.</div>
+      <div class="bubble-user">What is my calendar today?</div>
+      <div class="bubble-naavi">Here's your schedule for today:<br><br>1. Monday 9 all day<br>2. Call Bob — Jun 8 at 11:00 PM</div>
+    </div>
+
+    <div class="input-bar">Ask MyNaavi</div>
+
+  </div>
+
+</body>
+</html>
