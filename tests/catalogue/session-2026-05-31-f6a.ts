@@ -25,8 +25,8 @@ export const session20260531F6aTests: TestCase[] = [
     id: 'f6a.staff-table-seeded',
     category: 'f6a',
     description:
-      'support_staff table must contain both authorized emails (wael.aggan@gmail.com ' +
-      'and mynaavi2207@gmail.com) with active=true.',
+      'support_staff table must contain mynaavi2207@gmail.com with active=true. ' +
+      'wael.aggan@gmail.com must NOT be in the table (superadmin is wael@mynaavi.com, hardcoded).',
     timeoutMs: 15_000,
     async run(ctx) {
       const res = await fetch(

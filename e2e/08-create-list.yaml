@@ -15,9 +15,11 @@ tags:
 - launchApp:
     clearState: false
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "Create a shopping list"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 # Wait for the LIST CREATED card to render — proves LIST_CREATE action
 # fired, not a clarifying question.
 - extendedWaitUntil:

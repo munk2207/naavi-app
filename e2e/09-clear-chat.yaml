@@ -13,9 +13,11 @@ tags:
 - launchApp:
     clearState: false
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "Hello"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"

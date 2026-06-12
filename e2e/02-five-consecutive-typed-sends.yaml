@@ -21,9 +21,11 @@ tags:
 
 # --- Send 1 ---
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "What is the time"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
@@ -32,9 +34,11 @@ tags:
 
 # --- Send 2 ---
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "What day is today"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
@@ -43,9 +47,11 @@ tags:
 
 # --- Send 3 (the call that hung in V57.9.5) ---
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "What is the date"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
@@ -54,9 +60,11 @@ tags:
 
 # --- Send 4 ---
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "Hello again"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
@@ -65,9 +73,11 @@ tags:
 
 # --- Send 5 ---
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "Thank you"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"

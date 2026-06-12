@@ -1720,6 +1720,7 @@ export default function HomeScreen() {
         <Pressable
           delayLongPress={300}
           onLongPress={onChatLongPress}
+          onPress={() => { if (inputText.trim()) handleSend(); }}
           style={styles.flex}
         >
           {/* Collapse / expand chat history row */}
@@ -2349,7 +2350,6 @@ export default function HomeScreen() {
                 onChangeText={setInputText}
                 placeholder={t('home.inputPlaceholder')}
                 placeholderTextColor={Colors.textMuted}
-                multiline
                 maxLength={500}
                 returnKeyType="send"
                 onSubmitEditing={handleSend}

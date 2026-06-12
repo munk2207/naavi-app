@@ -17,9 +17,11 @@ tags:
 
 # 1. Typed send
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "What is the time"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
@@ -50,9 +52,11 @@ tags:
 
 # 4. Typed send again — verify state recovered fully.
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "What is the date"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"

@@ -19,9 +19,11 @@ tags:
 
 # Send #1
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "What is the time"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 # V57.12.3 — wait for idle (placeholder reappears) instead of asserting
 # on Naavi's prose. Prose drifts; idle state is stable.
 - extendedWaitUntil:
@@ -31,9 +33,11 @@ tags:
 
 # Send #2 — pushes the first turn into "Earlier:" collapsed form.
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "What is the date"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"

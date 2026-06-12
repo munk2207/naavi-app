@@ -21,9 +21,11 @@ tags:
     clearState: false
 
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "alert me at Walmart"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 
 # Picker speech includes a numbered list and a prompt to say a number
 # or the street name.

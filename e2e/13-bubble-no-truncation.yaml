@@ -27,9 +27,11 @@ tags:
     clearState: false
 
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "What is my next meeting?"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 
 # V57.12.3 — assert on the QUESTION MARK at the end of the user
 # message. If Yoga truncates "What is my next meeting?" anywhere

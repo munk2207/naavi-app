@@ -26,9 +26,11 @@ tags:
 # number — bypasses contact lookup, exercises only the Send-commit
 # path that this regression catcher was written for.
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "text 6135551234 hi from maestro testing"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 
 # Naavi composes the draft. The DraftCard label is stable from the
 # React component (SMS DRAFT READY); the Send/Discard buttons hang

@@ -18,9 +18,11 @@ tags:
 
 # Send one message to confirm session is alive at start.
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "Hello"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
@@ -46,9 +48,11 @@ tags:
 
 # And a fresh send should still work without manual sign-in.
 - tapOn:
-    text: "Ask MyNaavi"
+    label: "Message input"
 - inputText: "Still here"
-- pressKey: Enter
+- waitForAnimationToEnd
+- tapOn:
+    label: "Send"
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
