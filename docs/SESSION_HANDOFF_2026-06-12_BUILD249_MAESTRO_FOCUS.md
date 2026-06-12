@@ -5,7 +5,7 @@
 | Item | Status |
 |---|---|
 | AAB on Google Play | **Build 247** |
-| APK building now | **Build 249** (EAS job in flight — check expo.dev/accounts/waggan/projects/naavi/builds) |
+| APK 249 | **READY** — https://expo.dev/accounts/waggan/projects/naavi/builds/ad0fa6ec-513c-46c8-a817-fd3dae6344af |
 | Auto-tester | 251/251 ✅ |
 | Firebase Test Lab | ✅ PASSED (matrix-2mnf3uu9jxwqy, 2 devices, no issues) |
 | Maestro | ❌ Not clean — see below |
