@@ -16,7 +16,14 @@ serve(async (req) => {
   const { data: { user }, error } = await admin.auth.getUser(token);
   if (error || !user?.email) return new Response(JSON.stringify({ authorized: false }), { headers: { ...cors, 'Content-Type': 'application/json' } });
 
+  const SUPERADMIN = 'wael@mynaavi.com';
+
+  // Superadmin is hardcoded — never needs a DB row
+  if (user.email === SUPERADMIN) {
+    return new Response(JSON.stringify({ authorized: true, email: user.email, role: 'superadmin' }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+
   // Check if this email is in support_staff
-  const { data } = await admin.from('support_staff').select('email').eq('email', user.email).eq('active', true).maybeSingle();
-  return new Response(JSON.stringify({ authorized: !!data, email: user.email }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+  const { data } = await admin.from('support_staff').select('email, role').eq('email', user.email).eq('active', true).maybeSingle();
+  return new Response(JSON.stringify({ authorized: !!data, email: user.email, role: data?.role ?? null }), { headers: { ...cors, 'Content-Type': 'application/json' } });
 });
