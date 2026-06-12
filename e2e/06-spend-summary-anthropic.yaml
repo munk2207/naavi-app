@@ -4,18 +4,11 @@ tags:
   - feature
   - spend-summary
 ---
-# Verifies the V57.9.3-V57.9.4 spend-summary chain end-to-end:
-# - Mobile orchestrator's SPEND_SUMMARY action handler
-# - Server-side naavi-spend-summary V4 (documents source, Stripe-pair dedupe)
-# - Speech override that produces ONE number, not a list
-#
-# V57.12.3 — replaced the broken regex (Maestro's text matcher does
-# substring-only) with a stable idle-state assertion. The actual
-# dollar/no-data verdict depends on the test user's invoice data and
-# would only be a useful regression catcher if the test seeded data —
-# which it doesn't. Idle-state proves the SPEND_SUMMARY round-trip
-# completed.
+# Verifies the SPEND_SUMMARY chain end-to-end. Idle-state assertion
+# proves the round-trip completed (actual dollar amount depends on
+# test-user invoice data and is not asserted).
 
+- stopApp
 - launchApp:
     clearState: false
 - tapOn:
@@ -24,8 +17,6 @@ tags:
 - waitForAnimationToEnd
 - tapOn:
     label: "Send"
-# Wait for the response to complete — input placeholder reappears when
-# status returns to idle.
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"

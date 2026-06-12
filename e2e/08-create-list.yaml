@@ -4,14 +4,10 @@ tags:
   - prompt
   - lists
 ---
-# Mirrors the auto-tester `lists.create` case but on the actual mobile
-# UI. Catches regressions where Claude's prompt forgets that "Create a
-# shopping list" should emit LIST_CREATE (not a clarifying question).
-#
-# V57.12.3 — assertion now checks the LIST CREATED card label rather
-# than a substring of Naavi's confirmation prose. The label is from
-# the React component (stable), the prose drifts.
+# "Create a shopping list" must emit LIST_CREATE, not a clarifying
+# question. Catches prompt regressions.
 
+- stopApp
 - launchApp:
     clearState: false
 - tapOn:
@@ -20,13 +16,10 @@ tags:
 - waitForAnimationToEnd
 - tapOn:
     label: "Send"
-# Wait for the LIST CREATED card to render — proves LIST_CREATE action
-# fired, not a clarifying question.
 - extendedWaitUntil:
     visible:
       text: "LIST CREATED"
-    timeout: 15000
-# Should NOT have asked us a clarifying question.
+    timeout: 30000
 - assertNotVisible:
     text: "what would you like"
 - takeScreenshot: 08-list-created

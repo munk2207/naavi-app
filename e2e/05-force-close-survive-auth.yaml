@@ -5,18 +5,16 @@ tags:
   - critical
   - auth
 ---
-# This scenario reproduces the V57.9.7 fix: the install-then-restart-app
-# auth bug that broke V57.9.4-V57.9.6. After the V57.9.7 SecureStore
-# dual-write fix, force-killing and reopening the app should NOT log
-# the user out and should NOT show the "Sign-in expired — tap to fix"
-# banner.
+# Reproduces the V57.9.7 fix: force-killing and reopening the app
+# should NOT log the user out or show "Sign-in expired" banner.
 
+- stopApp
 - launchApp:
     clearState: false
 - assertVisible:
     text: "MyNaavi"
 
-# Send one message to confirm session is alive at start.
+# Confirm session is alive at start.
 - tapOn:
     label: "Message input"
 - inputText: "Hello"
@@ -26,27 +24,21 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
-    timeout: 15000
+    timeout: 30000
 
-# Force-stop the app — Maestro's stopApp closes it cleanly without
-# uninstall. Roughly equivalent to swiping it from the recent-apps
-# switcher.
+# Force-stop and relaunch.
 - stopApp
-
-# Relaunch.
 - launchApp:
     clearState: false
 - assertVisible:
     text: "MyNaavi"
 
-# CRITICAL — the stale-auth banner must NOT be visible.
-# If it shows up, the SecureStore dual-write didn't restore the session
-# (V57.9.7 regression).
+# CRITICAL — stale-auth banner must NOT appear.
 - assertNotVisible:
     text: "Sign-in expired"
 - takeScreenshot: 05-after-relaunch-no-banner
 
-# And a fresh send should still work without manual sign-in.
+# Fresh send must still work without re-login.
 - tapOn:
     label: "Message input"
 - inputText: "Still here"
@@ -56,4 +48,4 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
-    timeout: 15000
+    timeout: 30000

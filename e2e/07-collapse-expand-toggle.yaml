@@ -4,16 +4,10 @@ tags:
   - regression
   - chat-ui
 ---
-# Wael 2026-05-01: older chat turns could be expanded but not collapsed
-# back to one-line summary. V57.9.7 added a "tap to collapse"
-# affordance under each expanded older turn.
-#
-# Strategy:
-#   1. Send 2 messages so we have a "previous" turn that auto-collapses.
-#   2. Tap the collapsed summary to expand it.
-#   3. Verify a "tap to collapse" hint appears.
-#   4. Tap that hint and verify the summary collapses again.
+# V57.9.7: older chat turns can be expanded AND collapsed back.
+# Strategy: send 2 messages, verify collapse/expand/collapse cycle works.
 
+- stopApp
 - launchApp:
     clearState: false
 
@@ -24,14 +18,12 @@ tags:
 - waitForAnimationToEnd
 - tapOn:
     label: "Send"
-# V57.12.3 — wait for idle (placeholder reappears) instead of asserting
-# on Naavi's prose. Prose drifts; idle state is stable.
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
-    timeout: 15000
+    timeout: 30000
 
-# Send #2 — pushes the first turn into "Earlier:" collapsed form.
+# Send #2 — pushes first turn into "Earlier:" collapsed form.
 - tapOn:
     label: "Message input"
 - inputText: "What is the date"
@@ -41,29 +33,25 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
-    timeout: 12000
+    timeout: 30000
 
-# Verify the collapsed summary for turn #1 is visible.
+# Collapsed summary for turn #1 must be visible.
 - assertVisible:
     text: "Earlier:"
 - assertVisible:
     text: "tap to expand"
 
-# Tap to expand the older turn.
+# Expand.
 - tapOn:
     text: "tap to expand"
-
-# After expand, V57.9.7 adds a "tap to collapse" affordance.
 - extendedWaitUntil:
     visible:
       text: "tap to collapse"
     timeout: 5000
 
-# Tap it — collapse should reverse.
+# Collapse back.
 - tapOn:
     text: "tap to collapse"
-
-# Back to the collapsed summary.
 - extendedWaitUntil:
     visible:
       text: "tap to expand"

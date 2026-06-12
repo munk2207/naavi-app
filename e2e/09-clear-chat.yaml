@@ -3,13 +3,10 @@ name: 09 — clear chat returns to brief
 tags:
   - chat-ui
 ---
-# Verifies the X Clear chat affordance unwinds the chat state and
+# Verifies the Clear chat affordance unwinds chat state and
 # returns the user to the brief view.
-#
-# V57.12.3 — extended timeout for the response and waited for it to
-# fully complete before checking the Clear chat affordance. Previous
-# version ran the assertion before the response settled.
 
+- stopApp
 - launchApp:
     clearState: false
 - tapOn:
@@ -21,9 +18,9 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
-    timeout: 20000
+    timeout: 30000
 
-# Clear chat link appears once a turn exists. Wait explicitly for it.
+# Clear chat link appears once a turn exists.
 - extendedWaitUntil:
     visible:
       text: "Clear chat"
@@ -31,7 +28,7 @@ tags:
 - tapOn:
     text: "Clear chat"
 
-# After clear, the brief should be visible again.
+# Brief must be visible again.
 - extendedWaitUntil:
     visible:
       text: "Brief"

@@ -1483,11 +1483,6 @@ export default function HomeScreen() {
   }
 
   return (
-    <View
-      style={styles.flex}
-      onStartShouldSetResponder={() => true}
-      onResponderRelease={() => { if ((inputTextRef.current || inputText).trim()) handleSend(); }}
-    >
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       {/* Attach the 3-dot menu to the native header so it sits on the same row
           as "MyNaavi". Callbacks close over state declared in this component. */}
@@ -1725,6 +1720,7 @@ export default function HomeScreen() {
         <Pressable
           delayLongPress={300}
           onLongPress={onChatLongPress}
+          onPress={() => { if ((inputTextRef.current || inputText).trim()) handleSend(); else Keyboard.dismiss(); }}
           style={styles.flex}
         >
           {/* Collapse / expand chat history row */}
@@ -2597,7 +2593,6 @@ export default function HomeScreen() {
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
-    </View>
   );
 }
 
