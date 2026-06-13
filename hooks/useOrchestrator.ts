@@ -3356,7 +3356,15 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               if (triggerType === 'email' && Object.keys(normalizedTriggerConfig).length === 0) {
                 const fromVal    = String((action as any).from ?? '').trim();
                 const subjectVal = String((action as any).subject_keyword ?? '').trim();
-                if (fromVal)    normalizedTriggerConfig.from_name      = fromVal;
+                if (fromVal) {
+                  // Email addresses go into from_email so the DB match uses
+                  // sender_email; display names go into from_name for sender_name match.
+                  if (fromVal.includes('@')) {
+                    normalizedTriggerConfig.from_email = fromVal;
+                  } else {
+                    normalizedTriggerConfig.from_name = fromVal;
+                  }
+                }
                 if (subjectVal) normalizedTriggerConfig.subject_keyword = subjectVal;
                 // Build a readable label if Claude didn't supply one
                 if (!action.label) {
