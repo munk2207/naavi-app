@@ -342,6 +342,7 @@ export async function handleGmailSearch(
       .from('gmail_messages')
       .select('id, subject, sender_name, sender_email, snippet, received_at')
       .eq('user_id', userId)
+      .not('labels', 'cs', '{"TRASH"}')
       .order('received_at', { ascending: false })
       .limit(5);
 
