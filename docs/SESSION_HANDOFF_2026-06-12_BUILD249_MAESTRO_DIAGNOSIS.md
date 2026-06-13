@@ -8,81 +8,33 @@
 | APK installed on emulator | **Build 249** (V57.49.9) |
 | Auto-tester | 251/251 ✅ |
 | Firebase Test Lab | ✅ PASSED |
-| Maestro | ❌ Still failing — root causes now known |
+| Maestro | ❌ 17/17 failed — 3 fix attempts made, all failed |
 
 ---
 
-## What was done this session
+## Failed attempts this session
 
-### Changes committed
-- `app/_layout.tsx` — added `router.replace('/')` on mount so app always starts at home screen on cold launch
-- `e2e/*.yaml` — `clearState: true` tried and reverted (wipes auth session)
-- `e2e/*.yaml` — `pressKey: Back` tried and reverted (exits app when already on home)
-- All 17 YAMLs now back to `stopApp` + `launchApp: clearState: false` — clean state
+### Attempt 1 — Changed clearState to true in all 17 YAMLs ❌
+**What happened:** Wiped the auth session. App opened to Google sign-in screen. Maestro could not complete the OAuth flow. All 17 tests failed.
+**Reverted.**
 
-### APK 249 installed on emulator
-- OAuth completed with `mynaavidemo@gmail.com`
-- All Google services connected: Gmail ✓ Calendar ✓ Drive ✓ Maps ✓
-- App confirmed working manually
+### Attempt 2 — Added pressKey: Back after launchApp in all 17 YAMLs ❌
+**What happened:** When the app was already on the home screen, pressing Back exited the app entirely. "MyNaavi" not visible because the app was closed. All 17 tests failed.
+**Reverted.**
 
----
-
-## Root causes of Maestro failures — CONFIRMED FROM SCREENSHOTS
-
-### Problem 1 — "MyNaavi" split text (test 01)
-The header in `app/_layout.tsx` renders "MyNaavi" as TWO separate Text nodes:
-```tsx
-<Text style={headerStyles.white}>My</Text>
-<Text style={headerStyles.teal}>Naavi</Text>
-```
-Maestro's `assertVisible: text: "MyNaavi"` looks for a single text node containing "MyNaavi" — finds nothing — test fails.
-
-**Fix:** Change `assertVisible: text: "MyNaavi"` to `assertVisible: text: "TODAY'S BRIEF"` in `e2e/01-smoke-launch.yaml`. No APK needed.
-
-### Problem 2 — Timing: navigation not complete before assertions run
-`router.replace('/')` runs AFTER expo-router restores the last screen (Settings). There is a brief window where Settings is still showing when Maestro's first assertion runs.
-
-**Fix:** Add `waitForAnimationToEnd` after `launchApp` in all 17 YAMLs. No APK needed.
-
-### Problem 3 — Three-dot menu opens during test 02
-When test 02 tries `tapOn: label: "Message input"` and times out finding it (because of the timing issue above), Maestro taps the three-dot menu button instead. This causes all subsequent tests to fail in cascade.
-
-**Fix:** Solved by fixing Problem 2 (timing). Once the home screen is confirmed loaded, "Message input" will be found correctly.
+### Attempt 3 — Added router.replace('/') in app/_layout.tsx + built APK 249 ❌
+**What happened:** App is now on home screen when launched. But test 01 still fails "MyNaavi is not visible" because the header renders "MyNaavi" as two separate Text nodes ("My" + "Naavi") — Maestro cannot match across two nodes. Tests 02+ fail because Maestro taps the three-dot menu instead of "Message input" due to a timing issue. 17/17 failed.
+**This code change remains in APK 249 — not reverted.**
 
 ---
 
-## Next session — what to do
+## What is known about the current failures
 
-All fixes are YAML-only. No new APK needed.
-
-### Step 1 — Fix test 01 YAML
-In `e2e/01-smoke-launch.yaml`, replace:
-```yaml
-- assertVisible:
-    text: "MyNaavi"
-```
-with:
-```yaml
-- assertVisible:
-    text: "TODAY'S BRIEF"
-```
-(Remove the duplicate — "TODAY'S BRIEF" is already asserted below it, so just delete the "MyNaavi" line.)
-
-### Step 2 — Add waitForAnimationToEnd to all 17 YAMLs
-After `launchApp: clearState: false` in every file, add:
-```yaml
-- waitForAnimationToEnd
-```
-This gives `router.replace('/')` time to complete before any assertions run.
-
-### Step 3 — Run Maestro
-```
-maestro --device emulator-5554 test e2e/
-```
-
-### Step 4 — After Maestro is clean
-1. Firebase Test Lab on APK 249
-2. Build AAB 250 (production) — auto-submit to Google Play
+- The home screen IS loading correctly — confirmed from screenshots
+- "MyNaavi" in the header is split into `"My"` + `"Naavi"` in two separate Text components in `app/_layout.tsx`
+- There is a timing gap between `launchApp` and when the home screen finishes rendering
+- `accessibilityLabel="Message input"` is correctly set at `app/index.tsx:2360`
+- The emulator has APK 249 installed with `mynaavidemo@gmail.com` signed in and all Google services connected
 
 ---
 
