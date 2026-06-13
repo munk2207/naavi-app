@@ -3350,6 +3350,21 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                   normalizedTriggerConfig = {};
                 }
               }
+              // ARCH-1 email path: Haiku emits flat params (from, subject_keyword)
+              // not a nested trigger_config. Build trigger_config from flat fields
+              // so the insert stores conditions correctly.
+              if (triggerType === 'email' && Object.keys(normalizedTriggerConfig).length === 0) {
+                const fromVal    = String((action as any).from ?? '').trim();
+                const subjectVal = String((action as any).subject_keyword ?? '').trim();
+                if (fromVal)    normalizedTriggerConfig.from_name      = fromVal;
+                if (subjectVal) normalizedTriggerConfig.subject_keyword = subjectVal;
+                // Build a readable label if Claude didn't supply one
+                if (!action.label) {
+                  const parts = [fromVal ? `from ${fromVal}` : '', subjectVal ? `about "${subjectVal}"` : ''].filter(Boolean);
+                  (action as any).label = parts.length ? `Email ${parts.join(' ')}` : 'Email alert';
+                }
+                console.log('[Orchestrator] ARCH-1: built email trigger_config from flat params:', normalizedTriggerConfig);
+              }
               // 2026-05-24 (Wael, B4y) — default to_phone from
               // user_settings.phone when action_type='sms'/'whatsapp'
               // and no to_phone resolved. SET_EMAIL_ALERT handler at
