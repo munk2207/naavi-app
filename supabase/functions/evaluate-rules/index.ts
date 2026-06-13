@@ -292,7 +292,16 @@ async function findEmailTriggers(
       const subjectMatch = subjectKeyword
         ? msg.subject.toLowerCase().includes(subjectKeyword.toLowerCase())
         : false;
-      return nameMatch || emailMatch || subjectMatch;
+
+      // AND logic: when multiple conditions are specified, ALL must match.
+      // "from Bob about board meeting" must match BOTH sender AND subject —
+      // not just one. OR logic caused false fires (email from Bob about
+      // anything triggered a "from Bob about board meeting" rule).
+      const hasFrom    = !!(fromName || fromEmail);
+      const hasSubject = !!subjectKeyword;
+      const fromResult    = hasFrom    ? (nameMatch || emailMatch) : true;
+      const subjectResult = hasSubject ? subjectMatch              : true;
+      return fromResult && subjectResult;
     })
     .map(msg => msg.gmail_message_id);
 }

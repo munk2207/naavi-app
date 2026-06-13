@@ -25,6 +25,7 @@ export const HANDLED_INTENTS = new Set([
   'LIST_RULES',
   'LOOKUP_CONTACT',
   'CALENDAR_SEARCH',
+  'GMAIL_SEARCH',
   'PERSON_LOOKUP',
   'LIST_READ',
   'REMINDER_READ',
@@ -295,6 +296,97 @@ export async function handleCalendarSearch(
     display: `${intro}:\n\n${lines.map(l => l.display).join('\n')}`,
     actions: [],
   };
+}
+
+// ── GMAIL_SEARCH ──────────────────────────────────────────────────────────────
+// "Did I receive email from Bob?" — calls global-search gmail adapter and
+// returns whether matching emails exist. Deterministic: same query → same
+// real-data answer. Never routes to calendar.
+
+export async function handleGmailSearch(
+  keyword: string,
+  userId: string,
+  supabaseUrl: string,
+  serviceKey: string,
+): Promise<HandlerResult> {
+  // Trigger sync-gmail first so the answer reflects the current inbox, not just
+  // what was cached at the last cron run. Fire-and-await with 6s cap — if it
+  // times out we still search whatever is in the cache.
+  try {
+    const syncCtrl = new AbortController();
+    const syncTimer = setTimeout(() => syncCtrl.abort(), 6000);
+    await fetch(`${supabaseUrl}/functions/v1/sync-gmail`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+      body: JSON.stringify({ user_id: userId }),
+      signal: syncCtrl.signal,
+    });
+    clearTimeout(syncTimer);
+  } catch (_) { /* non-fatal — proceed with cached data */ }
+
+  // Direct DB query without signal_strength filter — explicit user queries should
+  // search ALL emails (including 'ambient' senders not yet in contacts).
+  // The global-search gmail adapter excludes ambient emails; that filter is right
+  // for automatic triage but wrong when the user directly asks about an email.
+  try {
+    const supabase = createClient(supabaseUrl, serviceKey);
+    const kw = keyword.trim().toLowerCase();
+    const pat = `%${kw}%`;
+
+    const { data, error } = await supabase
+      .from('gmail_messages')
+      .select('id, subject, sender_name, sender_email, snippet, received_at')
+      .eq('user_id', userId)
+      .or([
+        `subject.ilike.${pat}`,
+        `sender_name.ilike.${pat}`,
+        `sender_email.ilike.${pat}`,
+        `snippet.ilike.${pat}`,
+        `body_text.ilike.${pat}`,
+      ].join(','))
+      .order('received_at', { ascending: false })
+      .limit(5);
+
+    if (error) {
+      console.error('[handleGmailSearch] DB error:', error.message);
+      const msg = `I had trouble checking your email. Try again in a moment.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+
+    const rows = data ?? [];
+
+    if (rows.length === 0) {
+      const msg = `I don't see any emails matching "${keyword}" in your synced inbox. If it just arrived, it may not have synced yet.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+
+    const lines = rows.slice(0, 3).map((r: any, i: number) => {
+      const subject = r.subject ?? 'Email';
+      const sender  = r.sender_name ?? r.sender_email ?? '';
+      const when    = r.received_at
+        ? new Date(r.received_at).toLocaleString('en-CA', { timeZone: 'America/Toronto', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+        : '';
+      const detail  = [sender, when].filter(Boolean).join(', ');
+      return {
+        speech:  detail ? `${i + 1}. ${subject} from ${detail}` : `${i + 1}. ${subject}`,
+        display: detail ? `${i + 1}. **${subject}** — ${detail}` : `${i + 1}. **${subject}**`,
+      };
+    });
+
+    const intro = rows.length === 1
+      ? `Yes, you have an email matching "${keyword}"`
+      : `Yes, you have ${rows.length} emails matching "${keyword}"`;
+
+    return {
+      speech:  `${intro}. ${lines.map(l => l.speech).join('. ')}.`,
+      display: `${intro}:\n\n${lines.map(l => l.display).join('\n')}`,
+      actions: [],
+    };
+  } catch (e) {
+    console.error('[handleGmailSearch] error:', (e as Error).message);
+    const msg = `I had trouble checking your email. Try again in a moment.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
 }
 
 // ── PERSON_LOOKUP ─────────────────────────────────────────────────────────────
@@ -616,6 +708,7 @@ export const HANDLED_ACTION_INTENTS = new Set([
   'ADD_CONTACT',
   'DELETE_EVENT',
   'DRAFT_MESSAGE',
+  'SET_ACTION_RULE',
 ]);
 
 // Format ISO datetime to human-readable EST string.

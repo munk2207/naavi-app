@@ -18,7 +18,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.79.0';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { NAAVI_TOOLS, TOOL_NAME_TO_ACTION_TYPE } from '../_shared/anthropic_tools.ts';
 import { computeContactHash, COMMUNITY_PERSON_FIELDS } from '../_shared/community_hash.ts';
-import { HANDLED_INTENTS, handleListRules, handleLookupContact, handleCalendarSearch, handlePersonLookup, handleListRead, handleReminderRead, handleMemorySearch, handleCreateTicket, HANDLED_ACTION_INTENTS, handleSetReminderExec, handleCreateEventExec, handleRememberExec, handleDeleteRuleExec, handleDeleteMemoryExec, handleAddContactExec, handleDeleteEventExec } from './intentHandlers.ts';
+import { HANDLED_INTENTS, handleListRules, handleLookupContact, handleCalendarSearch, handleGmailSearch, handlePersonLookup, handleListRead, handleReminderRead, handleMemorySearch, handleCreateTicket, HANDLED_ACTION_INTENTS, handleSetReminderExec, handleCreateEventExec, handleRememberExec, handleDeleteRuleExec, handleDeleteMemoryExec, handleAddContactExec, handleDeleteEventExec } from './intentHandlers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1489,22 +1489,24 @@ async function classifyIntent(
 Today (America/Toronto): ${new Date().toLocaleDateString('en-CA', { timeZone: 'America/Toronto' })}. Use to resolve "tomorrow", "next Friday", etc. into ISO8601 with Toronto offset (e.g. "2026-06-14T15:00:00-04:00").
 
 Levels:
-A = answerable from user's real data (calendar, contacts, alerts, lists, reminders, memories). Use intents: LIST_RULES, LOOKUP_CONTACT, CALENDAR_SEARCH, PERSON_LOOKUP, LIST_READ, REMINDER_READ, MEMORY_SEARCH, CREATE_TICKET
+A = answerable from user's real data (calendar, contacts, alerts, lists, reminders, memories, email). Use intents: LIST_RULES, LOOKUP_CONTACT, CALENDAR_SEARCH, GMAIL_SEARCH, PERSON_LOOKUP, LIST_READ, REMINDER_READ, MEMORY_SEARCH, CREATE_TICKET
 B = data question Claude must reason about (no real source)
 action = creating/updating/deleting data (reminder, alert, event, memory, list item)
 chat = conversational, no data question
 
-Level A params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic. CREATE_TICKET→reporter_email, body.
+Level A params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). CALENDAR_SEARCH ONLY for calendar/schedule/appointment queries — NEVER for email queries. GMAIL_SEARCH→keyword (sender name, subject word, or topic). GMAIL_SEARCH for any query about receiving/checking email: "Did I get email from X", "Did I receive email from X", "Any email from X", "Check my email for X" → GMAIL_SEARCH. LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic. CREATE_TICKET→reporter_email, body.
 
 Level action intents and params (extract what's present, empty string if not mentioned):
-SET_REMINDER → title (what to remember), datetime (ISO8601 Toronto, e.g. "2026-06-14T15:00:00-04:00")
+SET_REMINDER → title (what to remember), datetime (ISO8601 Toronto). ONLY use for "remind me at [specific time]" — user must state an explicit time/date. e.g. "remind me to call John tomorrow at 3pm".
 CREATE_EVENT → summary (event name), start (ISO8601 Toronto), end (ISO8601 Toronto, default start+1h)
-REMEMBER → text (exact statement to save)
+REMEMBER → text (exact statement to save). Use for "remember that X", "note that X", "my wife is Sarah" — no time component.
 DELETE_RULE → match (keyword describing the alert to delete), all ("true" only if user says delete all alerts)
 DELETE_MEMORY → keyword (what to forget)
 ADD_CONTACT → name, phone (E.164 if given), email (if given)
 DRAFT_MESSAGE → to_name (recipient name), body (message text), to_phone (E.164 if known)
 DELETE_EVENT → query (event name/keyword to find and delete)
+SET_ACTION_RULE → location/email/time/contact-silence alerts. Params: trigger_type (email|location|time|contact_silence), from (email sender name/address), subject_keyword (keyword in subject line, e.g. "board meeting"), location (place name for location trigger), direction (arrive|leave). e.g. "alert me when I arrive at X" → {trigger_type:"location",location:"X",direction:"arrive"}; "alert me when email from Bob about board meeting" → {trigger_type:"email",from:"Bob",subject_keyword:"board meeting"}. NOT a reminder — no time param needed.
+LIST_CONNECTION_QUERY → connecting/disconnecting a list to an alert. e.g. "add my X list to my Y alert", "connect my grocery list to Costco alert".
 
 Output: {"level":"A","intent":"LIST_RULES","confidence":"high","params":{}}
 Use "low" confidence when ambiguous.`,
@@ -1607,6 +1609,31 @@ function buildActionConfirm(
       const s = `Here's your draft to ${params.to_name}: "${params.body.slice(0, 100)}". Review it in the card below.`;
       const action = { type: 'DRAFT_MESSAGE', to: params.to_name, to_phone: params.to_phone ?? '', body: params.body };
       return { speech: s, display: s, actions: [action] };
+    }
+    case 'SET_ACTION_RULE': {
+      const tt = String(params.trigger_type ?? '');
+      if (tt === 'email') {
+        if (!params.from && !params.subject_keyword) {
+          return { speech: '', display: '', actions: [], missingParam: "Who should the email be from, or what keyword should be in the subject?" };
+        }
+        const fromPart = params.from ? `from ${params.from}` : '';
+        const kwPart   = params.subject_keyword ? `about "${params.subject_keyword}"` : '';
+        const desc     = [fromPart, kwPart].filter(Boolean).join(' ');
+        const s = `I'll alert you when an email ${desc} arrives. Say yes to confirm, no to cancel, or tell me what to change.`;
+        return { speech: s, display: s, actions: [] };
+      }
+      if (tt === 'location') {
+        // Location requires mobile resolve-place flow — emit action immediately so
+        // useOrchestrator handles place resolution before writing the rule.
+        // V57.19: default one_shot=true unless user explicitly said "every time" / "recurring".
+        const place    = String(params.location ?? params.place ?? '');
+        const dir      = params.direction === 'leave' ? 'leave' : 'arrive at';
+        const s        = place ? `Setting up an alert for when you ${dir} ${place}.` : '';
+        const one_shot = params.one_shot === 'false' || params.recurring === 'true' ? false : true;
+        return { speech: s, display: s, actions: [{ type: 'SET_ACTION_RULE', ...params, one_shot }] };
+      }
+      // Other trigger types (time, contact_silence, weather) — fall through to Claude
+      return { speech: '', display: '', actions: [], missingParam: '__FALLTHROUGH__' };
     }
     default:
       return { speech: '', display: '', actions: [] };
@@ -1903,6 +1930,19 @@ Deno.serve(async (req) => {
               console.log(`[timing] ${elapsed()} | DELETE_EVENT executed`);
               return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
             }
+            if (pending.intent === 'SET_ACTION_RULE') {
+              // Emit the action for mobile useOrchestrator to execute (writes action_rules row)
+              const action = { type: 'SET_ACTION_RULE', ...pending.params };
+              const tt = String(pending.params.trigger_type ?? '');
+              const fromPart = pending.params.from ? `from ${pending.params.from}` : '';
+              const kwPart   = pending.params.subject_keyword ? `about "${pending.params.subject_keyword}"` : '';
+              const desc     = tt === 'email'
+                ? `Email alert${[fromPart, kwPart].filter(Boolean).length ? ' ' + [fromPart, kwPart].filter(Boolean).join(' ') : ''} set.`
+                : `Alert set.`;
+              const speech = `Done. ${desc}`;
+              console.log(`[timing] ${elapsed()} | SET_ACTION_RULE confirmed — action emitted for mobile`);
+              return jsonResponse({ rawText: JSON.stringify({ speech, display: speech, actions: [action], pendingThreads: [] }) });
+            }
           } catch (_) { /* fall through to Claude */ }
         }
       }
@@ -2092,6 +2132,13 @@ Deno.serve(async (req) => {
                 console.log(`[timing] ${elapsed()} | Level A CALENDAR_SEARCH deterministic`);
                 return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
               }
+              if (classification.intent === 'GMAIL_SEARCH' && classification.params.keyword) {
+                const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+                const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+                const result = await handleGmailSearch(classification.params.keyword, userId, supabaseUrl, serviceKey);
+                console.log(`[timing] ${elapsed()} | Level A GMAIL_SEARCH deterministic`);
+                return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+              }
               if (classification.intent === 'PERSON_LOOKUP' && classification.params.name) {
                 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
                 const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -2170,22 +2217,38 @@ Deno.serve(async (req) => {
             // Turn 2: Step 1.4 resolver executes server-side. Same result every time.
             const confirmed = buildActionConfirm(classification.intent, classification.params);
 
-            if (confirmed.missingParam) {
+            if (confirmed.missingParam === '__FALLTHROUGH__') {
+              // SET_ACTION_RULE with unhandled trigger type — let Claude respond naturally
+              console.log(`[timing] ${elapsed()} | Level action ${classification.intent} fallthrough to Claude (trigger_type=${(classification.params as any)?.trigger_type})`);
+              // fall through — do not return; Claude handles below
+
+            } else if (confirmed.missingParam) {
               // Required param missing — ask for it specifically, no Claude
               console.log(`[timing] ${elapsed()} | Level action ${classification.intent} — missing param, asking`);
               return jsonResponse({ rawText: JSON.stringify({ speech: confirmed.missingParam, display: confirmed.missingParam, actions: [], pendingThreads: [] }) });
-            }
 
-            if (classification.intent === 'DRAFT_MESSAGE') {
-              // DRAFT_MESSAGE: emit action immediately — DraftCard is the confirm UI
-              console.log(`[timing] ${elapsed()} | Level action DRAFT_MESSAGE — deterministic action emitted`);
+            } else if (confirmed.actions.length > 0) {
+              // Immediate-emit intents: DRAFT_MESSAGE, SET_ACTION_RULE(location)
+              console.log(`[timing] ${elapsed()} | Level action ${classification.intent} — deterministic action emitted immediately`);
               return jsonResponse({ rawText: JSON.stringify({ speech: confirmed.speech, display: confirmed.display, actions: confirmed.actions, pendingThreads: [] }) });
-            }
 
-            // All other action intents: confirm turn + PENDING_INTENT for Step 1.4
-            const pendingMarker = `<!--PENDING_INTENT:${JSON.stringify({ intent: classification.intent, level: 'action', confidence: 'high', params: classification.params })}-->`;
-            console.log(`[timing] ${elapsed()} | Level action ${classification.intent} — awaiting confirm`);
-            return jsonResponse({ rawText: JSON.stringify({ speech: confirmed.speech, display: `${confirmed.speech}\n${pendingMarker}`, actions: [], pendingThreads: [] }) });
+            } else if (classification.intent === 'REMEMBER') {
+              // REMEMBER is RULE 23 exempt — emit action immediately so mobile executes it.
+              const text = (classification.params.text ?? '').trim();
+              if (!text) {
+                const msg = `What would you like me to remember?`;
+                return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+              }
+              const speech = `Got it. I'll remember that.`;
+              console.log(`[timing] ${elapsed()} | Level action REMEMBER — deterministic action emitted immediately`);
+              return jsonResponse({ rawText: JSON.stringify({ speech, display: speech, actions: [{ type: 'REMEMBER', text }], pendingThreads: [] }) });
+
+            } else {
+              // All other action intents: confirm turn + PENDING_INTENT for Step 1.4
+              const pendingMarker = `<!--PENDING_INTENT:${JSON.stringify({ intent: classification.intent, level: 'action', confidence: 'high', params: classification.params })}-->`;
+              console.log(`[timing] ${elapsed()} | Level action ${classification.intent} — awaiting confirm`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: confirmed.speech, display: `${confirmed.speech}\n${pendingMarker}`, actions: [], pendingThreads: [] }) });
+            }
 
           } else {
             // Level action (unhandled) or chat — Claude responds naturally, no disclosure

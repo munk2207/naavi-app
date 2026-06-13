@@ -32,11 +32,11 @@ export const session2026_06_13Tests: TestCase[] = [
   },
   {
     id: 'arch1.handled-action-intents-contains-all',
-    description: 'ARCH-1: HANDLED_ACTION_INTENTS contains all 8 action intents',
+    description: 'ARCH-1: HANDLED_ACTION_INTENTS contains all 9 action intents (including SET_ACTION_RULE)',
     tags: ['arch1', 'deterministic'],
     run: async () => {
       const src = readFileSync(HANDLERS_PATH, 'utf8');
-      const required = ['SET_REMINDER', 'CREATE_EVENT', 'REMEMBER', 'DELETE_RULE', 'DELETE_MEMORY', 'ADD_CONTACT', 'DELETE_EVENT', 'DRAFT_MESSAGE'];
+      const required = ['SET_REMINDER', 'CREATE_EVENT', 'REMEMBER', 'DELETE_RULE', 'DELETE_MEMORY', 'ADD_CONTACT', 'DELETE_EVENT', 'DRAFT_MESSAGE', 'SET_ACTION_RULE'];
       for (const intent of required) {
         expectTruthy(src.includes(`'${intent}'`), `HANDLED_ACTION_INTENTS missing intent: ${intent}`);
       }
@@ -171,6 +171,57 @@ export const session2026_06_13Tests: TestCase[] = [
     },
   },
   {
+    id: 'arch1.set-action-rule-in-handled-intents',
+    description: 'ARCH-1: SET_ACTION_RULE is in HANDLED_ACTION_INTENTS for deterministic email confirm path',
+    tags: ['arch1', 'deterministic'],
+    run: async () => {
+      const src = readFileSync(HANDLERS_PATH, 'utf8');
+      expectTruthy(src.includes("'SET_ACTION_RULE'"), 'HANDLED_ACTION_INTENTS must contain SET_ACTION_RULE');
+    },
+  },
+  {
+    id: 'arch1.build-action-confirm-set-action-rule-email',
+    description: 'ARCH-1: buildActionConfirm generates confirm speech for email SET_ACTION_RULE',
+    tags: ['arch1', 'deterministic'],
+    run: async () => {
+      const src = readFileSync(INDEX_PATH, 'utf8');
+      expectTruthy(src.includes("case 'SET_ACTION_RULE':"), 'buildActionConfirm missing SET_ACTION_RULE case');
+      expectTruthy(src.includes("trigger_type === 'email'") || src.includes("tt === 'email'"), 'SET_ACTION_RULE case must handle email trigger');
+      expectTruthy(src.includes('subject_keyword'), 'SET_ACTION_RULE email confirm must use subject_keyword param');
+    },
+  },
+  {
+    id: 'arch1.step1-4-set-action-rule-case',
+    description: 'ARCH-1: Step 1.4 resolver has SET_ACTION_RULE case emitting action for mobile',
+    tags: ['arch1', 'deterministic'],
+    run: async () => {
+      const src = readFileSync(INDEX_PATH, 'utf8');
+      expectTruthy(src.includes("pending.intent === 'SET_ACTION_RULE'"), 'Step 1.4 missing SET_ACTION_RULE case');
+    },
+  },
+  {
+    id: 'arch1.email-trigger-and-logic',
+    description: 'evaluate-rules email trigger uses AND (from+subject both must match, not OR)',
+    tags: ['arch1', 'evaluate-rules'],
+    run: async () => {
+      const src = readFileSync(
+        join(process.cwd(), 'supabase', 'functions', 'evaluate-rules', 'index.ts'),
+        'utf8',
+      );
+      expectTruthy(src.includes('fromResult && subjectResult'), 'email trigger must use AND logic (fromResult && subjectResult)');
+      expectTruthy(!src.includes('nameMatch || emailMatch || subjectMatch'), 'OR logic must be removed from email trigger match');
+    },
+  },
+  {
+    id: 'arch1.location-action-one-shot-default',
+    description: 'ARCH-1: SET_ACTION_RULE(location) from buildActionConfirm includes one_shot:true by default',
+    tags: ['arch1', 'deterministic'],
+    run: async () => {
+      const src = readFileSync(INDEX_PATH, 'utf8');
+      expectTruthy(src.includes('one_shot'), 'buildActionConfirm SET_ACTION_RULE(location) must set one_shot');
+    },
+  },
+  {
     id: 'arch1.check-reminders-reads-channel-prefs',
     description: 'check-reminders reads alert_channels_enabled and gates each channel',
     tags: ['arch1', 'reminder'],
@@ -206,7 +257,11 @@ export const session2026_06_13Tests: TestCase[] = [
     tags: ['arch1', 'deterministic'],
     run: async () => {
       const src = readFileSync(INDEX_PATH, 'utf8');
-      expectTruthy(src.includes("intent === 'DRAFT_MESSAGE'") && src.includes('DraftCard is the confirm UI'), 'DRAFT_MESSAGE path missing or missing DraftCard comment');
+      // DRAFT_MESSAGE returns actions[] from buildActionConfirm; routing block emits immediately
+      // when confirmed.actions.length > 0. DraftCard comment lives in buildActionConfirm header.
+      expectTruthy(src.includes("case 'DRAFT_MESSAGE':"), 'DRAFT_MESSAGE case missing from buildActionConfirm');
+      expectTruthy(src.includes('DraftCard is the confirm UI'), 'DraftCard comment missing');
+      expectTruthy(src.includes('confirmed.actions.length > 0'), 'Immediate-emit branch missing for actions-bearing intents');
     },
   },
 ];
