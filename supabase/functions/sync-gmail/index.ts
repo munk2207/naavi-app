@@ -276,7 +276,11 @@ serve(async (req) => {
         }
 
         const labels: string[] = msg.labelIds ?? [];
-        if (labels.includes('TRASH')) continue;
+        if (labels.includes('TRASH')) {
+          await supabase.from('gmail_messages').delete()
+            .eq('user_id', user_id).eq('gmail_message_id', messageId);
+          continue;
+        }
         const isUnread    = labels.includes('UNREAD');
         const isImportant = labels.includes('IMPORTANT') || labels.includes('CATEGORY_PRIMARY');
         const receivedAt  = dateStr ? new Date(dateStr).toISOString() : new Date().toISOString();
@@ -365,6 +369,27 @@ serve(async (req) => {
             body: JSON.stringify({ user_id, gmail_message_id: messageId }),
           }).catch((e) => console.error('[sync-gmail] extract-email-actions call failed:', e?.message ?? e));
         }
+      }
+
+      // Cleanup: delete any DB rows whose messages are now in trash
+      try {
+        const trashUrl = new URL(`${GMAIL_API}/messages`);
+        trashUrl.searchParams.set('maxResults', '100');
+        trashUrl.searchParams.set('q', `in:trash after:${cutoffTs}`);
+        const trashRes = await fetch(trashUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+        if (trashRes.ok) {
+          const trashData = await trashRes.json();
+          const trashIds: string[] = (trashData.messages ?? []).map((m: { id: string }) => m.id);
+          if (trashIds.length > 0) {
+            await supabase.from('gmail_messages')
+              .delete()
+              .eq('user_id', user_id)
+              .in('gmail_message_id', trashIds);
+            console.log(`[sync-gmail] Deleted ${trashIds.length} trashed messages for user ${user_id}`);
+          }
+        }
+      } catch (e) {
+        console.error('[sync-gmail] trash cleanup failed:', e);
       }
 
       results.push({ user_id, messages: count });
