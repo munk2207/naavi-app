@@ -331,21 +331,32 @@ export async function handleGmailSearch(
   try {
     const supabase = createClient(supabaseUrl, serviceKey);
     const kw = keyword.trim().toLowerCase();
-    const pat = `%${kw}%`;
 
-    const { data, error } = await supabase
+    // Temporal/generic words ("new", "any", "recent", "latest", "email") are not
+    // content keywords — they mean "show me what arrived recently." In that case
+    // return the latest emails unfiltered instead of searching for those words.
+    const GENERIC_KEYWORDS = new Set(['new', 'any', 'recent', 'latest', 'email', 'emails', 'mail', '']);
+    const isGeneric = GENERIC_KEYWORDS.has(kw);
+
+    let query = supabase
       .from('gmail_messages')
       .select('id, subject, sender_name, sender_email, snippet, received_at')
       .eq('user_id', userId)
-      .or([
+      .order('received_at', { ascending: false })
+      .limit(5);
+
+    if (!isGeneric) {
+      const pat = `%${kw}%`;
+      query = query.or([
         `subject.ilike.${pat}`,
         `sender_name.ilike.${pat}`,
         `sender_email.ilike.${pat}`,
         `snippet.ilike.${pat}`,
         `body_text.ilike.${pat}`,
-      ].join(','))
-      .order('received_at', { ascending: false })
-      .limit(5);
+      ].join(','));
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error('[handleGmailSearch] DB error:', error.message);
@@ -356,7 +367,9 @@ export async function handleGmailSearch(
     const rows = data ?? [];
 
     if (rows.length === 0) {
-      const msg = `I don't see any emails matching "${keyword}" in your synced inbox. If it just arrived, it may not have synced yet.`;
+      const msg = isGeneric
+        ? `I don't see any recent emails in your synced inbox. If something just arrived, it may not have synced yet.`
+        : `I don't see any emails matching "${keyword}" in your synced inbox. If it just arrived, it may not have synced yet.`;
       return { speech: msg, display: msg, actions: [] };
     }
 
@@ -373,9 +386,9 @@ export async function handleGmailSearch(
       };
     });
 
-    const intro = rows.length === 1
-      ? `Yes, you have an email matching "${keyword}"`
-      : `Yes, you have ${rows.length} emails matching "${keyword}"`;
+    const intro = isGeneric
+      ? (rows.length === 1 ? `Yes, you have 1 new email` : `Yes, you have ${rows.length} recent emails`)
+      : (rows.length === 1 ? `Yes, you have an email matching "${keyword}"` : `Yes, you have ${rows.length} emails matching "${keyword}"`);
 
     return {
       speech:  `${intro}. ${lines.map(l => l.speech).join('. ')}.`,

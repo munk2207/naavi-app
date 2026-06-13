@@ -1494,7 +1494,7 @@ B = data question Claude must reason about (no real source)
 action = creating/updating/deleting data (reminder, alert, event, memory, list item)
 chat = conversational, no data question
 
-Level A params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). CALENDAR_SEARCH ONLY for calendar/schedule/appointment queries — NEVER for email queries. GMAIL_SEARCH→keyword (sender name, subject word, or topic). GMAIL_SEARCH for PAST email queries only: "Did I get email from X", "Did I receive email from X", "Any email from X", "Check my email for X" → GMAIL_SEARCH. IMPORTANT: "alert me when I receive email from X" or "notify me when email from X arrives" = SET_ACTION_RULE (action level), NOT GMAIL_SEARCH — the presence of "alert me"/"notify me"/"let me know" + "when" signals a future rule, not a past query. LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic. CREATE_TICKET→reporter_email, body.
+Level A params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). CALENDAR_SEARCH ONLY for calendar/schedule/appointment queries — NEVER for email queries. GMAIL_SEARCH→keyword (sender name or specific subject topic ONLY — never temporal/generic words). GMAIL_SEARCH for PAST email queries only: "Did I get email from X", "Did I receive email from X", "Any email from X", "Check my email for X" → GMAIL_SEARCH. keyword must be the sender name or topic (e.g. "Bob", "invoice", "board meeting") — NOT words like "new", "any", "recent", "latest", "email" which mean "show recent emails" → use empty keyword "" for those. IMPORTANT: "alert me when I receive email from X" or "notify me when email from X arrives" = SET_ACTION_RULE (action level), NOT GMAIL_SEARCH — the presence of "alert me"/"notify me"/"let me know" + "when" signals a future rule, not a past query. LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic. CREATE_TICKET→reporter_email, body.
 
 Level action intents and params (extract what's present, empty string if not mentioned):
 SET_REMINDER → title (what to remember), datetime (ISO8601 Toronto). ONLY use for "remind me at [specific time]" — user must state an explicit time/date. e.g. "remind me to call John tomorrow at 3pm".
@@ -2132,7 +2132,7 @@ Deno.serve(async (req) => {
                 console.log(`[timing] ${elapsed()} | Level A CALENDAR_SEARCH deterministic`);
                 return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
               }
-              if (classification.intent === 'GMAIL_SEARCH' && classification.params.keyword) {
+              if (classification.intent === 'GMAIL_SEARCH' && classification.params.keyword !== undefined) {
                 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
                 const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
                 const result = await handleGmailSearch(classification.params.keyword, userId, supabaseUrl, serviceKey);
