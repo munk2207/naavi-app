@@ -171,6 +171,36 @@ export const session2026_06_13Tests: TestCase[] = [
     },
   },
   {
+    id: 'arch1.check-reminders-reads-channel-prefs',
+    description: 'check-reminders reads alert_channels_enabled and gates each channel',
+    tags: ['arch1', 'reminder'],
+    run: async () => {
+      const src = readFileSync(
+        join(process.cwd(), 'supabase', 'functions', 'check-reminders', 'index.ts'),
+        'utf8',
+      );
+      expectTruthy(src.includes('alert_channels_enabled'), 'check-reminders must read alert_channels_enabled');
+      expectTruthy(src.includes("channelEnabled('sms')"), 'check-reminders must gate SMS on channelEnabled');
+      expectTruthy(src.includes("channelEnabled('whatsapp')"), 'check-reminders must gate WhatsApp on channelEnabled');
+      expectTruthy(src.includes("channelEnabled('email')"), 'check-reminders must gate Email on channelEnabled');
+      expectTruthy(src.includes("channelEnabled('push')"), 'check-reminders must gate Push on channelEnabled');
+      expectTruthy(src.includes("channelEnabled('voice_call')"), 'check-reminders must gate voice call on channelEnabled');
+    },
+  },
+  {
+    id: 'arch1.check-reminders-voice-call-fan-out',
+    description: 'check-reminders includes voice call in fan-out via /speak-alert (not just priority path)',
+    tags: ['arch1', 'reminder'],
+    run: async () => {
+      const src = readFileSync(
+        join(process.cwd(), 'supabase', 'functions', 'check-reminders', 'index.ts'),
+        'utf8',
+      );
+      expectTruthy(src.includes('speak-alert'), 'check-reminders must use speak-alert for voice call');
+      expectTruthy(src.includes('prepare-alert'), 'check-reminders must pre-generate TTS before dialing');
+    },
+  },
+  {
     id: 'arch1.draft-message-emits-action-immediately',
     description: 'ARCH-1: DRAFT_MESSAGE emits action immediately (DraftCard is confirm UI), no PENDING_INTENT',
     tags: ['arch1', 'deterministic'],
