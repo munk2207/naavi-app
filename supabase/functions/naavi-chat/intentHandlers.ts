@@ -331,17 +331,31 @@ export async function handleGmailSearch(
     const adminClient = createClient(supabaseUrl, serviceKey);
     const { data: tokenRow } = await adminClient
       .from('user_tokens')
-      .select('access_token, refresh_token')
+      .select('refresh_token')
       .eq('user_id', userId)
       .eq('provider', 'google')
       .single();
-    if (tokenRow?.access_token) {
+    if (tokenRow?.refresh_token) {
+      // Exchange refresh token for a fresh access token
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id:     Deno.env.get('GOOGLE_CLIENT_ID') ?? '',
+          client_secret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '',
+          refresh_token: tokenRow.refresh_token,
+          grant_type:    'refresh_token',
+        }),
+      });
+      const tokenData = await tokenRes.json();
+      const accessToken = tokenData.access_token;
+      if (accessToken) {
       const cutoff = Math.floor((Date.now() - 7 * 24 * 60 * 60 * 1000) / 1000);
       const trashUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
       trashUrl.searchParams.set('maxResults', '100');
       trashUrl.searchParams.set('q', `in:trash after:${cutoff}`);
       const trashRes = await fetch(trashUrl.toString(), {
-        headers: { Authorization: `Bearer ${tokenRow.access_token}` },
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (trashRes.ok) {
         const trashData = await trashRes.json();
@@ -353,6 +367,7 @@ export async function handleGmailSearch(
             .in('gmail_message_id', trashIds);
         }
       }
+      } // end if (accessToken)
     }
   } catch (e) {
     console.warn('[handleGmailSearch] trash cleanup failed:', e);
