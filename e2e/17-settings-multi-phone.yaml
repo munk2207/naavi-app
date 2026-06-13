@@ -20,7 +20,6 @@ tags:
 
 - launchApp:
     clearState: false
-- pressKey: Back
 
 # Open the 3-dot menu, tap Settings.
 - runFlow:

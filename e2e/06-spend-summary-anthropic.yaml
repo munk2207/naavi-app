@@ -11,7 +11,6 @@ tags:
 - stopApp
 - launchApp:
     clearState: false
-- pressKey: Back
 - tapOn:
     label: "Message input"
 - inputText: "How much did Anthropic charge me last month?"

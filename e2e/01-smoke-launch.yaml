@@ -6,7 +6,6 @@ tags:
 - stopApp
 - launchApp:
     clearState: false
-- pressKey: Back
 - assertVisible:
     text: "MyNaavi"
 - assertVisible:

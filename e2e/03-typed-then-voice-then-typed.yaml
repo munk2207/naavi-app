@@ -9,7 +9,6 @@ tags:
 - stopApp
 - launchApp:
     clearState: false
-- pressKey: Back
 
 # 1. Typed send
 - tapOn:

@@ -18,7 +18,6 @@ tags:
 
 - launchApp:
     clearState: false
-- pressKey: Back
 
 # Open the 3-dot menu — same dual-strategy as flow 10.
 - runFlow:

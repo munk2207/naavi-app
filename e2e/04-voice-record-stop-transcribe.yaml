@@ -19,7 +19,6 @@ tags:
 
 - launchApp:
     clearState: false
-- pressKey: Back
 
 # Wait for status to settle.
 - assertVisible:

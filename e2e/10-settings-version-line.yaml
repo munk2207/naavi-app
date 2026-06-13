@@ -14,7 +14,6 @@ tags:
 
 - launchApp:
     clearState: false
-- pressKey: Back
 
 # Open the 3-dot menu on the topbar. Try the id first, fall back to
 # any element with the right shape if the id is missing.

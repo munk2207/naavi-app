@@ -18,7 +18,6 @@ tags:
 
 - launchApp:
     clearState: false
-- pressKey: Back
 
 # Navigate to Lists.
 - runFlow:
