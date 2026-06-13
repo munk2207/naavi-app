@@ -19,7 +19,7 @@ tags:
 # auto-tester's job via the multi-phone catalogue).
 
 - launchApp:
-    clearState: false
+    clearState: true
 
 # Open the 3-dot menu, tap Settings.
 - runFlow:

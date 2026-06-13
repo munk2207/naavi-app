@@ -18,7 +18,7 @@ tags:
 # covered by the auto-tester's list-connections.disconnect-* cases.
 
 - launchApp:
-    clearState: false
+    clearState: true
 
 # Navigate to Alerts.
 - runFlow:

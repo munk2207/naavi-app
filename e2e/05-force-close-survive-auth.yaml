@@ -10,7 +10,7 @@ tags:
 
 - stopApp
 - launchApp:
-    clearState: false
+    clearState: true
 - assertVisible:
     text: "MyNaavi"
 
@@ -29,7 +29,7 @@ tags:
 # Force-stop and relaunch.
 - stopApp
 - launchApp:
-    clearState: false
+    clearState: true
 - assertVisible:
     text: "MyNaavi"
 

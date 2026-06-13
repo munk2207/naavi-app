@@ -9,7 +9,7 @@ tags:
 
 - stopApp
 - launchApp:
-    clearState: false
+    clearState: true
 
 # Send #1
 - tapOn:

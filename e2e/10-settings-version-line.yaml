@@ -13,7 +13,7 @@ tags:
 # UI labels independent of which version is current.
 
 - launchApp:
-    clearState: false
+    clearState: true
 
 # Open the 3-dot menu on the topbar. Try the id first, fall back to
 # any element with the right shape if the id is missing.

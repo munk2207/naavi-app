@@ -18,7 +18,7 @@ tags:
 # transcription step — that's a setup limitation, not an app bug.
 
 - launchApp:
-    clearState: false
+    clearState: true
 
 # Wait for status to settle.
 - assertVisible:

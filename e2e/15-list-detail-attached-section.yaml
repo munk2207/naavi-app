@@ -17,7 +17,7 @@ tags:
 # screen is empty, the flow falls through gracefully.
 
 - launchApp:
-    clearState: false
+    clearState: true
 
 # Navigate to Lists.
 - runFlow:

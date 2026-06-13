@@ -9,7 +9,7 @@ tags:
 
 - stopApp
 - launchApp:
-    clearState: false
+    clearState: true
 - tapOn:
     label: "Message input"
 - inputText: "Create a shopping list"
