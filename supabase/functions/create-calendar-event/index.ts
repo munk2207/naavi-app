@@ -46,7 +46,7 @@ serve(async (req) => {
   }
 
   const body = await req.json();
-  const { summary, description, start, end, attendees, recurrence, is_priority, user_id: bodyUserId } = body;
+  const { summary, description, start, end, attendees, recurrence, is_priority, user_id: bodyUserId, suppress_reminders } = body;
 
   if (!summary || !start || !end) {
     return new Response(JSON.stringify({ error: 'Missing summary, start, or end' }), {
@@ -192,6 +192,12 @@ serve(async (req) => {
     // Recurring event support (e.g. ["RRULE:FREQ=WEEKLY;BYDAY=SA"])
     if (Array.isArray(recurrence) && recurrence.length > 0) {
       event.recurrence = recurrence;
+    }
+
+    // Suppress Google Calendar's default notifications when Naavi handles fan-out itself
+    // (e.g. SET_REMINDER — check-reminders cron fires at the exact time via SMS/Push/etc.)
+    if (suppress_reminders === true) {
+      event.reminders = { useDefault: false, overrides: [] };
     }
 
     const createRes = await fetch(CALENDAR_API, {

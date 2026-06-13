@@ -149,6 +149,28 @@ export const session2026_06_13Tests: TestCase[] = [
     },
   },
   {
+    id: 'arch1.set-reminder-suppress-calendar-notifications',
+    description: 'ARCH-1: handleSetReminderExec passes suppress_reminders:true so Google Calendar does not fire its own notifications',
+    tags: ['arch1', 'deterministic'],
+    run: async () => {
+      const src = readFileSync(HANDLERS_PATH, 'utf8');
+      expectTruthy(src.includes('suppress_reminders: true'), 'handleSetReminderExec must pass suppress_reminders:true to create-calendar-event');
+    },
+  },
+  {
+    id: 'arch1.create-calendar-event-honors-suppress-reminders',
+    description: 'ARCH-1: create-calendar-event EF reads suppress_reminders and sets useDefault:false when true',
+    tags: ['arch1', 'deterministic'],
+    run: async () => {
+      const src = readFileSync(
+        join(process.cwd(), 'supabase', 'functions', 'create-calendar-event', 'index.ts'),
+        'utf8',
+      );
+      expectTruthy(src.includes('suppress_reminders'), 'create-calendar-event must read suppress_reminders param');
+      expectTruthy(src.includes('useDefault: false'), 'create-calendar-event must set useDefault:false when suppress_reminders');
+    },
+  },
+  {
     id: 'arch1.draft-message-emits-action-immediately',
     description: 'ARCH-1: DRAFT_MESSAGE emits action immediately (DraftCard is confirm UI), no PENDING_INTENT',
     tags: ['arch1', 'deterministic'],

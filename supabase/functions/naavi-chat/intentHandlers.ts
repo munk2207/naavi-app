@@ -688,7 +688,7 @@ export async function handleSetReminderExec(
     await fetch(`${supabaseUrl}/functions/v1/create-calendar-event`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
-      body:    JSON.stringify({ summary: params.title, description: params.title, start: safeDateTime, end, attendees: [], user_id: userId }),
+      body:    JSON.stringify({ summary: params.title, description: params.title, start: safeDateTime, end, attendees: [], user_id: userId, suppress_reminders: true }),
     });
   } catch (e) {
     console.warn('[handleSetReminderExec] calendar event failed (non-fatal):', (e as Error).message);
