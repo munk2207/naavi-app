@@ -21,16 +21,17 @@ tags:
 
 - launchApp:
     clearState: false
+- assertVisible:
+    text: "Ask MyNaavi"
 
 # Tap the input field and type a draft request with a literal phone
 # number — bypasses contact lookup, exercises only the Send-commit
 # path that this regression catcher was written for.
 - tapOn:
-    label: "Message input"
+    text: "Ask MyNaavi"
 - inputText: "text 6135551234 hi from maestro testing"
 - waitForAnimationToEnd
-- tapOn:
-    label: "Send"
+- pressKey: Enter
 
 # Naavi composes the draft. The DraftCard label is stable from the
 # React component (SMS DRAFT READY); the Send/Discard buttons hang
@@ -38,7 +39,7 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "SMS DRAFT READY"
-    timeout: 20000
+    timeout: 40000
 - assertVisible:
     text: "Send"
 

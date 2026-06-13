@@ -1,5 +1,5 @@
 appId: ca.naavi.app
-name: 09 — clear chat returns to brief
+name: 09 — collapse chat returns to brief
 tags:
   - chat-ui
 ---
@@ -9,29 +9,30 @@ tags:
 - stopApp
 - launchApp:
     clearState: false
+- assertVisible:
+    text: "Ask MyNaavi"
 - tapOn:
-    label: "Message input"
+    text: "Ask MyNaavi"
 - inputText: "Hello"
 - waitForAnimationToEnd
-- tapOn:
-    label: "Send"
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
     timeout: 30000
 
-# Clear chat link appears once a turn exists.
+# Collapse Chat button appears once a turn exists.
 - extendedWaitUntil:
     visible:
-      text: "Clear chat"
+      text: "Collapse Chat"
     timeout: 5000
 - tapOn:
-    text: "Clear chat"
+    text: "Collapse Chat"
 
 # Brief must be visible again.
 - extendedWaitUntil:
     visible:
-      text: "Brief"
+      text: "Today's brief"
     timeout: 5000
 - assertNotVisible:
     text: "Earlier:"

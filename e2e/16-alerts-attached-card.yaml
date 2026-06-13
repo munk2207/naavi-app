@@ -21,20 +21,8 @@ tags:
     clearState: false
 
 # Navigate to Alerts.
-- runFlow:
-    when:
-      visible:
-        id: "topbar-menu"
-    commands:
-      - tapOn:
-          id: "topbar-menu"
-- runFlow:
-    when:
-      notVisible:
-        id: "topbar-menu"
-    commands:
-      - tapOn:
-          point: "95%,9%"
+- tapOn:
+    label: "Open menu"
 
 - extendedWaitUntil:
     visible:

@@ -12,15 +12,14 @@ tags:
 - launchApp:
     clearState: false
 - assertVisible:
-    text: "MyNaavi"
+    text: "Ask MyNaavi"
 
 # Confirm session is alive at start.
 - tapOn:
-    label: "Message input"
+    text: "Ask MyNaavi"
 - inputText: "Hello"
 - waitForAnimationToEnd
-- tapOn:
-    label: "Send"
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
@@ -31,7 +30,7 @@ tags:
 - launchApp:
     clearState: false
 - assertVisible:
-    text: "MyNaavi"
+    text: "Ask MyNaavi"
 
 # CRITICAL — stale-auth banner must NOT appear.
 - assertNotVisible:
@@ -40,11 +39,10 @@ tags:
 
 # Fresh send must still work without re-login.
 - tapOn:
-    label: "Message input"
+    text: "Ask MyNaavi"
 - inputText: "Still here"
 - waitForAnimationToEnd
-- tapOn:
-    label: "Send"
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"

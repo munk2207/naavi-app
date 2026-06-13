@@ -224,7 +224,7 @@ This rule applies to EVERY context where 2 or more items are presented: entity d
   // Dynamic prefix — changes per request (minute-accurate time, calendar of upcoming days).
   // The body below is the cacheable stable block; the CACHE_BOUNDARY marker separates them.
   return `
-Today is ${dateStr}. The current time is ${timeStr} Eastern. Today's date is ${todayISO}. Upcoming days: ${upcomingDays}.
+Today is ${dateStr}. The current time is ${timeStr} Eastern. Today's date is ${todayISO}. Upcoming days: ${upcomingDays}. When asked what time or date it is, answer directly from these values — never hedge, never say "my best reading", never say you cannot verify from a live source. You have the exact time and date above — state it directly.
 ${CACHE_BOUNDARY}
 ${intro}
 

@@ -11,14 +11,15 @@ tags:
 - stopApp
 - launchApp:
     clearState: false
+- assertVisible:
+    text: "Ask MyNaavi"
 
 # --- Send 1 ---
 - tapOn:
-    label: "Message input"
+    text: "Ask MyNaavi"
 - inputText: "What is the time"
 - waitForAnimationToEnd
-- tapOn:
-    label: "Send"
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
@@ -27,11 +28,10 @@ tags:
 
 # --- Send 2 ---
 - tapOn:
-    label: "Message input"
+    text: "Ask MyNaavi"
 - inputText: "What day is today"
 - waitForAnimationToEnd
-- tapOn:
-    label: "Send"
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
@@ -40,11 +40,10 @@ tags:
 
 # --- Send 3 (the call that hung in V57.9.5) ---
 - tapOn:
-    label: "Message input"
+    text: "Ask MyNaavi"
 - inputText: "What is the date"
 - waitForAnimationToEnd
-- tapOn:
-    label: "Send"
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
@@ -53,11 +52,10 @@ tags:
 
 # --- Send 4 ---
 - tapOn:
-    label: "Message input"
+    text: "Ask MyNaavi"
 - inputText: "Hello again"
 - waitForAnimationToEnd
-- tapOn:
-    label: "Send"
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
@@ -66,11 +64,10 @@ tags:
 
 # --- Send 5 ---
 - tapOn:
-    label: "Message input"
+    text: "Ask MyNaavi"
 - inputText: "Thank you"
 - waitForAnimationToEnd
-- tapOn:
-    label: "Send"
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"

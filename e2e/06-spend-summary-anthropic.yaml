@@ -11,12 +11,13 @@ tags:
 - stopApp
 - launchApp:
     clearState: false
+- assertVisible:
+    text: "Ask MyNaavi"
 - tapOn:
-    label: "Message input"
+    text: "Ask MyNaavi"
 - inputText: "How much did Anthropic charge me last month?"
 - waitForAnimationToEnd
-- tapOn:
-    label: "Send"
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"

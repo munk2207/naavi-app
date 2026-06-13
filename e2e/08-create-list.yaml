@@ -10,12 +10,13 @@ tags:
 - stopApp
 - launchApp:
     clearState: false
+- assertVisible:
+    text: "Ask MyNaavi"
 - tapOn:
-    label: "Message input"
+    text: "Ask MyNaavi"
 - inputText: "Create a shopping list"
 - waitForAnimationToEnd
-- tapOn:
-    label: "Send"
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       text: "LIST CREATED"

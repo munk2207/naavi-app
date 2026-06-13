@@ -9,14 +9,15 @@ tags:
 - stopApp
 - launchApp:
     clearState: false
+- assertVisible:
+    text: "Ask MyNaavi"
 
 # 1. Typed send
 - tapOn:
-    label: "Message input"
+    text: "Ask MyNaavi"
 - inputText: "What is the time"
 - waitForAnimationToEnd
-- tapOn:
-    label: "Send"
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
@@ -45,11 +46,10 @@ tags:
 
 # 4. Typed send again — verify state recovered fully.
 - tapOn:
-    label: "Message input"
+    text: "Ask MyNaavi"
 - inputText: "What is the date"
 - waitForAnimationToEnd
-- tapOn:
-    label: "Send"
+- pressKey: Enter
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"

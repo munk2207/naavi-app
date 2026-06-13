@@ -15,22 +15,9 @@ tags:
 - launchApp:
     clearState: false
 
-# Open the 3-dot menu on the topbar. Try the id first, fall back to
-# any element with the right shape if the id is missing.
-- runFlow:
-    when:
-      visible:
-        id: "topbar-menu"
-    commands:
-      - tapOn:
-          id: "topbar-menu"
-- runFlow:
-    when:
-      notVisible:
-        id: "topbar-menu"
-    commands:
-      - tapOn:
-          point: "95%,9%"
+# Open the 3-dot menu on the topbar.
+- tapOn:
+    label: "Open menu"
 
 # Tap the Settings menu item. Looser timeout because the menu renders
 # asynchronously on some builds.
