@@ -276,6 +276,7 @@ serve(async (req) => {
         }
 
         const labels: string[] = msg.labelIds ?? [];
+        if (labels.includes('TRASH')) continue;
         const isUnread    = labels.includes('UNREAD');
         const isImportant = labels.includes('IMPORTANT') || labels.includes('CATEGORY_PRIMARY');
         const receivedAt  = dateStr ? new Date(dateStr).toISOString() : new Date().toISOString();
