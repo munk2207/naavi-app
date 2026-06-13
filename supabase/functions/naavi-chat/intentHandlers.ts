@@ -324,6 +324,40 @@ export async function handleGmailSearch(
     clearTimeout(syncTimer);
   } catch (_) { /* non-fatal — proceed with cached data */ }
 
+  // Trash cleanup: remove any stale DB rows whose messages the user has deleted.
+  // Done here (not in sync-gmail) because the 6s sync timeout may expire before
+  // the cleanup step runs, leaving old trashed emails in the DB.
+  try {
+    const adminClient = createClient(supabaseUrl, serviceKey);
+    const { data: tokenRow } = await adminClient
+      .from('user_tokens')
+      .select('access_token, refresh_token')
+      .eq('user_id', userId)
+      .eq('provider', 'google')
+      .single();
+    if (tokenRow?.access_token) {
+      const cutoff = Math.floor((Date.now() - 7 * 24 * 60 * 60 * 1000) / 1000);
+      const trashUrl = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
+      trashUrl.searchParams.set('maxResults', '100');
+      trashUrl.searchParams.set('q', `in:trash after:${cutoff}`);
+      const trashRes = await fetch(trashUrl.toString(), {
+        headers: { Authorization: `Bearer ${tokenRow.access_token}` },
+      });
+      if (trashRes.ok) {
+        const trashData = await trashRes.json();
+        const trashIds: string[] = (trashData.messages ?? []).map((m: { id: string }) => m.id);
+        if (trashIds.length > 0) {
+          await adminClient.from('gmail_messages')
+            .delete()
+            .eq('user_id', userId)
+            .in('gmail_message_id', trashIds);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[handleGmailSearch] trash cleanup failed:', e);
+  }
+
   // Direct DB query without signal_strength filter — explicit user queries should
   // search ALL emails (including 'ambient' senders not yet in contacts).
   // The global-search gmail adapter excludes ambient emails; that filter is right
