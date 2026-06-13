@@ -283,13 +283,13 @@ async function findEmailTriggers(
         return false;
       }
       const nameMatch = fromName
-        ? msg.sender_name.toLowerCase().includes(fromName.toLowerCase())
+        ? (msg.sender_name ?? '').toLowerCase().includes(fromName.toLowerCase())
         : false;
       const emailMatch = fromEmail
-        ? msg.sender_email.toLowerCase() === fromEmail.toLowerCase()
+        ? (msg.sender_email ?? '').toLowerCase() === fromEmail.toLowerCase()
         : false;
       const subjectMatch = subjectKeyword
-        ? msg.subject.toLowerCase().includes(subjectKeyword.toLowerCase())
+        ? (msg.subject ?? '').toLowerCase().includes(subjectKeyword.toLowerCase())
         : false;
 
       // AND logic: when multiple conditions are specified, ALL must match.
@@ -662,7 +662,18 @@ async function fireAction(
   // Build the final body from base + inline tasks + linked list items.
   // See _shared/alert_body.ts for the merge rules. Pass rule.id so F1a's
   // list_connections path can surface a connected list in the fan-out.
-  const body = await buildAlertBody(config, rule.user_id, supabaseUrl, interFnKey, rule.id);
+  let body = await buildAlertBody(config, rule.user_id, supabaseUrl, interFnKey, rule.id);
+
+  // Email alerts created via ARCH-1 have action_config:{} (no body) — generate
+  // a default notification body from trigger_config at fire time.
+  if (!body && rule.trigger_type === 'email') {
+    const tc = rule.trigger_config as Record<string, string>;
+    const from = tc.from_name || tc.from_email || 'someone';
+    const kw   = tc.subject_keyword;
+    body = kw
+      ? `Naavi: You received an email from ${from} about "${kw}".`
+      : `Naavi: You received an email from ${from}.`;
+  }
 
   if (!body) {
     console.error(`[evaluate-rules] Rule ${rule.id}: empty body after buildAlertBody`);
