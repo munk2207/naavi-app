@@ -1678,7 +1678,10 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       // retrieval queries — skip pre-search so unrelated inbox results don't
       // appear alongside the confirmation bubble.
       const isTicketCreation = /\b(open|create|log|file|submit|raise)\s+(a\s+)?(support\s+)?(ticket|issue|report)\b/i.test(userMessage);
-      const isRetrievalQuery = !isTicketCreation && (hasLongDigitRun || hasAtSign || retrievalRe.test(userMessage));
+      // Email alert creation contains an @ (sender address) but is NOT a retrieval query —
+      // skip pre-search so unrelated inbox results don't appear alongside the confirm bubble.
+      const isEmailAlertCreation = /\b(alert|notify|tell|let\s+me\s+know|ping)\s+me\s+(when|if|whenever)\b/i.test(userMessage);
+      const isRetrievalQuery = !isTicketCreation && !isEmailAlertCreation && (hasLongDigitRun || hasAtSign || retrievalRe.test(userMessage));
 
       // Strip question/retrieval verbs and trailing filler so the search
       // query matches real content. The raw user message "Find Gordon Doig's
