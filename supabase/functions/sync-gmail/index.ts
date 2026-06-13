@@ -219,8 +219,8 @@ serve(async (req) => {
       // category:primary filter applies to both cron and backfill so the
       // gmail_messages cache only ever holds Primary email going forward.
       const query = beforeTs !== null
-        ? `after:${cutoffTs} before:${beforeTs} (category:primary OR category:updates)`
-        : `after:${cutoffTs} (category:primary OR category:updates)`;
+        ? `after:${cutoffTs} before:${beforeTs} -in:trash (category:primary OR category:updates)`
+        : `after:${cutoffTs} -in:trash (category:primary OR category:updates)`;
 
       // Paginate through Gmail's 500-per-page list. In cron mode (7 days)
       // we cap at 500 messages; in backfill mode we fetch everything in the
