@@ -200,6 +200,21 @@ export const session2026_06_13Tests: TestCase[] = [
     },
   },
   {
+    id: 'arch1.email-trigger-from-anyone',
+    description: 'evaluate-rules email trigger fires even when no from/subject specified (alert on any email)',
+    tags: ['arch1', 'evaluate-rules'],
+    run: async () => {
+      const src = readFileSync(
+        join(process.cwd(), 'supabase', 'functions', 'evaluate-rules', 'index.ts'),
+        'utf8',
+      );
+      expectTruthy(
+        !src.includes('!fromName && !fromEmail && !subjectKeyword') ,
+        'early-return guard must be removed so "alert on any email" rules can fire',
+      );
+    },
+  },
+  {
     id: 'arch1.email-trigger-and-logic',
     description: 'evaluate-rules email trigger uses AND (from+subject both must match, not OR)',
     tags: ['arch1', 'evaluate-rules'],

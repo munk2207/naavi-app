@@ -245,8 +245,6 @@ async function findEmailTriggers(
   const fromEmail = config.from_email as string | null;
   const subjectKeyword = config.subject_keyword as string | null;
 
-  if (!fromName && !fromEmail && !subjectKeyword) return [];
-
   // Only check emails from after the rule was created, within last 24h
   const cutoff = new Date(Math.max(
     new Date(rule.created_at).getTime(),
