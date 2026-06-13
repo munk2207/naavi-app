@@ -18,7 +18,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.79.0';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { NAAVI_TOOLS, TOOL_NAME_TO_ACTION_TYPE } from '../_shared/anthropic_tools.ts';
 import { computeContactHash, COMMUNITY_PERSON_FIELDS } from '../_shared/community_hash.ts';
-import { HANDLED_INTENTS, handleListRules, handleLookupContact, handleCalendarSearch, handlePersonLookup, handleListRead, handleReminderRead, handleMemorySearch, handleCreateTicket } from './intentHandlers.ts';
+import { HANDLED_INTENTS, handleListRules, handleLookupContact, handleCalendarSearch, handlePersonLookup, handleListRead, handleReminderRead, handleMemorySearch, handleCreateTicket, HANDLED_ACTION_INTENTS, handleSetReminderExec, handleCreateEventExec, handleRememberExec, handleDeleteRuleExec, handleDeleteMemoryExec, handleAddContactExec, handleDeleteEventExec } from './intentHandlers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1483,9 +1483,10 @@ async function classifyIntent(
   try {
     const res = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 150,
+      max_tokens: 200,
       temperature: 0,
       system: `Classify the message. JSON only. No fences.
+Today (America/Toronto): ${new Date().toLocaleDateString('en-CA', { timeZone: 'America/Toronto' })}. Use to resolve "tomorrow", "next Friday", etc. into ISO8601 with Toronto offset (e.g. "2026-06-14T15:00:00-04:00").
 
 Levels:
 A = answerable from user's real data (calendar, contacts, alerts, lists, reminders, memories). Use intents: LIST_RULES, LOOKUP_CONTACT, CALENDAR_SEARCH, PERSON_LOOKUP, LIST_READ, REMINDER_READ, MEMORY_SEARCH, CREATE_TICKET
@@ -1493,7 +1494,17 @@ B = data question Claude must reason about (no real source)
 action = creating/updating/deleting data (reminder, alert, event, memory, list item)
 chat = conversational, no data question
 
-Params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic. CREATE_TICKET→reporter_email (customer email), body (issue description).
+Level A params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic. CREATE_TICKET→reporter_email, body.
+
+Level action intents and params (extract what's present, empty string if not mentioned):
+SET_REMINDER → title (what to remember), datetime (ISO8601 Toronto, e.g. "2026-06-14T15:00:00-04:00")
+CREATE_EVENT → summary (event name), start (ISO8601 Toronto), end (ISO8601 Toronto, default start+1h)
+REMEMBER → text (exact statement to save)
+DELETE_RULE → match (keyword describing the alert to delete), all ("true" only if user says delete all alerts)
+DELETE_MEMORY → keyword (what to forget)
+ADD_CONTACT → name, phone (E.164 if given), email (if given)
+DRAFT_MESSAGE → to_name (recipient name), body (message text), to_phone (E.164 if known)
+DELETE_EVENT → query (event name/keyword to find and delete)
 
 Output: {"level":"A","intent":"LIST_RULES","confidence":"high","params":{}}
 Use "low" confidence when ambiguous.`,
@@ -1522,6 +1533,83 @@ Use "low" confidence when ambiguous.`,
   } catch (err) {
     console.warn('[classifyIntent] failed:', (err as Error)?.message);
     return null;
+  }
+}
+
+// ── buildActionConfirm ────────────────────────────────────────────────────────
+// Generates a deterministic confirm speech string from Haiku-extracted params.
+// Returns { speech, display, actions, missingParam? }.
+// missingParam is set when a required param is absent — caller asks for it instead.
+// For DRAFT_MESSAGE, returns the action immediately (DraftCard is the confirm UI).
+
+function fmtDtLocal(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('en-CA', {
+      timeZone: 'America/Toronto', weekday: 'short', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+    });
+  } catch { return iso; }
+}
+
+function buildActionConfirm(
+  intent: string,
+  params: Record<string, string>,
+): { speech: string; display: string; actions: unknown[]; missingParam?: string } {
+  switch (intent) {
+    case 'SET_REMINDER': {
+      if (!params.title)    return { speech: '', display: '', actions: [], missingParam: "What should I remind you about?" };
+      if (!params.datetime) return { speech: '', display: '', actions: [], missingParam: "When should I remind you?" };
+      const label = fmtDtLocal(params.datetime);
+      const s = `I'll remind you: ${params.title} on ${label}. Say yes to confirm, no to cancel.`;
+      return { speech: s, display: s, actions: [] };
+    }
+    case 'CREATE_EVENT': {
+      if (!params.summary) return { speech: '', display: '', actions: [], missingParam: "What's the event name?" };
+      if (!params.start)   return { speech: '', display: '', actions: [], missingParam: "When is it?" };
+      const label = fmtDtLocal(params.start);
+      const s = `I'll add "${params.summary}" to your calendar on ${label}. Say yes to confirm, no to cancel.`;
+      return { speech: s, display: s, actions: [] };
+    }
+    case 'REMEMBER': {
+      if (!params.text) return { speech: '', display: '', actions: [], missingParam: "What would you like me to remember?" };
+      const snippet = params.text.slice(0, 80);
+      const s = `I'll save: "${snippet}". Say yes to confirm, no to cancel.`;
+      return { speech: s, display: s, actions: [] };
+    }
+    case 'DELETE_RULE': {
+      if (!params.match && params.all !== 'true') return { speech: '', display: '', actions: [], missingParam: "Which alert should I delete? Tell me the place, keyword, or contact it's for." };
+      const s = params.all === 'true'
+        ? `I'll delete all your alerts. Say yes to confirm, no to cancel.`
+        : `I'll delete your "${params.match}" alert. Say yes to confirm, no to cancel.`;
+      return { speech: s, display: s, actions: [] };
+    }
+    case 'DELETE_MEMORY': {
+      if (!params.keyword) return { speech: '', display: '', actions: [], missingParam: "What should I forget? Give me a topic or keyword." };
+      const s = `I'll forget everything I have about "${params.keyword}". Say yes to confirm, no to cancel.`;
+      return { speech: s, display: s, actions: [] };
+    }
+    case 'ADD_CONTACT': {
+      if (!params.name) return { speech: '', display: '', actions: [], missingParam: "What's the contact's name?" };
+      const detail = [params.phone, params.email].filter(Boolean).join(', ');
+      const s = detail
+        ? `I'll add ${params.name} (${detail}) to your contacts. Say yes to confirm, no to cancel.`
+        : `I'll add ${params.name} to your contacts. Say yes to confirm, no to cancel.`;
+      return { speech: s, display: s, actions: [] };
+    }
+    case 'DELETE_EVENT': {
+      if (!params.query) return { speech: '', display: '', actions: [], missingParam: "Which calendar event should I delete?" };
+      const s = `I'll delete "${params.query}" from your calendar. Say yes to confirm, no to cancel.`;
+      return { speech: s, display: s, actions: [] };
+    }
+    case 'DRAFT_MESSAGE': {
+      if (!params.to_name) return { speech: '', display: '', actions: [], missingParam: "Who should I send the message to?" };
+      if (!params.body)    return { speech: '', display: '', actions: [], missingParam: "What should the message say?" };
+      const s = `Here's your draft to ${params.to_name}: "${params.body.slice(0, 100)}". Review it in the card below.`;
+      const action = { type: 'DRAFT_MESSAGE', to: params.to_name, to_phone: params.to_phone ?? '', body: params.body };
+      return { speech: s, display: s, actions: [action] };
+    }
+    default:
+      return { speech: '', display: '', actions: [] };
   }
 }
 
@@ -1747,6 +1835,72 @@ Deno.serve(async (req) => {
                 serviceKey,
               );
               console.log(`[timing] ${elapsed()} | Level A CREATE_TICKET executed`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+            // ── Action intent executions (Turn 2 after user confirmed) ──────────
+            if (pending.intent === 'SET_REMINDER' && pending.params.title && pending.params.datetime) {
+              const _url = Deno.env.get('SUPABASE_URL') ?? '';
+              const _key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+              const result = await handleSetReminderExec(
+                pending.params as { title: string; datetime: string },
+                userId, supabase, _url, _key,
+              );
+              console.log(`[timing] ${elapsed()} | SET_REMINDER executed`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+            if (pending.intent === 'CREATE_EVENT' && pending.params.summary && pending.params.start) {
+              const _url = Deno.env.get('SUPABASE_URL') ?? '';
+              const _key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+              const result = await handleCreateEventExec(
+                pending.params as { summary: string; start: string; end?: string; description?: string },
+                userId, _url, _key,
+              );
+              console.log(`[timing] ${elapsed()} | CREATE_EVENT executed`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+            if (pending.intent === 'REMEMBER' && pending.params.text) {
+              const _url = Deno.env.get('SUPABASE_URL') ?? '';
+              const _key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+              const result = await handleRememberExec(pending.params as { text: string }, userId, _url, _key);
+              console.log(`[timing] ${elapsed()} | REMEMBER executed`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+            if (pending.intent === 'DELETE_RULE') {
+              const _url = Deno.env.get('SUPABASE_URL') ?? '';
+              const _key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+              const result = await handleDeleteRuleExec(
+                pending.params as { match: string; all?: string },
+                userId, _url, _key,
+              );
+              console.log(`[timing] ${elapsed()} | DELETE_RULE executed`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+            if (pending.intent === 'DELETE_MEMORY' && pending.params.keyword) {
+              const result = await handleDeleteMemoryExec(
+                pending.params as { keyword: string },
+                userId, supabase,
+              );
+              console.log(`[timing] ${elapsed()} | DELETE_MEMORY executed`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+            if (pending.intent === 'ADD_CONTACT' && pending.params.name) {
+              const _url = Deno.env.get('SUPABASE_URL') ?? '';
+              const _key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+              const result = await handleAddContactExec(
+                pending.params as { name: string; phone?: string; email?: string },
+                userId, _url, _key,
+              );
+              console.log(`[timing] ${elapsed()} | ADD_CONTACT executed`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+            }
+            if (pending.intent === 'DELETE_EVENT' && pending.params.query) {
+              const _url = Deno.env.get('SUPABASE_URL') ?? '';
+              const _key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+              const result = await handleDeleteEventExec(
+                pending.params as { query: string },
+                userId, _url, _key,
+              );
+              console.log(`[timing] ${elapsed()} | DELETE_EVENT executed`);
               return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
             }
           } catch (_) { /* fall through to Claude */ }
@@ -2009,8 +2163,32 @@ Deno.serve(async (req) => {
             pathB = true;
             console.log(`[timing] ${elapsed()} | Level B — Claude best-effort, Path B disclosure`);
 
+          } else if (classification.level === 'action' && HANDLED_ACTION_INTENTS.has(classification.intent)) {
+            // ── Deterministic action — skip Claude entirely ───────────────────
+            // Haiku extracted structured params. Validate completeness, then
+            // generate templated confirm speech + embed PENDING_INTENT marker.
+            // Turn 2: Step 1.4 resolver executes server-side. Same result every time.
+            const confirmed = buildActionConfirm(classification.intent, classification.params);
+
+            if (confirmed.missingParam) {
+              // Required param missing — ask for it specifically, no Claude
+              console.log(`[timing] ${elapsed()} | Level action ${classification.intent} — missing param, asking`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: confirmed.missingParam, display: confirmed.missingParam, actions: [], pendingThreads: [] }) });
+            }
+
+            if (classification.intent === 'DRAFT_MESSAGE') {
+              // DRAFT_MESSAGE: emit action immediately — DraftCard is the confirm UI
+              console.log(`[timing] ${elapsed()} | Level action DRAFT_MESSAGE — deterministic action emitted`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: confirmed.speech, display: confirmed.display, actions: confirmed.actions, pendingThreads: [] }) });
+            }
+
+            // All other action intents: confirm turn + PENDING_INTENT for Step 1.4
+            const pendingMarker = `<!--PENDING_INTENT:${JSON.stringify({ intent: classification.intent, level: 'action', confidence: 'high', params: classification.params })}-->`;
+            console.log(`[timing] ${elapsed()} | Level action ${classification.intent} — awaiting confirm`);
+            return jsonResponse({ rawText: JSON.stringify({ speech: confirmed.speech, display: `${confirmed.speech}\n${pendingMarker}`, actions: [], pendingThreads: [] }) });
+
           } else {
-            // Level action or chat — Claude responds naturally, no disclosure
+            // Level action (unhandled) or chat — Claude responds naturally, no disclosure
             console.log(`[timing] ${elapsed()} | Level ${classification.level} — Claude natural response`);
           }
         } else {

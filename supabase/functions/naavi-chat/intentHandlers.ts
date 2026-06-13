@@ -593,3 +593,342 @@ export async function handleCreateTicket(
     return { speech: msg, display: msg, actions: [] };
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ACTION HANDLERS — deterministic writes (Turn 2 execution after user confirms)
+//
+// Pattern (see ARCH-1 / project_naavi_deterministic_design.md):
+//   Turn 1 — Level action routing in index.ts validates params, generates
+//             templated confirm speech, embeds PENDING_INTENT marker.
+//   Turn 2 — Step 1.4 resolver sees "yes" + PENDING_INTENT, calls the matching
+//             handler below to execute deterministically. No Claude call on
+//             either turn.
+//
+// Same params → same result every time. This is the fix for LLM variability.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const HANDLED_ACTION_INTENTS = new Set([
+  'SET_REMINDER',
+  'CREATE_EVENT',
+  'REMEMBER',
+  'DELETE_RULE',
+  'DELETE_MEMORY',
+  'ADD_CONTACT',
+  'DELETE_EVENT',
+  'DRAFT_MESSAGE',
+]);
+
+// Format ISO datetime to human-readable EST string.
+function fmtDatetime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('en-CA', {
+      timeZone: 'America/Toronto',
+      weekday: 'short', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+// Correct naive datetimes (no TZ suffix) to America/Toronto offset.
+// Mirrors lib/supabase.ts::saveReminder — keeps behaviour consistent.
+export function correctDatetime(raw: string): string {
+  if (!raw || /[Zz]|[+-]\d{2}:\d{2}$/.test(raw)) return raw;
+  try {
+    const datePart = raw.includes('T') ? raw.split('T')[0] : raw;
+    const timePart = raw.includes('T') ? raw.split('T')[1] : '00:00:00';
+    const testDate = new Date(`${datePart}T12:00:00Z`);
+    const offset   = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Toronto', timeZoneName: 'shortOffset',
+    }).formatToParts(testDate).find(p => p.type === 'timeZoneName')?.value ?? 'GMT-4';
+    const sign  = offset.includes('-') ? '-' : '+';
+    const hours = offset.replace('GMT', '').replace(/[+-]/, '').padStart(2, '0');
+    return `${datePart}T${timePart}${sign}${hours}:00`;
+  } catch {
+    return raw;
+  }
+}
+
+// ── SET_REMINDER (exec) ───────────────────────────────────────────────────────
+export async function handleSetReminderExec(
+  params: { title: string; datetime: string },
+  userId: string,
+  supabase: ReturnType<typeof createClient>,
+  supabaseUrl: string,
+  serviceKey: string,
+): Promise<HandlerResult> {
+  const { data: settingsRow } = await supabase
+    .from('user_settings')
+    .select('phone')
+    .eq('user_id', userId)
+    .maybeSingle();
+  const phoneNumber = (settingsRow as any)?.phone ?? null;
+
+  const safeDateTime = correctDatetime(params.datetime);
+
+  const { error } = await supabase.from('reminders').insert({
+    user_id:      userId,
+    title:        params.title,
+    datetime:     safeDateTime,
+    source:       'chat',
+    phone_number: phoneNumber,
+    fired:        false,
+    is_priority:  false,
+  });
+
+  if (error) {
+    console.error('[handleSetReminderExec] DB error:', error.message);
+    const msg = `I couldn't save that reminder. Please try again.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
+
+  try {
+    const end = new Date(new Date(safeDateTime).getTime() + 15 * 60000).toISOString();
+    await fetch(`${supabaseUrl}/functions/v1/create-calendar-event`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+      body:    JSON.stringify({ summary: params.title, description: params.title, start: safeDateTime, end, attendees: [], user_id: userId }),
+    });
+  } catch (e) {
+    console.warn('[handleSetReminderExec] calendar event failed (non-fatal):', (e as Error).message);
+  }
+
+  const label = fmtDatetime(safeDateTime);
+  const msg   = `Done. Reminder set: ${params.title} on ${label}.`;
+  return { speech: msg, display: msg, actions: [] };
+}
+
+// ── CREATE_EVENT (exec) ───────────────────────────────────────────────────────
+export async function handleCreateEventExec(
+  params: { summary: string; start: string; end?: string; description?: string },
+  userId: string,
+  supabaseUrl: string,
+  serviceKey: string,
+): Promise<HandlerResult> {
+  const safeStart = correctDatetime(params.start);
+  const safeEnd   = params.end
+    ? correctDatetime(params.end)
+    : new Date(new Date(safeStart).getTime() + 60 * 60000).toISOString();
+
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/create-calendar-event`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+      body:    JSON.stringify({ summary: params.summary, description: params.description ?? '', start: safeStart, end: safeEnd, attendees: [], user_id: userId }),
+    });
+    if (!res.ok) {
+      console.error('[handleCreateEventExec] create-calendar-event HTTP', res.status);
+      const msg = `I couldn't add that to your calendar. Please try again.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+    const label = fmtDatetime(safeStart);
+    const msg   = `Done. Added "${params.summary}" to your calendar on ${label}.`;
+    return { speech: msg, display: msg, actions: [] };
+  } catch (e) {
+    console.error('[handleCreateEventExec] error:', (e as Error).message);
+    const msg = `I couldn't add that to your calendar. Please try again.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
+}
+
+// ── REMEMBER (exec) ───────────────────────────────────────────────────────────
+export async function handleRememberExec(
+  params: { text: string },
+  userId: string,
+  supabaseUrl: string,
+  serviceKey: string,
+): Promise<HandlerResult> {
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/ingest-note`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+      body:    JSON.stringify({ text: params.text, source: 'chat', user_id: userId }),
+    });
+    if (!res.ok) {
+      console.error('[handleRememberExec] ingest-note HTTP', res.status);
+      const msg = `I couldn't save that. Please try again.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+    const snippet = params.text.slice(0, 80);
+    const msg = `Got it. I've saved: "${snippet}"`;
+    return { speech: msg, display: msg, actions: [] };
+  } catch (e) {
+    console.error('[handleRememberExec] error:', (e as Error).message);
+    const msg = `I couldn't save that. Please try again.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
+}
+
+// ── DELETE_RULE (exec) ────────────────────────────────────────────────────────
+export async function handleDeleteRuleExec(
+  params: { match: string; all?: string },
+  userId: string,
+  supabaseUrl: string,
+  serviceKey: string,
+): Promise<HandlerResult> {
+  try {
+    const listRes = await fetch(`${supabaseUrl}/functions/v1/manage-rules`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+      body:    JSON.stringify({ op: 'list', user_id: userId }),
+    });
+    if (!listRes.ok) throw new Error(`manage-rules list ${listRes.status}`);
+    const listData = await listRes.json();
+    const allRules: Array<Record<string, any>> = Array.isArray((listData as any)?.rules) ? (listData as any).rules : [];
+
+    const deleteAll = params.all === 'true';
+    const match     = (params.match ?? '').trim().toLowerCase();
+    const needles   = match ? match.split(/\s+/).filter(Boolean) : [];
+    const haystackFor = (r: Record<string, any>) => {
+      const parts: string[] = [r.trigger_type ?? '', r.label ?? ''];
+      for (const v of Object.values(r.trigger_config ?? {})) if (v != null) parts.push(String(v));
+      for (const v of Object.values(r.action_config ?? {})) if (v != null) parts.push(String(v));
+      return parts.join(' ').toLowerCase();
+    };
+    const matched = deleteAll
+      ? allRules
+      : allRules.filter(r => needles.length === 0 || needles.every(n => haystackFor(r).includes(n)));
+
+    if (matched.length === 0) {
+      const msg = `I couldn't find an alert matching "${match}".`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+
+    if (matched.length > 1 && !deleteAll) {
+      const lines = matched.slice(0, 5).map((r, i) => `${i + 1}. ${r.label || r.trigger_type}`);
+      const intro = `I found ${matched.length} alerts matching "${match}". Which one?`;
+      return {
+        speech:  `${intro} ${lines.join('. ')}.`,
+        display: `${intro}\n\n${lines.join('\n')}`,
+        actions: [],
+      };
+    }
+
+    let deleted = 0;
+    for (const r of matched) {
+      const delRes = await fetch(`${supabaseUrl}/functions/v1/manage-rules`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+        body:    JSON.stringify({ op: 'delete', user_id: userId, rule_id: r.id }),
+      });
+      if ((delRes as any).ok) deleted++;
+      else console.warn('[handleDeleteRuleExec] delete failed for rule:', r.id);
+    }
+
+    const msg = deleted > 1
+      ? `Done — deleted ${deleted} alerts.`
+      : `Done. Alert deleted: ${matched[0]?.label ?? 'that alert'}.`;
+    return { speech: msg, display: msg, actions: [] };
+  } catch (e) {
+    console.error('[handleDeleteRuleExec] error:', (e as Error).message);
+    const msg = `I couldn't delete that alert. Please try again.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
+}
+
+// ── DELETE_MEMORY (exec) ──────────────────────────────────────────────────────
+export async function handleDeleteMemoryExec(
+  params: { keyword: string },
+  userId: string,
+  supabase: ReturnType<typeof createClient>,
+): Promise<HandlerResult> {
+  const kw = (params.keyword ?? '').trim().toLowerCase();
+  const { data: rows, error: selectErr } = await supabase
+    .from('knowledge_fragments')
+    .select('id, content')
+    .eq('user_id', userId)
+    .ilike('content', `%${kw}%`)
+    .limit(20);
+
+  if (selectErr) {
+    console.error('[handleDeleteMemoryExec] select error:', selectErr.message);
+    const msg = `I couldn't search your memories right now. Please try again.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
+
+  const matches = (rows ?? []) as Array<{ id: string; content: string }>;
+  if (matches.length === 0) {
+    const msg = `I don't have anything saved about "${params.keyword}".`;
+    return { speech: msg, display: msg, actions: [] };
+  }
+
+  const ids = matches.map(r => r.id);
+  const { error: delErr } = await supabase
+    .from('knowledge_fragments')
+    .delete()
+    .in('id', ids)
+    .eq('user_id', userId);
+
+  if (delErr) {
+    console.error('[handleDeleteMemoryExec] delete error:', delErr.message);
+    const msg = `I couldn't remove that memory. Please try again.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
+
+  const msg = matches.length > 1
+    ? `Done. I've forgotten ${matches.length} items about "${params.keyword}".`
+    : `Done. I've forgotten that.`;
+  return { speech: msg, display: msg, actions: [] };
+}
+
+// ── ADD_CONTACT (exec) ────────────────────────────────────────────────────────
+export async function handleAddContactExec(
+  params: { name: string; phone?: string; email?: string },
+  userId: string,
+  supabaseUrl: string,
+  serviceKey: string,
+): Promise<HandlerResult> {
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/create-contact`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+      body:    JSON.stringify({ name: params.name, phone: params.phone ?? '', email: params.email ?? '', user_id: userId }),
+    });
+    if (!res.ok) {
+      console.error('[handleAddContactExec] create-contact HTTP', res.status);
+      const msg = `I couldn't add that contact. Please try again.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+    const detail = [params.phone, params.email].filter(Boolean).join(', ');
+    const msg = detail
+      ? `Done. Added ${params.name} (${detail}) to your contacts.`
+      : `Done. Added ${params.name} to your contacts.`;
+    return { speech: msg, display: msg, actions: [] };
+  } catch (e) {
+    console.error('[handleAddContactExec] error:', (e as Error).message);
+    const msg = `I couldn't add that contact. Please try again.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
+}
+
+// ── DELETE_EVENT (exec) ───────────────────────────────────────────────────────
+export async function handleDeleteEventExec(
+  params: { query: string },
+  userId: string,
+  supabaseUrl: string,
+  serviceKey: string,
+): Promise<HandlerResult> {
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/delete-calendar-event`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+      body:    JSON.stringify({ query: params.query, user_id: userId }),
+    });
+    if (!res.ok) {
+      console.error('[handleDeleteEventExec] delete-calendar-event HTTP', res.status);
+      const msg = `I couldn't delete that event. Please try again.`;
+      return { speech: msg, display: msg, actions: [] };
+    }
+    const data = await res.json() as { deleted?: number };
+    const count = (data as any)?.deleted ?? 1;
+    const msg = count > 1
+      ? `Done. Deleted ${count} calendar events matching "${params.query}".`
+      : `Done. Deleted "${params.query}" from your calendar.`;
+    return { speech: msg, display: msg, actions: [] };
+  } catch (e) {
+    console.error('[handleDeleteEventExec] error:', (e as Error).message);
+    const msg = `I couldn't delete that event. Please try again.`;
+    return { speech: msg, display: msg, actions: [] };
+  }
+}
