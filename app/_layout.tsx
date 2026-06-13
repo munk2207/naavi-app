@@ -113,6 +113,10 @@ export default function RootLayout() {
   // when auth changes.
   const [userId, setUserId] = useState<string | null>(null);
 
+  // Always start at the home screen on cold launch. Expo-router persists
+  // navigation state so a previous Settings visit would reopen there.
+  useEffect(() => { router.replace('/'); }, []);
+
   // Wire geofence lifecycle to the current user. Handles auth changes,
   // foreground re-sync, and owns the OS geofence registration.
   useGeofencing(userId);
