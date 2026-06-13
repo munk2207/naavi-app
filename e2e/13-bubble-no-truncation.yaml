@@ -24,7 +24,8 @@ tags:
 # asserts the FULL string appears in the chat (not the truncated form).
 
 - launchApp:
-    clearState: true
+    clearState: false
+- pressKey: Back
 
 - tapOn:
     label: "Message input"

@@ -18,7 +18,8 @@ tags:
 #   - V57.11.7 (v59): Chain rule re-emphasized, picker should fire again ✓
 
 - launchApp:
-    clearState: true
+    clearState: false
+- pressKey: Back
 
 - tapOn:
     label: "Message input"

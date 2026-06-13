@@ -10,7 +10,8 @@ tags:
 
 - stopApp
 - launchApp:
-    clearState: true
+    clearState: false
+- pressKey: Back
 - assertVisible:
     text: "MyNaavi"
 
@@ -29,7 +30,8 @@ tags:
 # Force-stop and relaunch.
 - stopApp
 - launchApp:
-    clearState: true
+    clearState: false
+- pressKey: Back
 - assertVisible:
     text: "MyNaavi"
 

@@ -17,7 +17,8 @@ tags:
 # screen is empty, the flow falls through gracefully.
 
 - launchApp:
-    clearState: true
+    clearState: false
+- pressKey: Back
 
 # Navigate to Lists.
 - runFlow:

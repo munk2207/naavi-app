@@ -8,7 +8,8 @@ tags:
 
 - stopApp
 - launchApp:
-    clearState: true
+    clearState: false
+- pressKey: Back
 - tapOn:
     label: "Message input"
 - inputText: "Hello"
