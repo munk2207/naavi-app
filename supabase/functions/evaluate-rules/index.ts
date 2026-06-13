@@ -81,6 +81,7 @@ serve(async (req) => {
     .select('*')
     .eq('enabled', true);
 
+
   if (rulesError) {
     console.error('[evaluate-rules] Failed to load rules:', rulesError.message);
     return new Response(JSON.stringify({ error: rulesError.message }), {
