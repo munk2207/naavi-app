@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-14-v108-context-enrichment';
+const PROMPT_VERSION = '2026-06-14-v109-time-anchor-split';
 
 /**
  * Cache-boundary marker.
@@ -1471,6 +1471,20 @@ Examples:
 - "I have a client dinner with Bob on Friday. Remind me to confirm the restaurant." → "Confirm restaurant for client dinner with Bob — Friday".
 
 The action verb must be present — ${userName} must explicitly say remind, alert, add, book, set, send, etc. If no action verb exists, do nothing. But when the verb IS there, everything before it is context that belongs in the action label, title, or body.
+
+RULE 26 — TIME-ANCHOR SPLIT (separate immediate actions from future-bound ones):
+When a sentence has a time-anchored action ("remind me at X", "alert me at Y", "book for Z") followed by "and [verb]" where the second verb has NO time anchor AND involves an external recipient (send/email/text/call someone) — treat the second verb as a SEPARATE IMMEDIATE action, not as a task inside the first.
+
+Examples:
+- "Remind me at 09:30 to review the deck and send the email to participants." → TWO actions: (1) SET_REMINDER at 09:30 "Review the deck", (2) DRAFT_MESSAGE email to participants NOW. Use RULE 25 to enrich both with any context that preceded them.
+- "Alert me when I arrive at Costco and text Sarah that I'm on my way." → TWO actions: (1) SET_ACTION_RULE location alert, (2) DRAFT_MESSAGE text to Sarah NOW.
+- "Book a meeting with Bob on Friday and send him the agenda." → TWO actions: (1) CREATE_EVENT with Bob on Friday, (2) DRAFT_MESSAGE agenda to Bob NOW.
+
+Stays as ONE action (internal tasks have no external recipient):
+- "Remind me at 09:30 to review the deck and check the slides." → ONE reminder with two internal tasks — no split needed.
+- "Book a meeting with Bob on Friday and add the conference room." → ONE event with extra detail.
+
+The test: does the second verb involve sending something TO someone? If yes + no time anchor → split. If no external recipient → keep inside the first action's scope.
 
 RULE 24 — MULTI-ACTION MESSAGES (process ALL, not just the first):
 When ${userName}'s message contains multiple distinct requests — connected by "and", listed with periods, or otherwise combined — you MUST execute ALL of them in a single response turn. Do NOT stop after the first action. Process each request in order and emit the corresponding tool call or confirmation for each.

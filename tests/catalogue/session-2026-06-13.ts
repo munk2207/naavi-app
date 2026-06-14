@@ -319,6 +319,22 @@ export const session2026_06_13Tests: TestCase[] = [
       expectTruthy(src.includes('alert_task'), 'task executions should use source: alert_task');
     },
   },
+  // RULE 26 — Time-anchor split
+  {
+    id: 'rule26.time-anchor-split-prompt-present',
+    description: 'RULE 26: get-naavi-prompt contains time-anchor split rule (immediate vs future-bound actions)',
+    tags: ['rule26', 'prompt'],
+    run: async () => {
+      const src = readFileSync(
+        join(process.cwd(), 'supabase', 'functions', 'get-naavi-prompt', 'index.ts'),
+        'utf8',
+      );
+      expectTruthy(src.includes('RULE 26'), 'RULE 26 missing from get-naavi-prompt');
+      expectTruthy(src.includes('TIME-ANCHOR SPLIT') || src.includes('time-anchor'), 'RULE 26 must be about time-anchor splitting');
+      expectTruthy(src.includes('external recipient'), 'RULE 26 must reference external recipient as split signal');
+      expectTruthy(src.includes('v109-time-anchor-split'), 'PROMPT_VERSION must reflect v109');
+    },
+  },
   // RULE 25 — Context enrichment
   {
     id: 'rule25.context-enrichment-prompt-present',
@@ -332,7 +348,7 @@ export const session2026_06_13Tests: TestCase[] = [
       expectTruthy(src.includes('RULE 25'), 'RULE 25 missing from get-naavi-prompt');
       expectTruthy(src.includes('context enrichment') || src.includes('CONTEXT ENRICHMENT'), 'RULE 25 must be about context enrichment');
       expectTruthy(src.includes('action verb must be present'), 'RULE 25 must require explicit action verb');
-      expectTruthy(src.includes('v108-context-enrichment'), 'PROMPT_VERSION must reflect v108');
+      expectTruthy(src.includes('RULE 25'), 'RULE 25 must still be present in prompt');
     },
   },
 ];
