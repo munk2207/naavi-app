@@ -31,6 +31,7 @@ export const HANDLED_INTENTS = new Set([
   'REMINDER_READ',
   'MEMORY_SEARCH',
   'CREATE_TICKET',
+  'READ_CALENDAR',
 ]);
 
 // ── LIST_RULES ────────────────────────────────────────────────────────────────

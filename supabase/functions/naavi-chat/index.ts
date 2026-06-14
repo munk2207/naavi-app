@@ -226,6 +226,7 @@ function buildFallbackSpeech(actions: any[]): string {
     case 'ADD_CONTACT':     return 'Contact added.';
     case 'SCHEDULE_MEDICATION': return 'Medication schedule added.';
     case 'FETCH_TRAVEL_TIME':   return 'Looking up travel time.';
+    case 'READ_CALENDAR':       return 'Checking your calendar.';
     case 'SPEND_SUMMARY':       return 'Calculating that for you.';
     case 'UPDATE_MORNING_CALL': return 'Morning call updated.';
     case 'START_CALL_RECORDING':return 'Recording started.';
@@ -457,7 +458,7 @@ const BILLING_INTENT_RE =
 // detectEmailAlert: regex gate + intent-specific bypass. Claude is never
 // called for these queries → impossible to misroute.
 const CALENDAR_READ_INTENT_RE =
-  /\b(?:what(?:'?s| is) (?:on |in )?(?:my|the) (?:calendar|schedule|agenda)|what (?:meetings?|events?|appointments?) do i have|show (?:me )?(?:my|the) (?:calendar|schedule|agenda)|any (?:meetings?|events?|appointments?))/i;
+  /\b(?:what(?:'?s| is) (?:on |in )?(?:my|the) (?:calendar|schedule|agenda)|what (?:meetings?|events?|appointments?) do i have|show (?:me )?(?:my|the) (?:calendar|schedule|agenda)|any (?:meetings?|events?|appointments?)|what do i have (?:today|tomorrow|tonight|this week|next week|coming up)|do i have (?:anything|any meetings?|any events?|any appointments?)(?:\s+(?:today|tomorrow|tonight|this week|next week|coming up))?|what'?s (?:coming up|next on (?:my )?(?:calendar|schedule)|scheduled|happening today|happening this week)|when(?:'?s| is) (?:my|the) next (?:meeting|event|appointment))/i;
 
 // Negative guard: imperative create/delete/alert verbs at the START of the
 // message mean this is NOT a read intent even if the positive regex matches.
@@ -1489,12 +1490,12 @@ async function classifyIntent(
 Today (America/Toronto): ${new Date().toLocaleDateString('en-CA', { timeZone: 'America/Toronto' })}. Use to resolve "tomorrow", "next Friday", etc. into ISO8601 with Toronto offset (e.g. "2026-06-14T15:00:00-04:00").
 
 Levels:
-A = answerable from user's real data (calendar, contacts, alerts, lists, reminders, memories, email). Use intents: LIST_RULES, LOOKUP_CONTACT, CALENDAR_SEARCH, GMAIL_SEARCH, PERSON_LOOKUP, LIST_READ, REMINDER_READ, MEMORY_SEARCH, CREATE_TICKET
+A = answerable from user's real data (calendar, contacts, alerts, lists, reminders, memories, email). Use intents: LIST_RULES, LOOKUP_CONTACT, CALENDAR_SEARCH, READ_CALENDAR, GMAIL_SEARCH, PERSON_LOOKUP, LIST_READ, REMINDER_READ, MEMORY_SEARCH, CREATE_TICKET
 B = data question Claude must reason about (no real source)
 action = creating/updating/deleting data (reminder, alert, event, memory, list item)
 chat = conversational, no data question
 
-Level A params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). CALENDAR_SEARCH ONLY for calendar/schedule/appointment queries — NEVER for email queries. GMAIL_SEARCH→keyword (sender name or specific subject topic ONLY — never temporal/generic words). GMAIL_SEARCH for PAST email queries only: "Did I get email from X", "Did I receive email from X", "Any email from X", "Check my email for X" → GMAIL_SEARCH. keyword must be the sender name or topic (e.g. "Bob", "invoice", "board meeting") — NOT words like "new", "any", "recent", "latest", "email" which mean "show recent emails" → use empty keyword "" for those. IMPORTANT: "alert me when I receive email from X" or "notify me when email from X arrives" = SET_ACTION_RULE (action level), NOT GMAIL_SEARCH — the presence of "alert me"/"notify me"/"let me know" + "when" signals a future rule, not a past query. LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic. CREATE_TICKET→reporter_email, body.
+Level A params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). CALENDAR_SEARCH ONLY when user asks about a SPECIFIC event by name ("do I have a dentist appointment", "is my board meeting on Tuesday") — NEVER for email queries. READ_CALENDAR (no keyword param) for general schedule reads with no specific event named: "what do I have today", "what's coming up", "show me my schedule", "do I have anything tomorrow", "what's next" — use READ_CALENDAR, NOT CALENDAR_SEARCH, when there is no specific event name to search for. GMAIL_SEARCH→keyword (sender name or specific subject topic ONLY — never temporal/generic words). GMAIL_SEARCH for PAST email queries only: "Did I get email from X", "Did I receive email from X", "Any email from X", "Check my email for X" → GMAIL_SEARCH. keyword must be the sender name or topic (e.g. "Bob", "invoice", "board meeting") — NOT words like "new", "any", "recent", "latest", "email" which mean "show recent emails" → use empty keyword "" for those. IMPORTANT: "alert me when I receive email from X" or "notify me when email from X arrives" = SET_ACTION_RULE (action level), NOT GMAIL_SEARCH — the presence of "alert me"/"notify me"/"let me know" + "when" signals a future rule, not a past query. LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic. CREATE_TICKET→reporter_email, body.
 
 Level action intents and params (extract what's present, empty string if not mentioned):
 SET_REMINDER → title (what to remember), datetime (ISO8601 Toronto). ONLY use for "remind me at [specific time]" — user must state an explicit time/date. e.g. "remind me to call John tomorrow at 3pm".
@@ -2131,6 +2132,14 @@ Deno.serve(async (req) => {
                 const result = await handleCalendarSearch(liveEventsL2, classification.params.keyword);
                 console.log(`[timing] ${elapsed()} | Level A CALENDAR_SEARCH deterministic`);
                 return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
+              }
+              if (classification.intent === 'READ_CALENDAR') {
+                const liveEventsRC = await fetchLiveCalendarEvents(supabase, userId);
+                const rcWindow     = detectCalendarWindow(userText);
+                const rcFiltered   = filterCalendarBriefByWindow(liveEventsRC, rcWindow);
+                const rcBuilt      = buildCalendarReadResponse(rcFiltered, rcWindow);
+                console.log(`[timing] ${elapsed()} | Level A READ_CALENDAR deterministic window=${rcWindow} events=${rcFiltered.length}`);
+                return jsonResponse({ rawText: JSON.stringify({ speech: rcBuilt.speech, display: rcBuilt.display, actions: rcBuilt.actions, pendingThreads: [] }) });
               }
               if (classification.intent === 'GMAIL_SEARCH' && classification.params.keyword !== undefined) {
                 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
