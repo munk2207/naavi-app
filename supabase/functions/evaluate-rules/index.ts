@@ -885,7 +885,12 @@ async function fireAction(
   // These are auto-send tasks (text/email a contact) that the user attached
   // when creating the location alert. Runs after the main notification so
   // the primary alert always fires first, even if task execution fails.
-  const taskActions = Array.isArray(config.task_actions) ? (config.task_actions as Array<Record<string, string>>) : [];
+  // Accept both task_actions (canonical) and tasks (Claude sometimes uses this key).
+  const taskActions = Array.isArray(config.task_actions)
+    ? (config.task_actions as Array<Record<string, string>>)
+    : Array.isArray((config as Record<string, unknown>).tasks)
+      ? ((config as Record<string, unknown>).tasks as Array<Record<string, string>>)
+      : [];
   if (taskActions.length > 0) {
     const taskSends = taskActions.map(ta => {
       if (ta.type === 'send_sms' && ta.to_phone) {

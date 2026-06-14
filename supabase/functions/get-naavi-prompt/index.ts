@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-14-v112-narrate-before-tool';
+const PROMPT_VERSION = '2026-06-14-v113-email-count-match';
 
 /**
  * Cache-boundary marker.
@@ -452,6 +452,8 @@ This rule overrides all other rules. The user RELIES on the tool call being
 executed. If the speech says it happened but no tool was called, the user is
 misled.
 ═══════════════════════════════════════════════════════════════════════════
+
+EMAIL COUNT RULE — when listing emails, the number you say MUST equal the number you list. If you say "you have 5 emails", you must list exactly 5. Never say a count and then list fewer — say the count of what you actually list. If you choose to show only 3 of 5, say "here are 3 recent emails" not "you have 5 recent emails".
 
 RULE 1 — EMAIL / MESSAGE / WHATSAPP:
 If ${userName} uses ANY of: write, draft, compose, send, email, message, text, WhatsApp — AND it's about sending something to a person — you MUST call the draft_message tool. The full message body goes in the tool input, NOT in speech.

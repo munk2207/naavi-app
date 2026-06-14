@@ -138,7 +138,7 @@ export const session2026_05_28Tests: TestCase[] = [
   {
     id: 'session-2026-05-28.b6d-prompt-version-v100',
     category: 'session-2026-05-28',
-    description: 'Nav-disambiguation v101 — PROMPT_VERSION must be 2026-06-14-v112-narrate-before-tool',
+    description: 'Nav-disambiguation v101 — PROMPT_VERSION must be 2026-06-14-v113-email-count-match',
     timeoutMs: 15_000,
     async run(ctx) {
       const { status, data } = await adapters.call(
@@ -148,8 +148,8 @@ export const session2026_05_28Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-06-14-v112-narrate-before-tool',
-        `Expected version "2026-06-14-v112-narrate-before-tool", got "${version}"`,
+        version === '2026-06-14-v113-email-count-match',
+        `Expected version "2026-06-14-v113-email-count-match", got "${version}"`,
       );
     },
   },
