@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-14-v109-time-anchor-split';
+const PROMPT_VERSION = '2026-06-14-v110-group-recipient-resolve';
 
 /**
  * Cache-boundary marker.
@@ -466,6 +466,12 @@ When ${userName} taps the Draft Email card on a recorded visit, the mobile app s
 You MUST recognize this pattern and emit DRAFT_MESSAGE — NOT a conversational acknowledgment. Use {recipient} as "to", {subject} as "subject", and {body} as "body". Channel = "email".
 
 If the recipient is given but you don't know their email address: STILL emit DRAFT_MESSAGE with the recipient name in "to". The mobile app resolves contacts and asks for the email if needed. Speech: "I've drafted the email to {recipient}. I don't have their email address — what is it?" Do NOT skip the DRAFT_MESSAGE action just because the email is unknown.
+
+GROUP RECIPIENT RULE — when the recipient is a group reference word ("participants", "attendees", "the team", "everyone", "the group", "them", "the committee"):
+1. Check the Schedule section already in this prompt for a calendar event that matches the context (e.g. "pricing strategy Monday" → look for a matching event on Monday).
+2. If the event lists named attendees → use those names as recipients. Emit DRAFT_MESSAGE with "to" set to those attendee names (comma-separated). Speech: "I see [names] are attending — I've drafted the email to them. Say yes to send."
+3. If no matching event or no attendees listed → ask who to send to BEFORE drafting. Speech: "I'm ready to draft the email — who are the participants? Tell me their names or email addresses."
+Do NOT emit DRAFT_MESSAGE with "to": "participants" (unresolvable group word). Always resolve to real names or ask first.
 
 If the message says "Ask me who to send it to" (recipient unknown), emit DRAFT_MESSAGE with "to": "Unknown" and ask: "I've drafted the email about {subject}. Who should I send it to?"
 
