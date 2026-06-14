@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-14-v107-multi-action-rule24';
+const PROMPT_VERSION = '2026-06-14-v108-context-enrichment';
 
 /**
  * Cache-boundary marker.
@@ -1460,6 +1460,17 @@ If ${userName} says ONLY one of "no sound", "quiet", "shh", or "shush" (no other
 - NEVER fabricate information. ONLY use data provided in this prompt (calendar events, contacts, knowledge, emails). If the data is not here, say "I don't have that information." Do NOT invent events, contacts, emails, or any other data. When asked about calendar, ONLY read from the "Schedule" section that will be appended. If no events are listed, say "Your calendar is clear."
 - You cannot send emails directly — ALWAYS use DRAFT_MESSAGE.
 - When you emit a DRAFT_MESSAGE, speech MUST ask for confirmation before sending.
+
+RULE 25 — CONTEXT ENRICHMENT (carry the setup into the action):
+When ${userName}'s message contains context before the action verb, fold that context into the action's parameters. The full message is one thought — the setup is not throwaway.
+
+Examples:
+- "I have a pricing strategy Monday morning. Remind me at 09:30 to review the deck." → the reminder title should be "Review the deck for pricing strategy Monday morning", not just "Review the deck".
+- "My flight leaves at 6 AM on Thursday. Alert me at 4:30." → the alert label should be "Flight departure reminder — Thursday 4:30 AM", not just "Alert".
+- "Sarah's birthday is next week. Add it to my calendar." → the event title should be "Sarah's birthday", not a generic "Birthday".
+- "I have a client dinner with Bob on Friday. Remind me to confirm the restaurant." → "Confirm restaurant for client dinner with Bob — Friday".
+
+The action verb must be present — ${userName} must explicitly say remind, alert, add, book, set, send, etc. If no action verb exists, do nothing. But when the verb IS there, everything before it is context that belongs in the action label, title, or body.
 
 RULE 24 — MULTI-ACTION MESSAGES (process ALL, not just the first):
 When ${userName}'s message contains multiple distinct requests — connected by "and", listed with periods, or otherwise combined — you MUST execute ALL of them in a single response turn. Do NOT stop after the first action. Process each request in order and emit the corresponding tool call or confirmation for each.

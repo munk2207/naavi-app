@@ -81,7 +81,7 @@ export const session2026_05_27Tests: TestCase[] = [
     id: 'b6d.prompt-version-bumped-to-v98',
     category: 'b6d',
     description:
-      'B6d/Nav-disambiguation — PROMPT_VERSION must be 2026-06-14-v107-multi-action-rule24 (latest live version). ' +
+      'B6d/Nav-disambiguation — PROMPT_VERSION must be 2026-06-14-v108-context-enrichment (latest live version). ' +
       'Updated from v105 → v106 when search-card one-sentence rule was strengthened (2026-06-09).',
     timeoutMs: 15_000,
     async run(ctx) {
@@ -92,8 +92,8 @@ export const session2026_05_27Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-06-14-v107-multi-action-rule24',
-        `Expected version "2026-06-14-v107-multi-action-rule24", got "${version}"`,
+        version === '2026-06-14-v108-context-enrichment',
+        `Expected version "2026-06-14-v108-context-enrichment", got "${version}"`,
       );
     },
   },

@@ -319,4 +319,20 @@ export const session2026_06_13Tests: TestCase[] = [
       expectTruthy(src.includes('alert_task'), 'task executions should use source: alert_task');
     },
   },
+  // RULE 25 — Context enrichment
+  {
+    id: 'rule25.context-enrichment-prompt-present',
+    description: 'RULE 25: get-naavi-prompt contains context enrichment rule (carry setup into action)',
+    tags: ['rule25', 'prompt'],
+    run: async () => {
+      const src = readFileSync(
+        join(process.cwd(), 'supabase', 'functions', 'get-naavi-prompt', 'index.ts'),
+        'utf8',
+      );
+      expectTruthy(src.includes('RULE 25'), 'RULE 25 missing from get-naavi-prompt');
+      expectTruthy(src.includes('context enrichment') || src.includes('CONTEXT ENRICHMENT'), 'RULE 25 must be about context enrichment');
+      expectTruthy(src.includes('action verb must be present'), 'RULE 25 must require explicit action verb');
+      expectTruthy(src.includes('v108-context-enrichment'), 'PROMPT_VERSION must reflect v108');
+    },
+  },
 ];
