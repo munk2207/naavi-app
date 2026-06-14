@@ -71,8 +71,8 @@ From `C:\Users\waela\naavi-mobile`:
 
 ### Step 5 — Bump version
 In `C:\Users\waela\OneDrive\Desktop\Naavi`:
-- `app.json` → bump `versionCode` (check Google Play for next available)
-- `app/settings.tsx` → bump version text to match
+- `app.json` → `"version": "1.0.253"` and `"versionCode": 253`
+- `app/settings.tsx` → bump version text to `1.0.253`
 - Commit + push
 
 ### Step 6 — Production AAB
