@@ -276,7 +276,18 @@ function formatWhatHappens(r: ActionRule, userPhone: string | null, userEmail: s
     channelsLine = `Naavi sends you ${chans.join(', ')}${chans.length > 1 ? '' : ''} — all channels that are set up.`;
   } else {
     const to = a.to_name ?? a.to ?? 'a contact';
-    channelsLine = `Naavi sends ${to} a ${r.action_type === 'email' ? 'message by email' : r.action_type === 'whatsapp' ? 'WhatsApp' : 'text message'}.`;
+    if (r.action_type === 'email') {
+      const toEmail = String(a.to_email ?? '').trim();
+      channelsLine = toEmail
+        ? `Naavi emails ${to} at ${toEmail}.`
+        : `Naavi sends ${to} a message by email.`;
+    } else {
+      const toPhone = String(a.to_phone ?? '').trim();
+      const msgType = r.action_type === 'whatsapp' ? 'WhatsApp message' : 'text message';
+      channelsLine = toPhone
+        ? `Naavi sends ${to} a ${msgType} at ${toPhone}.`
+        : `Naavi sends ${to} a ${msgType}.`;
+    }
   }
 
   const bodyLine = body ? `"${body}"` : null;

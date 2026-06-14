@@ -430,7 +430,22 @@ export const NAAVI_TOOLS: NaaviTool[] = [
     },
   },
 
-  // 9. REMEMBER
+  // 9. MAKE_CALL
+  {
+    name: 'make_call',
+    description: 'Place an outbound call to a contact and deliver a spoken message on behalf of the user. RULE 23 confirm-then-act applies — always include confirm speech before executing.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        to:   { type: 'string', description: 'Contact name only. Orchestrator resolves to phone number.' },
+        body: { type: 'string', description: 'The spoken message to deliver when the call connects.' },
+      },
+      required: ['to', 'body'],
+      additionalProperties: false,
+    },
+  },
+
+  // 10. REMEMBER
   {
     name: 'remember',
     description: 'Save a personal fact or preference to user memory. Emit at most ONCE per turn for the same fact.',
@@ -816,4 +831,5 @@ export const TOOL_NAME_TO_ACTION_TYPE: Record<string, string> = {
   spend_summary: 'SPEND_SUMMARY',
   update_morning_call: 'UPDATE_MORNING_CALL',
   start_call_recording: 'START_CALL_RECORDING',
+  make_call: 'MAKE_CALL',
 };

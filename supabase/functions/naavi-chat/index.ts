@@ -464,7 +464,9 @@ const BILLING_INTENT_RE =
 const MULTI_ACTION_VERB_RE = /^(?:send|book|schedule|remind|add|create|text|call|email|alert|notify|save|set|make|write|draft|message|forward|invite|show|find|get|check|read|look up|delete|cancel|remove|update|move|open)\b/i;
 
 function normalizeActionSeparators(text: string): string {
-  const parts = text.split(/\.\s+(?=[A-Z])/);
+  // Split on period+whitespace regardless of case — voice dictation (Deepgram)
+  // produces all-lowercase so (?=[A-Z]) would never fire for voice input.
+  const parts = text.split(/\.\s+/);
   if (parts.length < 2) return text;
   const actionCount = parts.filter(p => MULTI_ACTION_VERB_RE.test(p.trim())).length;
   if (actionCount < 2) return text;
@@ -1528,7 +1530,7 @@ DELETE_MEMORY → keyword (what to forget)
 ADD_CONTACT → name, phone (E.164 if given), email (if given)
 DRAFT_MESSAGE → to_name (recipient name), body (message text), to_phone (E.164 if known)
 DELETE_EVENT → query (event name/keyword to find and delete)
-SET_ACTION_RULE → location/email/time/contact-silence alerts. Params: trigger_type (email|location|time|contact_silence), from (email sender name/address), subject_keyword (keyword in subject line, e.g. "board meeting"), location (place name for location trigger), direction (arrive|leave). e.g. "alert me when I arrive at X" → {trigger_type:"location",location:"X",direction:"arrive"}; "alert me when email from Bob about board meeting" → {trigger_type:"email",from:"Bob",subject_keyword:"board meeting"}; "at 5:50 AM send Sarah an SMS say hi" or "build alert to text Bob at 9 AM" → {trigger_type:"time"}. CRITICAL: any "send/text/email [someone else] at [time]" → SET_ACTION_RULE trigger_type:'time', NEVER SET_REMINDER. NOT a reminder — no time param needed.
+SET_ACTION_RULE → location/email/time/contact-silence alerts. Params: trigger_type (email|location|time|contact_silence), from (email sender name/address), subject_keyword (keyword in subject line, e.g. "board meeting"), location (place name for location trigger), direction (arrive|leave). e.g. "alert me when I arrive at X" → {trigger_type:"location",location:"X",direction:"arrive"}; "alert me when email from Bob about board meeting" → {trigger_type:"email",from:"Bob",subject_keyword:"board meeting"}; "at 5:50 AM send Sarah an SMS say hi" → {trigger_type:"time",to_name:"Sarah",datetime:"2026-06-14T05:50:00-04:00",body:"hi"}; "text Bob at 9 AM say hello" → {trigger_type:"time",to_name:"Bob",datetime:"2026-06-14T09:00:00-04:00",body:"hello"}. CRITICAL: any "send/text/email [someone else] at [time]" → SET_ACTION_RULE trigger_type:'time', NEVER SET_REMINDER. Extract: to_name (recipient name), datetime (ISO8601 Toronto using today's date), body (message text).
 LIST_CONNECTION_QUERY → connecting/disconnecting a list to an alert. e.g. "add my X list to my Y alert", "connect my grocery list to Costco alert".
 
 Output: {"level":"A","intent":"LIST_RULES","confidence":"high","params":{}}
@@ -1570,7 +1572,7 @@ Use "low" confidence when ambiguous.`,
 function fmtDtLocal(iso: string): string {
   try {
     return new Date(iso).toLocaleString('en-CA', {
-      timeZone: 'America/Toronto', weekday: 'short', month: 'short', day: 'numeric',
+      timeZone: 'America/Toronto', weekday: 'long', month: 'long', day: 'numeric',
       hour: 'numeric', minute: '2-digit',
     });
   } catch { return iso; }
@@ -1633,6 +1635,8 @@ function buildActionConfirm(
       const action = { type: 'DRAFT_MESSAGE', to: params.to_name, to_phone: params.to_phone ?? '', body: params.body };
       return { speech: s, display: s, actions: [action] };
     }
+    case 'MAKE_CALL':
+      return { speech: '', display: '', actions: [], missingParam: '__FALLTHROUGH__' };
     case 'SET_ACTION_RULE': {
       const tt = String(params.trigger_type ?? '');
       if (tt === 'email') {
@@ -1792,6 +1796,24 @@ Deno.serve(async (req) => {
 
     // ── Step 1.5 (B6e 2026-05-26): pre-Claude calendar-read bypass ─────────────
     // Haiku at the 111 KB assembled prompt misroutes "what is on my calendar
+    // DATE/TIME BYPASS — "what is the date today?", "what day is it?", "what time is it?"
+    // Claude hedges with "Here's my best reading" despite the prompt rule.
+    // Server-side bypass computes the answer deterministically — no LLM in path.
+    const DATE_TIME_RE = /^\s*what(?:'s|\s+is|\s+are)?\s+(?:the\s+)?(?:date|day|time)(?:\s+(?:today|now|right\s+now|is\s+it|today))?\s*\??\.?\s*$|^\s*what\s+(?:day|date|time)\s+is\s+(?:it|today)\s*\??\.?\s*$|^\s*(?:today'?s?\s+)?(?:date|day|time)\s*\??\.?\s*$/i;
+    if (DATE_TIME_RE.test(userText.trim())) {
+      const _dtNow = new Date();
+      const _dtOpts: Intl.DateTimeFormatOptions = { timeZone: 'America/Toronto', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+      const _dtDate = _dtNow.toLocaleDateString('en-CA', _dtOpts);
+      const _dtTimeOpts: Intl.DateTimeFormatOptions = { timeZone: 'America/Toronto', hour: 'numeric', minute: '2-digit' };
+      const _dtTime = _dtNow.toLocaleTimeString('en-CA', _dtTimeOpts);
+      const _isTimeQ = /time/i.test(userText);
+      const _dtSpeech = _isTimeQ
+        ? `It's ${_dtTime} on ${_dtDate}.`
+        : `Today is ${_dtDate}. The time is ${_dtTime}.`;
+      console.log(`[timing] ${elapsed()} | date-time bypass — answer: ${_dtSpeech}`);
+      return jsonResponse({ rawText: JSON.stringify({ speech: _dtSpeech, display: _dtSpeech, actions: [], pendingThreads: [] }) });
+    }
+
     // this week?" to LIST_READ / LIST_RULES even when the brief contains the
     // correct calendar items and three explicit prompt rules say "read the
     // Schedule section." Bypass returns deterministic brief contents.
@@ -1830,13 +1852,16 @@ Deno.serve(async (req) => {
         if (Array.isArray(c)) return c.filter((b: any) => b.type === 'text').map((b: any) => String(b.text ?? '')).join('');
         return '';
       })();
+      const _s14HasPI = lastDisplay14.includes('<!--PENDING_INTENT:');
+      console.log(`[Step1.4-diag] userText="${userText.slice(0,30)}" | lastDisplay14 len=${lastDisplay14.length} | hasPendingIntent=${_s14HasPI} | head="${lastDisplay14.slice(0,120).replace(/\n/g,'↵')}"`);
       const markerMatch14 = lastDisplay14.match(/<!--PENDING_INTENT:(\{.*?\})-->/s);
       const pendingHasDisambig = markerMatch14
         ? (() => { try { return !!(JSON.parse(markerMatch14[1]) as any).awaitingDisambig; } catch { return false; } })()
         : false;
-      const isPickReply = PICK_RE.test(userText.trim());
+      const isPickReply   = PICK_RE.test(userText.trim());
+      const isBareDigit   = /^\d+\s*$/.test(userText.trim());
 
-      if (YES_RE.test(userText) || NO_RE.test(userText) || (isPickReply && pendingHasDisambig)) {
+      if (YES_RE.test(userText) || NO_RE.test(userText) || (isPickReply && pendingHasDisambig) || (isBareDigit && pendingHasDisambig)) {
         const lastAssistant = lastAssistant14;
         const lastDisplay   = lastDisplay14;
 
@@ -1963,6 +1988,30 @@ Deno.serve(async (req) => {
               console.log(`[timing] ${elapsed()} | DELETE_EVENT executed`);
               return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
             }
+            if (pending.intent === 'MAKE_CALL' && pending.params.to_phone && pending.params.body) {
+              const _ocUrl = Deno.env.get('SUPABASE_URL') ?? '';
+              const _ocKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+              try {
+                const _ocRes = await fetch(`${_ocUrl}/functions/v1/outbound-call`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_ocKey}` },
+                  body: JSON.stringify({ user_id: userId, to_phone: pending.params.to_phone, to_name: pending.params.to, body: pending.params.body }),
+                });
+                const _ocData = await _ocRes.json().catch(() => ({}));
+                if (!_ocRes.ok || _ocData.error) {
+                  const msg = `I had trouble placing the call — ${_ocData.error ?? 'please try again'}.`;
+                  console.error(`[timing] ${elapsed()} | MAKE_CALL outbound-call failed: ${JSON.stringify(_ocData)}`);
+                  return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                }
+                const speech = `Done. I called ${pending.params.to} at ${pending.params.to_phone} and delivered your message.`;
+                console.log(`[timing] ${elapsed()} | MAKE_CALL executed | sid=${_ocData.sid} | to=${pending.params.to_phone}`);
+                return jsonResponse({ rawText: JSON.stringify({ speech, display: speech, actions: [], pendingThreads: [] }) });
+              } catch (_ocErr) {
+                const msg = `I had trouble placing the call — please try again.`;
+                console.error(`[timing] ${elapsed()} | MAKE_CALL error: ${_ocErr}`);
+                return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+              }
+            }
             if (pending.intent === 'SET_ACTION_RULE') {
               const _acUrl = Deno.env.get('SUPABASE_URL') ?? '';
               const _acKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -2023,8 +2072,18 @@ Deno.serve(async (req) => {
                 }
                 // Apply pick
                 if (field === 'to' && pendingAC) {
-                  pendingAC.to_phone = picked.phone;
-                  pendingAC.to_name  = picked.name;
+                  if (pendingParams.action_type === 'email') {
+                    pendingAC.to_email = picked.email;
+                    pendingAC.to_name  = picked.name;
+                  } else {
+                    pendingAC.to_phone = picked.phone;
+                    pendingAC.to_name  = picked.name;
+                  }
+                  // Refine label: replace generic contact name with resolved full name
+                  const _lbl = String((pendingParams as any).label ?? '');
+                  if (_lbl && name && picked.name !== name) {
+                    (pendingParams as any).label = _lbl.replace(name, picked.name);
+                  }
                 } else if (field === 'task_action' && Array.isArray(pendingAC?.task_actions)) {
                   const ta = pendingAC.task_actions[taIndex] as Record<string, any> | undefined;
                   if (ta) ta.to_phone = picked.phone;
@@ -2065,13 +2124,15 @@ Deno.serve(async (req) => {
                 }
               }
 
-              // Emit the action for mobile useOrchestrator to execute (writes action_rules row)
-              const action = { type: 'SET_ACTION_RULE', ...pendingParams };
+              // Save action_rules row via manage-rules (proven write path, same as mobile).
               const tt = String(pendingParams.trigger_type ?? '');
               const fromPart = pendingParams.from ? `from ${pendingParams.from}` : '';
               const kwPart   = pendingParams.subject_keyword ? `about "${pendingParams.subject_keyword}"` : '';
               const toLabel  = pendingAC?.to_name && pendingAC?.to_phone
-                ? ` Text ${pendingAC.to_name} at ${pendingAC.to_phone}.` : '';
+                ? ` Text ${pendingAC.to_name} at ${pendingAC.to_phone}.`
+                : pendingAC?.to_name && pendingAC?.to_email
+                ? ` Email ${pendingAC.to_name} at ${pendingAC.to_email}.`
+                : '';
               const pendingTAsFinal: Array<Record<string, any>> = Array.isArray(pendingAC?.task_actions) ? pendingAC.task_actions : [];
               const taskSummary = pendingTAsFinal.length > 0
                 ? ` Scheduled: ${pendingTAsFinal.map((ta: Record<string, any>) =>
@@ -2080,9 +2141,38 @@ Deno.serve(async (req) => {
               const desc = tt === 'email'
                 ? `Email alert${[fromPart, kwPart].filter(Boolean).length ? ' ' + [fromPart, kwPart].filter(Boolean).join(' ') : ''} set.`
                 : `Alert set.${taskSummary}`;
-              const speech = `Done. ${desc}`;
-              console.log(`[timing] ${elapsed()} | SET_ACTION_RULE confirmed — action emitted for mobile`);
-              return jsonResponse({ rawText: JSON.stringify({ speech, display: speech, actions: [action], pendingThreads: [] }) });
+              const normalizedTC: any = typeof pendingParams.trigger_config === 'string'
+                ? (() => { try { return JSON.parse(pendingParams.trigger_config); } catch { return {}; } })()
+                : (pendingParams.trigger_config ?? {});
+              const _mrUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/manage-rules`;
+              const _mrKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+              const _mrPayload = {
+                op:             'create',
+                user_id:        userId,
+                trigger_type:   tt || 'time',
+                trigger_config: normalizedTC,
+                action_type:    String(pendingParams.action_type ?? 'sms'),
+                action_config:  pendingAC ?? {},
+                label:          String(pendingParams.label ?? 'Action rule'),
+                one_shot:       pendingParams.one_shot ?? true,
+              };
+              console.log(`[SET_ACTION_RULE] calling manage-rules | payload=${JSON.stringify(_mrPayload)}`);
+              const _mrRes = await fetch(_mrUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_mrKey}` },
+                body: JSON.stringify(_mrPayload),
+              });
+              const _mrRawText = await _mrRes.text();
+              console.log(`[SET_ACTION_RULE] manage-rules response | status=${_mrRes.status} | body=${_mrRawText}`);
+              let _mrData: any = {};
+              try { _mrData = JSON.parse(_mrRawText); } catch { /* ignore */ }
+              const insErr = (!_mrRes.ok || _mrData.error) ? (_mrData.error ?? 'manage-rules failed') : null;
+              const speech = insErr
+                ? `I had trouble saving that alert — please try again.`
+                : `Done. ${desc}`;
+              if (insErr) console.error(`[timing] ${elapsed()} | SET_ACTION_RULE manage-rules failed: ${insErr}`);
+              else console.log(`[timing] ${elapsed()} | SET_ACTION_RULE manage-rules succeeded`);
+              return jsonResponse({ rawText: JSON.stringify({ speech, display: speech, actions: [], pendingThreads: [] }) });
             }
           } catch (_) { /* fall through to Claude */ }
         }
@@ -2211,6 +2301,52 @@ Deno.serve(async (req) => {
     // Fast pre-filter: obvious conversational messages skip Haiku entirely.
     // Keeps the universal guarantee (nothing unclassified reaches Claude) while
     // eliminating the Haiku cost for greetings, thanks, and short follow-ups.
+    // ── MAKE_CALL pre-Haiku bypass ─────────────────────────────────────────────
+    // "Call Bob and say X" / "Phone Sarah and tell her X" — Haiku consistently
+    // misclassifies these as DRAFT_MESSAGE (email). Intercept before classification.
+    {
+      const MAKE_CALL_BYPASS_RE = /^\s*(?:call|phone|ring|dial)\s+(.+?)\s+(?:and\s+(?:say|tell\b|let\b.*?\bknow)|saying)\s+(.+)/is;
+      const mcm = MAKE_CALL_BYPASS_RE.exec(userText);
+      if (mcm && userId) {
+        const _mcToName  = mcm[1].trim();
+        const _mcBodyRaw = mcm[2].trim();
+        const _mcBody    = _mcBodyRaw.replace(/^(?:him|her|them|you)\s+(?:that\s+)?/i, '').trim() || _mcBodyRaw;
+        const _mcUrl = Deno.env.get('SUPABASE_URL') ?? '';
+        const _mcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+        try {
+          const _mcLr = await fetch(`${_mcUrl}/functions/v1/lookup-contact`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_mcKey}` },
+            body: JSON.stringify({ name: _mcToName, user_id: userId }),
+          });
+          if (_mcLr.ok) {
+            const _mcLd = await _mcLr.json();
+            const _mcAllC: Array<Record<string, any>> = Array.isArray(_mcLd.contacts)
+              ? _mcLd.contacts : (_mcLd.contact ? [_mcLd.contact] : []);
+            const _mcWithPhone = _mcAllC.filter((c: Record<string, any>) => c.phone);
+            if (_mcWithPhone.length > 0) {
+              if (_mcWithPhone.length > 1) {
+                const lines = _mcWithPhone.map((c: Record<string, any>, i: number) => `${i + 1}. ${c.name} (${c.phone})`).join('\n');
+                const dismsg = `I found ${_mcWithPhone.length} contacts named ${_mcToName} — which one?\n${lines}`;
+                const pi = JSON.stringify({ intent: 'MAKE_CALL', level: 'action', confidence: 'high', params: { to: _mcToName, body: _mcBody }, awaitingDisambig: { name: _mcToName, contacts: _mcWithPhone, field: 'to', taIndex: 0 } });
+                console.log(`[timing] ${elapsed()} | MAKE_CALL bypass disambig "${_mcToName}"`);
+                return jsonResponse({ rawText: JSON.stringify({ speech: dismsg, display: `${dismsg}\n<!--PENDING_INTENT:${pi}-->`, actions: [], pendingThreads: [] }) });
+              }
+              const _mcBest = _mcWithPhone[0];
+              const _mcPendingParams = { to: _mcBest.name, to_phone: _mcBest.phone, body: _mcBody };
+              const _mcSpeech = `I'll call ${_mcBest.name} at ${_mcBest.phone} and say "${_mcBody.slice(0, 80)}". Say yes to confirm, no to cancel.`;
+              const _mcPi = JSON.stringify({ intent: 'MAKE_CALL', level: 'action', confidence: 'high', params: _mcPendingParams });
+              console.log(`[timing] ${elapsed()} | MAKE_CALL bypass resolved "${_mcToName}" → ${_mcBest.phone}`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: _mcSpeech, display: `${_mcSpeech}\n<!--PENDING_INTENT:${_mcPi}-->`, actions: [], pendingThreads: [] }) });
+            }
+          }
+        } catch (_mcErr) {
+          console.warn(`[naavi-chat] MAKE_CALL bypass lookup error: ${_mcErr}`);
+        }
+        // Contact not found — fall through to Claude for a natural response
+      }
+    }
+
     // FAST_CHAT_RE — messages that skip the classifier (no Haiku pre-call).
     // Group A: short social/acknowledgement phrases.
     // Group B: common question patterns that are clearly conversational and
@@ -2367,7 +2503,170 @@ Deno.serve(async (req) => {
             const confirmed = buildActionConfirm(classification.intent, classification.params);
 
             if (confirmed.missingParam === '__FALLTHROUGH__') {
-              // SET_ACTION_RULE with unhandled trigger type — let Claude respond naturally
+              const _ftTrigger = String((classification.params as any)?.trigger_type ?? '');
+              if (_ftTrigger === 'time' && userId) {
+                const _ftParamAny = classification.params as any;
+                const _ftParamTaskActionsEarly: Array<Record<string, any>> = Array.isArray(_ftParamAny.action_config?.task_actions) ? _ftParamAny.action_config.task_actions : [];
+                const _ftToName    = String(_ftParamAny.to_name ?? _ftParamAny.to ?? _ftParamTaskActionsEarly[0]?.to_name ?? '').trim();
+                const _ftDatetime  = String(_ftParamAny.datetime ?? _ftParamAny.trigger_config?.datetime ?? '').trim();
+                const _ftBody      = String(_ftParamAny.body ?? _ftParamAny.message ?? _ftParamTaskActionsEarly[0]?.body ?? '').trim();
+                const _ftActionType = String((classification.params as any).action_type ?? 'sms').toLowerCase();
+                const _ftParamTaskActions: Array<Record<string, any>> = Array.isArray((classification.params as any).action_config?.task_actions) ? (classification.params as any).action_config.task_actions : [];
+                const _ftIsEmail = _ftActionType === 'email'
+                  || _ftParamTaskActions.some((ta: Record<string, any>) => String(ta?.type ?? '').toLowerCase() === 'send_email')
+                  || /^email\b/i.test(userText.trim());
+                const _ftUrl = Deno.env.get('SUPABASE_URL') ?? '';
+                const _ftKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+
+                if (!_ftToName) {
+                  const msg = `Who should I send the message to?`;
+                  return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                }
+                if (!_ftDatetime) {
+                  const msg = `What time should I send it?`;
+                  return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                }
+                if (!_ftBody) {
+                  const msg = `What should the message say?`;
+                  return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                }
+
+                try {
+                  const _ftLr = await fetch(`${_ftUrl}/functions/v1/lookup-contact`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_ftKey}` },
+                    body: JSON.stringify({ name: _ftToName, user_id: userId }),
+                  });
+                  if (!_ftLr.ok) throw new Error(`lookup-contact HTTP ${_ftLr.status}`);
+                  const _ftLd = await _ftLr.json();
+                  const _ftAllC: Array<Record<string, any>> = Array.isArray(_ftLd.contacts)
+                    ? _ftLd.contacts : (_ftLd.contact ? [_ftLd.contact] : []);
+                  const _ftDtLabel = fmtDtLocal(_ftDatetime);
+
+                  if (_ftIsEmail) {
+                    // ── Email action branch ──────────────────────────────────────────
+                    const _ftWithEmail = _ftAllC.filter((c: Record<string, any>) => c.email);
+                    if (_ftWithEmail.length === 0) {
+                      const msg = `I couldn't find an email address for ${_ftToName} in your contacts. Please add them and try again.`;
+                      return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                    }
+                    const _ftEmailParams: Record<string, any> = {
+                      trigger_type: 'time',
+                      trigger_config: { datetime: _ftDatetime },
+                      action_type: 'email',
+                      action_config: { body: _ftBody, to_name: _ftToName, to_email: '' },
+                    };
+                    _ftEmailParams.label = `Email ${_ftToName} at ${_ftDtLabel}`;
+                    if (_ftWithEmail.length > 1) {
+                      const lines = _ftWithEmail.map((c: Record<string, any>, i: number) => `${i + 1}. ${c.name} (${c.email})`).join('\n');
+                      const dismsg = `I found ${_ftWithEmail.length} contacts named ${_ftToName} — which one?\n${lines}`;
+                      const pi = JSON.stringify({
+                        intent: 'SET_ACTION_RULE', level: 'action', confidence: 'high', params: _ftEmailParams,
+                        awaitingDisambig: { name: _ftToName, contacts: _ftWithEmail, field: 'to', taIndex: 0 },
+                      });
+                      console.log(`[timing] ${elapsed()} | time-trigger email disambig for "${_ftToName}" — ${_ftWithEmail.length} matches`);
+                      return jsonResponse({ rawText: JSON.stringify({ speech: dismsg, display: `${dismsg}\n<!--PENDING_INTENT:${pi}-->`, actions: [], pendingThreads: [] }) });
+                    }
+                    const _ftEmailBest = _ftWithEmail[0];
+                    _ftEmailParams.action_config.to_email = _ftEmailBest.email;
+                    _ftEmailParams.action_config.to_name  = _ftEmailBest.name;
+                    _ftEmailParams.label = `Email ${_ftEmailBest.name} at ${_ftDtLabel}`;
+                    const _ftEmailSpeech = `I'll email ${_ftEmailBest.name} at ${_ftEmailBest.email} at ${_ftDtLabel} saying "${_ftBody.slice(0, 60)}". Say yes to confirm, no to cancel.`;
+                    const _ftEmailPi = JSON.stringify({ intent: 'SET_ACTION_RULE', level: 'action', confidence: 'high', params: _ftEmailParams });
+                    console.log(`[timing] ${elapsed()} | time-trigger email resolved "${_ftToName}" → ${_ftEmailBest.email} — awaiting confirm`);
+                    return jsonResponse({ rawText: JSON.stringify({ speech: _ftEmailSpeech, display: `${_ftEmailSpeech}\n<!--PENDING_INTENT:${_ftEmailPi}-->`, actions: [], pendingThreads: [] }) });
+
+                  } else {
+                    // ── SMS action branch ────────────────────────────────────────────
+                    const _ftWithPhone = _ftAllC.filter((c: Record<string, any>) => c.phone);
+                    if (_ftWithPhone.length === 0) {
+                      const msg = `I couldn't find a phone number for ${_ftToName} in your contacts. Please add them and try again.`;
+                      return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                    }
+                    const _ftPendingParams: Record<string, any> = {
+                      trigger_type: 'time',
+                      trigger_config: { datetime: _ftDatetime },
+                      action_type: 'sms',
+                      action_config: { body: _ftBody, to_name: _ftToName, to_phone: '' },
+                    };
+                    _ftPendingParams.label = `Text ${_ftToName} at ${_ftDtLabel}`;
+                    if (_ftWithPhone.length > 1) {
+                      const lines = _ftWithPhone.map((c: Record<string, any>, i: number) => `${i + 1}. ${c.name} (${c.phone})`).join('\n');
+                      const dismsg = `I found ${_ftWithPhone.length} contacts named ${_ftToName} — which one?\n${lines}`;
+                      const pi = JSON.stringify({
+                        intent: 'SET_ACTION_RULE', level: 'action', confidence: 'high', params: _ftPendingParams,
+                        awaitingDisambig: { name: _ftToName, contacts: _ftWithPhone, field: 'to', taIndex: 0 },
+                      });
+                      console.log(`[timing] ${elapsed()} | time-trigger disambig for "${_ftToName}" — ${_ftWithPhone.length} matches`);
+                      return jsonResponse({ rawText: JSON.stringify({ speech: dismsg, display: `${dismsg}\n<!--PENDING_INTENT:${pi}-->`, actions: [], pendingThreads: [] }) });
+                    }
+                    const _ftBest = _ftWithPhone[0];
+                    _ftPendingParams.action_config.to_phone = _ftBest.phone;
+                    _ftPendingParams.action_config.to_name  = _ftBest.name;
+                    _ftPendingParams.label = `Text ${_ftBest.name} at ${_ftDtLabel}`;
+                    const _ftSpeech = `I'll text ${_ftBest.name} at ${_ftBest.phone} at ${_ftDtLabel} saying "${_ftBody.slice(0, 60)}". Say yes to confirm, no to cancel.`;
+                    const _ftPi = JSON.stringify({ intent: 'SET_ACTION_RULE', level: 'action', confidence: 'high', params: _ftPendingParams });
+                    console.log(`[timing] ${elapsed()} | time-trigger resolved "${_ftToName}" → ${_ftBest.phone} — awaiting confirm`);
+                    return jsonResponse({ rawText: JSON.stringify({ speech: _ftSpeech, display: `${_ftSpeech}\n<!--PENDING_INTENT:${_ftPi}-->`, actions: [], pendingThreads: [] }) });
+                  }
+
+                } catch (_ftErr) {
+                  console.warn(`[naavi-chat] time-trigger lookup error: ${_ftErr}`);
+                  // Fall through to Claude as last resort
+                }
+              }
+              // ── MAKE_CALL Turn 1 handler ─────────────────────────────────────
+              if (classification.intent === 'MAKE_CALL' && userId) {
+                const _mcToName = String((classification.params as any).to ?? (classification.params as any).to_name ?? '').trim();
+                const _mcBody   = String((classification.params as any).body ?? '').trim();
+                if (!_mcToName) {
+                  const msg = `Who should I call?`;
+                  return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                }
+                if (!_mcBody) {
+                  const msg = `What message should I deliver on the call?`;
+                  return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                }
+                const _mcUrl = Deno.env.get('SUPABASE_URL') ?? '';
+                const _mcKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+                try {
+                  const _mcLr = await fetch(`${_mcUrl}/functions/v1/lookup-contact`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_mcKey}` },
+                    body: JSON.stringify({ name: _mcToName, user_id: userId }),
+                  });
+                  if (!_mcLr.ok) throw new Error(`lookup-contact HTTP ${_mcLr.status}`);
+                  const _mcLd = await _mcLr.json();
+                  const _mcAllC: Array<Record<string, any>> = Array.isArray(_mcLd.contacts)
+                    ? _mcLd.contacts : (_mcLd.contact ? [_mcLd.contact] : []);
+                  const _mcWithPhone = _mcAllC.filter((c: Record<string, any>) => c.phone);
+                  if (_mcWithPhone.length === 0) {
+                    const msg = `I couldn't find a phone number for ${_mcToName}. Please add their number and try again.`;
+                    return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                  }
+                  if (_mcWithPhone.length > 1) {
+                    const lines = _mcWithPhone.map((c: Record<string, any>, i: number) => `${i + 1}. ${c.name} (${c.phone})`).join('\n');
+                    const dismsg = `I found ${_mcWithPhone.length} contacts named ${_mcToName} — which one?\n${lines}`;
+                    const pi = JSON.stringify({
+                      intent: 'MAKE_CALL', level: 'action', confidence: 'high',
+                      params: { to: _mcToName, body: _mcBody },
+                      awaitingDisambig: { name: _mcToName, contacts: _mcWithPhone, field: 'to', taIndex: 0 },
+                    });
+                    console.log(`[timing] ${elapsed()} | MAKE_CALL disambig for "${_mcToName}" — ${_mcWithPhone.length} matches`);
+                    return jsonResponse({ rawText: JSON.stringify({ speech: dismsg, display: `${dismsg}\n<!--PENDING_INTENT:${pi}-->`, actions: [], pendingThreads: [] }) });
+                  }
+                  const _mcBest = _mcWithPhone[0];
+                  const _mcPendingParams = { to: _mcBest.name, to_phone: _mcBest.phone, body: _mcBody };
+                  const _mcSpeech = `I'll call ${_mcBest.name} at ${_mcBest.phone} and say "${_mcBody.slice(0, 80)}". Say yes to confirm, no to cancel.`;
+                  const _mcPi = JSON.stringify({ intent: 'MAKE_CALL', level: 'action', confidence: 'high', params: _mcPendingParams });
+                  console.log(`[timing] ${elapsed()} | MAKE_CALL resolved "${_mcToName}" → ${_mcBest.phone} — awaiting confirm`);
+                  return jsonResponse({ rawText: JSON.stringify({ speech: _mcSpeech, display: `${_mcSpeech}\n<!--PENDING_INTENT:${_mcPi}-->`, actions: [], pendingThreads: [] }) });
+                } catch (_mcErr) {
+                  console.warn(`[naavi-chat] MAKE_CALL lookup error: ${_mcErr}`);
+                  // fall through to Claude
+                }
+              }
+              // Non-time __FALLTHROUGH__ or lookup failed — let Claude respond naturally
               console.log(`[timing] ${elapsed()} | Level action ${classification.intent} fallthrough to Claude (trigger_type=${(classification.params as any)?.trigger_type})`);
               // fall through — do not return; Claude handles below
 
@@ -2970,6 +3269,83 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── Time-trigger Turn-2 intercept ────────────────────────────────────────
+    // When Claude generates a verbal confirm on Turn 1 WITHOUT calling the tool
+    // (speech-only), PENDING_INTENT is never embedded. On Turn 2 "yes", B4y
+    // allows the tool call through. We intercept here — before the action reaches
+    // the mobile — to resolve the recipient phone server-side and disambiguate
+    // when 2+ contacts share the name.
+    console.log(`[naavi-chat] T2-intercept-check | b4yDropped=${b4yDroppedStateChanging} | userId=${!!userId} | actions=${JSON.stringify(actions.map((a: any) => ({ type: a.type, trigger_type: a.trigger_type })))}`);
+    if (!b4yDroppedStateChanging && userId) {
+      const t2TimeRule = actions.find((a: any) =>
+        a.type === 'SET_ACTION_RULE' && String(a.trigger_type ?? '') === 'time'
+      );
+      console.log(`[naavi-chat] T2-intercept-rule | found=${!!t2TimeRule} | action_config=${JSON.stringify(t2TimeRule?.action_config)}`);
+      if (t2TimeRule) {
+        const _t2Url = Deno.env.get('SUPABASE_URL') ?? '';
+        const _t2Key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+        const _t2AC = (t2TimeRule.action_config ?? {}) as Record<string, any>;
+        const t2ToName = String(_t2AC?.to ?? _t2AC?.to_name ?? '').trim();
+        const t2TAs: Array<Record<string, any>> = Array.isArray(_t2AC?.task_actions) ? _t2AC.task_actions : [];
+        const t2Name = t2ToName || t2TAs.find((ta: any) => ta.to_name)?.to_name || '';
+
+        if (t2Name) {
+          try {
+            const lr = await fetch(`${_t2Url}/functions/v1/lookup-contact`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_t2Key}` },
+              body: JSON.stringify({ name: t2Name, user_id: userId }),
+            });
+            if (lr.ok) {
+              const ld = await lr.json();
+              const allC: Array<Record<string, any>> = Array.isArray(ld.contacts)
+                ? ld.contacts : (ld.contact ? [ld.contact] : []);
+              const withPhone = allC.filter((c: Record<string, any>) => c.phone);
+
+              if (withPhone.length === 0) {
+                const msg = `I couldn't find a phone number for ${t2Name} in your contacts. Please add them and try again.`;
+                return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+              }
+
+              if (withPhone.length > 1) {
+                // Disambiguation — pause the rule creation, ask which contact
+                const lines = withPhone.map((c: Record<string, any>, i: number) => `${i + 1}. ${c.name} (${c.phone})`).join('\n');
+                const dismsg = `I found ${withPhone.length} contacts named ${t2Name} — which one?\n${lines}`;
+                const pi = JSON.stringify({
+                  intent: 'SET_ACTION_RULE',
+                  level: 'action',
+                  confidence: 'high',
+                  params: { ...t2TimeRule },
+                  awaitingDisambig: {
+                    name: t2Name,
+                    contacts: withPhone,
+                    field: t2ToName ? 'to' : 'task_action',
+                    taIndex: t2ToName ? 0 : t2TAs.findIndex((ta: any) => ta.to_name === t2Name),
+                  },
+                });
+                const display = `${dismsg}\n<!--PENDING_INTENT:${pi}-->`;
+                console.log(`[naavi-chat] T2 time-trigger disambig for "${t2Name}" — ${withPhone.length} matches`);
+                return jsonResponse({ rawText: JSON.stringify({ speech: dismsg, display, actions: [], pendingThreads: [] }) });
+              }
+
+              // Single match — inject resolved phone so mobile skips its own lookupContact
+              const best = withPhone[0];
+              if (t2ToName) {
+                _t2AC.to_phone = best.phone;
+                _t2AC.to_name  = best.name;
+              }
+              for (const ta of t2TAs) {
+                if (ta.to_name === t2Name && !ta.to_phone) ta.to_phone = best.phone;
+              }
+              console.log(`[naavi-chat] T2 time-trigger resolved "${t2Name}" → ${best.phone}`);
+            }
+          } catch (e) {
+            console.warn(`[naavi-chat] T2 time-trigger lookup failed: ${e}`);
+          }
+        }
+      }
+    }
+
     // ── Time-trigger contact resolution (Turn 1 confirm) ────────────────────
     // When B4y dropped a time-trigger SET_ACTION_RULE on Turn 1 (confirm ask),
     // resolve the recipient phone server-side NOW — before embedding PENDING_INTENT.
@@ -3105,8 +3481,18 @@ Deno.serve(async (req) => {
         return !stateChanging.has(a?.type);
       })
     ) {
-      speech = `Here's my best reading: ${speech} — I can't verify this from a live source right now. Does that work, or would you like me to try a different approach?`;
-      console.log(`[timing] ${elapsed()} | Layer3 Path B disclosure applied`);
+      // Only apply the Path B wrapper when Claude genuinely admitted uncertainty
+      // (contains "I don't", "I'm not sure", "I cannot", "I can't be certain", etc.).
+      // For clean direct answers, strip the wrapper — the answer is correct and the
+      // hedging phrase confuses users and reads badly on TTS. This is the systemic
+      // fix for the "Here's my best reading" recurring problem (2026-06-14).
+      const _genuinelyUncertain = /\bi\s+(don'?t|cannot|can'?t|am\s+not\s+sure|have\s+no\s+way|have\s+no\s+access|don'?t\s+have\s+(access|real.time))\b/i.test(speech);
+      if (_genuinelyUncertain) {
+        speech = `Here's my best reading: ${speech} — I can't verify this from a live source right now. Does that work, or would you like me to try a different approach?`;
+        console.log(`[timing] ${elapsed()} | Layer3 Path B disclosure applied (genuine uncertainty)`);
+      } else {
+        console.log(`[timing] ${elapsed()} | Layer3 Path B skipped — Claude gave a direct answer`);
+      }
     }
     if (!speechBlocks.trim() && actions.length > 0) {
       console.log(

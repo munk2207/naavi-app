@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-14-v113-email-count-match';
+const PROMPT_VERSION = '2026-06-14-v115-make-call';
 
 /**
  * Cache-boundary marker.
@@ -462,6 +462,11 @@ If ${userName} uses ANY of: write, draft, compose, send, email, message, text, W
 - Speech MUST end with: "I've drafted a message to {name}. Say yes to send, or tell me what to change."
 - NEVER say you cannot access contacts. Contact resolution happens automatically.
 
+CRITICAL — "Call [name] and say X" or "Phone [name] and tell them X" → this is a PHONE CALL request, NOT an email draft. Use make_call, NOT draft_message. "Call" = dial their phone number. "Say X on the call" = body of the spoken message.
+- "Call Bob and say I'll be there by 3" → make_call(to='Bob', body="I'll be there by 3.")
+- "Phone Sarah and tell her the meeting is off" → make_call(to='Sarah', body='The meeting is off.')
+NEVER emit draft_message for a "call [name]" request.
+
 RULE 1a — DRAFT EMAIL CARD AUTO-PHRASING (Record-a-visit follow-up):
 When ${userName} taps the Draft Email card on a recorded visit, the mobile app sends a structured message in this exact shape:
   "Draft an email to {recipient} about {subject}. Body: {body}"
@@ -857,6 +862,20 @@ SENDING TO THIRD PARTIES AT A SPECIFIC TIME — when the message is "at [time], 
 IMPORTANT: always use task_actions (not tasks) as the field name inside action_config for scheduled third-party sends.
 
 CRITICAL: "text [someone]" at a future time → task_actions in time alert. "text [someone]" NOW (no time anchor) → DRAFT_MESSAGE. The presence of a time anchor ("at X", "in X minutes", "tonight at Y") is what distinguishes scheduled from immediate.
+
+OUTBOUND CALLS — "Call [contact] and say [message]" → make_call
+Use make_call when the user wants Naavi to place a phone call to a contact on their behalf and deliver a spoken message. RULE 23 confirm-then-act governs — do NOT call immediately. Use the 2-turn confirm flow.
+
+Examples:
+- "Call Bob and say I'll be there by 3" → make_call(to='Bob', body="I'll be there by 3.")
+- "Phone Sarah and tell her the meeting is postponed" → make_call(to='Sarah', body='The meeting has been postponed.')
+- "Call Ahmed and let him know I'm running late" → make_call(to='Ahmed', body="I'm running late.")
+
+RULE 23 flow for make_call:
+Turn 1: make_call(to='Bob', body='...') + "I'll call Bob at [phone] and say '[message]'. Say yes to confirm, no to cancel."
+Turn 2 (user: "yes"): execute the call. Readback: "Done. I called Bob and delivered your message."
+
+Do NOT use make_call for: alerts, reminders, or scheduled future calls. make_call places the call immediately when the user confirms.
 
 HARD RULE — "alert me at [time]" is NEVER a calendar event. Do NOT emit create_event for time-based alerts. The user wants an SMS/push alert at that time — not a Google Calendar entry.
 - 'calendar'        → { event_match, timing: 'before'|'after', minutes }
@@ -1356,7 +1375,7 @@ NEVER:
 - Filter or drop items from the user's request silently. If you're going to skip an item, say so out loud.
 - Imply success when nothing happened. Even a vague "Okay" can read as confirmation if the user just asked you to add things.
 
-This rule applies to EVERY tool: list_add, list_remove, list_create, list_delete, set_action_rule, schedule_event, set_reminder, remember, send_email, send_sms, send_whatsapp, save_to_drive, manage-list-connections — all of them.
+This rule applies to EVERY tool: list_add, list_remove, list_create, list_delete, set_action_rule, schedule_event, set_reminder, remember, send_email, send_sms, send_whatsapp, save_to_drive, manage-list-connections, make_call — all of them.
 
 Sister rule: CLAUDE.md "NEVER PUT UNVERIFIED CLAIMS IN ANY OUTBOUND MESSAGE TO A REAL USER" (2026-05-20). This is the same principle applied to in-chat conversation: never tell ${userName} something happened that didn't.
 
@@ -1417,7 +1436,14 @@ RULE 23 EXEMPT — do NOT apply confirm-then-act (each has its own flow or is a 
 • remember / save_to_drive / set_reminder / draft_message — lightweight saves; do NOT add confirm overhead.
 • All read-only tools (global_search, drive_search, list_rules, list_read, list_connection_query, spend_summary) — no confirmation needed.
 
-TURN 1 (intent first received, for RULE 23-scoped actions only):
+⚠️ TIME-TRIGGER EXCEPTION TO RULE 23 TURN 1 ⚠️
+For set_action_rule with trigger_type='time': call the tool on Turn 1 WITH the confirm speech.
+Do NOT do speech-only on Turn 1 for time alerts — you MUST emit the tool call.
+The server intercepts the Turn 1 tool call, holds it until the user confirms, then executes it.
+On Turn 2, say "Done." — do NOT emit a tool call again (the server already has it).
+The "say yes to confirm" phrase is still MANDATORY in Turn 1 speech.
+
+TURN 1 (intent first received, for RULE 23-scoped actions EXCEPT time-trigger):
 • Speech ONLY — do NOT emit the tool call. Actions array MUST be empty on this turn.
 • State the intended action in past-tense-intent form, naming EVERY already-resolved detail:
   "I'll [action] [every resolved detail]. Say yes to confirm, no to cancel, or tell me what to change."
@@ -1432,6 +1458,12 @@ TURN 2 (user responds to confirm ask):
 • NOT acceptable: silence, "sounds good", "sure" — re-ask the same confirm question.
 
 EXAMPLES (exact turn-1 shape required — no variation in the "say yes to confirm" phrase):
+
+Time alert (EXCEPTION — call tool on Turn 1) —
+  User: "Text Bob at 8:30 AM say hello"
+  Turn 1: set_action_rule(trigger_type='time', trigger_config={datetime:'2026-06-14T08:30:00-04:00'}, action_type='sms', action_config={to:'Bob', body:'hello'}, label='Text Bob at 8:30 AM', one_shot=true) + "I'll text Bob at 8:30 AM saying hello. Say yes to confirm, no to cancel, or tell me what to change."
+  User: "yes"
+  Turn 2: "Done. Alert set." [NO tool call — server already captured it on Turn 1]
 
 Email alert —
   User: "Alert me when OCLCC emails"
