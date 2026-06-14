@@ -1520,7 +1520,7 @@ chat = conversational, no data question — ALSO use for multi-action messages (
 Level A params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). CALENDAR_SEARCH ONLY when user asks about a SPECIFIC event by name ("do I have a dentist appointment", "is my board meeting on Tuesday") — NEVER for email queries. READ_CALENDAR (no keyword param) for general schedule reads with no specific event named: "what do I have today", "what's coming up", "show me my schedule", "do I have anything tomorrow", "what's next" — use READ_CALENDAR, NOT CALENDAR_SEARCH, when there is no specific event name to search for. GMAIL_SEARCH→keyword (sender name or specific subject topic ONLY — never temporal/generic words). GMAIL_SEARCH for PAST email queries only: "Did I get email from X", "Did I receive email from X", "Any email from X", "Check my email for X" → GMAIL_SEARCH. keyword must be the sender name or topic (e.g. "Bob", "invoice", "board meeting") — NOT words like "new", "any", "recent", "latest", "email" which mean "show recent emails" → use empty keyword "" for those. IMPORTANT: "alert me when I receive email from X" or "notify me when email from X arrives" = SET_ACTION_RULE (action level), NOT GMAIL_SEARCH — the presence of "alert me"/"notify me"/"let me know" + "when" signals a future rule, not a past query. LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic. CREATE_TICKET→reporter_email, body.
 
 Level action intents and params (extract what's present, empty string if not mentioned):
-SET_REMINDER → title (what to remember), datetime (ISO8601 Toronto). ONLY use for "remind me at [specific time]" — user must state an explicit time/date. e.g. "remind me to call John tomorrow at 3pm".
+SET_REMINDER → title (what to remember), datetime (ISO8601 Toronto). ONLY use for "remind me at [specific time]" where the action at that time is FOR THE USER THEMSELVES (not sending to someone else). e.g. "remind me to call John tomorrow at 3pm". NEVER use SET_REMINDER when the timed action is sending an SMS/email/text TO a third party — use SET_ACTION_RULE (trigger_type:'time') instead.
 CREATE_EVENT → summary (event name), start (ISO8601 Toronto), end (ISO8601 Toronto, default start+1h)
 REMEMBER → text (exact statement to save). Use for "remember that X", "note that X", "my wife is Sarah" — no time component.
 DELETE_RULE → match (keyword describing the alert to delete), all ("true" only if user says delete all alerts)
@@ -1528,7 +1528,7 @@ DELETE_MEMORY → keyword (what to forget)
 ADD_CONTACT → name, phone (E.164 if given), email (if given)
 DRAFT_MESSAGE → to_name (recipient name), body (message text), to_phone (E.164 if known)
 DELETE_EVENT → query (event name/keyword to find and delete)
-SET_ACTION_RULE → location/email/time/contact-silence alerts. Params: trigger_type (email|location|time|contact_silence), from (email sender name/address), subject_keyword (keyword in subject line, e.g. "board meeting"), location (place name for location trigger), direction (arrive|leave). e.g. "alert me when I arrive at X" → {trigger_type:"location",location:"X",direction:"arrive"}; "alert me when email from Bob about board meeting" → {trigger_type:"email",from:"Bob",subject_keyword:"board meeting"}. NOT a reminder — no time param needed.
+SET_ACTION_RULE → location/email/time/contact-silence alerts. Params: trigger_type (email|location|time|contact_silence), from (email sender name/address), subject_keyword (keyword in subject line, e.g. "board meeting"), location (place name for location trigger), direction (arrive|leave). e.g. "alert me when I arrive at X" → {trigger_type:"location",location:"X",direction:"arrive"}; "alert me when email from Bob about board meeting" → {trigger_type:"email",from:"Bob",subject_keyword:"board meeting"}; "at 5:50 AM send Sarah an SMS say hi" or "build alert to text Bob at 9 AM" → {trigger_type:"time"}. CRITICAL: any "send/text/email [someone else] at [time]" → SET_ACTION_RULE trigger_type:'time', NEVER SET_REMINDER. NOT a reminder — no time param needed.
 LIST_CONNECTION_QUERY → connecting/disconnecting a list to an alert. e.g. "add my X list to my Y alert", "connect my grocery list to Costco alert".
 
 Output: {"level":"A","intent":"LIST_RULES","confidence":"high","params":{}}
@@ -1819,21 +1819,29 @@ Deno.serve(async (req) => {
     {
       const YES_RE = /^\s*(yes|yeah|yep|yup|correct|right|confirm|go ahead|do it|please|ok|okay|sure|absolutely|definitely|affirmative)\s*[.!]?\s*$/i;
       const NO_RE  = /^\s*(no|nope|nah|cancel|stop|never mind|nevermind|forget it|don't)\s*[.!]?\s*$/i;
+      const PICK_RE = /^#\s*(\d+)$/i;
 
-      if (YES_RE.test(userText) || NO_RE.test(userText)) {
-        const lastAssistant = [...(messages ?? [])]
-          .reverse()
-          .find((m: any) => m.role === 'assistant');
-        const lastDisplay: string = (() => {
-          const c = lastAssistant?.content;
-          if (typeof c === 'string') return c;
-          if (Array.isArray(c)) return c.filter((b: any) => b.type === 'text').map((b: any) => String(b.text ?? '')).join('');
-          // Also check rawText if the last message is the structured naavi format
-          return '';
-        })();
+      const lastAssistant14 = [...(messages ?? [])]
+        .reverse()
+        .find((m: any) => m.role === 'assistant');
+      const lastDisplay14: string = (() => {
+        const c = lastAssistant14?.content;
+        if (typeof c === 'string') return c;
+        if (Array.isArray(c)) return c.filter((b: any) => b.type === 'text').map((b: any) => String(b.text ?? '')).join('');
+        return '';
+      })();
+      const markerMatch14 = lastDisplay14.match(/<!--PENDING_INTENT:(\{.*?\})-->/s);
+      const pendingHasDisambig = markerMatch14
+        ? (() => { try { return !!(JSON.parse(markerMatch14[1]) as any).awaitingDisambig; } catch { return false; } })()
+        : false;
+      const isPickReply = PICK_RE.test(userText.trim());
+
+      if (YES_RE.test(userText) || NO_RE.test(userText) || (isPickReply && pendingHasDisambig)) {
+        const lastAssistant = lastAssistant14;
+        const lastDisplay   = lastDisplay14;
 
         // Try to extract PENDING_INTENT from the display field
-        const markerMatch = lastDisplay.match(/<!--PENDING_INTENT:(\{.*?\})-->/s);
+        const markerMatch = markerMatch14;
         if (markerMatch) {
           if (NO_RE.test(userText)) {
             const msg = `No problem — just let me know what you need.`;
@@ -1956,14 +1964,122 @@ Deno.serve(async (req) => {
               return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
             }
             if (pending.intent === 'SET_ACTION_RULE') {
+              const _acUrl = Deno.env.get('SUPABASE_URL') ?? '';
+              const _acKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+              const pendingParams = pending.params as Record<string, any>;
+              const pendingAC = pendingParams.action_config as Record<string, any> | undefined;
+
+              // Helper: lookup contacts for a name, return those with a phone number.
+              const lookupWithPhone = async (name: string): Promise<Array<Record<string, any>>> => {
+                try {
+                  const r = await fetch(`${_acUrl}/functions/v1/lookup-contact`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_acKey}` },
+                    body: JSON.stringify({ name, user_id: userId }),
+                  });
+                  if (!r.ok) return [];
+                  const d = await r.json();
+                  const all: Array<Record<string, any>> = Array.isArray(d.contacts)
+                    ? d.contacts : (d.contact ? [d.contact] : []);
+                  return all.filter((c: Record<string, any>) => c.phone);
+                } catch { return []; }
+              };
+
+              // Helper: return a disambiguation response, re-embedding PENDING_INTENT
+              // with awaitingDisambig so Step 1.4 can resolve on the next turn.
+              const disambigResponse = (
+                name: string,
+                contacts: Array<Record<string, any>>,
+                field: 'to' | 'task_action',
+                taIndex: number,
+              ) => {
+                const lines = contacts.map((c: Record<string, any>, i: number) =>
+                  `${i + 1}. ${c.name} (${c.phone})`).join('\n');
+                const speech = `I found ${contacts.length} contacts named ${name} — which one?\n${lines}`;
+                const pi = JSON.stringify({
+                  ...pending,
+                  awaitingDisambig: { name, contacts, field, taIndex },
+                });
+                const display = `${speech}\n<!--PENDING_INTENT:${pi}-->`;
+                console.log(`[timing] ${elapsed()} | SET_ACTION_RULE contact disambiguation for "${name}"`);
+                return jsonResponse({ rawText: JSON.stringify({ speech, display, actions: [], pendingThreads: [] }) });
+              };
+
+              // ── Handle disambiguation pick (user replied "# N" to a prior disambig) ──
+              if ((pending as any).awaitingDisambig) {
+                const { name, contacts, field, taIndex } = (pending as any).awaitingDisambig as {
+                  name: string; contacts: Array<Record<string, any>>; field: 'to' | 'task_action'; taIndex: number;
+                };
+                const pickMatch = userText.match(/^#\s*(\d+)|^(\d+)\s*$/i);
+                const pickIdx = pickMatch ? parseInt(pickMatch[1] ?? pickMatch[2], 10) - 1 : -1;
+                const picked = contacts[pickIdx];
+                if (!picked || pickIdx < 0) {
+                  // Invalid pick — re-ask
+                  const lines = contacts.map((c: Record<string, any>, i: number) => `${i + 1}. ${c.name} (${c.phone})`).join('\n');
+                  const msg = `Please pick a number from 1 to ${contacts.length}.\n${lines}`;
+                  const pi = JSON.stringify({ ...pending });
+                  const display = `${msg}\n<!--PENDING_INTENT:${pi}-->`;
+                  return jsonResponse({ rawText: JSON.stringify({ speech: msg, display, actions: [], pendingThreads: [] }) });
+                }
+                // Apply pick
+                if (field === 'to' && pendingAC) {
+                  pendingAC.to_phone = picked.phone;
+                  pendingAC.to_name  = picked.name;
+                } else if (field === 'task_action' && Array.isArray(pendingAC?.task_actions)) {
+                  const ta = pendingAC.task_actions[taIndex] as Record<string, any> | undefined;
+                  if (ta) ta.to_phone = picked.phone;
+                }
+                // Fall through to emit action below
+              } else {
+                // ── Resolve action_config.to (single direct recipient) ──────────────
+                // Always re-resolve by name — never trust the phone Claude embedded.
+                // Claude picks contacts from context and often picks the wrong one when
+                // multiple contacts share a name.
+                const toName = String(pendingAC?.to ?? pendingAC?.to_name ?? '').trim();
+                if (toName && !pendingAC?.to_email) {
+                  const withPhone = await lookupWithPhone(toName);
+                  if (withPhone.length === 0) {
+                    const msg = `I couldn't find a phone number for ${toName} in your contacts. Please add them and try again.`;
+                    return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                  }
+                  if (withPhone.length > 1) return disambigResponse(toName, withPhone, 'to', 0);
+                  if (pendingAC) {
+                    pendingAC.to_phone = withPhone[0].phone;
+                    pendingAC.to_name  = withPhone[0].name;
+                  }
+                }
+
+                // ── Resolve task_actions recipients ──────────────────────────────────
+                const pendingTAs: Array<Record<string, any>> = Array.isArray(pendingAC?.task_actions) ? pendingAC.task_actions : [];
+                for (let taIdx = 0; taIdx < pendingTAs.length; taIdx++) {
+                  const ta = pendingTAs[taIdx];
+                  if (ta.to_name && !ta.to_phone && !ta.to_email) {
+                    const withPhone = await lookupWithPhone(ta.to_name);
+                    if (withPhone.length === 0) {
+                      const msg = `I couldn't find a phone number for ${ta.to_name} in your contacts. Please add them and try again.`;
+                      return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                    }
+                    if (withPhone.length > 1) return disambigResponse(ta.to_name, withPhone, 'task_action', taIdx);
+                    ta.to_phone = withPhone[0].phone;
+                  }
+                }
+              }
+
               // Emit the action for mobile useOrchestrator to execute (writes action_rules row)
-              const action = { type: 'SET_ACTION_RULE', ...pending.params };
-              const tt = String(pending.params.trigger_type ?? '');
-              const fromPart = pending.params.from ? `from ${pending.params.from}` : '';
-              const kwPart   = pending.params.subject_keyword ? `about "${pending.params.subject_keyword}"` : '';
-              const desc     = tt === 'email'
+              const action = { type: 'SET_ACTION_RULE', ...pendingParams };
+              const tt = String(pendingParams.trigger_type ?? '');
+              const fromPart = pendingParams.from ? `from ${pendingParams.from}` : '';
+              const kwPart   = pendingParams.subject_keyword ? `about "${pendingParams.subject_keyword}"` : '';
+              const toLabel  = pendingAC?.to_name && pendingAC?.to_phone
+                ? ` Text ${pendingAC.to_name} at ${pendingAC.to_phone}.` : '';
+              const pendingTAsFinal: Array<Record<string, any>> = Array.isArray(pendingAC?.task_actions) ? pendingAC.task_actions : [];
+              const taskSummary = pendingTAsFinal.length > 0
+                ? ` Scheduled: ${pendingTAsFinal.map((ta: Record<string, any>) =>
+                    `${ta.type === 'send_sms' ? 'text' : 'email'} ${ta.to_name}${ta.to_phone ? ` at ${ta.to_phone}` : ''}`).join(', ')}.`
+                : toLabel;
+              const desc = tt === 'email'
                 ? `Email alert${[fromPart, kwPart].filter(Boolean).length ? ' ' + [fromPart, kwPart].filter(Boolean).join(' ') : ''} set.`
-                : `Alert set.`;
+                : `Alert set.${taskSummary}`;
               const speech = `Done. ${desc}`;
               console.log(`[timing] ${elapsed()} | SET_ACTION_RULE confirmed — action emitted for mobile`);
               return jsonResponse({ rawText: JSON.stringify({ speech, display: speech, actions: [action], pendingThreads: [] }) });
@@ -2792,6 +2908,16 @@ Deno.serve(async (req) => {
     // list_connect/disconnect/delete (have their own gate in listGate),
     // list_create/add/remove, remember, save_to_drive, set_reminder,
     // draft_message, and all read-only tools.
+    // Capture time-trigger SET_ACTION_RULE params before B4y Phase 2 drops them.
+    // If B4y drops the action (Turn 1 confirm ask), we embed a PENDING_INTENT in
+    // the display field so Turn 2 Step 1.4 can execute it deterministically.
+    const timeRuleCandidate = actions.find((a: any) =>
+      a.type === 'SET_ACTION_RULE' && String(a.trigger_type ?? '') === 'time'
+    );
+    const pendingTimeRule: Record<string, any> | null = timeRuleCandidate
+      ? { intent: 'SET_ACTION_RULE', level: 'action', confidence: 'high', params: { ...timeRuleCandidate } }
+      : null;
+
     let b4yDroppedStateChanging = false;
     {
       const RULE23_UNIVERSAL_TYPES = new Set([
@@ -2844,6 +2970,82 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── Time-trigger contact resolution (Turn 1 confirm) ────────────────────
+    // When B4y dropped a time-trigger SET_ACTION_RULE on Turn 1 (confirm ask),
+    // resolve the recipient phone server-side NOW — before embedding PENDING_INTENT.
+    // This ensures:
+    //   (a) The confirm speech shows the EXACT phone Robert is approving.
+    //   (b) If two contacts share the name, return a disambiguation question
+    //       instead of the confirm — no rule is embedded until Robert picks.
+    //   (c) pendingTimeRule.params carries the server-resolved phone so Step 1.4
+    //       on Turn 2 doesn't need to re-lookup (just verifies).
+    let resolvedConfirmPhone: string | null = null; // injected into confirm speech
+    if (pendingTimeRule !== null && b4yDroppedStateChanging) {
+      const _t1Url = Deno.env.get('SUPABASE_URL') ?? '';
+      const _t1Key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+      const _t1AC = (pendingTimeRule.params as Record<string, any>).action_config as Record<string, any> | undefined;
+      // Collect all unresolved recipient names (action_config.to OR task_actions[].to_name)
+      const toName = String(_t1AC?.to ?? _t1AC?.to_name ?? '').trim();
+      const taskActionsT1: Array<Record<string, any>> = Array.isArray(_t1AC?.task_actions) ? _t1AC.task_actions : [];
+      // First unresolved name wins for disambiguation (handle one at a time)
+      const firstUnresolvedName = toName || taskActionsT1.find(ta => ta.to_name)?.to_name || '';
+
+      if (firstUnresolvedName) {
+        try {
+          const lr = await fetch(`${_t1Url}/functions/v1/lookup-contact`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_t1Key}` },
+            body: JSON.stringify({ name: firstUnresolvedName, user_id: userId }),
+          });
+          if (lr.ok) {
+            const ld = await lr.json();
+            const allC: Array<Record<string, any>> = Array.isArray(ld.contacts)
+              ? ld.contacts : (ld.contact ? [ld.contact] : []);
+            const withPhone = allC.filter((c: Record<string, any>) => c.phone);
+
+            if (withPhone.length === 0) {
+              const msg = `I couldn't find a phone number for ${firstUnresolvedName} in your contacts. Please add them and try again.`;
+              return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+            }
+
+            if (withPhone.length > 1) {
+              // Disambiguation — return numbered list, embed PENDING_INTENT with awaitingDisambig
+              const lines = withPhone.map((c: Record<string, any>, i: number) => `${i + 1}. ${c.name} (${c.phone})`).join('\n');
+              const dismsg = `I found ${withPhone.length} contacts named ${firstUnresolvedName} — which one?\n${lines}`;
+              const field = toName ? 'to' : 'task_action';
+              const taIdx = toName ? 0 : taskActionsT1.findIndex(ta => ta.to_name === firstUnresolvedName);
+              const pi = JSON.stringify({
+                ...pendingTimeRule,
+                awaitingDisambig: { name: firstUnresolvedName, contacts: withPhone, field, taIndex: taIdx },
+              });
+              const display = `${dismsg}\n<!--PENDING_INTENT:${pi}-->`;
+              console.log(`[naavi-chat] T1 time-trigger disambig for "${firstUnresolvedName}" — ${withPhone.length} matches`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: dismsg, display, actions: [], pendingThreads: [] }) });
+            }
+
+            // Single match — inject resolved phone into pendingTimeRule params
+            const best = withPhone[0];
+            resolvedConfirmPhone = best.phone;
+            if (_t1AC) {
+              if (toName) {
+                _t1AC.to_phone = best.phone;
+                _t1AC.to_name  = best.name;
+              }
+              // Also resolve task_actions entries for the same name
+              for (const ta of taskActionsT1) {
+                if (ta.to_name === firstUnresolvedName && !ta.to_phone) {
+                  ta.to_phone = best.phone;
+                }
+              }
+            }
+            console.log(`[naavi-chat] T1 time-trigger resolved "${firstUnresolvedName}" → ${best.phone}`);
+          }
+        } catch (e) {
+          console.warn(`[naavi-chat] T1 time-trigger contact lookup failed: ${e}`);
+        }
+      }
+    }
+
     // V57.12.1 Bug E fix — Haiku occasionally emits tool_use without a
     // companion text block, leaving speech empty and the chat blank.
     // When that happens, synthesize a short action-specific confirmation
@@ -2855,6 +3057,19 @@ Deno.serve(async (req) => {
       ?? ((speechBlocks && speechBlocks.trim().length > 0)
             ? speechBlocks
             : buildFallbackSpeech(actions));
+
+    // If we resolved a phone for the time-trigger confirm, inject it into speech
+    // so Robert sees the exact number before saying yes.
+    if (resolvedConfirmPhone) {
+      // Append phone info before "Say yes to confirm" if present, otherwise append at end.
+      const confirmAskIdx = speech.search(/say yes to confirm/i);
+      const phoneNote = ` Phone: ${resolvedConfirmPhone}.`;
+      if (confirmAskIdx > 0) {
+        speech = speech.slice(0, confirmAskIdx).trimEnd() + phoneNote + ' ' + speech.slice(confirmAskIdx);
+      } else {
+        speech = speech.trimEnd() + phoneNote;
+      }
+    }
 
     // ── Layer 3 — Path B disclosure ───────────────────────────────────────────
     // When the query matched LAYER2_CANDIDATE_RE (a data/information question)
@@ -2936,8 +3151,20 @@ Deno.serve(async (req) => {
     // Backward-compat rawText: orchestrator's phantom-action regex still reads
     // this. Synthesize a JSON-flavored representation so existing parsers
     // (findActionInRawText, extractSpeech, mobile parseResponse) keep working.
+    // If B4y dropped a time-trigger SET_ACTION_RULE on Turn 1 (confirm ask),
+    // embed PENDING_INTENT in display so Step 1.4 can execute it on Turn 2 "yes".
+    const embedPendingTime = pendingTimeRule !== null && b4yDroppedStateChanging;
+    const pendingTimeMarker = embedPendingTime
+      ? `\n<!--PENDING_INTENT:${JSON.stringify(pendingTimeRule)}-->`
+      : '';
+    const display = speech + pendingTimeMarker;
+    if (embedPendingTime) {
+      console.log(`[naavi-chat] Embedded PENDING_INTENT for time-trigger SET_ACTION_RULE in display`);
+    }
+
     let rawText = JSON.stringify({
       speech,
+      display,
       actions,
       pendingThreads: [],
     });
