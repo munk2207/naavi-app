@@ -828,7 +828,6 @@ export async function handleSetReminderExec(
     user_id:      userId,
     title:        params.title,
     datetime:     safeDateTime,
-    source:       'chat',
     phone_number: phoneNumber,
     fired:        false,
     is_priority:  false,
