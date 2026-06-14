@@ -453,6 +453,27 @@ const BILLING_INTENT_RE =
 // prompt yielded list_read(naavi) and list_rules(alert) — non-deterministic
 // at temperature=0, classic Haiku attention loss on a long context.
 //
+// ── Multi-action sentence normalization ──────────────────────────────────────
+// "Send Sarah email. Book meeting with Bob. Remind me to call Jasmine."
+// → "Send Sarah email and book meeting with Bob and remind me to call Jasmine."
+//
+// Converts period-separated action sentences into "and"-connected form so
+// Claude's existing multi-action handling (which works for "and") takes over.
+// Only fires when 2+ sentences each start with an action verb — avoids
+// normalizing ordinary prose ("I saw Bob today. He looked well.").
+const MULTI_ACTION_VERB_RE = /^(?:send|book|schedule|remind|add|create|text|call|email|alert|notify|save|set|make|write|draft|message|forward|invite|show|find|get|check|read|look up|delete|cancel|remove|update|move|open)\b/i;
+
+function normalizeActionSeparators(text: string): string {
+  const parts = text.split(/\.\s+(?=[A-Z])/);
+  if (parts.length < 2) return text;
+  const actionCount = parts.filter(p => MULTI_ACTION_VERB_RE.test(p.trim())).length;
+  if (actionCount < 2) return text;
+  // Join with " and ", lowercasing the first letter of continuation sentences.
+  return parts
+    .map((p, i) => i === 0 ? p : p.charAt(0).toLowerCase() + p.slice(1))
+    .join(' and ');
+}
+
 // Fix: detect list-form calendar-read queries server-side and answer
 // deterministically from fetchLiveCalendarEvents. Same pattern as
 // detectEmailAlert: regex gate + intent-specific bypass. Claude is never
@@ -1492,8 +1513,8 @@ Today (America/Toronto): ${new Date().toLocaleDateString('en-CA', { timeZone: 'A
 Levels:
 A = answerable from user's real data (calendar, contacts, alerts, lists, reminders, memories, email). Use intents: LIST_RULES, LOOKUP_CONTACT, CALENDAR_SEARCH, READ_CALENDAR, GMAIL_SEARCH, PERSON_LOOKUP, LIST_READ, REMINDER_READ, MEMORY_SEARCH, CREATE_TICKET
 B = data question Claude must reason about (no real source)
-action = creating/updating/deleting data (reminder, alert, event, memory, list item)
-chat = conversational, no data question
+action = creating/updating/deleting data (reminder, alert, event, memory, list item) — ONLY when the message contains exactly ONE action. If the message contains 2 or more distinct actions (connected by "and" or otherwise), classify as chat so Claude can handle all of them together.
+chat = conversational, no data question — ALSO use for multi-action messages (2+ distinct actions)
 
 Level A params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). CALENDAR_SEARCH ONLY when user asks about a SPECIFIC event by name ("do I have a dentist appointment", "is my board meeting on Tuesday") — NEVER for email queries. READ_CALENDAR (no keyword param) for general schedule reads with no specific event named: "what do I have today", "what's coming up", "show me my schedule", "do I have anything tomorrow", "what's next" — use READ_CALENDAR, NOT CALENDAR_SEARCH, when there is no specific event name to search for. GMAIL_SEARCH→keyword (sender name or specific subject topic ONLY — never temporal/generic words). GMAIL_SEARCH for PAST email queries only: "Did I get email from X", "Did I receive email from X", "Any email from X", "Check my email for X" → GMAIL_SEARCH. keyword must be the sender name or topic (e.g. "Bob", "invoice", "board meeting") — NOT words like "new", "any", "recent", "latest", "email" which mean "show recent emails" → use empty keyword "" for those. IMPORTANT: "alert me when I receive email from X" or "notify me when email from X arrives" = SET_ACTION_RULE (action level), NOT GMAIL_SEARCH — the presence of "alert me"/"notify me"/"let me know" + "when" signals a future rule, not a past query. LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic. CREATE_TICKET→reporter_email, body.
 
@@ -1689,7 +1710,9 @@ Deno.serve(async (req) => {
     const token      = authHeader.replace('Bearer ', '').trim();
 
     const lastUserMsg = [...messages].reverse().find((m: { role: string }) => m.role === 'user');
-    const userText    = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : '';
+    const userTextRaw = typeof lastUserMsg?.content === 'string' ? lastUserMsg.content : '';
+    const userText    = normalizeActionSeparators(userTextRaw);
+    if (userText !== userTextRaw) console.log(`[multi-action] normalized: "${userTextRaw.slice(0,120)}" → "${userText.slice(0,120)}"`);
     const userPreview = userText.slice(0, 80).replace(/\s+/g, ' ');
     console.log(`[timing] ${elapsed()} | userText preview: "${userPreview}"`);
     console.log(`[TRACE-3 naavi-chat] userText full:`, JSON.stringify(userText), `length:`, userText.length);

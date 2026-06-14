@@ -48,6 +48,46 @@ import { normalizePlaceName } from '@/lib/normalizePlaceName';
 const SUPABASE_URL  = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
+// F5c — parse task strings into structured task_actions that evaluate-rules
+// can auto-execute (send SMS/email) when a location alert fires.
+// Only "text/message/sms [name] [message]" and "email [name] [message]" patterns
+// are auto-executable. Other task strings remain as plain reminder notes.
+interface TaskAction {
+  type: 'send_sms' | 'send_email';
+  to_name: string;
+  to_phone?: string;
+  to_email?: string;
+  body: string;
+}
+const TASK_SMS_RE   = /^(?:text|message|sms)\s+(\w+)\s+(?:that\s+|to\s+say\s+)?(.+)$/i;
+const TASK_EMAIL_RE = /^(?:email|send\s+(?:an?\s+)?email\s+(?:to\s+)?)\s*(\w+)\s+(?:about\s+|that\s+|to\s+say\s+)?(.+)$/i;
+
+async function resolveTaskActions(tasks: string[]): Promise<TaskAction[]> {
+  const results: TaskAction[] = [];
+  for (const task of tasks) {
+    const smsMatch   = TASK_SMS_RE.exec(task.trim());
+    const emailMatch = !smsMatch && TASK_EMAIL_RE.exec(task.trim());
+    const match = smsMatch || emailMatch;
+    if (!match) continue;
+
+    const toName = match[1];
+    const body   = match[2].trim();
+    try {
+      const contact = await lookupContact(toName);
+      if (smsMatch && contact?.phone) {
+        results.push({ type: 'send_sms', to_name: toName, to_phone: contact.phone, body });
+      } else if (emailMatch && contact?.email) {
+        results.push({ type: 'send_email', to_name: toName, to_email: contact.email, body });
+      } else {
+        console.log(`[F5c] resolveTaskActions: no phone/email for "${toName}" — task stays as reminder note`);
+      }
+    } catch (err) {
+      console.error('[F5c] resolveTaskActions contact lookup failed for:', toName, err);
+    }
+  }
+  return results;
+}
+
 // Affirmative / negative patterns for the pending-location confirmation turn.
 // Kept tight so ambiguous replies fall through to the clarification branch.
 const AFFIRMATIVE_RE = /^(yes|yeah|yep|yup|sure|confirm|confirmed|correct|ok|okay|alright|do it|go ahead|set it|please|please do|send)[.!?]*$/i;
@@ -1097,6 +1137,17 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
 // User says "every time" / "always" / "whenever" → one_shot:false (recurring,
 // guarded by the V57.17/V57.18 state machine).
 const oneShot = pending.originalAction?.one_shot ?? true;
+        // F5c — resolve task strings into structured task_actions at set-time
+        // so evaluate-rules can auto-execute them (send SMS/email) when the
+        // alert fires, rather than just surfacing them as reminder notes.
+        const rawTasks = Array.isArray((pending.originalAction?.action_config as any)?.tasks)
+          ? (pending.originalAction!.action_config as any).tasks as string[]
+          : [];
+        const resolvedTaskActions = await resolveTaskActions(rawTasks);
+        const baseActionConfig = pending.originalAction?.action_config ?? {};
+        const actionConfigWithTasks = resolvedTaskActions.length > 0
+          ? { ...baseActionConfig, task_actions: resolvedTaskActions }
+          : baseActionConfig;
         const { data: insertedRule, error } = await queryWithTimeout(
           supabase
             .from('action_rules')
@@ -1105,7 +1156,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               trigger_type:   'location',
               trigger_config: triggerConfig,
               action_type:    String(pending.originalAction?.action_type ?? 'sms'),
-              action_config:  pending.originalAction?.action_config ?? {},
+              action_config:  actionConfigWithTasks,
               label:          String(pending.originalAction?.label ?? 'Location alert'),
               one_shot:       oneShot,
             })

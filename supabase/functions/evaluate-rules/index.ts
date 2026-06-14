@@ -881,5 +881,50 @@ async function fireAction(
     `[evaluate-rules] Rule ${rule.id} fan-out (${mode}): ${parts.join(' ')} — ${successCount}/${sends.length} ok`,
   );
 
+  // F5c — execute structured task_actions stored at alert-set time.
+  // These are auto-send tasks (text/email a contact) that the user attached
+  // when creating the location alert. Runs after the main notification so
+  // the primary alert always fires first, even if task execution fails.
+  const taskActions = Array.isArray(config.task_actions) ? (config.task_actions as Array<Record<string, string>>) : [];
+  if (taskActions.length > 0) {
+    const taskSends = taskActions.map(ta => {
+      if (ta.type === 'send_sms' && ta.to_phone) {
+        return fetch(`${supabaseUrl}/functions/v1/send-sms`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${interFnKey}` },
+          body: JSON.stringify({
+            to: ta.to_phone, body: ta.body, channel: 'sms',
+            user_id: rule.user_id, recipient_name: ta.to_name,
+            sender_name: userName || 'Naavi', source: 'alert_task',
+          }),
+        }).then(r => ({ ok: r.ok, label: `sms→${ta.to_name}` }))
+          .catch(() => ({ ok: false, label: `sms→${ta.to_name}` }));
+      }
+      if (ta.type === 'send_email' && ta.to_email) {
+        return fetch(`${supabaseUrl}/functions/v1/send-user-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${interFnKey}` },
+          body: JSON.stringify({
+            user_id: rule.user_id,
+            subject: `Message from ${userName || 'Naavi'}`,
+            body: ta.body,
+            to: ta.to_email,
+          }),
+        }).then(r => ({ ok: r.ok, label: `email→${ta.to_name}` }))
+          .catch(() => ({ ok: false, label: `email→${ta.to_name}` }));
+      }
+      return null;
+    }).filter((p): p is Promise<{ ok: boolean; label: string }> => p !== null);
+
+    if (taskSends.length > 0) {
+      const taskResults = await Promise.allSettled(taskSends);
+      for (const r of taskResults) {
+        if (r.status === 'fulfilled') {
+          console.log(`[evaluate-rules] F5c task_action ${r.value.label}: ${r.value.ok ? 'ok' : 'fail'}`);
+        }
+      }
+    }
+  }
+
   return successCount > 0;
 }

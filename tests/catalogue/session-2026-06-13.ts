@@ -279,4 +279,44 @@ export const session2026_06_13Tests: TestCase[] = [
       expectTruthy(src.includes('confirmed.actions.length > 0'), 'Immediate-emit branch missing for actions-bearing intents');
     },
   },
+  // F5c — Executable tasks on alert fire
+  {
+    id: 'f5c.orchestrator-resolve-task-actions-present',
+    description: 'F5c: resolveTaskActions helper in useOrchestrator.ts parses text/email task strings',
+    tags: ['f5c', 'location'],
+    run: async () => {
+      const src = readFileSync(join(process.cwd(), 'hooks', 'useOrchestrator.ts'), 'utf8');
+      expectTruthy(src.includes('resolveTaskActions'), 'resolveTaskActions helper missing from useOrchestrator.ts');
+      expectTruthy(src.includes('TASK_SMS_RE'), 'TASK_SMS_RE pattern missing');
+      expectTruthy(src.includes('TASK_EMAIL_RE'), 'TASK_EMAIL_RE pattern missing');
+      expectTruthy(src.includes("type: 'send_sms'"), "task_actions type 'send_sms' missing");
+      expectTruthy(src.includes("type: 'send_email'"), "task_actions type 'send_email' missing");
+    },
+  },
+  {
+    id: 'f5c.orchestrator-injects-task-actions-into-action-config',
+    description: 'F5c: commitPending in useOrchestrator.ts injects task_actions into action_config before insert',
+    tags: ['f5c', 'location'],
+    run: async () => {
+      const src = readFileSync(join(process.cwd(), 'hooks', 'useOrchestrator.ts'), 'utf8');
+      expectTruthy(src.includes('resolvedTaskActions'), 'resolvedTaskActions missing from commitPending');
+      expectTruthy(src.includes('task_actions: resolvedTaskActions'), 'task_actions not merged into action_config');
+      expectTruthy(src.includes('actionConfigWithTasks'), 'actionConfigWithTasks merge object missing');
+    },
+  },
+  {
+    id: 'f5c.evaluate-rules-executes-task-actions',
+    description: 'F5c: evaluate-rules fireAction executes task_actions after main fan-out',
+    tags: ['f5c', 'evaluate-rules'],
+    run: async () => {
+      const src = readFileSync(
+        join(process.cwd(), 'supabase', 'functions', 'evaluate-rules', 'index.ts'),
+        'utf8',
+      );
+      expectTruthy(src.includes('task_actions'), 'evaluate-rules missing task_actions execution');
+      expectTruthy(src.includes("ta.type === 'send_sms'"), 'evaluate-rules missing send_sms task execution');
+      expectTruthy(src.includes("ta.type === 'send_email'"), 'evaluate-rules missing send_email task execution');
+      expectTruthy(src.includes('alert_task'), 'task executions should use source: alert_task');
+    },
+  },
 ];
