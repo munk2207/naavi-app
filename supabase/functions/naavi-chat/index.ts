@@ -2792,6 +2792,7 @@ Deno.serve(async (req) => {
     // list_connect/disconnect/delete (have their own gate in listGate),
     // list_create/add/remove, remember, save_to_drive, set_reminder,
     // draft_message, and all read-only tools.
+    let b4yDroppedStateChanging = false;
     {
       const RULE23_UNIVERSAL_TYPES = new Set([
         'CREATE_EVENT', 'DELETE_EVENT', 'DELETE_RULE', 'DELETE_MEMORY',
@@ -2828,9 +2829,16 @@ Deno.serve(async (req) => {
             `[naavi-chat] B4y Phase 2: dropping [${droppedP2.join(', ')}] — ` +
             `not a valid confirm-turn. userText="${userTextP2.slice(0, 80)}"`
           );
+          b4yDroppedStateChanging = true;
           if (!serverRejectionMessage) {
-            serverRejectionMessage =
-              `I need your confirmation before I can make that change. Please say yes to confirm.`;
+            // If Claude's own speech already asks for confirmation, keep it —
+            // it has the specific details (who, when, what). Only fall back to
+            // the generic message when Claude didn't include a confirm ask.
+            const claudeAskingConfirm = speechBlocks && /yes to confirm|say yes|confirm.*cancel/i.test(speechBlocks);
+            if (!claudeAskingConfirm) {
+              serverRejectionMessage =
+                `I need your confirmation before I can make that change. Please say yes to confirm.`;
+            }
           }
         }
       }
@@ -2863,6 +2871,7 @@ Deno.serve(async (req) => {
     if (
       pathB
       && !serverRejectionMessage
+      && !b4yDroppedStateChanging
       && !isClarificationResponse
       && !hasLiveSearchResults
       && speechBlocks.trim().length > 0

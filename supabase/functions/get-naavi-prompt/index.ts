@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-14-v110-group-recipient-resolve';
+const PROMPT_VERSION = '2026-06-14-v112-narrate-before-tool';
 
 /**
  * Cache-boundary marker.
@@ -271,6 +271,8 @@ Only offer once per turn. Do NOT offer for generic/institutional contacts from s
 All actions are exposed as TOOLS. To perform an action, CALL the corresponding tool with its required fields. Do NOT write JSON in your text response — use the tool API.
 
 Your spoken reply (what the user hears or reads) goes in the assistant text response, separate from any tool calls. Keep speech concise and direct.
+
+CRITICAL — ALWAYS NARRATE BEFORE TOOL CALLS: For SET_ACTION_RULE (time, weather, contact_silence triggers) and SET_REMINDER, you MUST include a brief text confirmation in your text response BEFORE or ALONGSIDE the tool call. Never emit a tool call for these actions without a companion text block. The text block must describe what you are about to do and include "Say yes to confirm, no to cancel." Example: "I'll schedule texts to Sarah and Ahmed at 12:15 AM. Say yes to confirm, no to cancel." followed by the set_action_rule tool call. This is required so the user knows what to confirm.
 
 You MAY call multiple tools in one turn when needed (e.g. REMEMBER + CREATE_EVENT for a date-fact fanout, or SET_ACTION_RULE alone for an alert). Each rule below maps to exactly one tool — do not invent action shapes; only call tools that exist.
 
@@ -845,6 +847,14 @@ TIME ALERT EXAMPLES — "alert me at [time]" or "remind me at [time] to do X" �
 - "Alert me to call Bob today at 11 PM" → set_action_rule(trigger_type='time', trigger_config={datetime:'2026-06-08T23:00:00-04:00'}, action_type='sms', action_config={body:'Call Bob.'}, one_shot=true)
 - "Alert me at 3 PM to take my medication" → set_action_rule(trigger_type='time', trigger_config={datetime:'2026-06-08T15:00:00-04:00'}, action_type='sms', action_config={body:'Take your medication.'}, one_shot=true)
 - "Notify me at 9 AM tomorrow" → set_action_rule(trigger_type='time', trigger_config={datetime:'2026-06-09T09:00:00-04:00'}, action_type='sms', action_config={body:'Good morning.'}, one_shot=true)
+
+SENDING TO THIRD PARTIES AT A SPECIFIC TIME — when the message is "at [time], text/email [someone else] [message]", use task_actions in action_config (same as location alert tasks). Do NOT emit DRAFT_MESSAGE — these are scheduled sends, not immediate drafts.
+- "At 12:15 am, text Sarah and Ahmed say hi" → set_action_rule(trigger_type='time', trigger_config={datetime:'<12:15 AM today/tomorrow ISO8601 Toronto>'}, action_type='sms', action_config={body:'Scheduled sends.', task_actions:[{type:'send_sms',to_name:'Sarah',body:'Hi'},{type:'send_sms',to_name:'Ahmed',body:'Hi'}]}, label='Text Sarah and Ahmed at 12:15 AM', one_shot=true)
+- "At 9 AM, email Bob the meeting notes" → set_action_rule(trigger_type='time', trigger_config={datetime:'<9 AM ISO8601 Toronto>'}, action_type='sms', action_config={body:'Scheduled send.', task_actions:[{type:'send_email',to_name:'Bob',body:'Meeting notes'}]}, label='Email Bob at 9 AM', one_shot=true)
+- "In 30 minutes, text Ahmed that I'm running late" → set_action_rule(trigger_type='time', trigger_config={datetime:'<now+30min ISO8601 Toronto>'}, action_type='sms', action_config={body:'Scheduled send.', task_actions:[{type:'send_sms',to_name:'Ahmed',body:"I'm running late."}]}, label='Text Ahmed in 30 min', one_shot=true)
+IMPORTANT: always use task_actions (not tasks) as the field name inside action_config for scheduled third-party sends.
+
+CRITICAL: "text [someone]" at a future time → task_actions in time alert. "text [someone]" NOW (no time anchor) → DRAFT_MESSAGE. The presence of a time anchor ("at X", "in X minutes", "tonight at Y") is what distinguishes scheduled from immediate.
 
 HARD RULE — "alert me at [time]" is NEVER a calendar event. Do NOT emit create_event for time-based alerts. The user wants an SMS/push alert at that time — not a Google Calendar entry.
 - 'calendar'        → { event_match, timing: 'before'|'after', minutes }

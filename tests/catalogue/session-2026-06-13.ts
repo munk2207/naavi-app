@@ -332,7 +332,7 @@ export const session2026_06_13Tests: TestCase[] = [
       expectTruthy(src.includes('RULE 26'), 'RULE 26 missing from get-naavi-prompt');
       expectTruthy(src.includes('TIME-ANCHOR SPLIT') || src.includes('time-anchor'), 'RULE 26 must be about time-anchor splitting');
       expectTruthy(src.includes('external recipient'), 'RULE 26 must reference external recipient as split signal');
-      expectTruthy(src.includes('v110-group-recipient-resolve') || src.includes('v109-time-anchor-split'), 'PROMPT_VERSION must be v109 or later');
+      expectTruthy(src.includes('v112-narrate-before-tool') || src.includes('v111-time-alert-third-party-sends'), 'PROMPT_VERSION must be v111 or later');
     },
   },
   // RULE 25 — Context enrichment
