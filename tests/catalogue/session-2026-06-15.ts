@@ -258,8 +258,8 @@ export const session2026_06_15Tests: TestCase[] = [
         'Multi-action detection must check hasMultipleStateChanging and not fire for list chains',
       );
       expectTruthy(
-        src.includes('pendingMultiAction = { queue: actions, index: 0 }'),
-        'Multi-action must store full queue with index=0 before returning',
+        src.includes('splitCompoundRequest'),
+        'Voice server must call splitCompoundRequest before askClaude to detect compound requests',
       );
       expectTruthy(
         src.includes('if (pendingMultiAction)'),
