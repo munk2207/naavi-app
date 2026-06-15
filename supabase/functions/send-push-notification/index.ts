@@ -179,6 +179,7 @@ serve(async (req) => {
     .eq('user_id', userId);
 
   if (!subs?.length) {
+    console.error(`[send-push] No push_subscriptions rows found for user ${userId} — token never registered or was cleared`);
     return new Response(JSON.stringify({ sent: 0, message: 'No subscriptions found' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -205,6 +206,8 @@ serve(async (req) => {
       } catch (err) {
         console.error('[send-push] FCM auth failed:', err);
       }
+    } else {
+      console.error('[send-push] FIREBASE_SERVICE_ACCOUNT_JSON secret is not set — Android FCM sends will be skipped');
     }
   }
 

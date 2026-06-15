@@ -842,14 +842,9 @@ async function fireAction(
       sends.push(callPush());
     }
 
-    // S12 — fifth channel: outbound voice call, ONLY for location arrival
-    // alerts. Visual channels don't reach a driver parking at Costco; the
-    // phone ringing does. Leave/inside directions and non-location triggers
-    // stay visual-only — this call is expensive (~$0.02/call) and would be
-    // noise for a 7 AM rain heads-up.
-    const triggerConfig = rule.trigger_config ?? {} as Record<string, unknown>;
-    const direction     = String((triggerConfig as any).direction ?? 'arrive');
-    if (userPhone && rule.trigger_type === 'location' && direction === 'arrive' && channelEnabled('voice_call')) {
+    // Voice call fires whenever the user has enabled it — no trigger-type gate.
+    // Robert's channel preference is his decision; we respect it unconditionally.
+    if (userPhone && channelEnabled('voice_call')) {
       sends.push(callVoice(userPhone));
     }
   } else if (toPhone) {
@@ -892,7 +887,37 @@ async function fireAction(
       ? ((config as Record<string, unknown>).tasks as Array<Record<string, string>>)
       : [];
   if (taskActions.length > 0) {
-    const taskSends = taskActions.map(ta => {
+    // Resolve missing to_phone/to_email via lookup-contact for any task_action
+    // that has only to_name. Uses the user's Google OAuth stored in user_tokens.
+    const resolvedActions = await Promise.all(taskActions.map(async ta => {
+      if ((ta.type === 'send_sms' && !ta.to_phone && ta.to_name) ||
+          (ta.type === 'send_email' && !ta.to_email && ta.to_name)) {
+        try {
+          const res = await fetch(`${supabaseUrl}/functions/v1/lookup-contact`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${interFnKey}` },
+            body: JSON.stringify({ name: ta.to_name, user_id: rule.user_id }),
+          });
+          if (res.ok) {
+            const data = await res.json() as { contacts?: Array<{ name?: string; phone?: string; email?: string }> };
+            const best = data.contacts?.[0];
+            if (best) {
+              return {
+                ...ta,
+                to_phone: ta.to_phone || best.phone || '',
+                to_email: ta.to_email || best.email || '',
+                to_name:  ta.to_name  || best.name  || ta.to_name,
+              };
+            }
+          }
+        } catch (e) {
+          console.warn(`[evaluate-rules] F5c contact lookup failed for "${ta.to_name}":`, e);
+        }
+      }
+      return ta;
+    }));
+
+    const taskSends = resolvedActions.map(ta => {
       if (ta.type === 'send_sms' && ta.to_phone) {
         return fetch(`${supabaseUrl}/functions/v1/send-sms`, {
           method: 'POST',

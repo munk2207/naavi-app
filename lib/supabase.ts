@@ -255,6 +255,10 @@ export async function callNaaviEdgeFunction(
     health_context: ctx.healthContext,
     knowledge_context: ctx.knowledgeContext,
     ...(userIdForBody ? { user_id: userIdForBody } : {}),
+    // Phone's local timezone + current time — used by get-naavi-prompt to
+    // compute "is this time in the past?" correctly for users outside Toronto.
+    client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    client_time: new Date().toISOString(),
   });
   log('callNaavi-fetch-start', {
     body_bytes: reqBody.length,

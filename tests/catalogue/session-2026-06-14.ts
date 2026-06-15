@@ -1,5 +1,5 @@
 /**
- * Session 2026-06-14 — v115/v116/v117 fixes
+ * Session 2026-06-14 — v115/v116/v117/v118/v119 fixes
  *
  * Covers:
  * 1. Sarah disambig label fix — label set before disambig branch, refined after pick
@@ -13,6 +13,7 @@
  * 9. v117: RULE 3 — combined self-reminder + participant SMS in ONE set_action_rule with task_actions
  * 10. v118: RULE 3 — single-result search must not show disambiguation list (use directly)
  * 11. v118: RULE 3 — after multi-result disambiguation pick, call set_action_rule in same turn as confirm prompt
+ * 12. v119: Past-check uses ISO timestamp comparison — fixes false "already past" for times near midnight (e.g. 1:00 AM vs 12:55 AM)
  *
  * Run via `npm run test:auto`.
  */
@@ -306,7 +307,7 @@ export const session2026_06_14Tests: TestCase[] = [
       const end   = src.indexOf('RULE 4 —', start);
       const block = src.slice(start, end);
       expectTruthy(
-        block.includes('exactly ONE result') && block.includes('use it directly'),
+        block.includes('exactly ONE') && block.includes('use it directly'),
         'RULE 3 PRE-EMIT CHECK must say: 1 global_search result → use it directly, no disambiguation list',
       );
     },
@@ -325,6 +326,27 @@ export const session2026_06_14Tests: TestCase[] = [
       expectTruthy(
         block.includes('After the user picks') && block.includes('THAT SAME RESPONSE'),
         'RULE 3 PRE-EMIT CHECK must say: after user picks from disambiguation, call tool in THAT SAME RESPONSE',
+      );
+    },
+  },
+
+  // ── 12. v119: past-check uses ISO comparison, not 12-hour string ──────────
+  {
+    id: 'v119.rule3-past-check-uses-iso-comparison',
+    description: 'v119: RULE 3 past-check must reference ISO timestamp and warn against comparing 12-hour strings numerically',
+    tags: ['v119', 'rule3', 'timezone'],
+    run: async () => {
+      const src = readFileSync(PROMPT_PATH, 'utf8');
+      const start = src.indexOf('PRE-EMIT CHECKS');
+      const end   = src.indexOf('RULE 4 —', start);
+      const block = src.slice(start, end);
+      expectTruthy(
+        block.includes('ISO8601 value') && block.includes('nowISO'),
+        'RULE 3 past-check must reference ISO8601 value and nowISO variable for comparison',
+      );
+      expectTruthy(
+        block.includes('12-hour clock strings'),
+        'RULE 3 past-check must warn against comparing 12-hour clock strings numerically',
       );
     },
   },

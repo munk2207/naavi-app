@@ -203,10 +203,15 @@ export const calendarAdapter: SearchAdapter = {
     //       or a narrowed time range for generic "what's on my calendar"
     //       queries that have no keyword to match).
     const generic = isGenericCalendarQuery(q);
+    // Birthday/anniversary queries are always forward-looking (user wants the
+    // NEXT occurrence, not past ones). Setting timeMin=now avoids returning
+    // stale past instances that cause unnecessary disambiguation noise.
+    const isBirthdayQuery = /birthday|anniversary|bday/i.test(q);
     const { timeMin, timeMax } = generic
       ? timeRangeFromQuery(q)
       : (() => {
-          const min = new Date(); min.setDate(min.getDate() - SEARCH_WINDOW_DAYS_PAST);
+          const min = new Date();
+          if (!isBirthdayQuery) min.setDate(min.getDate() - SEARCH_WINDOW_DAYS_PAST);
           const max = new Date(); max.setDate(max.getDate() + SEARCH_WINDOW_DAYS_FUTURE);
           return { timeMin: min, timeMax: max };
         })();

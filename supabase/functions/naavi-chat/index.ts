@@ -1130,11 +1130,12 @@ async function fetchBasePrompt(
   channel: 'app' | 'voice',
   userName: string,
   userPhone: string,
+  clientTimezone?: string,
+  clientTime?: string,
 ): Promise<string | null> {
-  // Cache key: channel only (userName/userPhone vary per user but the base
-  // prompt template is the same — user-specific values are injected server-side
-  // by get-naavi-prompt itself, so they don't affect cacheability here).
-  const cacheKey = channel;
+  // Cache key: channel + timezone. Different timezones get different time
+  // strings injected into the prompt, so they must not share a cache entry.
+  const cacheKey = `${channel}:${clientTimezone ?? 'America/Toronto'}`;
   const cached = promptCache.get(cacheKey);
   if (cached && Date.now() - cached.fetchedAt < PROMPT_CACHE_TTL_MS) {
     return cached.prompt;
@@ -1145,7 +1146,7 @@ async function fetchBasePrompt(
     const res = await fetch(`${supaUrl}/functions/v1/get-naavi-prompt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
-      body: JSON.stringify({ channel, userName, userPhone }),
+      body: JSON.stringify({ channel, userName, userPhone, clientTimezone, clientTime }),
     });
     if (!res.ok) {
       console.warn('[promptCache] get-naavi-prompt non-200:', res.status);
@@ -1171,6 +1172,8 @@ async function assembleSystemPromptServerSide(
     briefItems: MobileBriefItem[];
     healthContext: string;
     knowledgeContext: string;
+    clientTimezone?: string;
+    clientTime?: string;
   },
 ): Promise<string | null> {
   // 1. user_settings → user name + phone + home/work addresses (drives
@@ -1203,6 +1206,8 @@ async function assembleSystemPromptServerSide(
     opts.channel === 'voice' ? 'voice' : 'app',
     userName,
     userPhone,
+    opts.clientTimezone,
+    opts.clientTime,
   );
 
   if (!base) return null;
@@ -1730,6 +1735,8 @@ Deno.serve(async (req) => {
       brief_items: bodyBriefItems,
       health_context: bodyHealthContext,
       knowledge_context: bodyKnowledgeContext,
+      client_timezone: bodyClientTimezone,
+      client_time: bodyClientTime,
     } = body;
     // V57.7 cost audit — cap output at 1024 tokens (was 2048). Naavi
     // replies are short by design ("3 sentences unless asked for more"),
@@ -2816,6 +2823,8 @@ Deno.serve(async (req) => {
         briefItems: Array.isArray(bodyBriefItems) ? bodyBriefItems : [],
         healthContext: typeof bodyHealthContext === 'string' ? bodyHealthContext : '',
         knowledgeContext: typeof bodyKnowledgeContext === 'string' ? bodyKnowledgeContext : '',
+        clientTimezone: typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined,
+        clientTime: typeof bodyClientTime === 'string' ? bodyClientTime : undefined,
       });
       if (!assembled) {
         console.error('[naavi-chat] server-side prompt assembly failed; cannot proceed');

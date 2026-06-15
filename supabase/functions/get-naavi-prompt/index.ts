@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-15-v118-birthday-reminder-no-disambiguation';
+const PROMPT_VERSION = '2026-06-15-v124-task-actions-full-name';
 
 /**
  * Cache-boundary marker.
@@ -60,14 +60,15 @@ interface PromptRequest {
   userName?: string;
   userPhone?: string;
   language?: 'en' | 'fr';
+  clientTimezone?: string; // IANA tz from the user's phone, e.g. "America/Vancouver"
+  clientTime?: string;     // UTC ISO8601 from the user's phone clock
 }
 
-function buildUpcomingDays(now: Date): string {
+function buildUpcomingDays(now: Date, tz = 'America/Toronto'): string {
   const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(now);
-    d.setDate(now.getDate() + i);
-    const iso = d.toLocaleDateString('sv-SE', { timeZone: 'America/Toronto' });
+    const d = new Date(now.getTime() + i * 86400000);
+    const iso = d.toLocaleDateString('sv-SE', { timeZone: tz });
     const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : dayNames[d.getDay()];
     return `${label} = ${iso}`;
   }).join(', ');
@@ -77,11 +78,22 @@ function buildPrompt(req: PromptRequest): string {
   const userName = req.userName || 'the user';
   const userPhone = req.userPhone || '';
   const channel = req.channel;
-  const now = new Date();
-  const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/Toronto' });
-  const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Toronto' });
-  const todayISO = now.toLocaleDateString('sv-SE', { timeZone: 'America/Toronto' });
-  const upcomingDays = buildUpcomingDays(now);
+  // Use the phone's local timezone when available; fall back to America/Toronto.
+  // clientTime is the phone's UTC clock (ISO8601); clientTimezone is IANA tz.
+  const tz  = (req.clientTimezone && req.clientTimezone.length > 1) ? req.clientTimezone : 'America/Toronto';
+  const now = req.clientTime ? new Date(req.clientTime) : new Date();
+  const dateStr  = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: tz });
+  const timeStr  = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz });
+  const todayISO = now.toLocaleDateString('sv-SE', { timeZone: tz });
+  // Compute the phone's actual UTC offset dynamically — handles DST in any timezone.
+  const _localMs  = new Date(now.toLocaleString('en-US', { timeZone: tz })).getTime();
+  const _utcMs    = new Date(now.toLocaleString('en-US', { timeZone: 'UTC' })).getTime();
+  const _offMins  = Math.round((_utcMs - _localMs) / 60000);
+  const _offSign  = _offMins >= 0 ? '-' : '+';
+  const _offH     = String(Math.floor(Math.abs(_offMins) / 60)).padStart(2, '0');
+  const _offM     = String(Math.abs(_offMins) % 60).padStart(2, '0');
+  const nowISO    = todayISO + 'T' + now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: tz }) + `${_offSign}${_offH}:${_offM}`;
+  const upcomingDays = buildUpcomingDays(now, tz);
 
   // Channel-specific intro
   const intro = channel === 'voice'
@@ -531,10 +543,12 @@ One-time reminders use set_action_rule(trigger_type='time', one_shot=true). Recu
 PRE-EMIT CHECKS (apply IN ORDER before emitting a time alert or one-time CREATE_EVENT):
 1. Is the time present? If missing:
    a. If the request says "X days/hours before [person]'s birthday/anniversary/event" — READ the calendar context section already injected above. If the event appears there, calculate the date and emit set_action_rule immediately WITHOUT calling global_search and WITHOUT showing the user a disambiguation list. NEVER ask "When is [person]'s birthday?" if it is in the calendar context. Only call global_search if the event is genuinely absent from the calendar context.
-   b. If global_search returns exactly ONE result for the named event — use it directly. Do NOT show a numbered list with 1 item and ask the user to pick. A 1-item list is not disambiguation; it is unnecessary friction.
-   c. If global_search returns 2+ results — show the numbered list and ask the user to pick. After the user picks (replies with a number), call set_action_rule in THAT SAME RESPONSE together with the "say yes to confirm" prompt. Do NOT hold the tool call for after the user says "yes".
-   d. Otherwise, ask for the time. Do NOT emit yet.
-2. Is the time in the PAST? Compare against "The current time is ${timeStr} Eastern" given above. If the requested datetime is already past, ask: "It's already past [time] — did you mean tomorrow?" Do NOT emit yet.
+   b. If global_search returns results for a birthday/anniversary query — FIRST discard any results whose date is already in the past (before today ${todayISO}). Apply steps c/d to the REMAINING upcoming results only.
+   c. If the remaining results contain exactly ONE — use it directly. Do NOT show a numbered list with 1 item. A 1-item list is not disambiguation; it is unnecessary friction.
+   d. If the remaining results contain 2+ — show the numbered list (upcoming events only, sorted soonest first) and ask the user to pick. After the user picks (replies with a number), call set_action_rule in THAT SAME RESPONSE together with the "say yes to confirm" prompt. Do NOT hold the tool call for after the user says "yes".
+   e. If no results remain (nothing found or all past) — ask "When is [person]'s birthday?" Do NOT say "I don't have anything saved about [name]" — that is the wrong response for a calendar event query.
+   f. Otherwise, ask for the time. Do NOT emit yet.
+2. Is the time STRICTLY in the PAST? Compare the requested datetime ISO8601 value against the current moment ISO: ${nowISO} (= ${timeStr} local). Use the ISO values for comparison — do NOT compare 12-hour clock strings numerically (e.g. "1:00 AM" is AFTER "12:55 AM", not before). ONLY ask "It's already past [time] — did you mean tomorrow?" if the requested time is ALREADY PAST. If it is in the future — even seconds or minutes from now — proceed directly to step 3. NEVER ask "did you mean tomorrow?" for a future time. The user knows what they asked for.
 3. All checks pass → proceed to emit (steps below).
 
 LOCATION REMINDER RULE — "remind me with X when I arrive at Y":
@@ -559,9 +573,10 @@ EXAMPLES:
   Turn 2: "Done." [NO tool call]
 - User says "Remind me in 2 minutes to take my pills" and current time is 8:30 PM:
   Turn 1: set_action_rule(trigger_type='time', trigger_config={datetime:'<8:32 PM ISO8601 Toronto>'}, action_type='sms', action_config={body:'Take your pills.'}, label='Take pills at 8:32 PM', one_shot=true) + "I'll remind you to take your pills at 8:32 PM. Say yes to confirm, no to cancel." (short delay is fine, never refuse)
-- User says "Remind me at 09:30 to review the deck AND send SMS reminder to the meeting participants (Bob and Sarah)":
+- User says "Remind me at 09:30 to review the deck AND send SMS reminder to the meeting participants (Bob and Sarah El-Gillani)":
   ONE alert — self-reminder body + task_actions for participants in the SAME set_action_rule call.
-  Turn 1: set_action_rule(trigger_type='time', trigger_config={datetime:'<09:30 ISO8601 Toronto>'}, action_type='sms', action_config={body:'Review the deck for the meeting.', task_actions:[{type:'send_sms',to_name:'Bob',body:'Reminder: meeting today.'},{type:'send_sms',to_name:'Sarah',body:'Reminder: meeting today.'}]}, label='Review deck + text Bob & Sarah at 9:30 AM', one_shot=true) + "I'll remind you to review the deck at 9:30 AM and text Bob and Sarah the meeting reminder at the same time. Say yes to confirm, no to cancel, or tell me what to change."
+  FULL NAME RULE: always use the participant's FULL display name in to_name (e.g. "Sarah El-Gillani", NOT "Sarah"). First names alone are ambiguous when the user has multiple contacts with the same first name.
+  Turn 1: set_action_rule(trigger_type='time', trigger_config={datetime:'<09:30 ISO8601 Toronto>'}, action_type='sms', action_config={body:'Review the deck for the meeting.', task_actions:[{type:'send_sms',to_name:'Bob Smith',body:'Reminder: meeting today.'},{type:'send_sms',to_name:'Sarah El-Gillani',body:'Reminder: meeting today.'}]}, label='Review deck + text Bob & Sarah El-Gillani at 9:30 AM', one_shot=true) + "I'll remind you to review the deck at 9:30 AM and text Bob Smith and Sarah El-Gillani the meeting reminder at the same time. Say yes to confirm, no to cancel, or tell me what to change."
   User: "yes"
   Turn 2: "Done." [NO tool call]
   IMPORTANT: always ONE set_action_rule when the reminder and the sends share the same time. Never emit two separate tool calls for "remind me AND send to X at the same time".
@@ -867,7 +882,8 @@ SENDING TO THIRD PARTIES AT A SPECIFIC TIME — when the message is "at [time], 
 - "At 12:15 am, text Sarah and Ahmed say hi" → set_action_rule(trigger_type='time', trigger_config={datetime:'<12:15 AM today/tomorrow ISO8601 Toronto>'}, action_type='sms', action_config={body:'Scheduled sends.', task_actions:[{type:'send_sms',to_name:'Sarah',body:'Hi'},{type:'send_sms',to_name:'Ahmed',body:'Hi'}]}, label='Text Sarah and Ahmed at 12:15 AM', one_shot=true)
 - "At 9 AM, email Bob the meeting notes" → set_action_rule(trigger_type='time', trigger_config={datetime:'<9 AM ISO8601 Toronto>'}, action_type='sms', action_config={body:'Scheduled send.', task_actions:[{type:'send_email',to_name:'Bob',body:'Meeting notes'}]}, label='Email Bob at 9 AM', one_shot=true)
 - "In 30 minutes, text Ahmed that I'm running late" → set_action_rule(trigger_type='time', trigger_config={datetime:'<now+30min ISO8601 Toronto>'}, action_type='sms', action_config={body:'Scheduled send.', task_actions:[{type:'send_sms',to_name:'Ahmed',body:"I'm running late."}]}, label='Text Ahmed in 30 min', one_shot=true)
-- "Remind me at 9:30 to review the deck and send SMS to Bob and Sarah" → ONE set_action_rule with body for self-reminder + task_actions for Bob and Sarah: set_action_rule(trigger_type='time', trigger_config={datetime:'<9:30 ISO8601 Toronto>'}, action_type='sms', action_config={body:'Review the deck.', task_actions:[{type:'send_sms',to_name:'Bob',body:'Meeting reminder.'},{type:'send_sms',to_name:'Sarah',body:'Meeting reminder.'}]}, label='Review deck + text Bob & Sarah at 9:30', one_shot=true)
+- "Remind me at 9:30 to review the deck and send SMS to Bob and Sarah El-Gillani" → ONE set_action_rule with body for self-reminder + task_actions for Bob and Sarah: set_action_rule(trigger_type='time', trigger_config={datetime:'<9:30 ISO8601 Toronto>'}, action_type='sms', action_config={body:'Review the deck.', task_actions:[{type:'send_sms',to_name:'Bob Smith',body:'Meeting reminder.'},{type:'send_sms',to_name:'Sarah El-Gillani',body:'Meeting reminder.'}]}, label='Review deck + text Bob & Sarah El-Gillani at 9:30', one_shot=true)
+FULL NAME RULE: to_name must always be the full display name from the calendar attendee list. Never use first name only — it causes wrong contact resolution when multiple contacts share the same first name.
 IMPORTANT: always use task_actions (not tasks) as the field name inside action_config for scheduled third-party sends.
 
 CRITICAL: "text [someone]" at a future time → task_actions in time alert. "text [someone]" NOW (no time anchor) → DRAFT_MESSAGE. The presence of a time anchor ("at X", "in X minutes", "tonight at Y") is what distinguishes scheduled from immediate.

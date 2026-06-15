@@ -148,8 +148,8 @@ export const session2026_05_28Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-06-15-v118-birthday-reminder-no-disambiguation',
-        `Expected version "2026-06-15-v116-reminder-to-time-alert", got "${version}"`,
+        version === '2026-06-15-v124-task-actions-full-name',
+        `Expected version "2026-06-15-v124-task-actions-full-name", got "${version}"`,
       );
     },
   },
