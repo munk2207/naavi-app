@@ -235,6 +235,21 @@ export const session2026_06_14Tests: TestCase[] = [
     },
   },
   {
+    id: 'v116.lookup-contact-empty-name-falls-through',
+    description: 'v116: LOOKUP_CONTACT with empty name (pronoun "their"/"them") falls through to Claude instead of showing broken confirmation',
+    tags: ['v116', 'contact-lookup'],
+    run: async () => {
+      const src = readFileSync(INDEX_PATH, 'utf8');
+      // The guard must null-out classification when name is empty
+      expectTruthy(
+        src.includes("classification.intent === 'LOOKUP_CONTACT'") &&
+        src.includes("!classification.params.name?.trim()") &&
+        src.includes('classification = null;'),
+        'Pronoun guard for empty LOOKUP_CONTACT name missing from naavi-chat',
+      );
+    },
+  },
+  {
     id: 'v116.rule26-time-anchor-extends',
     description: 'v116: RULE 26 now says time anchor extends to both actions unless "now/right now/immediately" is present',
     tags: ['v116', 'rule26'],

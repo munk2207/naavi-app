@@ -2407,8 +2407,17 @@ Deno.serve(async (req) => {
         console.log(`[timing] ${elapsed()} | Universal gate classification: ${JSON.stringify(classification)}`);
 
         if (classification) {
+          // If LOOKUP_CONTACT has no resolved name (pronoun like "their", "them"),
+          // fall through to Claude which has full conversation context to resolve it.
+          if (
+            classification.intent === 'LOOKUP_CONTACT' &&
+            !classification.params.name?.trim()
+          ) {
+            classification = null;
+          }
+
           // ── Level A — answer from Robert's real data ──────────────────────────
-          if (classification.level === 'A') {
+          if (classification?.level === 'A') {
             if (classification.confidence === 'low') {
               const intentDesc =
                 classification.intent === 'LIST_RULES'      ? 'see your alerts'
