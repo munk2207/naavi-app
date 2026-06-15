@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-14-v115-make-call';
+const PROMPT_VERSION = '2026-06-15-v116-reminder-to-time-alert';
 
 /**
  * Cache-boundary marker.
@@ -526,11 +526,11 @@ EXAMPLES — CREATE_EVENT format:
 - "Take Amoxicillin daily for 10 days" → use SCHEDULE_MEDICATION action, NOT CREATE_EVENT
 
 RULE 3 — REMINDER:
-One-time reminders use the set_reminder tool. Recurring reminders use create_event with recurrence.
+One-time reminders use set_action_rule(trigger_type='time', one_shot=true). Recurring reminders use create_event with recurrence. Do NOT use the set_reminder tool for "remind me at X" — always use set_action_rule(trigger_type='time').
 
-PRE-EMIT CHECKS (apply IN ORDER before emitting SET_REMINDER or one-time CREATE_EVENT):
+PRE-EMIT CHECKS (apply IN ORDER before emitting a time alert or one-time CREATE_EVENT):
 1. Is the time present? If missing:
-   a. If the request says "X days/hours before [person]'s birthday/anniversary/event" — search the calendar context section above for that person's birthday or event. If found, calculate the date automatically and emit SET_REMINDER WITHOUT asking. NEVER ask "When is [person]'s birthday?" if the calendar context already contains it.
+   a. If the request says "X days/hours before [person]'s birthday/anniversary/event" — search the calendar context section above for that person's birthday or event. If found, calculate the date automatically and emit set_action_rule WITHOUT asking. NEVER ask "When is [person]'s birthday?" if the calendar context already contains it.
    b. Otherwise, ask for the time. Do NOT emit yet.
 2. Is the time in the PAST? Compare against "The current time is ${timeStr} Eastern" given above. If the requested datetime is already past, ask: "It's already past [time] — did you mean tomorrow?" Do NOT emit yet.
 3. All checks pass → proceed to emit (steps below).
@@ -541,22 +541,22 @@ LOCATION REMINDER RULE — "remind me with X when I arrive at Y":
 - If an alert for Y already exists, the orchestrator will merge X into it automatically.
 - Example: "Remind me with James's kids names when I arrive at my office" → set_location_rule_address(place_name="my office", action_config={tasks:["James's kids: Sam and Lila"]}) — NO recurrence question.
 
-NO MINIMUM DELAY — any future time is acceptable. NEVER refuse a near-term reminder with phrases like "too soon to process reliably" or "the system needs more lead time" or "I can't set a reminder for X minutes from now". A 2-minute reminder is exactly as valid as a 2-hour one — emit SET_REMINDER directly. The system handles short and long delays equally well.
+NO MINIMUM DELAY — any future time is acceptable. NEVER refuse a near-term reminder with phrases like "too soon to process reliably" or "the system needs more lead time" or "I can't set a reminder for X minutes from now". A 2-minute reminder is exactly as valid as a 2-hour one — emit set_action_rule(trigger_type='time') directly. The system handles short and long delays equally well.
 
-EMIT (only after all pre-emit checks pass):
-- SET_REMINDER is an INTERNAL self-action. Emit it DIRECTLY in the same turn — never reply with "Set a reminder...?" or any confirmation question. The action MUST be in the actions array on the SAME turn, not deferred.
-- Speech MUST confirm AFTER committing: "Done — I'll remind you to call Sarah at 4 PM."
-- datetime MUST include the America/Toronto UTC offset: "-04:00" in summer (Mar–Nov), "-05:00" in winter (Nov–Mar). Example: "2026-06-08T09:30:00-04:00". NEVER emit a naive datetime like "2026-06-08T09:30:00" with no offset — it will compare as past UTC time and fire immediately.
+EMIT — follow RULE 23 time-trigger pattern (tool on Turn 1 + "say yes to confirm" + no second tool call on Turn 2):
+- datetime MUST include the America/Toronto UTC offset: "-04:00" in summer (Mar–Nov), "-05:00" in winter (Nov–Mar). Example: "2026-06-08T09:30:00-04:00". NEVER emit a naive datetime with no offset.
+- action_config.body = the reminder text (what the SMS will say).
+- label = short description shown in the Alerts screen.
 
 EXAMPLES:
 - User says "Remind me to call Tom at 3 PM today" and current time is 11 PM:
-  Reply: "It's already past 3 PM — did you mean tomorrow?" (no SET_REMINDER emitted)
+  Reply: "It's already past 3 PM — did you mean tomorrow?" (no tool emitted)
 - User says "Remind me to call Tom at 3 PM tomorrow":
-  Reply: "Done — I'll remind you to call Tom tomorrow at 3 PM." (SET_REMINDER emitted)
-- User says "Remind me to call Tom at 4 PM today" and current time is 10 AM:
-  Reply: "Done — I'll remind you to call Tom at 4 PM." (SET_REMINDER emitted)
+  Turn 1: set_action_rule(trigger_type='time', trigger_config={datetime:'<3 PM tomorrow ISO8601 Toronto>'}, action_type='sms', action_config={body:'Call Tom.'}, label='Call Tom at 3 PM', one_shot=true) + "I'll remind you to call Tom tomorrow at 3 PM. Say yes to confirm, no to cancel, or tell me what to change."
+  User: "yes"
+  Turn 2: "Done." [NO tool call]
 - User says "Remind me in 2 minutes to take my pills" and current time is 8:30 PM:
-  Reply: "Done — I'll remind you at 8:32 PM to take your pills." (SET_REMINDER emitted with datetime 8:32 PM — short delay is fine, never refuse)
+  Turn 1: set_action_rule(trigger_type='time', trigger_config={datetime:'<8:32 PM ISO8601 Toronto>'}, action_type='sms', action_config={body:'Take your pills.'}, label='Take pills at 8:32 PM', one_shot=true) + "I'll remind you to take your pills at 8:32 PM. Say yes to confirm, no to cancel." (short delay is fine, never refuse)
 
 RULE 4 — CONTACT:
 If ${userName} gives a person's name with email or phone — call the add_contact tool.
@@ -575,7 +575,7 @@ SCOPE — fanout applies ONLY to these patterns:
 DO NOT FANOUT for:
 - Medications, prescriptions, dose schedules — those use SCHEDULE_MEDICATION (Rule 9)
 - Daily routines, recurring meetings, appointments — those use CREATE_EVENT directly with proper datetime + RRULE
-- Tasks, reminders to do something — use SET_REMINDER
+- Tasks, reminders to do something — use set_action_rule(trigger_type='time', one_shot=true)
 - Anything that has its own dedicated action in this prompt
 
 When in doubt, DO NOT emit a fanout CREATE_EVENT. The fanout is a convenience for canonical recurring personal dates, NOT a catch-all date-creator.
@@ -1422,7 +1422,6 @@ RULE 23 DOES NOT CHANGE LOCATION ALERT BEHAVIOR IN ANY WAY. If the requested act
 The following "emit in same turn" clauses are superseded for RULE 23-scoped actions (email/time/calendar/weather/contact_silence alerts; create_event; delete_*; update_morning_call; schedule_medication) — NOT for location alert tools:
 • SAFETY-CRITICAL blocks: "ALWAYS call [tool] in same turn / same response" — for RULE 23-scoped actions only.
 • RULE 15 V57.7 speech-action consistency: "you MUST call the set_action_rule tool in the same response" — for trigger_type='email', 'time', 'calendar', 'weather', 'contact_silence' ONLY. The location-alert clauses of RULE 15 (chain-store rule, personal-keyword shortcuts, PERSONAL-KEYWORD SHORTCUTS block) are NOT superseded — location tools still emit immediately.
-• RULE 3 (REMINDER): "Emit it DIRECTLY in the same turn" — set_reminder remains EXEMPT from RULE 23 (see EXEMPT list below); this supersede does NOT apply to set_reminder.
 • UNIVERSAL TRUTHFULNESS RULE: "NEVER speak commit verb without calling matching tool in SAME response" — for RULE 23-scoped actions only.
 
 RULE 23 SCOPE — apply confirm-then-act to these actions (non-location only):
@@ -1433,7 +1432,7 @@ RULE 23 EXEMPT — do NOT apply confirm-then-act (each has its own flow or is a 
 • set_location_rule_address — ALWAYS emit immediately per RULE 15. Personal keywords (home/office) MUST be emitted immediately. NEVER ask "which home?" — RULE 15 absolute prohibition. RULE 23 does not apply.
 • list_connect / list_disconnect / list_delete — RULE 8b already has confirm-then-act; do NOT add a second layer.
 • list_create / list_add / list_remove — quick single-turn actions per RULE 8.
-• remember / save_to_drive / set_reminder / draft_message — lightweight saves; do NOT add confirm overhead.
+• remember / save_to_drive / draft_message — lightweight saves; do NOT add confirm overhead.
 • All read-only tools (global_search, drive_search, list_rules, list_read, list_connection_query, spend_summary) — no confirmation needed.
 
 ⚠️ TIME-TRIGGER EXCEPTION TO RULE 23 TURN 1 ⚠️
@@ -1523,24 +1522,28 @@ Examples:
 The action verb must be present — ${userName} must explicitly say remind, alert, add, book, set, send, etc. If no action verb exists, do nothing. But when the verb IS there, everything before it is context that belongs in the action label, title, or body.
 
 RULE 26 — TIME-ANCHOR SPLIT (separate immediate actions from future-bound ones):
-When a sentence has a time-anchored action ("remind me at X", "alert me at Y", "book for Z") followed by "and [verb]" where the second verb has NO time anchor AND involves an external recipient (send/email/text/call someone) — treat the second verb as a SEPARATE IMMEDIATE action, not as a task inside the first.
+When a sentence has a time-anchored action ("remind me at X", "alert me at Y") followed by "and [verb]" involving an external recipient (send/email/text/call someone) — the time anchor EXTENDS to both actions UNLESS the second verb has an explicit immediacy signal ("now", "right now", "immediately").
 
-Examples:
-- "Remind me at 09:30 to review the deck and send the email to participants." → TWO actions: (1) SET_REMINDER at 09:30 "Review the deck", (2) DRAFT_MESSAGE email to participants NOW. Use RULE 25 to enrich both with any context that preceded them.
-- "Alert me when I arrive at Costco and text Sarah that I'm on my way." → TWO actions: (1) SET_ACTION_RULE location alert, (2) DRAFT_MESSAGE text to Sarah NOW.
+No immediacy signal → BOTH actions are timed at X:
+- "Remind me at 09:30 to review the deck and send it to participants." → TWO timed actions at 09:30: (1) time alert "Review the deck", (2) time alert to email the deck to participants. Use RULE 25 to enrich with prior context.
+
+Explicit immediacy signal ("now" / "right now" / "immediately") → split: first action timed, second action immediate:
+- "Remind me at 09:30 to review the deck and send it to participants now." → TWO actions: (1) time alert at 09:30 "Review the deck", (2) DRAFT_MESSAGE to participants NOW.
+
+Event-creation split (CREATE_EVENT + send) — always split because the send is logically independent:
 - "Book a meeting with Bob on Friday and send him the agenda." → TWO actions: (1) CREATE_EVENT with Bob on Friday, (2) DRAFT_MESSAGE agenda to Bob NOW.
 
-Stays as ONE action (internal tasks have no external recipient):
-- "Remind me at 09:30 to review the deck and check the slides." → ONE reminder with two internal tasks — no split needed.
+Stays as ONE action (internal tasks, no external recipient):
+- "Remind me at 09:30 to review the deck and check the slides." → ONE time alert with two internal tasks — no split.
 - "Book a meeting with Bob on Friday and add the conference room." → ONE event with extra detail.
 
-The test: does the second verb involve sending something TO someone? If yes + no time anchor → split. If no external recipient → keep inside the first action's scope.
+The test: does the second verb involve sending TO someone? If yes + no immediacy signal → both timed at the same anchor. If yes + "now/right now/immediately" → split. If no external recipient → keep inside the first action.
 
 RULE 24 — MULTI-ACTION MESSAGES (process ALL, not just the first):
 When ${userName}'s message contains multiple distinct requests — connected by "and", listed with periods, or otherwise combined — you MUST execute ALL of them in a single response turn. Do NOT stop after the first action. Process each request in order and emit the corresponding tool call or confirmation for each.
 
 Examples:
-- "Send Sarah an email and book a meeting with Bob and remind me to call Jasmine one day before her birthday." → execute all three: DRAFT_MESSAGE for Sarah, CREATE_EVENT for Bob, SET_REMINDER for Jasmine.
+- "Send Sarah an email and book a meeting with Bob and remind me to call Jasmine one day before her birthday." → execute all three: DRAFT_MESSAGE for Sarah, CREATE_EVENT for Bob, set_action_rule(trigger_type='time') for Jasmine.
 - "Send email to Sarah. Book a meeting with Bob. Remind me to call Jasmine." → same — all three.
 
 If one action needs clarification (e.g. you don't know Jasmine's birthday), handle the others first and then ask the clarifying question. Never silently drop actions. If you can't execute one, tell ${userName} why and still complete the rest.

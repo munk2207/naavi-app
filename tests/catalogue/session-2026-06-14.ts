@@ -1,5 +1,5 @@
 /**
- * Session 2026-06-14 — v115 fixes
+ * Session 2026-06-14 — v115/v116 fixes
  *
  * Covers:
  * 1. Sarah disambig label fix — label set before disambig branch, refined after pick
@@ -7,6 +7,8 @@
  * 3. Path B wrapper only fires on genuine uncertainty, not direct answers
  * 4. normalizeActionSeparators lowercase — period-separated lowercase sentences both fire
  * 5. MAKE_CALL pre-Claude bypass and outbound-call Edge Function present
+ * 6. v116: RULE 3 — SET_REMINDER retired; "remind me at X" → set_action_rule(trigger_type='time')
+ * 7. v116: RULE 26 — time anchor extends to both actions unless user says "now/right now/immediately"
  *
  * Run via `npm run test:auto`.
  */
@@ -16,8 +18,9 @@ import { join } from 'node:path';
 import { expectTruthy } from '../lib/assertions';
 import type { TestCase } from '../lib/types';
 
-const INDEX_PATH = join(process.cwd(), 'supabase', 'functions', 'naavi-chat', 'index.ts');
-const OC_PATH    = join(process.cwd(), 'supabase', 'functions', 'outbound-call', 'index.ts');
+const INDEX_PATH   = join(process.cwd(), 'supabase', 'functions', 'naavi-chat', 'index.ts');
+const OC_PATH      = join(process.cwd(), 'supabase', 'functions', 'outbound-call', 'index.ts');
+const PROMPT_PATH  = join(process.cwd(), 'supabase', 'functions', 'get-naavi-prompt', 'index.ts');
 
 export const session2026_06_14Tests: TestCase[] = [
   // ── 1. Sarah disambig label fix ──────────────────────────────────────────
@@ -206,6 +209,47 @@ export const session2026_06_14Tests: TestCase[] = [
       expectTruthy(
         src.includes("pending.intent === 'MAKE_CALL'"),
         "Step 1.4 resolver missing MAKE_CALL case",
+      );
+    },
+  },
+
+  // ── 6. v116: RULE 3 — set_reminder retired ───────────────────────────────
+  {
+    id: 'v116.rule3-no-set-reminder-in-rule3',
+    description: 'v116: RULE 3 in get-naavi-prompt no longer routes "remind me at X" to set_reminder tool',
+    tags: ['v116', 'reminder'],
+    run: async () => {
+      const src = readFileSync(PROMPT_PATH, 'utf8');
+      // Find the RULE 3 block
+      const start = src.indexOf('RULE 3 — REMINDER:');
+      const end   = src.indexOf('RULE 4 —', start);
+      const rule3 = src.slice(start, end);
+      expectTruthy(
+        !rule3.includes('set_reminder tool') || rule3.includes('Do NOT use the set_reminder tool'),
+        'RULE 3 still routes to set_reminder without the deprecation notice',
+      );
+      expectTruthy(
+        rule3.includes("trigger_type='time'"),
+        "RULE 3 must instruct Claude to use set_action_rule(trigger_type='time')",
+      );
+    },
+  },
+  {
+    id: 'v116.rule26-time-anchor-extends',
+    description: 'v116: RULE 26 now says time anchor extends to both actions unless "now/right now/immediately" is present',
+    tags: ['v116', 'rule26'],
+    run: async () => {
+      const src = readFileSync(PROMPT_PATH, 'utf8');
+      const start = src.indexOf('RULE 26 —');
+      const end   = src.indexOf('RULE 24 —', start);
+      const rule26 = src.slice(start, end);
+      expectTruthy(
+        rule26.includes('time anchor EXTENDS') || rule26.includes('EXTENDS to both'),
+        'RULE 26 must state that the time anchor extends to both actions',
+      );
+      expectTruthy(
+        rule26.includes('"now"') || rule26.includes("'now'"),
+        'RULE 26 must list "now" as the immediacy signal that triggers a split',
       );
     },
   },

@@ -140,6 +140,7 @@ All items confirmed done. Moved here to keep active tables clean.
 | B7a | Duplicate `client_diagnostics` log events — every DB log event fires in pairs | mobile | 2026-06-11 | Root cause: `app/index.tsx` AppState listener called `remoteLog` on every state change; `appLifecycle.ts` already does the same. Duplicate listener removed from `app/index.tsx`. Ships with next AAB. |
 | B7c | Homepage storyboard iframes not running | website | 2026-06-11 | Tested by Wael 2026-06-11 — iframes working correctly. No fix required. |
 | B7b | Voice bare-name transcription loss — Deepgram drops leading verb, falls through to hallucination | voice | 2026-06-11 | Tested by Wael 2026-06-11 — does not reproduce. Phone-operator confirmation flow already handles bare-name input correctly. Reopen if specific hallucination observed. |
+| B7d | SET_REMINDER handler in useOrchestrator — retire `saveReminder()` + calendar event creation; replace with action_rules INSERT (time trigger) | mobile | 2026-06-15 | RULE 3 prompt already updated (v116) to route "remind me at X" → set_action_rule(trigger_type='time'). This is the mobile-side cleanup: remove `saveReminder()` call at `hooks/useOrchestrator.ts:2699`, remove the calendar event block at lines 2701-2714, and insert directly into `action_rules` instead. Ships with next AAB. |
 
 ---
 
