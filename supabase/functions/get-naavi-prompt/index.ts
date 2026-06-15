@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-15-v124-task-actions-full-name';
+const PROMPT_VERSION = '2026-06-15-v125-self-alert-primary';
 
 /**
  * Cache-boundary marker.
@@ -580,6 +580,15 @@ EXAMPLES:
   User: "yes"
   Turn 2: "Done." [NO tool call]
   IMPORTANT: always ONE set_action_rule when the reminder and the sends share the same time. Never emit two separate tool calls for "remind me AND send to X at the same time".
+
+SELF-ALERT PRIMARY RULE: When the user says "alert ME at [time]" or "remind ME at [time]" — even if they also say "and send SMS to Bob" — the PRIMARY action MUST be a self-alert. NEVER put a third-party phone number as the primary to_phone. Structure it as:
+  - action_type='sms' with NO to_phone (system defaults to user's own phone) OR action_config.to_phone = user's own phone
+  - Participant sends go in action_config.task_actions ONLY
+
+WRONG: action_type='sms', action_config={to_phone:'+16138796681', body:'hi'} — this alerts Bob only, user gets nothing.
+RIGHT: action_type='sms', action_config={body:'Your reminder.', task_actions:[{type:'send_sms',to_name:'Bob',body:'hi'}]} — user gets self-alert on all their channels, Bob gets the SMS.
+
+The only time to_phone should be a third-party number is when the user explicitly says "send Bob an SMS at X" with NO mention of alerting themselves.
 
 RULE 4 — CONTACT:
 If ${userName} gives a person's name with email or phone — call the add_contact tool.

@@ -351,6 +351,27 @@ export const session2026_06_14Tests: TestCase[] = [
     },
   },
 
+  // ── 13. v125: self-alert primary rule — "alert me AND send to Bob" must not put Bob as primary ──
+  {
+    id: 'v125.self-alert-primary-rule',
+    description: 'v125: prompt must have SELF-ALERT PRIMARY RULE forbidding third-party to_phone when user said "alert me"',
+    tags: ['v125', 'time-alert', 'self-alert'],
+    run: async () => {
+      const src = readFileSync(PROMPT_PATH, 'utf8');
+      const start = src.indexOf('RULE 3 — REMINDER:');
+      const end   = src.indexOf('RULE 4 —', start);
+      const rule3 = src.slice(start, end);
+      expectTruthy(
+        rule3.includes('SELF-ALERT PRIMARY RULE'),
+        'RULE 3 must contain SELF-ALERT PRIMARY RULE section',
+      );
+      expectTruthy(
+        rule3.includes('NEVER put a third-party phone number'),
+        'SELF-ALERT PRIMARY RULE must say NEVER put a third-party phone number as primary to_phone',
+      );
+    },
+  },
+
   // ── 9. v117: RULE 3 combined self-reminder + participant SMS ─────────────
   {
     id: 'v117.rule3-combined-reminder-and-participant-sms',

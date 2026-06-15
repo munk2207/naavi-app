@@ -92,8 +92,8 @@ export const session2026_05_27Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-06-15-v124-task-actions-full-name',
-        `Expected version "2026-06-15-v124-task-actions-full-name", got "${version}"`,
+        version === '2026-06-15-v125-self-alert-primary',
+        `Expected version "2026-06-15-v125-self-alert-primary", got "${version}"`,
       );
     },
   },
