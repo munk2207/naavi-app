@@ -2747,7 +2747,9 @@ const oneShot = pending.originalAction?.one_shot ?? true;
             if (session?.user) {
               const timeToWindow = (hhmm: string | undefined): 'morning' | 'midday' | 'evening' | 'night' | null => {
                 if (!hhmm) return null;
-                const t = String(hhmm).substring(0, 5);
+                let t = String(hhmm).trim().substring(0, 5);
+                // Zero-pad single-digit hours: "9:00" → "09:00"
+                if (/^\d:\d\d$/.test(t)) t = '0' + t;
                 if (t < '11:00') return 'morning';
                 if (t < '15:00') return 'midday';
                 if (t < '20:00') return 'evening';

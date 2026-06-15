@@ -94,7 +94,7 @@ export const session2026_06_15Tests: TestCase[] = [
   },
   {
     id: 'voice.morning-call.brief-windows-patched',
-    description: 'Voice UPDATE_MORNING_CALL: reads brief_windows before patching and writes updated object',
+    description: 'Voice UPDATE_MORNING_CALL: reads brief_windows, zero-pads time, patches correct window',
     tags: ['voice', 'morning-call', 'brief-windows'],
     run: async () => {
       const src = readFileSync(VOICE_PATH, 'utf8');
@@ -109,6 +109,10 @@ export const session2026_06_15Tests: TestCase[] = [
       expectTruthy(
         src.includes("select=brief_windows"),
         'Voice UPDATE_MORNING_CALL handler does not read current brief_windows before patching',
+      );
+      expectTruthy(
+        src.includes("/^\\d:\\d\\d$/.test(t)") || src.includes('/^\\d:\\d\\d$/.test(t)'),
+        'Voice timeToWindow must zero-pad single-digit hours to fix "9:00" → night bug',
       );
     },
   },
@@ -164,7 +168,8 @@ export const session2026_06_15Tests: TestCase[] = [
       // Inline equivalent (mirrors voice server implementation) for boundary validation.
       function timeToWindow(hhmm: string | undefined): string | null {
         if (!hhmm) return null;
-        const t = String(hhmm).substring(0, 5);
+        let t = String(hhmm).trim().substring(0, 5);
+        if (/^\d:\d\d$/.test(t)) t = '0' + t;
         if (t < '11:00') return 'morning';
         if (t < '15:00') return 'midday';
         if (t < '20:00') return 'evening';
@@ -172,6 +177,8 @@ export const session2026_06_15Tests: TestCase[] = [
       }
 
       const cases: [string, string][] = [
+        ['09:00', 'morning'],
+        ['9:00',  'morning'], // unpadded — was wrongly returning 'night'
         ['10:59', 'morning'],
         ['11:00', 'midday'],
         ['14:59', 'midday'],
