@@ -842,6 +842,7 @@ async function fetchLiveCalendarEvents(
           const data = await res.json();
           return (data?.items ?? []) as Array<{
             id?: string; summary?: string; location?: string;
+            attendees?: Array<{ email?: string; displayName?: string; self?: boolean }>;
             start?: { dateTime?: string; date?: string };
             end?: { dateTime?: string; date?: string };
           }>;
@@ -854,6 +855,7 @@ async function fetchLiveCalendarEvents(
     const seen = new Set<string>();
     const items: Array<{
       id?: string; summary?: string; location?: string;
+      attendees?: Array<{ email?: string; displayName?: string; self?: boolean }>;
       start?: { dateTime?: string; date?: string };
       end?: { dateTime?: string; date?: string };
     }> = [];
@@ -924,6 +926,12 @@ async function fetchLiveCalendarEvents(
         const dateStr = dateForLabel.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Toronto' });
         const detailParts = [isAllDay ? `${dateStr} all day` : `${dateStr} at ${timeStr}`];
         if (e.location) detailParts.push(`at ${e.location}`);
+        // Include attendees (exclude the calendar owner — Google marks them with self:true)
+        const guestNames = (e.attendees ?? [])
+          .filter(a => !a.self)
+          .map(a => a.displayName ?? a.email ?? '')
+          .filter(Boolean);
+        if (guestNames.length) detailParts.push(`with ${guestNames.join(', ')}`);
         return {
           id: e.id ?? '',
           category: 'calendar',

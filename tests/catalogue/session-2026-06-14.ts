@@ -152,6 +152,30 @@ export const session2026_06_14Tests: TestCase[] = [
     },
   },
 
+  // ── Calendar attendees in fetchLiveCalendarEvents ────────────────────────
+  {
+    id: 'v115.calendar-fetch-includes-attendees-type',
+    description: 'v115: fetchLiveCalendarEvents event type includes attendees field (so Google API attendees are not stripped)',
+    tags: ['v115', 'calendar'],
+    run: async () => {
+      const src = readFileSync(INDEX_PATH, 'utf8');
+      // Both the fetch-result type and the dedup-array type must declare attendees
+      const fetchTypeCount  = (src.match(/attendees\?\s*:\s*Array<\{[^}]*self\?\s*:\s*boolean/g) ?? []).length;
+      expectTruthy(fetchTypeCount >= 2, `attendees field with self?: boolean must appear in at least 2 type declarations; found ${fetchTypeCount}`);
+    },
+  },
+  {
+    id: 'v115.calendar-fetch-appends-guests-to-detail',
+    description: 'v115: fetchLiveCalendarEvents appends "with [guests]" to detail string (so Claude sees attendees)',
+    tags: ['v115', 'calendar'],
+    run: async () => {
+      const src = readFileSync(INDEX_PATH, 'utf8');
+      expectTruthy(src.includes('guestNames'), 'guestNames extraction missing from fetchLiveCalendarEvents');
+      expectTruthy(src.includes('!a.self'), 'self-filter missing — calendar owner would appear in their own guest list');
+      expectTruthy(src.includes('`with ${guestNames.join'), 'guestNames not appended to detailParts');
+    },
+  },
+
   // ── 5. MAKE_CALL bypass + outbound-call EF ───────────────────────────────
   {
     id: 'v115.make-call-pre-claude-bypass',
