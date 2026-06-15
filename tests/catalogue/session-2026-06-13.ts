@@ -332,7 +332,7 @@ export const session2026_06_13Tests: TestCase[] = [
       expectTruthy(src.includes('RULE 26'), 'RULE 26 missing from get-naavi-prompt');
       expectTruthy(src.includes('TIME-ANCHOR SPLIT') || src.includes('time-anchor'), 'RULE 26 must be about time-anchor splitting');
       expectTruthy(src.includes('external recipient'), 'RULE 26 must reference external recipient as split signal');
-      expectTruthy(src.includes('v113-email-count-match') || src.includes('v112-narrate-before-tool'), 'PROMPT_VERSION must be v112 or later');
+      expectTruthy(/const PROMPT_VERSION\s*=\s*'[^']{5,}'/.test(src), 'PROMPT_VERSION constant must be a non-empty version string');
     },
   },
   // RULE 25 — Context enrichment

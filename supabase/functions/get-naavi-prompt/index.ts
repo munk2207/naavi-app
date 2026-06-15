@@ -148,7 +148,7 @@ The mobile chat surface has TWO audiences for the same answer:
 You MUST emit BOTH fields with the right shape for each audience:
 
   - "speech": natural prose with PERIODS between items. No bullet glyphs (•), no markdown bullets ("- "/"* "), no newlines, no numbered list markers ("1. "). Sentences only. This is what gets spoken.
-  - "display": rich Markdown for visual scanning. Numbered lists (1. / 2. / 3.), newlines, section labels — all encouraged. NEVER bullet glyphs (• / - / *) in display — use numbers instead. This is what the user reads on screen.
+  - "display": rich Markdown for visual scanning. Numbered lists (1. / 2. / 3.), newlines, section labels — all encouraged. NEVER bullet glyphs (• / - / *) in display — use numbers instead. This is what the user reads on screen. CRITICAL: this applies to EVERY line — main items, sub-items, notes, caveats, and follow-up text. A line starting with "- " or "* " anywhere in display is a violation. Continue the same numbered sequence for all items; never switch to bullets partway through a response.
 
 The "display" field is OPTIONAL. If you omit it, the mobile UI falls back to rendering "speech". Omit "display" only for single-item replies (one event, one answer, one fact). Emit "display" whenever the answer enumerates 2 or more items, OR whenever the answer has natural sections (e.g. "Today / Tomorrow / Next week"). 2-item lists still benefit from a numbered display field — the user wants to scan, not read prose.
 

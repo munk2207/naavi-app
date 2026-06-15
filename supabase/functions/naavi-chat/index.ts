@@ -1530,7 +1530,7 @@ DELETE_MEMORY → keyword (what to forget)
 ADD_CONTACT → name, phone (E.164 if given), email (if given)
 DRAFT_MESSAGE → to_name (recipient name), body (message text), to_phone (E.164 if known)
 DELETE_EVENT → query (event name/keyword to find and delete)
-SET_ACTION_RULE → location/email/time/contact-silence alerts. Params: trigger_type (email|location|time|contact_silence), from (email sender name/address), subject_keyword (keyword in subject line, e.g. "board meeting"), location (place name for location trigger), direction (arrive|leave). e.g. "alert me when I arrive at X" → {trigger_type:"location",location:"X",direction:"arrive"}; "alert me when email from Bob about board meeting" → {trigger_type:"email",from:"Bob",subject_keyword:"board meeting"}; "at 5:50 AM send Sarah an SMS say hi" → {trigger_type:"time",to_name:"Sarah",datetime:"2026-06-14T05:50:00-04:00",body:"hi"}; "text Bob at 9 AM say hello" → {trigger_type:"time",to_name:"Bob",datetime:"2026-06-14T09:00:00-04:00",body:"hello"}. CRITICAL: any "send/text/email [someone else] at [time]" → SET_ACTION_RULE trigger_type:'time', NEVER SET_REMINDER. Extract: to_name (recipient name), datetime (ISO8601 Toronto using today's date), body (message text).
+SET_ACTION_RULE → location/email/time/contact-silence alerts. Params: trigger_type (email|location|time|contact_silence), from (email sender name/address), subject_keyword (keyword in subject line, e.g. "board meeting"), location (place name for location trigger), direction (arrive|leave). e.g. "alert me when I arrive at X" → {trigger_type:"location",location:"X",direction:"arrive"}; "alert me when email from Bob about board meeting" → {trigger_type:"email",from:"Bob",subject_keyword:"board meeting"}; "alert me when an email arrives from Bob" → {trigger_type:"email",from:"Bob"}; "notify me when I get an email from Sarah" → {trigger_type:"email",from:"Sarah"}; "at 5:50 AM send Sarah an SMS say hi" → {trigger_type:"time",to_name:"Sarah",datetime:"2026-06-14T05:50:00-04:00",body:"hi"}; "text Bob at 9 AM say hello" → {trigger_type:"time",to_name:"Bob",datetime:"2026-06-14T09:00:00-04:00",body:"hello"}. CRITICAL: any "send/text/email [someone else] at [time]" → SET_ACTION_RULE trigger_type:'time', NEVER SET_REMINDER. Extract: to_name (recipient name), datetime (ISO8601 Toronto using today's date), body (message text).
 LIST_CONNECTION_QUERY → connecting/disconnecting a list to an alert. e.g. "add my X list to my Y alert", "connect my grocery list to Costco alert".
 
 Output: {"level":"A","intent":"LIST_RULES","confidence":"high","params":{}}
@@ -2344,6 +2344,37 @@ Deno.serve(async (req) => {
           console.warn(`[naavi-chat] MAKE_CALL bypass lookup error: ${_mcErr}`);
         }
         // Contact not found — fall through to Claude for a natural response
+      }
+    }
+
+    // ── EMAIL ALERT pre-Haiku bypass ───────────────────────────────────────────
+    // "Alert me when [an] email arrives from X" / "Alert me when X emails me"
+    // Haiku consistently classifies these as LIST_RULES (reads "alert me" as
+    // "show me my alerts"). Intercept before classification and route directly
+    // to buildActionConfirm(SET_ACTION_RULE, email).
+    {
+      const _eaRe = /^\s*(?:alert\s+me|notify\s+me|let\s+me\s+know)\s+when\b.{0,80}\bemail/is;
+      if (_eaRe.test(userText)) {
+        let _eaFrom = '';
+        let _eaSubject = '';
+        // "from X" or "from X about Y"
+        const _eaFromM = /\bfrom\s+([A-Za-z][A-Za-z0-9\s.@'-]{0,40}?)(?:\s+about\b|\s+(?:arrives?|comes?)\b|$)/i.exec(userText);
+        if (_eaFromM) _eaFrom = _eaFromM[1].trim();
+        // "X emails me" (inverted — sender before verb)
+        const _eaSenderM = /\bwhen\s+([A-Za-z][A-Za-z0-9\s.'-]{0,40}?)\s+emails?\s+(?:me|us)\b/i.exec(userText);
+        if (_eaSenderM && !_eaFrom) _eaFrom = _eaSenderM[1].trim().replace(/\s+an?\s+email.*$/, '').trim();
+        // "about X"
+        const _eaAboutM = /\babout\s+([A-Za-z][A-Za-z0-9\s'-]{0,40}?)(?:\s*$|\s+(?:arrives?|from)\b)/i.exec(userText);
+        if (_eaAboutM) _eaSubject = _eaAboutM[1].trim();
+        const _eaParams: Record<string, string> = { trigger_type: 'email' };
+        if (_eaFrom)    _eaParams.from             = _eaFrom;
+        if (_eaSubject) _eaParams.subject_keyword   = _eaSubject;
+        const _eaConfirm = buildActionConfirm('SET_ACTION_RULE', _eaParams);
+        if (_eaConfirm.speech) {
+          const _eaPi = JSON.stringify({ intent: 'SET_ACTION_RULE', level: 'action', confidence: 'high', params: _eaParams });
+          console.log(`[timing] ${elapsed()} | EMAIL_ALERT bypass from="${_eaFrom}" subject="${_eaSubject}"`);
+          return jsonResponse({ rawText: JSON.stringify({ speech: _eaConfirm.speech, display: `${_eaConfirm.display}\n<!--PENDING_INTENT:${_eaPi}-->`, actions: [], pendingThreads: [] }) });
+        }
       }
     }
 
