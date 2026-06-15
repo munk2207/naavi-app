@@ -191,22 +191,52 @@ serve(async (req) => {
     for (const frag of fragments) {
       const embedding = await generateEmbedding(frag.content);
 
-      const { data, error } = await adminClient
-        .from('knowledge_fragments')
-        .insert({
-          user_id:        userId,
-          type:           frag.type,
-          content:        frag.content,
-          classification: frag.classification,
-          confidence:     frag.confidence,
-          source,
-          embedding:      embedding ? JSON.stringify(embedding) : null,
-        })
-        .select('id, type, content, classification, source, confidence')
-        .single();
+      // F5b — dedup check: if a semantically near-identical fragment already
+      // exists (cosine distance < 0.10, i.e. similarity > 0.90), UPDATE it
+      // instead of inserting a duplicate. Catches STT variants like
+      // "Houssain" / "Hussein" / "Hoosein" that pgvector maps close together.
+      let existingId: string | null = null;
+      if (embedding) {
+        const { data: matches, error: dedupErr } = await adminClient.rpc(
+          'match_knowledge_for_dedup',
+          { p_user_id: userId, p_embedding: JSON.stringify(embedding), p_limit: 1 },
+        );
+        if (dedupErr) {
+          console.warn('[ingest-note] Dedup check failed:', dedupErr.message);
+        } else if (matches?.[0]?.distance < 0.10) {
+          existingId = matches[0].id;
+          console.log(`[ingest-note] F5b dedup: distance=${matches[0].distance.toFixed(4)} — updating existing fragment ${existingId}`);
+        }
+      }
+
+      const payload = {
+        user_id:        userId,
+        type:           frag.type,
+        content:        frag.content,
+        classification: frag.classification,
+        confidence:     frag.confidence,
+        source,
+        embedding:      embedding ? JSON.stringify(embedding) : null,
+      };
+
+      let data, error;
+      if (existingId) {
+        ({ data, error } = await adminClient
+          .from('knowledge_fragments')
+          .update({ content: payload.content, confidence: payload.confidence, embedding: payload.embedding, updated_at: new Date().toISOString() })
+          .eq('id', existingId)
+          .select('id, type, content, classification, source, confidence')
+          .single());
+      } else {
+        ({ data, error } = await adminClient
+          .from('knowledge_fragments')
+          .insert(payload)
+          .select('id, type, content, classification, source, confidence')
+          .single());
+      }
 
       if (error) {
-        console.error('[ingest-note] Insert failed:', error.message);
+        console.error('[ingest-note] Write failed:', error.message);
       } else {
         stored.push(data);
       }

@@ -15,6 +15,8 @@
  * 9. voice LIST_RULES ARCH-1 classifier: 'alerts'/'notifications' disambiguated from LIST_READ.
  * 10. voice LIST_RULES full-Claude path: filters enabled===true before narrating.
  * 11. mobile alerts: expired rule shows "Delete alert" button (hard delete), active rule shows "Disable alert" (soft).
+ * 12. F5b: ingest-note calls match_knowledge_for_dedup RPC and updates existing row on near-duplicate.
+ * 13. F5b: migration file defines the match_knowledge_for_dedup SQL function.
  *
  * Run via `npm run test:auto`.
  */
@@ -238,6 +240,50 @@ export const session2026_06_15Tests: TestCase[] = [
       expectTruthy(
         src.includes("setRules(prev => prev.filter(r => r.id !== deleted.id))"),
         'Hard delete must remove the row from the list (not just set enabled=false)',
+      );
+    },
+  },
+  {
+    id: 'f5b.ingest-note.dedup-calls-rpc-before-insert',
+    description: 'F5b: ingest-note calls match_knowledge_for_dedup RPC and updates existing row when distance < 0.10 instead of inserting a duplicate',
+    tags: ['knowledge', 'dedup', 'f5b'],
+    run: async () => {
+      const src = readFileSync(join(process.cwd(), 'supabase', 'functions', 'ingest-note', 'index.ts'), 'utf8');
+      expectTruthy(
+        src.includes('match_knowledge_for_dedup'),
+        'ingest-note must call the match_knowledge_for_dedup RPC for dedup check',
+      );
+      expectTruthy(
+        src.includes('distance < 0.10'),
+        'ingest-note must use distance < 0.10 threshold for dedup match',
+      );
+      expectTruthy(
+        src.includes('existingId'),
+        'ingest-note must track existingId and branch UPDATE vs INSERT',
+      );
+      expectTruthy(
+        src.includes("if (existingId)"),
+        'ingest-note must use UPDATE path when existingId is set',
+      );
+    },
+  },
+  {
+    id: 'f5b.migration.match-knowledge-for-dedup-exists',
+    description: 'F5b: migration file creates match_knowledge_for_dedup SQL function',
+    tags: ['knowledge', 'dedup', 'f5b', 'migration'],
+    run: async () => {
+      const src = readFileSync(join(process.cwd(), 'supabase', 'migrations', '20260615_knowledge_dedup.sql'), 'utf8');
+      expectTruthy(
+        src.includes('CREATE OR REPLACE FUNCTION match_knowledge_for_dedup'),
+        'Migration must define match_knowledge_for_dedup function',
+      );
+      expectTruthy(
+        src.includes('embedding <=> p_embedding'),
+        'Function must use pgvector cosine distance operator',
+      );
+      expectTruthy(
+        src.includes('vector(1536)'),
+        'Function parameter must use vector(1536) to match knowledge_fragments embedding dimension',
       );
     },
   },
