@@ -4,7 +4,7 @@ Sources: `hooks/useOrchestrator.ts`, `naavi-voice-server/src/index.js`, `app/ind
 
 Legend: ✅ = fully working · ⚠️ = partial · ❌ = not implemented
 
-Last updated: 2026-06-15 (Build 254) — B2m session closed 3 voice gaps + 1 accepted-no-action.
+Last updated: 2026-06-15 (Build 255) — B2m CLOSED. UPDATE_MORNING_CALL brief_windows shipped both surfaces; timeToWindow zero-pad fix applied.
 
 ---
 
@@ -54,7 +54,7 @@ Last updated: 2026-06-15 (Build 254) — B2m session closed 3 voice gaps + 1 acc
 | Source-hint filtering ("find in contacts") | ✅ | ⚠️ | **Accepted — no action** (2026-06-15): answer is correct regardless; voice fans all 10 adapters, fractions-of-a-cent cost difference, not worth complexity |
 | **BRIEFINGS** | | | |
 | Brief delivery (all windows) | ✅ | ✅ | Voice is primary; mobile renders brief cards |
-| Configure briefing time | ❌ | ⚠️ | **Open**: voice UPDATE_MORNING_CALL writes to legacy morning_call_time only; brief_windows (new multi-window system) not yet written by either surface via chat. Dedicated session needed — see next-session focus. |
+| Configure briefing time | ✅ | ✅ | **B2m CLOSED** — both surfaces patch brief_windows via timeToWindow(); legacy columns also written as fallback. Zero-pad bug fixed (build 255). |
 | Call recording | ❌ | ✅ | By design — voice-only feature |
 | **SPEND SUMMARY** | | | |
 | Spend summary | ✅ | ✅ | **Confirmed parity 2026-06-15** — SPEND_SUMMARY handler exists in voice server (line 10082); prior audit entry was stale |
@@ -88,6 +88,7 @@ Last updated: 2026-06-15 (Build 254) — B2m session closed 3 voice gaps + 1 acc
 | `LOG_CONCERN` / `UPDATE_PROFILE` missing in voice (Medium) | Fixed — voice writes to topics table (commit `fe82638`) |
 | `SPEND_SUMMARY` listed as voice gap (Medium) | Closed — was already implemented; audit entry was stale |
 | Source-hint filtering in global search (Low) | Accepted, no action — answer identical either way; cost difference negligible |
+| Configure briefing time (Medium) | **B2m CLOSED 2026-06-15** — brief_windows patched on both surfaces; timeToWindow zero-pad fix; tested and confirmed build 255 |
 
 ---
 
