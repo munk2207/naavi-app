@@ -12,6 +12,8 @@
  * 6. Mobile useOrchestrator handles UPDATE_MORNING_CALL and patches brief_windows.
  * 7. disable-all: enabled:false with no time disables all 4 windows.
  * 8. timeToWindow: boundary cases for window derivation.
+ * 9. voice LIST_RULES ARCH-1 classifier: 'alerts'/'notifications' disambiguated from LIST_READ.
+ * 10. voice LIST_RULES full-Claude path: filters enabled===true before narrating.
  *
  * Run via `npm run test:auto`.
  */
@@ -181,6 +183,34 @@ export const session2026_06_15Tests: TestCase[] = [
         const got = timeToWindow(input);
         expectTruthy(got === expected, `timeToWindow('${input}') = '${got}', expected '${expected}'`);
       }
+    },
+  },
+  {
+    id: 'voice.list-rules.arch1-classifier-alerts-not-list-read',
+    description: 'ARCH-1 classifier prompt: "alerts"/"notifications" explicitly mapped to LIST_RULES, never LIST_READ',
+    tags: ['voice', 'list-rules', 'arch1'],
+    run: async () => {
+      const src = readFileSync(VOICE_PATH, 'utf8');
+      expectTruthy(
+        src.includes('LIST_RULES = any request about alerts, rules, or notifications'),
+        'ARCH-1 classifier must explicitly define LIST_RULES for alerts/rules/notifications',
+      );
+      expectTruthy(
+        src.includes('never "alerts"/"rules"/"notifications"'),
+        'ARCH-1 classifier must exclude alerts/rules/notifications from LIST_READ listName',
+      );
+    },
+  },
+  {
+    id: 'voice.list-rules.full-claude-path-filters-enabled',
+    description: 'Full-Claude LIST_RULES path filters enabled===true and skips fired one-shot rules',
+    tags: ['voice', 'list-rules'],
+    run: async () => {
+      const src = readFileSync(VOICE_PATH, 'utf8');
+      expectTruthy(
+        src.includes('allRules.filter(r => r.enabled === true && !(r.one_shot && r.last_fired_at != null))'),
+        'Full-Claude LIST_RULES path must filter out disabled and fired one-shot rules',
+      );
     },
   },
 ];
