@@ -638,6 +638,27 @@ serve(async (req) => {
         await admin.from('action_rules').update({ enabled: false }).eq('id', rule_id);
       }
 
+      // 7. Audit log — fire-and-forget, never block the main path
+      const reportedLat = typeof body.lat === 'number' ? body.lat : null;
+      const reportedLng = typeof body.lng === 'number' ? body.lng : null;
+      const ruleLat = rule.trigger_config?.resolved_lat;
+      const ruleLng = rule.trigger_config?.resolved_lng;
+      let distM: number | null = null;
+      if (reportedLat !== null && reportedLng !== null && typeof ruleLat === 'number' && typeof ruleLng === 'number') {
+        distM = Math.round(haversineMeters(reportedLat, reportedLng, ruleLat, ruleLng));
+      }
+      admin.from('geofence_events').insert({
+        user_id,
+        rule_id,
+        rule_label: rule.label ?? null,
+        event: normalizedEvent,
+        lat: reportedLat,
+        lng: reportedLng,
+        distance_from_center_m: distM,
+      }).then(() => {}).catch((err: unknown) => {
+        console.error('[report-location-event] geofence_events insert failed:', err);
+      });
+
       console.log(`[report-location-event] Fired rule ${rule_id} for user ${user_id} (${event})`);
       return json({ ok: true, fired: true });
     }
