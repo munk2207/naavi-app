@@ -2758,6 +2758,77 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           await saveTopic({ subject: String(action.category ?? 'general'), note: String(action.note ?? ''), category: String(action.severity ?? 'low') });
         } else if (action.type === 'UPDATE_PROFILE') {
           await saveTopic({ subject: String(action.key ?? 'preference'), note: String(action.value ?? ''), category: 'preference' });
+        } else if (action.type === 'UPDATE_MORNING_CALL') {
+          if (supabase) {
+            const session = await getSessionWithTimeout();
+            if (session?.user) {
+              const timeToWindow = (hhmm: string | undefined): 'morning' | 'midday' | 'evening' | 'night' | null => {
+                if (!hhmm) return null;
+                const t = String(hhmm).substring(0, 5);
+                if (t < '11:00') return 'morning';
+                if (t < '15:00') return 'midday';
+                if (t < '20:00') return 'evening';
+                return 'night';
+              };
+
+              // Read current brief_windows before patching.
+              const { data: currentRow } = await queryWithTimeout(
+                supabase.from('user_settings').select('brief_windows').eq('user_id', session.user.id).single(),
+                15_000,
+                'select-brief-windows',
+              );
+              const currentWindows: Record<string, any> | null = (currentRow as any)?.brief_windows ?? null;
+
+              const settingsUpdate: Record<string, any> = { updated_at: new Date().toISOString() };
+
+              // Legacy columns for users without brief_windows.
+              if (action.time) settingsUpdate.morning_call_time = String(action.time);
+              if (action.enabled !== undefined) settingsUpdate.morning_call_enabled = action.enabled;
+
+              // brief_windows patch.
+              if (currentWindows) {
+                const newWindows = { ...currentWindows };
+                if (action.time) {
+                  const win = timeToWindow(String(action.time));
+                  if (win) {
+                    newWindows[win] = {
+                      ...(newWindows[win] ?? { channels: [] }),
+                      time: String(action.time).substring(0, 5),
+                      enabled: action.enabled !== false,
+                    };
+                  }
+                } else if (action.enabled === false) {
+                  for (const w of ['morning', 'midday', 'evening', 'night']) {
+                    if (newWindows[w]) newWindows[w] = { ...newWindows[w], enabled: false };
+                  }
+                }
+                settingsUpdate.brief_windows = newWindows;
+              } else if (action.time) {
+                const win = timeToWindow(String(action.time));
+                const defaultWindows: Record<string, any> = {
+                  morning: { enabled: false, time: '08:00', channels: [] },
+                  midday:  { enabled: false, time: '12:00', channels: [] },
+                  evening: { enabled: false, time: '17:00', channels: [] },
+                  night:   { enabled: false, time: '21:00', channels: [] },
+                };
+                if (win) {
+                  defaultWindows[win] = {
+                    enabled: action.enabled !== false,
+                    time: String(action.time).substring(0, 5),
+                    channels: ['sms'],
+                  };
+                }
+                settingsUpdate.brief_windows = defaultWindows;
+              }
+
+              const { error: mcErr } = await queryWithTimeout(
+                supabase.from('user_settings').update(settingsUpdate).eq('user_id', session.user.id),
+                15_000,
+                'update-morning-call',
+              );
+              if (mcErr) console.error('[Orchestrator] UPDATE_MORNING_CALL failed:', mcErr.message);
+            }
+          }
         } else if (action.type === 'SET_EMAIL_ALERT') {
           // Writes go to action_rules (unified trigger/action framework).
           // email_watch_rules has been retired; evaluate-rules reads action_rules.
