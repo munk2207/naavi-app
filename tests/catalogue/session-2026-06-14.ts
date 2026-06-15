@@ -11,6 +11,8 @@
  * 7. v116: RULE 26 — time anchor extends to both actions unless user says "now/right now/immediately"
  * 8. v117: Calendar attendee names — People API contacts lookup for emails without displayName
  * 9. v117: RULE 3 — combined self-reminder + participant SMS in ONE set_action_rule with task_actions
+ * 10. v118: RULE 3 — single-result search must not show disambiguation list (use directly)
+ * 11. v118: RULE 3 — after multi-result disambiguation pick, call set_action_rule in same turn as confirm prompt
  *
  * Run via `npm run test:auto`.
  */
@@ -289,6 +291,40 @@ export const session2026_06_14Tests: TestCase[] = [
       expectTruthy(
         src.includes('emailNameMap[a.email?.toLowerCase()'),
         'attendee name resolution must use emailNameMap as fallback before a.email',
+      );
+    },
+  },
+
+  // ── 10. v118: RULE 3 — single-result search must not show disambiguation ──
+  {
+    id: 'v118.rule3-single-result-no-disambiguation',
+    description: 'v118: RULE 3 PRE-EMIT CHECK — if global_search returns exactly 1 result, use it directly; no numbered list',
+    tags: ['v118', 'rule3', 'disambiguation'],
+    run: async () => {
+      const src = readFileSync(PROMPT_PATH, 'utf8');
+      const start = src.indexOf('PRE-EMIT CHECKS');
+      const end   = src.indexOf('RULE 4 —', start);
+      const block = src.slice(start, end);
+      expectTruthy(
+        block.includes('exactly ONE result') && block.includes('use it directly'),
+        'RULE 3 PRE-EMIT CHECK must say: 1 global_search result → use it directly, no disambiguation list',
+      );
+    },
+  },
+
+  // ── 11. v118: RULE 3 — post-disambiguation tool call in same turn ─────────
+  {
+    id: 'v118.rule3-post-disambiguation-tool-call-same-turn',
+    description: 'v118: RULE 3 PRE-EMIT CHECK — after user picks from 2+ results, call set_action_rule in same turn as confirm prompt',
+    tags: ['v118', 'rule3', 'disambiguation'],
+    run: async () => {
+      const src = readFileSync(PROMPT_PATH, 'utf8');
+      const start = src.indexOf('PRE-EMIT CHECKS');
+      const end   = src.indexOf('RULE 4 —', start);
+      const block = src.slice(start, end);
+      expectTruthy(
+        block.includes('After the user picks') && block.includes('THAT SAME RESPONSE'),
+        'RULE 3 PRE-EMIT CHECK must say: after user picks from disambiguation, call tool in THAT SAME RESPONSE',
       );
     },
   },

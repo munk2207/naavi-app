@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-15-v117-attendee-names-task-actions';
+const PROMPT_VERSION = '2026-06-15-v118-birthday-reminder-no-disambiguation';
 
 /**
  * Cache-boundary marker.
@@ -530,8 +530,10 @@ One-time reminders use set_action_rule(trigger_type='time', one_shot=true). Recu
 
 PRE-EMIT CHECKS (apply IN ORDER before emitting a time alert or one-time CREATE_EVENT):
 1. Is the time present? If missing:
-   a. If the request says "X days/hours before [person]'s birthday/anniversary/event" — search the calendar context section above for that person's birthday or event. If found, calculate the date automatically and emit set_action_rule WITHOUT asking. NEVER ask "When is [person]'s birthday?" if the calendar context already contains it.
-   b. Otherwise, ask for the time. Do NOT emit yet.
+   a. If the request says "X days/hours before [person]'s birthday/anniversary/event" — READ the calendar context section already injected above. If the event appears there, calculate the date and emit set_action_rule immediately WITHOUT calling global_search and WITHOUT showing the user a disambiguation list. NEVER ask "When is [person]'s birthday?" if it is in the calendar context. Only call global_search if the event is genuinely absent from the calendar context.
+   b. If global_search returns exactly ONE result for the named event — use it directly. Do NOT show a numbered list with 1 item and ask the user to pick. A 1-item list is not disambiguation; it is unnecessary friction.
+   c. If global_search returns 2+ results — show the numbered list and ask the user to pick. After the user picks (replies with a number), call set_action_rule in THAT SAME RESPONSE together with the "say yes to confirm" prompt. Do NOT hold the tool call for after the user says "yes".
+   d. Otherwise, ask for the time. Do NOT emit yet.
 2. Is the time in the PAST? Compare against "The current time is ${timeStr} Eastern" given above. If the requested datetime is already past, ask: "It's already past [time] — did you mean tomorrow?" Do NOT emit yet.
 3. All checks pass → proceed to emit (steps below).
 
