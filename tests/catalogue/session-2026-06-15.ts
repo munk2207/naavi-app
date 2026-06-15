@@ -244,6 +244,38 @@ export const session2026_06_15Tests: TestCase[] = [
     },
   },
   {
+    id: 'voice.multi-action.queue-intercepts-before-dispatch',
+    description: 'Multi-action queue: when 2+ state-changing actions come from Claude, pendingMultiAction is set and dispatch loop is skipped; user is stepped through one at a time',
+    tags: ['voice', 'multi-action'],
+    run: async () => {
+      const src = readFileSync(VOICE_PATH, 'utf8');
+      expectTruthy(
+        src.includes('let pendingMultiAction = null'),
+        'Voice server must declare pendingMultiAction closure variable',
+      );
+      expectTruthy(
+        src.includes('hasMultipleStateChanging && !skipGateForChain'),
+        'Multi-action detection must check hasMultipleStateChanging and not fire for list chains',
+      );
+      expectTruthy(
+        src.includes('pendingMultiAction = { queue: actions, index: 0 }'),
+        'Multi-action must store full queue with index=0 before returning',
+      );
+      expectTruthy(
+        src.includes('if (pendingMultiAction)'),
+        'Gate must check pendingMultiAction before pendingDraft on each turn',
+      );
+      expectTruthy(
+        src.includes("Say yes to confirm or no to skip"),
+        'Multi-action speech must prompt user with yes/no for each item',
+      );
+      expectTruthy(
+        src.includes('function describeMultiActionStep'),
+        'describeMultiActionStep helper must exist to narrate each action',
+      );
+    },
+  },
+  {
     id: 'f5b.ingest-note.dedup-calls-rpc-before-insert',
     description: 'F5b: ingest-note calls match_knowledge_for_dedup RPC and updates existing row when distance < 0.10 instead of inserting a duplicate',
     tags: ['knowledge', 'dedup', 'f5b'],
