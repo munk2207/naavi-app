@@ -92,7 +92,7 @@ export const session2026_05_27Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-06-15-v116-reminder-to-time-alert',
+        version === '2026-06-15-v117-attendee-names-task-actions',
         `Expected version "2026-06-15-v116-reminder-to-time-alert", got "${version}"`,
       );
     },

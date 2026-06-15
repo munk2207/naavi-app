@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-15-v116-reminder-to-time-alert';
+const PROMPT_VERSION = '2026-06-15-v117-attendee-names-task-actions';
 
 /**
  * Cache-boundary marker.
@@ -557,6 +557,12 @@ EXAMPLES:
   Turn 2: "Done." [NO tool call]
 - User says "Remind me in 2 minutes to take my pills" and current time is 8:30 PM:
   Turn 1: set_action_rule(trigger_type='time', trigger_config={datetime:'<8:32 PM ISO8601 Toronto>'}, action_type='sms', action_config={body:'Take your pills.'}, label='Take pills at 8:32 PM', one_shot=true) + "I'll remind you to take your pills at 8:32 PM. Say yes to confirm, no to cancel." (short delay is fine, never refuse)
+- User says "Remind me at 09:30 to review the deck AND send SMS reminder to the meeting participants (Bob and Sarah)":
+  ONE alert — self-reminder body + task_actions for participants in the SAME set_action_rule call.
+  Turn 1: set_action_rule(trigger_type='time', trigger_config={datetime:'<09:30 ISO8601 Toronto>'}, action_type='sms', action_config={body:'Review the deck for the meeting.', task_actions:[{type:'send_sms',to_name:'Bob',body:'Reminder: meeting today.'},{type:'send_sms',to_name:'Sarah',body:'Reminder: meeting today.'}]}, label='Review deck + text Bob & Sarah at 9:30 AM', one_shot=true) + "I'll remind you to review the deck at 9:30 AM and text Bob and Sarah the meeting reminder at the same time. Say yes to confirm, no to cancel, or tell me what to change."
+  User: "yes"
+  Turn 2: "Done." [NO tool call]
+  IMPORTANT: always ONE set_action_rule when the reminder and the sends share the same time. Never emit two separate tool calls for "remind me AND send to X at the same time".
 
 RULE 4 — CONTACT:
 If ${userName} gives a person's name with email or phone — call the add_contact tool.
@@ -859,6 +865,7 @@ SENDING TO THIRD PARTIES AT A SPECIFIC TIME — when the message is "at [time], 
 - "At 12:15 am, text Sarah and Ahmed say hi" → set_action_rule(trigger_type='time', trigger_config={datetime:'<12:15 AM today/tomorrow ISO8601 Toronto>'}, action_type='sms', action_config={body:'Scheduled sends.', task_actions:[{type:'send_sms',to_name:'Sarah',body:'Hi'},{type:'send_sms',to_name:'Ahmed',body:'Hi'}]}, label='Text Sarah and Ahmed at 12:15 AM', one_shot=true)
 - "At 9 AM, email Bob the meeting notes" → set_action_rule(trigger_type='time', trigger_config={datetime:'<9 AM ISO8601 Toronto>'}, action_type='sms', action_config={body:'Scheduled send.', task_actions:[{type:'send_email',to_name:'Bob',body:'Meeting notes'}]}, label='Email Bob at 9 AM', one_shot=true)
 - "In 30 minutes, text Ahmed that I'm running late" → set_action_rule(trigger_type='time', trigger_config={datetime:'<now+30min ISO8601 Toronto>'}, action_type='sms', action_config={body:'Scheduled send.', task_actions:[{type:'send_sms',to_name:'Ahmed',body:"I'm running late."}]}, label='Text Ahmed in 30 min', one_shot=true)
+- "Remind me at 9:30 to review the deck and send SMS to Bob and Sarah" → ONE set_action_rule with body for self-reminder + task_actions for Bob and Sarah: set_action_rule(trigger_type='time', trigger_config={datetime:'<9:30 ISO8601 Toronto>'}, action_type='sms', action_config={body:'Review the deck.', task_actions:[{type:'send_sms',to_name:'Bob',body:'Meeting reminder.'},{type:'send_sms',to_name:'Sarah',body:'Meeting reminder.'}]}, label='Review deck + text Bob & Sarah at 9:30', one_shot=true)
 IMPORTANT: always use task_actions (not tasks) as the field name inside action_config for scheduled third-party sends.
 
 CRITICAL: "text [someone]" at a future time → task_actions in time alert. "text [someone]" NOW (no time anchor) → DRAFT_MESSAGE. The presence of a time anchor ("at X", "in X minutes", "tonight at Y") is what distinguishes scheduled from immediate.

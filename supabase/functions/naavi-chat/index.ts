@@ -867,6 +867,35 @@ async function fetchLiveCalendarEvents(
         items.push(e);
       }
     }
+
+    // Look up names for attendees where Google Calendar API returned no displayName.
+    // Uses Google People API searchContacts so the user sees "Sarah El-Gillani" not
+    // "sarahl.elgillani@gmail.com" in the calendar brief and in Claude's context.
+    const emailsNeedingNames = new Set<string>();
+    for (const e of items) {
+      for (const a of (e.attendees ?? [])) {
+        if (!a.self && !a.displayName && a.email) emailsNeedingNames.add(a.email);
+      }
+    }
+    const emailNameMap: Record<string, string> = {};
+    if (emailsNeedingNames.size > 0) {
+      await Promise.all([...emailsNeedingNames].map(async (email) => {
+        try {
+          const url = `https://people.googleapis.com/v1/people:searchContacts?query=${encodeURIComponent(email)}&readMask=names,emailAddresses&pageSize=5`;
+          const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+          if (!res.ok) return;
+          const data = await res.json() as { results?: Array<{ person?: { names?: Array<{ displayName?: string }>; emailAddresses?: Array<{ value?: string }> } }> };
+          for (const r of (data.results ?? [])) {
+            const personEmails = (r.person?.emailAddresses ?? []).map(e2 => e2.value?.toLowerCase() ?? '');
+            if (personEmails.includes(email.toLowerCase())) {
+              const name = r.person?.names?.[0]?.displayName;
+              if (name) emailNameMap[email.toLowerCase()] = name;
+              break;
+            }
+          }
+        } catch { /* non-fatal: fall back to email */ }
+      }));
+    }
     items.sort((a, b) => {
       const aTime = new Date(a.start?.dateTime ?? a.start?.date ?? '').getTime();
       const bTime = new Date(b.start?.dateTime ?? b.start?.date ?? '').getTime();
@@ -929,7 +958,7 @@ async function fetchLiveCalendarEvents(
         // Include attendees (exclude the calendar owner — Google marks them with self:true)
         const guestNames = (e.attendees ?? [])
           .filter(a => !a.self)
-          .map(a => a.displayName ?? a.email ?? '')
+          .map(a => a.displayName ?? emailNameMap[a.email?.toLowerCase() ?? ''] ?? a.email ?? '')
           .filter(Boolean);
         if (guestNames.length) detailParts.push(`with ${guestNames.join(', ')}`);
         return {

@@ -1,5 +1,5 @@
 /**
- * Session 2026-06-14 — v115/v116 fixes
+ * Session 2026-06-14 — v115/v116/v117 fixes
  *
  * Covers:
  * 1. Sarah disambig label fix — label set before disambig branch, refined after pick
@@ -9,6 +9,8 @@
  * 5. MAKE_CALL pre-Claude bypass and outbound-call Edge Function present
  * 6. v116: RULE 3 — SET_REMINDER retired; "remind me at X" → set_action_rule(trigger_type='time')
  * 7. v116: RULE 26 — time anchor extends to both actions unless user says "now/right now/immediately"
+ * 8. v117: Calendar attendee names — People API contacts lookup for emails without displayName
+ * 9. v117: RULE 3 — combined self-reminder + participant SMS in ONE set_action_rule with task_actions
  *
  * Run via `npm run test:auto`.
  */
@@ -265,6 +267,49 @@ export const session2026_06_14Tests: TestCase[] = [
       expectTruthy(
         rule26.includes('"now"') || rule26.includes("'now'"),
         'RULE 26 must list "now" as the immediacy signal that triggers a split',
+      );
+    },
+  },
+
+  // ── 8. v117: calendar attendee names — People API lookup ─────────────────
+  {
+    id: 'v117.calendar-attendee-names-people-api-lookup',
+    description: 'v117: fetchLiveCalendarEvents looks up attendee emails without displayName via Google People API searchContacts',
+    tags: ['v117', 'calendar', 'attendees'],
+    run: async () => {
+      const src = readFileSync(INDEX_PATH, 'utf8');
+      expectTruthy(
+        src.includes('emailsNeedingNames') && src.includes('emailNameMap'),
+        'naavi-chat index.ts must have emailsNeedingNames + emailNameMap contacts lookup for calendar attendees',
+      );
+      expectTruthy(
+        src.includes('people:searchContacts'),
+        'naavi-chat must call Google People API searchContacts for attendee name resolution',
+      );
+      expectTruthy(
+        src.includes('emailNameMap[a.email?.toLowerCase()'),
+        'attendee name resolution must use emailNameMap as fallback before a.email',
+      );
+    },
+  },
+
+  // ── 9. v117: RULE 3 combined self-reminder + participant SMS ─────────────
+  {
+    id: 'v117.rule3-combined-reminder-and-participant-sms',
+    description: 'v117: RULE 3 includes example showing "remind me AND send to participants" → ONE set_action_rule with task_actions',
+    tags: ['v117', 'rule3', 'task-actions'],
+    run: async () => {
+      const src = readFileSync(PROMPT_PATH, 'utf8');
+      const start = src.indexOf('RULE 3 — REMINDER:');
+      const end   = src.indexOf('RULE 4 —', start);
+      const rule3 = src.slice(start, end);
+      expectTruthy(
+        rule3.includes('task_actions') && rule3.includes('ONE'),
+        'RULE 3 must have a combined self-reminder + task_actions example with "ONE" alert instruction',
+      );
+      expectTruthy(
+        src.includes('Remind me at') && src.includes('send SMS') && src.includes('task_actions'),
+        'TIME ALERT EXAMPLES must include combined remind+send example with task_actions',
       );
     },
   },
