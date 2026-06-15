@@ -589,12 +589,19 @@ export default function AlertsScreen() {
     try {
       if (!supabase) throw new Error('No Supabase client');
       const deleted = pendingDelete;
+      const isExpired = deleted.enabled === false;
+      const op = isExpired ? 'delete' : 'deactivate';
       const { error: err } = await invokeWithTimeout('manage-rules', {
-        body: { op: 'deactivate', rule_id: deleted.id },
+        body: { op, rule_id: deleted.id },
       }, 15_000);
       if (err) throw err;
-      // Soft-disable: keep the row visible greyed with Reactivate button.
-      setRules(prev => prev.map(r => r.id === deleted.id ? { ...r, enabled: false } : r));
+      if (isExpired) {
+        // Hard delete: remove the row entirely from the list.
+        setRules(prev => prev.filter(r => r.id !== deleted.id));
+      } else {
+        // Soft-disable: keep the row visible greyed with Reactivate button.
+        setRules(prev => prev.map(r => r.id === deleted.id ? { ...r, enabled: false } : r));
+      }
       setPendingDelete(null);
 
       // B2l fix (2026-05-19) — re-sync the Transistorsoft SDK so the
@@ -864,7 +871,7 @@ export default function AlertsScreen() {
                             onPress={() => setPendingDelete(rule)}
                           >
                             <Ionicons name="trash" size={16} color="#fff" />
-                            <Text style={styles.deleteBtnText}>Disable alert</Text>
+                            <Text style={styles.deleteBtnText}>{isDisabled ? 'Delete alert' : 'Disable alert'}</Text>
                           </TouchableOpacity>
                         </View>
                       </View>
@@ -887,11 +894,11 @@ export default function AlertsScreen() {
       >
         <Pressable style={styles.modalBackdrop} onPress={() => !deleting && setPendingDelete(null)}>
           <Pressable style={styles.modalCard} onPress={e => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Disable alert?</Text>
+            <Text style={styles.modalTitle}>{pendingDelete?.enabled === false ? 'Delete alert?' : 'Disable alert?'}</Text>
             <Text style={styles.modalBody}>
               {pendingDelete ? formatTriggerSummary(pendingDelete) : ''}
             </Text>
-            <Text style={styles.modalSub}>You can reactivate it any time.</Text>
+            <Text style={styles.modalSub}>{pendingDelete?.enabled === false ? 'This will permanently remove the alert.' : 'You can reactivate it any time.'}</Text>
             <View style={styles.modalBtnRow}>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnSecondary]}

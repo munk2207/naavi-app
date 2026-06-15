@@ -222,37 +222,36 @@ export const session2026_06_11Tests: TestCase[] = [
   },
   {
     id: 'soft-delete.alerts-screen-calls-deactivate-not-delete',
-    description: 'alerts.tsx confirmDelete calls op=deactivate (soft-disable) not op=delete',
+    description: 'alerts.tsx confirmDelete calls op=deactivate for active rules, op=delete for expired rules',
     tags: ['soft-delete', 'alerts'],
     run: async () => {
       const src = readFileSync(ALERTS_SCREEN_PATH, 'utf8');
+      // Both ops must be present: deactivate for active rules, delete for expired
       expectTruthy(
-        src.includes("op: 'deactivate'"),
-        'alerts.tsx confirmDelete must call manage-rules with op=deactivate',
+        src.includes("op: 'deactivate'") || src.includes("'deactivate'"),
+        'alerts.tsx confirmDelete must still use op=deactivate for active rules',
       );
-      // The old hard-delete path must not be used in confirmDelete.
-      // (op: 'delete' may still appear in comments — check no bare object literal)
-      const confirmDeleteBlock = src.slice(src.indexOf('const confirmDelete'), src.indexOf('const confirmDelete') + 800);
       expectTruthy(
-        !confirmDeleteBlock.includes("op: 'delete'"),
-        'alerts.tsx confirmDelete must NOT use op=delete (hard delete)',
+        src.includes("isExpired ? 'delete' : 'deactivate'"),
+        'alerts.tsx confirmDelete must use op=delete for expired rules',
       );
     },
   },
   {
     id: 'soft-delete.alerts-screen-keeps-row-on-disable',
-    description: 'alerts.tsx sets enabled=false on the row instead of filtering it out',
+    description: 'alerts.tsx: active rule disables (keeps row greyed); expired rule is removed from list',
     tags: ['soft-delete', 'alerts'],
     run: async () => {
       const src = readFileSync(ALERTS_SCREEN_PATH, 'utf8');
+      // Active path: row stays with enabled=false
       expectTruthy(
         src.includes('enabled: false'),
-        'alerts.tsx must update the row to enabled=false after deactivate',
+        'alerts.tsx must update active row to enabled=false after deactivate',
       );
-      const confirmDeleteBlock = src.slice(src.indexOf('const confirmDelete'), src.indexOf('const confirmDelete') + 800);
+      // Expired path: row is removed
       expectTruthy(
-        !confirmDeleteBlock.includes('.filter(r => r.id !== deleted.id)'),
-        'alerts.tsx confirmDelete must NOT filter out the row (row must stay greyed)',
+        src.includes('.filter(r => r.id !== deleted.id)'),
+        'alerts.tsx must filter out the row when hard-deleting an expired rule',
       );
     },
   },

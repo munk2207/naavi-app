@@ -14,6 +14,7 @@
  * 8. timeToWindow: boundary cases for window derivation.
  * 9. voice LIST_RULES ARCH-1 classifier: 'alerts'/'notifications' disambiguated from LIST_READ.
  * 10. voice LIST_RULES full-Claude path: filters enabled===true before narrating.
+ * 11. mobile alerts: expired rule shows "Delete alert" button (hard delete), active rule shows "Disable alert" (soft).
  *
  * Run via `npm run test:auto`.
  */
@@ -210,6 +211,26 @@ export const session2026_06_15Tests: TestCase[] = [
       expectTruthy(
         src.includes('allRules.filter(r => r.enabled === true && !(r.one_shot && r.last_fired_at != null))'),
         'Full-Claude LIST_RULES path must filter out disabled and fired one-shot rules',
+      );
+    },
+  },
+  {
+    id: 'mobile.alerts.expired-shows-delete-not-disable',
+    description: 'Expired alert button: "Delete alert" (hard delete op) not "Disable alert"; active alert keeps "Disable alert" (deactivate op)',
+    tags: ['mobile', 'alerts'],
+    run: async () => {
+      const src = readFileSync(join(process.cwd(), 'app', 'alerts.tsx'), 'utf8');
+      expectTruthy(
+        src.includes("isDisabled ? 'Delete alert' : 'Disable alert'"),
+        'Button label must be "Delete alert" for expired rules and "Disable alert" for active rules',
+      );
+      expectTruthy(
+        src.includes("const op = isExpired ? 'delete' : 'deactivate'"),
+        'confirmDelete must use op=delete for expired rules and op=deactivate for active rules',
+      );
+      expectTruthy(
+        src.includes("setRules(prev => prev.filter(r => r.id !== deleted.id))"),
+        'Hard delete must remove the row from the list (not just set enabled=false)',
       );
     },
   },
