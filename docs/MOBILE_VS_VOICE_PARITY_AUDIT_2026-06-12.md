@@ -4,6 +4,8 @@ Sources: `hooks/useOrchestrator.ts`, `naavi-voice-server/src/index.js`, `app/ind
 
 Legend: ✅ = fully working · ⚠️ = partial · ❌ = not implemented
 
+Last updated: 2026-06-15 (Build 254) — B2m session closed 3 voice gaps + 1 accepted-no-action.
+
 ---
 
 ## Full Capability Table
@@ -29,7 +31,7 @@ Legend: ✅ = fully working · ⚠️ = partial · ❌ = not implemented
 | Query list connections | ✅ | ✅ | Parity |
 | **ALERTS / RULES** | | | |
 | Create location alert | ✅ | ✅ | Parity — both have picker, 3-attempt cap, permission check |
-| Re-arm expired location alert | ✅ | ⚠️ | **Voice gap**: voice returns error telling user to tap mobile app; mobile auto-re-arms inline |
+| Re-arm expired location alert | ✅ | ✅ | **FIXED 2026-06-15** — all 4 commitLocationRule paths offer inline re-arm |
 | Create email / time / calendar / weather / contact-silence alert | ✅ | ✅ | Parity |
 | List rules | ✅ | ✅ | Parity |
 | Delete rule (single + bulk) | ✅ | ✅ | Parity |
@@ -37,7 +39,7 @@ Legend: ✅ = fully working · ⚠️ = partial · ❌ = not implemented
 | Remember (save fact) | ✅ | ✅ | Parity |
 | Recall / search memory | ✅ | ✅ | Parity |
 | Delete memory | ✅ | ✅ | Parity |
-| LOG_CONCERN / UPDATE_PROFILE | ✅ | ⚠️ | **Voice gap**: no executeAction case found in voice server switch block |
+| LOG_CONCERN / UPDATE_PROFILE | ✅ | ✅ | **FIXED 2026-06-15** — voice now writes to topics table via REST API |
 | **REMINDERS** | | | |
 | Set reminder | ✅ | ✅ | Parity |
 | Read reminders | ✅ | ✅ | Parity |
@@ -49,13 +51,13 @@ Legend: ✅ = fully working · ⚠️ = partial · ❌ = not implemented
 | Verified-address gate before travel time | ✅ | ⚠️ | **Voice gap**: mobile pre-verifies via resolve-place; voice calls Edge Function directly |
 | **SEARCH** | | | |
 | Global search (10 adapters) | ✅ | ✅ | Parity |
-| Source-hint filtering ("find in contacts") | ✅ | ⚠️ | **Voice gap**: voice pre-search always fans out to all adapters; source_hint not passed |
-| **MORNING BRIEF** | | | |
-| Morning brief delivery | ✅ | ✅ | Voice is primary; mobile renders brief cards |
-| Configure morning call time | ❌ | ✅ | **Mobile gap**: UPDATE_MORNING_CALL has no handler in useOrchestrator |
+| Source-hint filtering ("find in contacts") | ✅ | ⚠️ | **Accepted — no action** (2026-06-15): answer is correct regardless; voice fans all 10 adapters, fractions-of-a-cent cost difference, not worth complexity |
+| **BRIEFINGS** | | | |
+| Brief delivery (all windows) | ✅ | ✅ | Voice is primary; mobile renders brief cards |
+| Configure briefing time | ❌ | ⚠️ | **Open**: voice UPDATE_MORNING_CALL writes to legacy morning_call_time only; brief_windows (new multi-window system) not yet written by either surface via chat. Dedicated session needed — see next-session focus. |
 | Call recording | ❌ | ✅ | By design — voice-only feature |
 | **SPEND SUMMARY** | | | |
-| Spend summary | ✅ | ⚠️ | **Voice gap**: SPEND_SUMMARY in voice prompt but no executeAction case in voice server |
+| Spend summary | ✅ | ✅ | **Confirmed parity 2026-06-15** — SPEND_SUMMARY handler exists in voice server (line 10082); prior audit entry was stale |
 | **VOICE / AUDIO** | | | |
 | TTS playback | ✅ | ✅ | Parity (both Deepgram Hera) |
 | Hands-free mode | ❌ | ✅ | By design — phone call IS hands-free |
@@ -64,21 +66,28 @@ Legend: ✅ = fully working · ⚠️ = partial · ❌ = not implemented
 
 ---
 
-## Confirmed Gaps — Priority Ranked
+## Open Gaps — Priority Ranked
 
 ### Mobile gaps (voice has it, mobile does not)
 | Priority | Gap | Notes |
 |---|---|---|
-| Medium | `UPDATE_MORNING_CALL` not wired in mobile chat | Users must configure morning call via voice only |
+| Medium | Configure briefing time via chat | Both surfaces write to wrong/legacy column; needs brief_windows upgrade — next session |
 
 ### Voice gaps (mobile has it, voice does not)
 | Priority | Gap | Notes |
 |---|---|---|
-| High | Re-arm expired location alert | Voice tells user to tap mobile app; should auto-re-arm in call |
-| Medium | `SPEND_SUMMARY` not in voice executeAction | Listed in prompt but falls through to Claude without a handler |
-| Medium | `LOG_CONCERN` / `UPDATE_PROFILE` not in voice executeAction | Falls through to Claude |
-| Low | Verified-address gate before `FETCH_TRAVEL_TIME` | Mobile pre-verifies; voice calls Edge Function directly |
-| Low | Source-hint filtering in global search | Voice always fans out to all 10 adapters regardless of user intent |
+| Low | Verified-address gate before `FETCH_TRAVEL_TIME` | Mobile pre-verifies; voice calls Edge Function directly. Answer is correct either way. |
+
+---
+
+## Closed / Accepted (2026-06-15 B2m session)
+
+| Gap | Resolution |
+|---|---|
+| Re-arm expired location alert (High) | Fixed — voice server 4 paths now offer inline re-arm (commit `0a42ffa`) |
+| `LOG_CONCERN` / `UPDATE_PROFILE` missing in voice (Medium) | Fixed — voice writes to topics table (commit `fe82638`) |
+| `SPEND_SUMMARY` listed as voice gap (Medium) | Closed — was already implemented; audit entry was stale |
+| Source-hint filtering in global search (Low) | Accepted, no action — answer identical either way; cost difference negligible |
 
 ---
 
