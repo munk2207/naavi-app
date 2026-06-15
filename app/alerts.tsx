@@ -783,6 +783,27 @@ export default function AlertsScreen() {
                             </>
                           );
                         })()}
+                        {/* task_actions — structured SMS recipients auto-derived from task strings */}
+                        {(() => {
+                          const taskActions: any[] = Array.isArray((rule.action_config as any)?.task_actions)
+                            ? (rule.action_config as any).task_actions
+                            : [];
+                          const smsActions = taskActions.filter(ta => ta?.type === 'sms' && ta?.to_name);
+                          if (smsActions.length === 0) return null;
+                          return (
+                            <>
+                              <Text style={[styles.detailHeader, { marginTop: 14 }]}>Also notifies</Text>
+                              {smsActions.map((ta, idx) => (
+                                <View key={idx} style={styles.attachCard}>
+                                  <Ionicons name="chatbubble-outline" size={18} color={Colors.accent} style={{ marginRight: 10 }} />
+                                  <Text style={styles.attachCardName} numberOfLines={1}>
+                                    Texts {ta.to_name}{ta.body ? `: "${ta.body}"` : ''}
+                                  </Text>
+                                </View>
+                              ))}
+                            </>
+                          );
+                        })()}
                         {/* 2026-05-19 (Wael) — ALWAYS render the "Attached lists"
                             section, even when empty. List details already shows
                             "Not attached to anything. Standalone list." for the

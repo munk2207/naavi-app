@@ -35,6 +35,7 @@ import { isCalendarConnected, connectGoogleCalendar, disconnectGoogleCalendar } 
 import { saveNotionToken, getNotionToken, removeNotionToken, hasNotionToken } from '@/lib/notion';
 import { isEpicConnected, connectEpic, disconnectEpic } from '@/lib/epic';
 import { registerPushNotifications } from '@/lib/push';
+import * as Notifications from 'expo-notifications';
 import { registry } from '@/lib/adapters/registry';
 import type { UserProfile } from '@/lib/types';
 import { Colors } from '@/constants/Colors';
@@ -206,9 +207,15 @@ export default function SettingsScreen() {
       const cached = await getUserNameAsync();
       if (cached) { setUserName(cached); setUserNameSaved(true); }
     })();
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      setPushEnabled(Notification.permission === 'granted');
-    }
+    // Check push permission on mount — web and Android paths differ.
+    (async () => {
+      if (typeof window !== 'undefined' && 'Notification' in window) {
+        setPushEnabled(Notification.permission === 'granted');
+      } else {
+        const { status } = await Notifications.getPermissionsAsync();
+        setPushEnabled(status === 'granted');
+      }
+    })();
     // Voice playback preference — Supabase-backed, falls back to AsyncStorage.
     refreshVoicePref().then(setVoicePlayback);
     // Load user-scoped settings from Supabase (name + morning call + phone).

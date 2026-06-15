@@ -19,7 +19,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem, type GlobalSearchResult } from '@/lib/naavi-client';
 import { isVoiceEnabledSync } from '@/lib/voicePref';
-import { saveContact, saveReminder, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
+import { saveContact, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
 import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 import { remoteLog, newDiagSession, endDiagSession } from '@/lib/remoteLog';
 import { maybePromptBatteryExemption } from '@/lib/batteryExemptionPrompt';
@@ -2695,24 +2695,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         } else if (action.type === 'SET_REMINDER') {
           const reminderTitle = String(action.title ?? '');
           const reminderDatetime = String(action.datetime ?? '');
-          const reminderPhone = String(action.phoneNumber ?? '');
-          await saveReminder({ title: reminderTitle, datetime: reminderDatetime, source: String(action.source ?? ''), phone_number: reminderPhone || undefined });
-          // Create a Google Calendar event so Robert gets a native notification
           if (reminderDatetime) {
-            try {
-              const start = reminderDatetime;
-              const end = new Date(new Date(start).getTime() + 15 * 60000).toISOString();
-              const event = await registry.calendar.createEvent({
-                title:       reminderTitle || 'Reminder',
-                description: reminderTitle,
-                startISO:    start,
-                endISO:      end,
-                attendees:   [],
-              });
-              turnEvents.push({ summary: event.title, htmlLink: event.htmlLink });
-            } catch (err) {
-              console.error('[Orchestrator] SET_REMINDER calendar event failed:', err);
-            }
             // Schedule a Web Push notification at the reminder time
             const delayMs = new Date(reminderDatetime).getTime() - Date.now();
             if (delayMs > 0 && delayMs < 24 * 60 * 60 * 1000) {
