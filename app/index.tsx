@@ -1116,6 +1116,13 @@ export default function HomeScreen() {
     }
   }, [turns.length]);
 
+  // Keep the scroll position at the bottom as word-reveal grows the latest bubble.
+  useEffect(() => {
+    if (revealWordCount !== null) {
+      scrollRef.current?.scrollToEnd({ animated: false });
+    }
+  }, [revealWordCount]);
+
   // keyboardDidShow listener removed — caused keyboard to dismiss when typing
   // by scrolling the view while TextInput was focused (build 214 regression).
 
