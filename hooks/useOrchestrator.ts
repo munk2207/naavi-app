@@ -460,25 +460,14 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   // is playing, or null when not revealing (show full text).
   const [revealWordCount, setRevealWordCount] = useState<number | null>(null);
   const revealIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Chunk-scroll sync — which TTS chunk is currently playing.
+  const [currentChunk, setCurrentChunk] = useState<{ idx: number; total: number; charOffset: number; totalChars: number } | null>(null);
   useEffect(() => {
-    const MS_PER_WORD = Math.round(60_000 / 160); // 160 wpm ≈ 375 ms/word
     _revealCallbacks = {
-      start: (text: string) => {
-        const words = text.trim().split(/\s+/);
-        if (words.length <= 3) return; // too short to animate
-        if (revealIntervalRef.current) clearInterval(revealIntervalRef.current);
-        let revealed = 3; // show first 3 words immediately
-        setRevealWordCount(revealed);
-        revealIntervalRef.current = setInterval(() => {
-          revealed++;
-          if (revealed >= words.length) {
-            clearInterval(revealIntervalRef.current!);
-            revealIntervalRef.current = null;
-            setRevealWordCount(null);
-          } else {
-            setRevealWordCount(revealed);
-          }
-        }, MS_PER_WORD);
+      start: (_text: string) => {
+        // Show full text immediately — word-reveal was tried and removed.
+        // Scroll sync is handled per-chunk via chunkStart below.
+        setRevealWordCount(null);
       },
       stop: () => {
         if (revealIntervalRef.current) {
@@ -486,6 +475,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           revealIntervalRef.current = null;
         }
         setRevealWordCount(null);
+        setCurrentChunk(null);
+      },
+      chunkStart: (chunkIdx, totalChunks, charOffset, totalChars) => {
+        setCurrentChunk({ idx: chunkIdx, total: totalChunks, charOffset, totalChars });
       },
     };
     return () => {
@@ -4066,6 +4059,8 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     pendingAction, confirmPending, cancelPending, editPending,
     // Word-reveal: number of words shown in the latest turn bubble while TTS plays.
     revealWordCount,
+    // Chunk-scroll: which chunk is currently playing (for auto-scroll sync).
+    currentChunk,
   };
 }
 
@@ -4161,8 +4156,12 @@ let _currentSound: any = null;
 // Promise resolves immediately and the next tick can release the mic.
 let _pendingPlaybackCleanup: ((reason: string) => void) | null = null;
 
-// Word-reveal sync — hook registers callbacks; speakCloudNative fires them.
-let _revealCallbacks: { start: (text: string) => void; stop: () => void } | null = null;
+// Chunk-scroll sync — hook registers callbacks; speakCloudNative fires them.
+let _revealCallbacks: {
+  start: (text: string) => void;
+  stop: () => void;
+  chunkStart?: (chunkIdx: number, totalChunks: number, charOffset: number, totalChars: number) => void;
+} | null = null;
 
 export function stopSpeaking(): void {
   _revealCallbacks?.stop();
@@ -4516,8 +4515,17 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
     console.warn('[TTS Native] Skipped — text produced 0 chunks after split');
     return;
   }
+  // Build character offsets so we know where each chunk sits in the full text.
+  const charOffsets: number[] = [];
+  let _searchFrom = 0;
+  for (const chunk of chunks) {
+    const pos = text.indexOf(chunk, _searchFrom);
+    charOffsets.push(pos >= 0 ? pos : _searchFrom);
+    _searchFrom = pos >= 0 ? pos + chunk.length : _searchFrom + chunk.length;
+  }
+
   try {
-    // Start word-reveal animation before first audio byte plays.
+    // Show full text immediately — word-reveal removed; chunk scroll handles sync.
     _revealCallbacks?.start(text);
     const audioPromises = chunks.map(chunk => fetchTTSBase64(chunk));
     let playedAny = false;
@@ -4538,6 +4546,8 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
         console.log(`[TTS Native] chunk ${chunkIdx}/${chunks.length} stale after fetch, skipping playback`);
         continue;
       }
+      // Fire scroll callback 300ms before audio so Robert's eye lands before voice.
+      _revealCallbacks?.chunkStart?.(chunkIdx - 1, chunks.length, charOffsets[chunkIdx - 1] ?? 0, text.length);
       console.log(`[TTS Native] playing chunk ${chunkIdx}/${chunks.length} (${base64.length} bytes base64)`);
       remoteLog(ttsSession, 'tts-chunk-play', { chunkIdx, total: chunks.length, bytes: base64.length });
       await playBase64AudioNative(base64);

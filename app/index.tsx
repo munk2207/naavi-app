@@ -669,6 +669,7 @@ export default function HomeScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const scrollRef = useRef<ScrollView>(null);
+  const [scrollContentHeight, setScrollContentHeight] = useState(0);
   const runSyncRef = useRef<(() => void) | null>(null);
   const avoidHighwaysRef = useRef(false);
   // V57.11.1 — mirror the input text in a ref so handleSend reads the
@@ -1075,7 +1076,7 @@ export default function HomeScreen() {
   // tap-to-talk + press-and-hold-anywhere on the chat. The phone (Twilio)
   // surface remains the always-listening voice channel — that is the
   // strategic moat. See docs/SESSION_HANDOFF_V57.11.3.md for the rationale.
-  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, onOrangeButtonPressed, isAudioPlaying, pendingAction, confirmPending, cancelPending, editPending, revealWordCount } = useOrchestrator('en', brief, avoidHighwaysRef.current, false);
+  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, onOrangeButtonPressed, isAudioPlaying, pendingAction, confirmPending, cancelPending, editPending, revealWordCount, currentChunk } = useOrchestrator('en', brief, avoidHighwaysRef.current, false);
 
   // Lock-model derived flags — wired into every voice-channel button below.
   const inputLocked = isInputLocked(status);
@@ -1115,6 +1116,18 @@ export default function HomeScreen() {
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     }
   }, [turns.length]);
+
+  // Chunk-scroll sync — scroll to the active TTS chunk as Naavi speaks.
+  // chunkIdx 0 = first chunk → scroll to top so Robert reads from the start.
+  // Later chunks → proportional scroll based on char offset in the full text.
+  useEffect(() => {
+    if (!currentChunk || !scrollRef.current || scrollContentHeight === 0) return;
+    const { idx, charOffset, totalChars } = currentChunk;
+    const y = idx === 0
+      ? 0
+      : Math.round((charOffset / Math.max(totalChars, 1)) * scrollContentHeight);
+    scrollRef.current.scrollTo({ y, animated: true });
+  }, [currentChunk, scrollContentHeight]);
 
   // keyboardDidShow listener removed — caused keyboard to dismiss when typing
   // by scrolling the view while TextInput was focused (build 214 regression).
@@ -1229,10 +1242,6 @@ export default function HomeScreen() {
     // the text. The two gestures (mute when speaking, talk-entry when
     // idle) are mutually exclusive, so the same long-press serves both
     // without ambiguity.
-    if (isAudioPlaying) {
-      stopSpeaking();
-      return;
-    }
     if (isInputLocked(status)) return;
     if (memoState !== 'idle') return;
     // V57.11.7 — switch to RN Vibration API. expo-haptics' Heavy impact
@@ -1716,6 +1725,7 @@ export default function HomeScreen() {
           enableOnAndroid={true}
           keyboardShouldPersistTaps="handled"
           extraScrollHeight={20}
+          onContentSizeChange={(_w, h) => setScrollContentHeight(h)}
         >
         <Pressable
           delayLongPress={300}
