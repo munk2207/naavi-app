@@ -3097,6 +3097,85 @@ Deno.serve(async (req) => {
           subTaskResults.push({ task, speech: cleanSpeech, actions: taskActions });
         }
 
+        // ── Resolve personal-keyword location actions ─────────────────────────
+        // For SET_ACTION_RULE(location) sub-tasks with place_name "office"/"home"
+        // and no coordinates, resolve via user_settings and write to DB directly.
+        // This avoids useOrchestrator needing a second "yes" confirmation turn.
+        if (userId && supabase) {
+          const PERSONAL_WORK_KW = new Set(['office', 'my office', 'the office', 'work', 'my work', 'work address']);
+          const PERSONAL_HOME_KW = new Set(['home', 'my home', 'house', 'the house', 'my place', 'home address']);
+          let uAddr: { work_address?: string | null; home_address?: string | null; phone?: string | null } | null = null;
+          for (const subResult of subTaskResults) {
+            for (let i = 0; i < subResult.actions.length; i++) {
+              const act = subResult.actions[i];
+              if (act?.type !== 'SET_ACTION_RULE' || act?.trigger_type !== 'location') continue;
+              const pnRaw = String(act?.trigger_config?.place_name ?? '').trim();
+              const pn = pnRaw.toLowerCase();
+              if (!pn || act?.trigger_config?.lat) continue; // already has coords — skip
+              const isWork = PERSONAL_WORK_KW.has(pn);
+              const isHome = PERSONAL_HOME_KW.has(pn);
+              if (!isWork && !isHome) continue;
+              // Lazy-load user settings once
+              if (!uAddr) {
+                const { data: us } = await supabase.from('user_settings').select('work_address, home_address, phone').eq('user_id', userId).maybeSingle();
+                uAddr = us ?? {};
+              }
+              const address = isWork ? uAddr.work_address : uAddr.home_address;
+              if (!address) {
+                const which = isWork ? 'work' : 'home';
+                console.log(`[compound:loc] personal_unset for "${pnRaw}" — ${which}_address not in user_settings`);
+                subResult.speech += ` (Note: please add your ${which} address in Settings to set the arrival alert.)`;
+                subResult.actions.splice(i, 1); i--; continue;
+              }
+              // Geocode via resolve-place
+              try {
+                const rpUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/resolve-place`;
+                const rpKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+                const rpRes = await fetch(rpUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${rpKey}` },
+                  body: JSON.stringify({ place_name: address, user_id: userId }),
+                });
+                const rpData: any = await rpRes.json();
+                console.log(`[compound:loc] resolve-place("${address}") → status=${rpData?.status} lat=${rpData?.lat}`);
+                if (rpData?.status === 'success' && rpData?.lat && rpData?.lng) {
+                  const actionConfig: Record<string, any> = { ...(act?.action_config ?? {}) };
+                  if ((act?.action_type === 'sms' || act?.action_type === 'whatsapp') && !actionConfig.to_phone) {
+                    actionConfig.to_phone = uAddr.phone ?? null;
+                  }
+                  const triggerConfig = {
+                    place_name: pnRaw,
+                    address: rpData.address ?? address,
+                    lat: rpData.lat,
+                    lng: rpData.lng,
+                    radius_meters: rpData.radius_meters ?? 300,
+                    direction: act?.trigger_config?.direction ?? 'arrive',
+                  };
+                  const mrUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/manage-rules`;
+                  const mrRes = await fetch(mrUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${rpKey}` },
+                    body: JSON.stringify({
+                      op: 'create', user_id: userId,
+                      trigger_type: 'location', trigger_config: triggerConfig,
+                      action_type: act?.action_type ?? 'sms', action_config: actionConfig,
+                      label: act?.label ?? 'Location alert', one_shot: act?.one_shot ?? true,
+                    }),
+                  });
+                  const mrData: any = await mrRes.json();
+                  console.log(`[compound:loc] manage-rules → ok=${mrData?.ok} id=${mrData?.id} err=${mrData?.error}`);
+                  if (mrData?.ok) {
+                    // Rule written — remove from actions so orchestrator doesn't re-process
+                    subResult.actions.splice(i, 1); i--;
+                  }
+                }
+              } catch (err: any) {
+                console.error(`[compound:loc] location resolution error:`, err?.message ?? err);
+              }
+            }
+          }
+        }
+
         // Build compound confirmation speech (clean — no JSON in display)
         const planLines = subTaskResults.map((s, i) => `${i + 1}. ${s.speech}`).join('\n');
         const confirmSpeech = `I have ${subTaskResults.length} things to handle:\n${planLines}\n\nSay yes to confirm all, or tell me which to skip.`;
