@@ -476,6 +476,24 @@ function normalizeActionSeparators(text: string): string {
     .join(' and ');
 }
 
+// ── Compound request splitter ────────────────────────────────────────────────
+// Splits "Send Sarah email. Book Bob. Remind Jasmine." into sub-task strings.
+// Only fires when 2+ imperative action clauses are detected.
+const COMPOUND_ACTION_VERB_RE = /^(?:send|book|schedule|remind|add|create|text|call|email|alert|notify|save|set|make|write|draft|message|forward|invite|delete|cancel|remove|update|move|open|check|find)\b/i;
+
+function splitCompoundRequest(text: string): string[] {
+  if (!text || text.length < 20) return [];
+  // Try period-separated first (original user input before normalizeActionSeparators)
+  const periodParts = text.split(/\.\s+/).map(p => p.trim()).filter(Boolean);
+  const periodAction = periodParts.filter(p => COMPOUND_ACTION_VERB_RE.test(p));
+  if (periodAction.length >= 2) return periodAction.filter(p => p.length > 8);
+  // Try "and"-separated (after normalizeActionSeparators converted periods to "and")
+  const andParts = text.split(/\s+and\s+/i).map(p => p.trim()).filter(Boolean);
+  const andAction = andParts.filter(p => COMPOUND_ACTION_VERB_RE.test(p));
+  if (andAction.length >= 2) return andAction.filter(p => p.length > 8);
+  return [];
+}
+
 // Fix: detect list-form calendar-read queries server-side and answer
 // deterministically from fetchLiveCalendarEvents. Same pattern as
 // detectEmailAlert: regex gate + intent-specific bypass. Claude is never
@@ -1898,6 +1916,25 @@ Deno.serve(async (req) => {
       })();
       const _s14HasPI = lastDisplay14.includes('<!--PENDING_INTENT:');
       console.log(`[Step1.4-diag] userText="${userText.slice(0,30)}" | lastDisplay14 len=${lastDisplay14.length} | hasPendingIntent=${_s14HasPI} | head="${lastDisplay14.slice(0,120).replace(/\n/g,'↵')}"`);
+
+      // ── Step 1.5: PENDING_MULTI_INTENT executor ───────────────────────────
+      // When Turn 1 detected a compound request and embedded pre-computed
+      // sub-task actions in the display field, and the user now says "yes",
+      // return all stored actions directly — no Claude call needed.
+      const multiMarkerMatch = lastDisplay14.match(/<!--PENDING_MULTI_INTENT:(\[.*?\])-->/s);
+      if (multiMarkerMatch && YES_RE.test(userText.trim())) {
+        try {
+          const subTasks: Array<{ task: string; speech: string; actions: any[] }> = JSON.parse(multiMarkerMatch[1]);
+          const allActions = subTasks.flatMap(s => Array.isArray(s.actions) ? s.actions : []);
+          const count = subTasks.length;
+          const readback = `Done — handled all ${count} thing${count !== 1 ? 's' : ''}.`;
+          console.log(`[Step1.5] PENDING_MULTI_INTENT confirmed — returning ${allActions.length} action(s) for ${count} sub-task(s)`);
+          return jsonResponse({ rawText: JSON.stringify({ speech: readback, display: readback, actions: allActions, pendingThreads: [] }) });
+        } catch (e) {
+          console.warn(`[Step1.5] PENDING_MULTI_INTENT parse failed — falling through:`, e);
+        }
+      }
+
       const markerMatch14 = lastDisplay14.match(/<!--PENDING_INTENT:(\{.*?\})-->/s);
       const pendingHasDisambig = markerMatch14
         ? (() => { try { return !!(JSON.parse(markerMatch14[1]) as any).awaitingDisambig; } catch { return false; } })()
@@ -2974,6 +3011,92 @@ Deno.serve(async (req) => {
         ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
         : system;
     }
+    // ── Compound multi-action interception ───────────────────────────────────
+    // When the user sent 2+ imperative action sentences, use the two-turn
+    // simulation pattern per sub-task (same as voice server fix 2026-06-16):
+    //   Turn 1 per sub-task → plan speech from Claude (actions: [])
+    //   Turn 2 per sub-task → 'yes' with fake history → Claude emits action
+    // All actions are pre-computed and stored in PENDING_MULTI_INTENT.
+    // The user sees a compound confirmation; on 'yes', Step 1.5 returns them.
+    {
+      const IS_CONFIRM_RE = /^(yes|yeah|yep|confirm|approved|go\s+ahead|do\s+it|please|ok|okay|send)[\s\W]*$/i;
+      const compoundTasks = splitCompoundRequest(userText);
+      if (compoundTasks.length >= 2 && !IS_CONFIRM_RE.test(userText.trim())) {
+        console.log(`[compound] Detected ${compoundTasks.length} sub-tasks: ${compoundTasks.map((t, i) => `${i+1}."${t.slice(0,40)}"`).join(', ')}`);
+
+        // Helper: extract actions from a Claude API response content array
+        const extractActions = (content: any[]): any[] =>
+          content
+            .filter((b: any) => b.type === 'tool_use')
+            .map((b: any) => {
+              const actionType = TOOL_NAME_TO_ACTION_TYPE[b.name];
+              if (!actionType) return null;
+              if (b.name === 'set_location_rule_chain' || b.name === 'set_location_rule_address') {
+                return convertLocationToolToActionRule(b.name, b.input ?? {});
+              }
+              return { type: actionType, ...(b.input ?? {}) };
+            })
+            .filter((a: any) => a !== null);
+
+        const subTaskResults: Array<{ task: string; speech: string; actions: any[] }> = [];
+
+        for (const task of compoundTasks) {
+          // Turn 1: get Claude's plan speech for this sub-task
+          const r1 = await client.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 512,
+            system: cachedSystem as any,
+            messages: [{ role: 'user', content: task }],
+            tools: NAAVI_TOOLS as any,
+            temperature: 0,
+          });
+          const r1Speech = r1.content.filter((b: any) => b.type === 'text').map((b: any) => String(b.text ?? '')).join('');
+          let taskActions = extractActions(r1.content);
+          console.log(`[compound] sub-task="${task.slice(0,50)}" r1.actions=${JSON.stringify(taskActions.map((a: any) => a?.type))} r1.speech="${r1Speech.slice(0,80)}"`);
+
+          // Turn 2: if Claude returned no actions (planning mode), simulate the
+          // 'yes' confirm turn so B4y sees a valid confirm-turn and emits the action.
+          if (taskActions.length === 0 && r1Speech) {
+            const fakeHistory = [
+              { role: 'user', content: task },
+              { role: 'assistant', content: r1Speech },
+              { role: 'user', content: 'yes' },
+            ];
+            const r2 = await client.messages.create({
+              model: 'claude-haiku-4-5-20251001',
+              max_tokens: 512,
+              system: cachedSystem as any,
+              messages: fakeHistory,
+              tools: NAAVI_TOOLS as any,
+              temperature: 0,
+            });
+            taskActions = extractActions(r2.content);
+            console.log(`[compound] sub-task turn2 actions=${JSON.stringify(taskActions.map((a: any) => a?.type))}`);
+          }
+
+          // Strip confirmation boilerplate from the plan speech
+          const cleanSpeech = r1Speech
+            .replace(/\.\s*Say yes to confirm[^.]*\./gi, '.')
+            .replace(/,?\s*say yes to confirm[^.]*\.?$/i, '')
+            .replace(/\.\s*I need your confirmation[^.]*\./gi, '.')
+            .replace(/,?\s*I need your confirmation[^.]*\.?$/i, '')
+            .replace(/\.\s*Please say yes to confirm[^.]*\.?/gi, '')
+            .trim();
+
+          subTaskResults.push({ task, speech: cleanSpeech, actions: taskActions });
+        }
+
+        // Build compound confirmation speech
+        const planLines = subTaskResults.map((s, i) => `${i + 1}. ${s.speech}`).join('\n');
+        const confirmSpeech = `I have ${subTaskResults.length} things to handle:\n${planLines}\n\nSay yes to confirm all, or tell me which to skip.`;
+        const multiIntentMarker = `<!--PENDING_MULTI_INTENT:${JSON.stringify(subTaskResults)}-->`;
+        const display = `${confirmSpeech}\n${multiIntentMarker}`;
+
+        console.log(`[compound] Returning compound confirmation — ${subTaskResults.length} sub-tasks, total actions=${subTaskResults.reduce((n, s) => n + s.actions.length, 0)}`);
+        return jsonResponse({ rawText: JSON.stringify({ speech: confirmSpeech, display, actions: [], pendingThreads: [] }) });
+      }
+    }
+
     // V57.11.9 Phase 2 — Anthropic Structured Outputs migration.
     // Switch from "JSON-in-prose" parsing to schema-constrained tool use.
     // temperature=0 + tool schemas eliminate the prompt-drift cycle. Claude
