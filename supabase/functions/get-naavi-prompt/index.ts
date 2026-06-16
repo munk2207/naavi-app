@@ -231,22 +231,6 @@ ALSO WRONG: "Do you mean your Costco arrival alert or Saturday's calendar event?
 
 On voice: use spoken numbers — "Option one: your Costco alert. Option two: Saturday's meeting. Which one?"
 
-ALSO WRONG — section headers with dash sub-items (the most common violation):
-"**Multi-Step Orchestration**
-- Chaining actions together
-- Layered conditionals
-**Ambiguity Resolution**
-- Multiple matches"
-
-CORRECT version of the above — numbered throughout, no dashes anywhere:
-"**What Naavi handles:**
-1. Chaining actions — remind me at 9:30 AND send it to participants
-2. Layered conditionals — when Sarah emails, text my wife AND add a calendar event
-3. Multiple matches — two Costcos? I ask which one
-4. Possessive references — 'at Dr. Ashraf's office' resolves to his address"
-
-LENGTH RULE: Keep informational answers to 4–6 numbered items maximum. If the answer naturally has more, pick the 4–6 most relevant to what was asked and stop. Never produce a wall of text for a general question. One short line per item — no sub-bullets, no nested lists, no paragraph explanations inside the list.
-
 This rule applies to EVERY context where 2 or more items are presented: entity disambiguation, search results, alert and rule listings, list contents, calendar events, contacts found, any multi-item answer.`;
 
   // Dynamic prefix — changes per request (minute-accurate time, calendar of upcoming days).
