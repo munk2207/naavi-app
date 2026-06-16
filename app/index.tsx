@@ -1075,7 +1075,7 @@ export default function HomeScreen() {
   // tap-to-talk + press-and-hold-anywhere on the chat. The phone (Twilio)
   // surface remains the always-listening voice channel — that is the
   // strategic moat. See docs/SESSION_HANDOFF_V57.11.3.md for the rationale.
-  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, onOrangeButtonPressed, isAudioPlaying, pendingAction, confirmPending, cancelPending, editPending } = useOrchestrator('en', brief, avoidHighwaysRef.current, false);
+  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, onOrangeButtonPressed, isAudioPlaying, pendingAction, confirmPending, cancelPending, editPending, revealWordCount } = useOrchestrator('en', brief, avoidHighwaysRef.current, false);
 
   // Lock-model derived flags — wired into every voice-channel button below.
   const inputLocked = isInputLocked(status);
@@ -1851,7 +1851,13 @@ export default function HomeScreen() {
               ) : (
                 <>
                   <ConversationBubble role="user" content={turn.userMessage} timestamp={turn.timestamp} />
-                  <ConversationBubble role="assistant" content={turn.assistantSpeech.replace(/<!--PENDING_INTENT:[\s\S]*?-->/g, '').trim()} timestamp={turn.timestamp} />
+                  <ConversationBubble role="assistant" content={(() => {
+                    const full = turn.assistantSpeech.replace(/<!--PENDING_INTENT:[\s\S]*?-->/g, '').trim();
+                    if (isLatest && revealWordCount !== null) {
+                      return full.split(/\s+/).slice(0, revealWordCount).join(' ');
+                    }
+                    return full;
+                  })()} timestamp={turn.timestamp} />
                   {/* V57.9.7 — collapse-back affordance for older turns
                       that were expanded. Without this, expand was a one-way
                       action (Wael 2026-05-01). Latest turn never gets this

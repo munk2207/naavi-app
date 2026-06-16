@@ -456,6 +456,44 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const pendingActionRef = useRef<PendingAction | null>(null);
 
+  // Word-reveal: number of words revealed so far for the latest turn while TTS
+  // is playing, or null when not revealing (show full text).
+  const [revealWordCount, setRevealWordCount] = useState<number | null>(null);
+  const revealIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    const MS_PER_WORD = Math.round(60_000 / 160); // 160 wpm ≈ 375 ms/word
+    _revealCallbacks = {
+      start: (text: string) => {
+        const words = text.trim().split(/\s+/);
+        if (words.length <= 3) return; // too short to animate
+        if (revealIntervalRef.current) clearInterval(revealIntervalRef.current);
+        let revealed = 3; // show first 3 words immediately
+        setRevealWordCount(revealed);
+        revealIntervalRef.current = setInterval(() => {
+          revealed++;
+          if (revealed >= words.length) {
+            clearInterval(revealIntervalRef.current!);
+            revealIntervalRef.current = null;
+            setRevealWordCount(null);
+          } else {
+            setRevealWordCount(revealed);
+          }
+        }, MS_PER_WORD);
+      },
+      stop: () => {
+        if (revealIntervalRef.current) {
+          clearInterval(revealIntervalRef.current);
+          revealIntervalRef.current = null;
+        }
+        setRevealWordCount(null);
+      },
+    };
+    return () => {
+      _revealCallbacks = null;
+      if (revealIntervalRef.current) clearInterval(revealIntervalRef.current);
+    };
+  }, []);
+
   // Always-current status ref — callbacks (like onOrangeButtonPressed) need
   // to read the current status without being recreated on every status change.
   const statusRef = useRef<OrchestratorStatus>('idle');
@@ -4026,6 +4064,8 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     isAudioPlaying,
     // Voice-confirm
     pendingAction, confirmPending, cancelPending, editPending,
+    // Word-reveal: number of words shown in the latest turn bubble while TTS plays.
+    revealWordCount,
   };
 }
 
@@ -4121,7 +4161,11 @@ let _currentSound: any = null;
 // Promise resolves immediately and the next tick can release the mic.
 let _pendingPlaybackCleanup: ((reason: string) => void) | null = null;
 
+// Word-reveal sync — hook registers callbacks; speakCloudNative fires them.
+let _revealCallbacks: { start: (text: string) => void; stop: () => void } | null = null;
+
 export function stopSpeaking(): void {
+  _revealCallbacks?.stop();
   _speechGen++;  // invalidate any in-flight speakResponse
   // B-NEW-4 fix: capture _currentSound BEFORE firing the cleanup callback.
   // cleanupAndResolve (registered as _pendingPlaybackCleanup) sets
@@ -4473,6 +4517,8 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
     return;
   }
   try {
+    // Start word-reveal animation before first audio byte plays.
+    _revealCallbacks?.start(text);
     const audioPromises = chunks.map(chunk => fetchTTSBase64(chunk));
     let playedAny = false;
     let chunkIdx = 0;
@@ -4508,6 +4554,8 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
       remoteLog(ttsSession, 'tts-done', { total: chunks.length });
       endDiagSession(ttsSession);
     }
+    // Audio finished — show full text immediately regardless of reveal timer.
+    _revealCallbacks?.stop();
   } catch (err) {
     if (isStale()) { endDiagSession(ttsSession); return; }
     // Fall back to expo-speech if cloud TTS fails
