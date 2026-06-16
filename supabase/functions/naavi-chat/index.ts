@@ -1181,6 +1181,15 @@ async function fetchBasePrompt(
   return null;
 }
 
+// Gate for live Google Calendar fetch — only pay the 2-4s Google API cost
+// when the query is actually about the user's schedule. For everything else
+// (time, reminders, lists, general chat, etc.) use the mobile's brief items
+// which are fresh enough. Pattern covers "what's on my calendar", "do I have
+// a meeting", "what's next week", etc. — deliberately broad to avoid false
+// negatives (missing a calendar query is worse than an extra fetch).
+const LIVE_CALENDAR_RE =
+  /\b(schedul|calendar|agenda|meeting|appointment|event|availab|free\s*(today|tomorrow|this|next)|busy|what('?s|\s+is)\s+(on|next|happen|today|tomorrow)|do\s+i\s+have\s+(a|any|an)|upcoming|next\s+week|this\s+week|next\s+month|remind.*when|when.*is\s+(my|the)|what\s+(time|day|date)\s+(is|am|are|do)\s+I|today.*event|event.*today)\b/i;
+
 async function assembleSystemPromptServerSide(
   supabase: ReturnType<typeof createClient>,
   userId: string,
@@ -1192,6 +1201,7 @@ async function assembleSystemPromptServerSide(
     knowledgeContext: string;
     clientTimezone?: string;
     clientTime?: string;
+    userText?: string;
   },
 ): Promise<string | null> {
   // 1. user_settings → user name + phone + home/work addresses (drives
@@ -1242,7 +1252,13 @@ async function assembleSystemPromptServerSide(
   // fetch so Claude never sees a stale schedule. Non-calendar items (emails,
   // birthdays, weather) still come from mobile (they don't have the same
   // staleness problem).
-  const liveCalendar = await fetchLiveCalendarEvents(supabase, userId);
+  // Latency gate (2026-06-16): only hit the Google Calendar API when the query
+  // is calendar-shaped. Non-calendar queries use the mobile brief directly,
+  // saving 2-4s per turn for "what time is it", list/reminder questions, etc.
+  const needsLiveCalendar = LIVE_CALENDAR_RE.test(opts.userText ?? '');
+  const liveCalendar = needsLiveCalendar
+    ? await fetchLiveCalendarEvents(supabase, userId)
+    : (opts.briefItems ?? []).filter(item => item.category === 'calendar');
   const nonCalendarMobile = (opts.briefItems ?? []).filter(item => item.category !== 'calendar');
   const mergedBrief: MobileBriefItem[] = [...liveCalendar, ...nonCalendarMobile];
 
@@ -2873,6 +2889,7 @@ Deno.serve(async (req) => {
         knowledgeContext: typeof bodyKnowledgeContext === 'string' ? bodyKnowledgeContext : '',
         clientTimezone: typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined,
         clientTime: typeof bodyClientTime === 'string' ? bodyClientTime : undefined,
+        userText,
       });
       if (!assembled) {
         console.error('[naavi-chat] server-side prompt assembly failed; cannot proceed');
