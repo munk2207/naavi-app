@@ -1917,21 +1917,32 @@ Deno.serve(async (req) => {
       const _s14HasPI = lastDisplay14.includes('<!--PENDING_INTENT:');
       console.log(`[Step1.4-diag] userText="${userText.slice(0,30)}" | lastDisplay14 len=${lastDisplay14.length} | hasPendingIntent=${_s14HasPI} | head="${lastDisplay14.slice(0,120).replace(/\n/g,'↵')}"`);
 
-      // ── Step 1.5: PENDING_MULTI_INTENT executor ───────────────────────────
-      // When Turn 1 detected a compound request and embedded pre-computed
-      // sub-task actions in the display field, and the user now says "yes",
-      // return all stored actions directly — no Claude call needed.
-      const multiMarkerMatch = lastDisplay14.match(/<!--PENDING_MULTI_INTENT:(\[.*?\])-->/s);
-      if (multiMarkerMatch && YES_RE.test(userText.trim())) {
+      // ── Step 1.5: Compound queue executor ────────────────────────────────
+      // When Turn 1 stored compound sub-task data in pending_actions
+      // (tagged {type:'__COMPOUND__'}), and the user now says "yes",
+      // return all pre-computed actions directly — no Claude call needed.
+      if (YES_RE.test(userText.trim()) && userId && supabase) {
         try {
-          const subTasks: Array<{ task: string; speech: string; actions: any[] }> = JSON.parse(multiMarkerMatch[1]);
-          const allActions = subTasks.flatMap(s => Array.isArray(s.actions) ? s.actions : []);
-          const count = subTasks.length;
-          const readback = `Done — handled all ${count} thing${count !== 1 ? 's' : ''}.`;
-          console.log(`[Step1.5] PENDING_MULTI_INTENT confirmed — returning ${allActions.length} action(s) for ${count} sub-task(s)`);
-          return jsonResponse({ rawText: JSON.stringify({ speech: readback, display: readback, actions: allActions, pendingThreads: [] }) });
+          const { data: compoundRow } = await supabase
+            .from('pending_actions')
+            .select('*')
+            .eq('user_id', userId)
+            .gt('expires_at', new Date().toISOString())
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (compoundRow && Array.isArray(compoundRow.actions) && compoundRow.actions[0]?.type === '__COMPOUND__') {
+            const subTasks: Array<{ task: string; speech: string; actions: any[] }> = compoundRow.actions[0].tasks ?? [];
+            const allActions = subTasks.flatMap(s => Array.isArray(s.actions) ? s.actions : []);
+            const count = subTasks.length;
+            const readback = `Done — handled all ${count} thing${count !== 1 ? 's' : ''}.`;
+            // Delete the compound record so it doesn't linger
+            await supabase.from('pending_actions').delete().eq('id', compoundRow.id);
+            console.log(`[Step1.5] Compound queue confirmed — returning ${allActions.length} action(s) for ${count} sub-task(s)`);
+            return jsonResponse({ rawText: JSON.stringify({ speech: readback, display: readback, actions: allActions, pendingThreads: [] }) });
+          }
         } catch (e) {
-          console.warn(`[Step1.5] PENDING_MULTI_INTENT parse failed — falling through:`, e);
+          console.warn(`[Step1.5] Compound queue read failed — falling through:`, e);
         }
       }
 
@@ -3086,14 +3097,24 @@ Deno.serve(async (req) => {
           subTaskResults.push({ task, speech: cleanSpeech, actions: taskActions });
         }
 
-        // Build compound confirmation speech
+        // Build compound confirmation speech (clean — no JSON in display)
         const planLines = subTaskResults.map((s, i) => `${i + 1}. ${s.speech}`).join('\n');
         const confirmSpeech = `I have ${subTaskResults.length} things to handle:\n${planLines}\n\nSay yes to confirm all, or tell me which to skip.`;
-        const multiIntentMarker = `<!--PENDING_MULTI_INTENT:${JSON.stringify(subTaskResults)}-->`;
-        const display = `${confirmSpeech}\n${multiIntentMarker}`;
 
-        console.log(`[compound] Returning compound confirmation — ${subTaskResults.length} sub-tasks, total actions=${subTaskResults.reduce((n, s) => n + s.actions.length, 0)}`);
-        return jsonResponse({ rawText: JSON.stringify({ speech: confirmSpeech, display, actions: [], pendingThreads: [] }) });
+        // Store pre-computed sub-task data in pending_actions so Step 1.5
+        // can retrieve it on the "yes" turn without another Claude call.
+        // Tagged {type:'__COMPOUND__'} so Step 1.5 can identify it.
+        if (userId && supabase) {
+          const expiry = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
+          await supabase.from('pending_actions').upsert(
+            { user_id: userId, actions: [{ type: '__COMPOUND__', tasks: subTaskResults }], expires_at: expiry },
+            { onConflict: 'user_id' },
+          );
+        }
+
+        const totalActions = subTaskResults.reduce((n, s) => n + s.actions.length, 0);
+        console.log(`[compound] Stored ${subTaskResults.length} sub-tasks (${totalActions} actions) in pending_actions — returning clean confirmation`);
+        return jsonResponse({ rawText: JSON.stringify({ speech: confirmSpeech, display: confirmSpeech, actions: [], pendingThreads: [] }) });
       }
     }
 
