@@ -2,7 +2,7 @@
   "expo": {
     "name": "MyNaavi",
     "slug": "naavi",
-    "version": "1.0.260",
+    "version": "1.0.261",
     "runtimeVersion": {
       "policy": "appVersion"
     },
@@ -27,7 +27,7 @@
       }
     },
     "android": {
-      "versionCode": 260,
+      "versionCode": 261,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0D0D0D"
