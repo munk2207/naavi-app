@@ -456,16 +456,35 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const pendingActionRef = useRef<PendingAction | null>(null);
 
-  // Text-sync: show full text instantly when TTS starts, scroll follows audio.
-  // revealWordCount is Infinity while speaking (shows all words), null when done.
+  // Word-reveal: number of words revealed so far for the latest turn while TTS
+  // is playing, or null when not revealing (show full text).
   const [revealWordCount, setRevealWordCount] = useState<number | null>(null);
   const revealIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
+    const MS_PER_WORD = Math.round(60_000 / 160); // 160 wpm ≈ 375 ms/word
     _revealCallbacks = {
-      start: (_text: string) => {
-        setRevealWordCount(Infinity);
+      start: (text: string) => {
+        const words = text.trim().split(/\s+/);
+        if (words.length <= 3) return; // too short to animate
+        if (revealIntervalRef.current) clearInterval(revealIntervalRef.current);
+        let revealed = 3; // show first 3 words immediately
+        setRevealWordCount(revealed);
+        revealIntervalRef.current = setInterval(() => {
+          revealed++;
+          if (revealed >= words.length) {
+            clearInterval(revealIntervalRef.current!);
+            revealIntervalRef.current = null;
+            setRevealWordCount(null);
+          } else {
+            setRevealWordCount(revealed);
+          }
+        }, MS_PER_WORD);
       },
       stop: () => {
+        if (revealIntervalRef.current) {
+          clearInterval(revealIntervalRef.current);
+          revealIntervalRef.current = null;
+        }
         setRevealWordCount(null);
       },
     };
