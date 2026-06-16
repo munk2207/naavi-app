@@ -42,7 +42,6 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 
 | ID | Description | Surface | Notes | Server/AAB | Status |
 |----|-------------|---------|-------|------------|--------|
-| F2a | Onboarding Review (multi-phone + 7 other gaps) | mobile | Onboarding doc + Settings UI covering 8 gaps (multi-phone setup, voice keyterms capture at setup, quiet hours field, verified-address expectation, consolidated privacy callout, post-install rehearsal with starter prompts, re-install / new-phone flow, first-week-vs-week-two expectation calibration). Postponed 2026-05-09 — not all 8 have crisp product decisions; needs a dedicated session looking at onboarding end-to-end. Settings UI changes require AAB; doc is a build-script regen. | Both | open (postponed) |
 | F2b | Demo line maturity (richer scenarios + conversion path + telemetry) | voice | Demo phone line gets richer scenarios, a conversion path back to a real account, and telemetry to see what works. Postponed 2026-05-09 — marketing/growth decisions need a focused session. Three sub-pieces in sequence: telemetry first (total calls, scenario popularity, opt-in rate, signup conversion), conversion attribution second (per-call token in the SMS link), scenario richness third (medication scheduling, navigation, recurring delegation, variable data, light branching). Already shipped: 5 canned scenarios, name capture, personalized SMS recap. | Server | open (postponed) |
 | F5b | Self-cleansing memory on voice | voice | STT mistranscriptions create malformed entries — one "Hussein" can become three knowledge_fragments rows under "Houssain", "Hussein", "Hoosein". Fix: phonetic-merge on read (Soundex / Metaphone variant matching) + detect-and-flag malformed memory at fetch time. **POSTPONED 2026-06-10 (Wael) — needs design decision first.** The `knowledge_fragments` table stores free-text with no structured slot/key column. Schema redesign (adding a structured `slot` column at write time) or Claude-judges-at-read-time are the only viable paths. Design decision required before any code. | Server | postponed — design decision required |
 
@@ -147,6 +146,7 @@ All items confirmed done. Moved here to keep active tables clean.
 
 | ID | Description | Surface | Closed | Reason |
 |----|-------------|---------|--------|--------|
+| F2a | Onboarding Review (multi-phone + 7 other gaps) | mobile | 2026-06-16 | Closed by Wael — done. |
 | F1a | Lists wired to entities (alerts / calendar events / reminders) | both | 2026-05-15 | Waves 1 / 2 / 2.5 / 2.6 all shipped. Live V57.15.x. |
 | F1b | Inbound SMS / WhatsApp queryability | backend | 2026-05-08 | No viable architecture. WhatsApp API is B2C only; SMS via OS-level READ_SMS carries Play rejection risk. |
 | F1c | Voice privacy UX (4-piece auto-classification bundle) | voice | 2026-05-10 | Superseded by F1d (user-controlled mute). Auto-classification creates unfixable social problem. |
