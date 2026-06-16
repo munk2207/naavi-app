@@ -3315,6 +3315,38 @@ Deno.serve(async (req) => {
       }
     }
 
+    // 2026-06-16 (Wael) — Turn-1 confirmation gate for LIST_CONNECT /
+    // LIST_DISCONNECT. Claude non-deterministically skips the prompt
+    // rule and emits the action on the FIRST user turn without asking
+    // for confirmation. This gate catches that: if LIST_CONNECT or
+    // LIST_DISCONNECT is emitted AND the last user message is NOT an
+    // affirmative, we drop the action and inject a confirmation ask.
+    // Only fires when the last user message is NOT an affirmative —
+    // so it does NOT block the legitimate second-turn "yes" path.
+    {
+      const lastUserMsg2 = [...(messages ?? [])].reverse().find((m: any) => m.role === 'user');
+      const lastUserText2 = typeof lastUserMsg2?.content === 'string' ? lastUserMsg2.content : '';
+      const hasConnectAction = actions.some((a: any) =>
+        a.type === 'LIST_CONNECT' || a.type === 'LIST_DISCONNECT'
+      );
+      if (hasConnectAction && !isAffirmativeConfirmTurn(lastUserText2) && serverRejectionMessage === null) {
+        // Find the first LIST_CONNECT or LIST_DISCONNECT action to name the list
+        const connectAction = actions.find((a: any) =>
+          a.type === 'LIST_CONNECT' || a.type === 'LIST_DISCONNECT'
+        );
+        const verb = connectAction?.type === 'LIST_DISCONNECT' ? 'disconnect' : 'connect';
+        const listName = connectAction?.listName || connectAction?.entityRef || 'your list';
+        const alertName = connectAction?.entityRef || 'the alert';
+        serverRejectionMessage = verb === 'disconnect'
+          ? `I'll disconnect ${listName} from ${alertName}. Say yes to confirm, or no to cancel.`
+          : `I'll connect ${listName} to ${alertName}. Say yes to confirm, or no to cancel.`;
+        actions = actions.filter((a: any) =>
+          a.type !== 'LIST_CONNECT' && a.type !== 'LIST_DISCONNECT'
+        );
+        console.warn(`[naavi-chat] turn-1 LIST_CONNECT gate fired — dropped action, injecting confirmation ask`);
+      }
+    }
+
     // 2026-05-24 (Wael) — B4x. Entity-existence validator updated to
     // surface disabled-only matches as a combined reactivate-and-do-X
     // ask, multiple-disabled as disambiguation, and active+disabled
