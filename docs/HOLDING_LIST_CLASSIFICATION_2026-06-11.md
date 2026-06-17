@@ -42,7 +42,6 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 
 | ID | Description | Surface | Notes | Server/AAB | Status |
 |----|-------------|---------|-------|------------|--------|
-| B8a | LIST_RULES synthesize-action backstop — server forces LIST_RULES if user asks about alerts but Claude doesn't emit the action | server | If Claude answers "what alerts do I have?" from memory instead of calling LIST_RULES, the user gets a hallucinated answer. Backstop detects clear list-rules intent without the action and forces it server-side. | Server | open |
 | F2b | Demo line maturity (richer scenarios + conversion path + telemetry) | voice | Demo phone line gets richer scenarios, a conversion path back to a real account, and telemetry to see what works. Postponed 2026-05-09 — marketing/growth decisions need a focused session. Three sub-pieces in sequence: telemetry first (total calls, scenario popularity, opt-in rate, signup conversion), conversion attribution second (per-call token in the SMS link), scenario richness third (medication scheduling, navigation, recurring delegation, variable data, light branching). Already shipped: 5 canned scenarios, name capture, personalized SMS recap. | Server | open (postponed) |
 | F5b | Self-cleansing memory on voice | voice | STT mistranscriptions create malformed entries — one "Hussein" can become three knowledge_fragments rows under "Houssain", "Hussein", "Hoosein". Fix: phonetic-merge on read (Soundex / Metaphone variant matching) + detect-and-flag malformed memory at fetch time. **POSTPONED 2026-06-10 (Wael) — needs design decision first.** The `knowledge_fragments` table stores free-text with no structured slot/key column. Schema redesign (adding a structured `slot` column at write time) or Claude-judges-at-read-time are the only viable paths. Design decision required before any code. | Server | postponed — design decision required |
 
@@ -147,6 +146,7 @@ All items confirmed done. Moved here to keep active tables clean.
 
 | ID | Description | Surface | Closed | Reason |
 |----|-------------|---------|--------|--------|
+| B8a | LIST_RULES synthesize-action backstop | both | 2026-06-17 | Tested by Wael — works on both mobile and voice. No backstop code needed. |
 | F4f | Caller PIN for off-phone verification — 4-digit PIN lets Wael call from any phone and be recognized | mobile | 2026-06-17 | Built and live in mobile Settings. Design in `project_naavi_caller_pin_chosen_over_biometric.md`. |
 | F2a | Onboarding Review (multi-phone + 7 other gaps) | mobile | 2026-06-16 | Closed by Wael — done. |
 | F1a | Lists wired to entities (alerts / calendar events / reminders) | both | 2026-05-15 | Waves 1 / 2 / 2.5 / 2.6 all shipped. Live V57.15.x. |
