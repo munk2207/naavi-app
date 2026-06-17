@@ -51,7 +51,6 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 
 | ID | Description | Surface | Notes | Server/AAB | Status |
 |----|-------------|---------|-------|------------|--------|
-| T2a | Maestro full-suite mobile UI test coverage | mobile | 2026-06-17 | 16 scenarios, 12/16 pass on emulator. 4 failures (08, 11, 12, 13) confirmed working on real phone — emulator timing/state issues only, not product bugs. Suite accepted as-is. |
 | T3c | Voice regression suite — automated call-path testing for naavi-voice-server | voice | No automated regression coverage exists for the Twilio voice path today. Every voice change is manually tested by calling +1 249 523 5394. Required: a suite of scripted test calls (or call simulations) that verify the core voice flows — greeting, intent classification, action execution (SET_ACTION_RULE, LOOKUP_CONTACT, READ_CALENDAR, MAKE_CALL, etc.), disambiguation, confirm-then-act, and error paths — without requiring a human caller each time. Approach options: (1) Mock the Twilio/Deepgram layer and unit-test `askClaude` + `executeAction` directly in Node; (2) Use Twilio's test credentials to place real calls and assert on TwiML responses; (3) Extend `npm run test:auto` with a voice-server adapter that posts directly to the Railway endpoint. Referenced in ARCH-1 as remaining work before that item can close. | server | open — approach decision required before coding |
 
 ---
@@ -183,6 +182,7 @@ All items confirmed done. Moved here to keep active tables clean.
 | T2b | Phase 2 demo data — Gmail + Calendar seeding for mynaavidemo | backend | 2026-06-12 | `scripts/seed-demo-google-data.js` run successfully — 5 calendar events + 5 Gmail messages seeded for demo user. Both idempotent (re-run safe). |
 | T4b | Mobile vs Voice parity audit | docs | 2026-06-12 | Audit produced: `docs/MOBILE_VS_VOICE_PARITY_AUDIT_2026-06-12.md`. 5 voice gaps + 1 mobile gap identified and ranked. Doc is now a live standing document — see CLAUDE.md rule for update obligation. |
 | T4c | Soft-tick presence audit on voice | voice | 2026-06-12 | Audited all silent gaps. One real gap fixed: tick now plays on all inbound calls (including morning-brief) from connect to first user word. Bypass paths inside askClaude() were already covered (tick starts before askClaude() is called). |
+| T2a | Maestro full-suite mobile UI test coverage | mobile | 2026-06-17 | 16 scenarios, 12/16 pass on emulator. 4 failures (08, 11, 12, 13) confirmed working on real phone — emulator timing/state issues only, not product bugs. Suite accepted as-is. |
 
 ## Closed Architecture (ARCH)
 
