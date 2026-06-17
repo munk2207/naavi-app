@@ -422,35 +422,8 @@ Memory folder: `C:\Users\waela\.claude\projects\C--Users-waela-OneDrive-Desktop-
 
 ### HOLDING LIST — services/features in queue
 
-Canonical source: `docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md`. Closed items are in the history section at the bottom of that doc. Edit items there, not here.
-
-**Blocked on external approvals:**
-2. AWS Polly (voice unification mobile→Polly Joanna) — needs AWS account setup
-3. Maestro full-suite — emulator OAuth blocker was stale (preview APK + sideload gives full OAuth on emulator). Real blocker: Maestro dadb driver times out on port 7001 on Windows (confirmed 2026-05-29). ADB restart did not resolve it. Fix path: investigate Maestro Windows/dadb compatibility or use `maestro --device emulator-5554` flag explicitly.
-4. **Geofence reliability — TRANSISTORSOFT TRIAL FAILED 2026-05-15.** Trial branch `claude/transistorsoft-trial` preserved. Decision: (a) retry with 4 postmortem fixes, (b) try Radar, (c) accept Samsung-geofencing-unsolved. Full postmortem: `docs/SESSION_HANDOFF_2026-05-15_V57.15.6_BUILD_179_TRANSISTORSOFT_TRIAL.md`.
-
-**Server-side queue (no AAB needed):**
-4a. Caller PIN for off-phone verification — design in `project_naavi_caller_pin_chosen_over_biometric.md`
-5. Voice live-calendar fetch
-6. Voice action parity — DELETE_EVENT, LIST_RULES, DELETE_MEMORY, SCHEDULE_MEDICATION
-8. Voice Deepgram first-word truncation on barge-in
-9. Voice name-search phonetic fallback
-10. Voice migration to Anthropic Structured Outputs
-11. Inbound SMS/WhatsApp queryability
-13. LIST_RULES synthesize-action backstop
-14. Demo line "remind me" time-extraction loop fix
-
-**AAB-required queue:**
-18d. `isValidE164` strict 10-digit-after-+1 enforcement
-20. Demo line maturity
-25. Voice privacy UX (4-piece, not started)
-26. Blog age reframe (2 articles)
-
-**Deferred by design (open questions before code):**
-28. `list_change` trigger (7 design questions — see `project_naavi_list_change_trigger_deferred.md`)
-29. Health trigger (Epic integration required)
-30. Price trigger (scraping complexity)
-31. Phase 2 demo data
+**Single source of truth: `docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md`**
+All open, closed, and deferred items live there. Do not maintain a duplicate list here — edit the doc directly.
 
 ### THE PROJECT — TWO PARTS
 
