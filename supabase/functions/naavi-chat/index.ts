@@ -1943,19 +1943,25 @@ Deno.serve(async (req) => {
             .from('pending_actions')
             .select('*')
             .eq('user_id', userId)
-            .gt('expires_at', new Date().toISOString())
+            .eq('type', '__COMPOUND__')
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
-          if (compoundRow && Array.isArray(compoundRow.actions) && compoundRow.actions[0]?.type === '__COMPOUND__') {
-            const subTasks: Array<{ task: string; speech: string; actions: any[] }> = compoundRow.actions[0].tasks ?? [];
+          const payload: any = compoundRow?.payload ?? {};
+          const payloadExpiry: string | undefined = payload.expires_at;
+          const payloadValid = compoundRow && payloadExpiry && new Date(payloadExpiry) > new Date();
+          if (payloadValid && Array.isArray(payload.tasks)) {
+            const subTasks: Array<{ task: string; speech: string; actions: any[] }> = payload.tasks;
             const allActions = subTasks.flatMap(s => Array.isArray(s.actions) ? s.actions : []);
-            const count = subTasks.length;
-            const readback = `Done — handled all ${count} thing${count !== 1 ? 's' : ''}.`;
-            // Delete the compound record so it doesn't linger
+            // Build narrated speech: "First — email. Next — Bob meeting. Next — work list. Last — Jasmine."
+            const labels = subTasks.map((s, i) => {
+              const prefix = i === 0 ? 'First' : i === subTasks.length - 1 ? 'And last' : 'Next';
+              return `${prefix} — ${s.speech}`;
+            });
+            const speech = `On it. ${labels.join('. ')}.`;
             await supabase.from('pending_actions').delete().eq('id', compoundRow.id);
-            console.log(`[Step1.5] Compound queue confirmed — returning ${allActions.length} action(s) for ${count} sub-task(s)`);
-            return jsonResponse({ rawText: JSON.stringify({ speech: readback, display: readback, actions: allActions, pendingThreads: [] }) });
+            console.log(`[Step1.5] Compound queue approved — returning ${allActions.length} action(s) for ${subTasks.length} sub-task(s)`);
+            return jsonResponse({ rawText: JSON.stringify({ speech, display: speech, actions: allActions, pendingThreads: [] }) });
           }
         } catch (e) {
           console.warn(`[Step1.5] Compound queue read failed — falling through:`, e);
@@ -3195,17 +3201,26 @@ Deno.serve(async (req) => {
 
         // Build compound confirmation speech (clean — no JSON in display)
         const planLines = subTaskResults.map((s, i) => `${i + 1}. ${s.speech}`).join('\n');
-        const confirmSpeech = `I have ${subTaskResults.length} things to handle:\n${planLines}\n\nSay yes to confirm all, or tell me which to skip.`;
+        const confirmSpeech = `I'll take care of these ${subTaskResults.length} things:\n${planLines}\n\nSay yes to go ahead, or no to cancel.`;
 
         // Store pre-computed sub-task data in pending_actions so Step 1.5
         // can retrieve it on the "yes" turn without another Claude call.
         // Tagged {type:'__COMPOUND__'} so Step 1.5 can identify it.
+        // current_index tracks which sub-task to execute next (one per turn).
+        // Uses delete+insert via the existing `type` + `payload` columns —
+        // no schema changes needed. expires_at is stored inside payload JSON.
         if (userId && supabase) {
           const expiry = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
-          await supabase.from('pending_actions').upsert(
-            { user_id: userId, actions: [{ type: '__COMPOUND__', tasks: subTaskResults }], expires_at: expiry },
-            { onConflict: 'user_id' },
-          );
+          await supabase.from('pending_actions')
+            .delete()
+            .eq('user_id', userId)
+            .eq('type', '__COMPOUND__');
+          const { error: insertErr } = await supabase.from('pending_actions').insert({
+            user_id: userId,
+            type: '__COMPOUND__',
+            payload: { tasks: subTaskResults, current_index: 0, expires_at: expiry },
+          });
+          if (insertErr) console.error(`[compound] pending_actions insert failed:`, insertErr.message);
         }
 
         const totalActions = subTaskResults.reduce((n, s) => n + s.actions.length, 0);
