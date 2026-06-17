@@ -433,14 +433,12 @@ Canonical source: `docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md`. Closed items
 4a. Caller PIN for off-phone verification — design in `project_naavi_caller_pin_chosen_over_biometric.md`
 5. Voice live-calendar fetch
 6. Voice action parity — DELETE_EVENT, LIST_RULES, DELETE_MEMORY, SCHEDULE_MEDICATION
-7. Voice stop-word interrupt regression
 8. Voice Deepgram first-word truncation on barge-in
 9. Voice name-search phonetic fallback
 10. Voice migration to Anthropic Structured Outputs
 11. Inbound SMS/WhatsApp queryability
 13. LIST_RULES synthesize-action backstop
 14. Demo line "remind me" time-extraction loop fix
-16. `resolve-place` radius 100→500 + address-vs-business routing fix
 
 **AAB-required queue:**
 18d. `isValidE164` strict 10-digit-after-+1 enforcement
