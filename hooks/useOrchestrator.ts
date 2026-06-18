@@ -3172,6 +3172,9 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       user_id: session.user.id,
                       place_name: placeName,
                       save_to_cache: false,
+                      // Contact-card addresses are residential — use Geocoding
+                      // API directly instead of Places Text Search.
+                      use_geocoding: !!possessiveContactSource,
                     }),
                   }, 30000);
                   const data = await res.json();
@@ -3180,7 +3183,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                   // V57.13.3 — memory cache removed. The only "instant-commit"
                   // paths now are settings_home / settings_work — explicit
                   // pet-name shortcuts the user defined in their settings.
-                  if (data?.status === 'ok' && (data.source === 'settings_home' || data.source === 'settings_work')) {
+                  if (data?.status === 'ok' && (data.source === 'settings_home' || data.source === 'settings_work' || data.source === 'contact')) {
                     // V57.11 — explicitly carry radius_meters into trigger_config.
                     // Without this every rule landed with NULL radius (resolve-place
                     // returns one but the orchestrator wasn't reading it), which

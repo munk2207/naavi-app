@@ -122,9 +122,19 @@ serve(async (req) => {
     // (user already inside the building); 300m gives early-arrival
     // alert while the user is still approaching/parking.
     const radiusOverride = body.radius_meters !== undefined ? Number(body.radius_meters) : 300;
+    // use_geocoding: true — skip Places Text Search and geocode the address
+    // directly. Used for contact-card addresses (residential) that Places
+    // Text Search cannot find.
+    const useGeocoding   = body.use_geocoding === true;
 
     if (!user_id || !placeName) {
       return jsonResponse({ status: 'error', error: 'Missing user_id or place_name' }, 400);
+    }
+
+    // ── (0) Direct geocoding path (contact-card addresses) ──────────────────
+    if (useGeocoding) {
+      if (!apiKey) return jsonResponse({ status: 'error', error: 'GOOGLE_PLACES_API_KEY not configured' }, 500);
+      return await resolveByAddress({ apiKey, addressQuery: placeName, source: 'contact', radiusOverride });
     }
 
     const normalized = normalize(placeName);
@@ -430,7 +440,7 @@ function isPostalCodeComplete(code: string | null, country: string | null): bool
 async function resolveByAddress(opts: {
   apiKey: string | undefined;
   addressQuery: string;
-  source: 'settings_home' | 'settings_work';
+  source: 'settings_home' | 'settings_work' | 'contact';
   radiusOverride: number;
 }): Promise<Response> {
   if (!opts.apiKey) {
