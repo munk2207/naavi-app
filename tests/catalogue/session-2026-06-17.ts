@@ -23,9 +23,10 @@ import { join } from 'node:path';
 import { expectTruthy } from '../lib/assertions';
 import type { TestCase } from '../lib/types';
 
-const NAAVI_CHAT_PATH  = join(process.cwd(), 'supabase', 'functions', 'naavi-chat', 'index.ts');
-const VOICE_PATH       = join(process.cwd(), 'naavi-voice-server', 'src', 'index.js');
-const PROMPT_PATH      = join(process.cwd(), 'supabase', 'functions', 'get-naavi-prompt', 'index.ts');
+const NAAVI_CHAT_PATH        = join(process.cwd(), 'supabase', 'functions', 'naavi-chat', 'index.ts');
+const VOICE_PATH             = join(process.cwd(), 'naavi-voice-server', 'src', 'index.js');
+const PROMPT_PATH            = join(process.cwd(), 'supabase', 'functions', 'get-naavi-prompt', 'index.ts');
+const MANAGE_LIST_CONN_PATH  = join(process.cwd(), 'supabase', 'functions', 'manage-list-connections', 'index.ts');
 
 export const session2026_06_17Tests: TestCase[] = [
   {
@@ -141,6 +142,25 @@ export const session2026_06_17Tests: TestCase[] = [
       expectTruthy(
         !allDaySection.includes('+ 2 *') && !allDaySection.includes('+2*'),
         'Voice server allDayUrl still uses 2-day window — all-day events beyond 2 days will be invisible',
+      );
+    },
+  },
+
+  {
+    id: 'list-connect.idempotent-already-attached',
+    description: 'manage-list-connections CONNECT returns 200 success when connection already exists (not 409)',
+    tags: ['list', 'connect'],
+    run: async () => {
+      const src = readFileSync(MANAGE_LIST_CONN_PATH, 'utf8');
+      // Must NOT return 409 for duplicate connections
+      expectTruthy(
+        !src.includes("}, 409)"),
+        'manage-list-connections CONNECT still returns 409 for already_attached — compound queue will show LIST ACTION ERROR when work list is already connected to office alert',
+      );
+      // Must return success:true for duplicate connections
+      expectTruthy(
+        src.includes('already_attached: true') && src.includes('success: true, already_attached'),
+        'manage-list-connections CONNECT does not return success:true for already_attached — idempotency fix not present',
       );
     },
   },

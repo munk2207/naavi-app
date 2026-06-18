@@ -237,8 +237,9 @@ async function handleConnect(
     .single();
   if (insertErr) {
     // 23505 = unique_violation. The (list, entity) pair is already wired.
+    // Treat as idempotent success — the end-state the user wanted already exists.
     if ((insertErr as any).code === '23505') {
-      return jsonResponse({ success: false, error: 'already_attached', list_id: listId, entity_type: entityType, entity_id: entityId }, 409);
+      return jsonResponse({ success: true, already_attached: true, list_id: listId, entity_type: entityType, entity_id: entityId });
     }
     console.error('[manage-list-connections] CONNECT insert error:', insertErr.message);
     return jsonResponse({ error: insertErr.message }, 500);
