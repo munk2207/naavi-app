@@ -1733,7 +1733,7 @@ function buildActionConfirm(
         const dir      = params.direction === 'leave' ? 'leave' : 'arrive at';
         const s        = place ? `Setting up an alert for when you ${dir} ${place}.` : '';
         const one_shot = params.one_shot === 'false' || params.recurring === 'true' ? false : true;
-        return { speech: s, display: s, actions: [{ type: 'SET_ACTION_RULE', trigger_type: 'location', trigger_config: { place_name: place, direction: String((params as any).direction ?? 'arrive') }, action_type: String((params as any).action_type ?? 'sms'), action_config: (params as any).action_config ?? {}, label: String((params as any).label ?? ''), one_shot }] };
+        return { speech: s, display: s, actions: [{ type: 'SET_ACTION_RULE', trigger_type: 'location', trigger_config: { place_name: place, direction: String((params as any).direction ?? 'arrive') }, action_type: String((params as any).action_type ?? 'sms'), action_config: (params as any).action_config ?? {}, label: String((params as any).label ?? '').trim() || null, one_shot }] };
       }
       // Other trigger types (time, contact_silence, weather) — fall through to Claude
       return { speech: '', display: '', actions: [], missingParam: '__FALLTHROUGH__' };
