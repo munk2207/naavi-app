@@ -3316,7 +3316,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                     if (insertSucceeded) {
                       turnLocationRules.push({
                         ruleId: String(insertedRule!.id),
-                        placeName: data.place_name,
+                        placeName: formatLocationLabel(spokenLabel) || data.place_name,
                         address: data.address ?? null,
                         oneShot,
                       });
@@ -3358,10 +3358,11 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                     const isDuplicate =
                       (insertErr as any)?.code === '23505' ||
                       /duplicate|already exists|conflict/i.test(insertErr?.message ?? '');
+                    const displayName = formatLocationLabel(spokenLabel) || data.place_name;
                     turnSpeechOverride = insertSucceeded
-                      ? `Alert set — ${modeText} you arrive at ${data.place_name}.`
+                      ? `Alert set — ${modeText} you arrive at ${displayName}.`
                       : isDuplicate
-                        ? `You already have an alert set for ${data.place_name}.`
+                        ? `You already have an alert set for ${displayName}.`
                         : `I couldn't save the alert — please try again in a moment.`;
                     console.log(`[orch:loc] turnSpeechOverride set | "${turnSpeechOverride}"`);
                     continue;
