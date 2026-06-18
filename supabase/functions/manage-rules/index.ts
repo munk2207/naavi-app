@@ -296,7 +296,14 @@ serve(async (req) => {
         .select('id')
         .single();
       if (insErr) {
-        return new Response(JSON.stringify({ error: insErr.message }), {
+        // 23505 = unique_violation — row already exists, treat as idempotent success
+        if ((insErr as any).code === '23505') {
+          return new Response(JSON.stringify({ ok: true, duplicate: true }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        console.error('[manage-rules] create insert error | code=', (insErr as any).code, '| msg=', insErr.message);
+        return new Response(JSON.stringify({ error: insErr.message, code: (insErr as any).code }), {
           status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }

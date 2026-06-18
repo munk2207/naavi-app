@@ -3556,7 +3556,13 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               const insertedRow = insertedId ? { id: insertedId } : null;
               if (error) {
                 console.error('[Orchestrator] SET_ACTION_RULE failed:', error.message);
-                turnSpeechOverride = "I tried to save that alert but something went wrong. Please try again.";
+                remoteLog(`[SET_ACTION_RULE] FAILED | trigger=${triggerType} | error=${JSON.stringify(error)}`);
+                // Don't clobber compound queue speech ("On it. First — ...") with an error message.
+                // In a compound batch, other actions may have succeeded — log only.
+                const isCompoundBatch = (response.speech ?? '').startsWith('On it.');
+                if (!isCompoundBatch) {
+                  turnSpeechOverride = "I tried to save that alert but something went wrong. Please try again.";
+                }
               } else {
                 console.log('[Orchestrator] SET_ACTION_RULE saved via manage-rules:', action.label);
                 // B4j — eager-create list + connection for the legacy

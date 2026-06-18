@@ -27,6 +27,8 @@ const NAAVI_CHAT_PATH        = join(process.cwd(), 'supabase', 'functions', 'naa
 const VOICE_PATH             = join(process.cwd(), 'naavi-voice-server', 'src', 'index.js');
 const PROMPT_PATH            = join(process.cwd(), 'supabase', 'functions', 'get-naavi-prompt', 'index.ts');
 const MANAGE_LIST_CONN_PATH  = join(process.cwd(), 'supabase', 'functions', 'manage-list-connections', 'index.ts');
+const MANAGE_RULES_PATH      = join(process.cwd(), 'supabase', 'functions', 'manage-rules', 'index.ts');
+const ORCHESTRATOR_PATH      = join(process.cwd(), 'hooks', 'useOrchestrator.ts');
 
 export const session2026_06_17Tests: TestCase[] = [
   {
@@ -176,6 +178,32 @@ export const session2026_06_17Tests: TestCase[] = [
       expectTruthy(
         src.includes('already_attached: true') && src.includes('success: true, already_attached'),
         'manage-list-connections CONNECT does not return success:true for already_attached — idempotency fix not present',
+      );
+    },
+  },
+
+  {
+    id: 'manage-rules.create-23505-idempotent',
+    description: 'manage-rules create op returns 200 ok:true for 23505 unique_violation (duplicate rule insert is idempotent)',
+    tags: ['rules', 'idempotent'],
+    run: async () => {
+      const src = readFileSync(MANAGE_RULES_PATH, 'utf8');
+      expectTruthy(
+        src.includes("'23505'") && src.includes('duplicate: true'),
+        'manage-rules create does not handle 23505 idempotently — duplicate rule inserts return 500, causing compound queue speech override',
+      );
+    },
+  },
+
+  {
+    id: 'orchestrator.set-action-rule-no-compound-speech-override',
+    description: 'useOrchestrator: SET_ACTION_RULE failure does not override compound queue speech ("On it.")',
+    tags: ['orchestrator', 'compound', 'rules'],
+    run: async () => {
+      const src = readFileSync(ORCHESTRATOR_PATH, 'utf8');
+      expectTruthy(
+        src.includes('isCompoundBatch') && src.includes("startsWith('On it.')"),
+        'SET_ACTION_RULE error handler does not guard compound queue speech — "I tried to save that alert" overrides "On it. First —" when a rule insert fails during compound execution',
       );
     },
   },
