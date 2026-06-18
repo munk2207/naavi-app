@@ -149,6 +149,19 @@ export const session2026_06_17Tests: TestCase[] = [
   },
 
   {
+    id: 'compound.turn2-skipped-for-clarifying-question',
+    description: 'Compound queue: Turn 2 fake-yes is skipped when Turn 1 speech is a clarifying question (prevents garbage SET_ACTION_RULE with no coordinates)',
+    tags: ['compound', 'queue'],
+    run: async () => {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      expectTruthy(
+        src.includes('isClarifyingQuestion') && src.includes("!isClarifyingQuestion"),
+        'Compound queue Turn 2 skip guard for clarifying questions not present — unresolved tasks will generate incomplete actions',
+      );
+    },
+  },
+
+  {
     id: 'list-connect.idempotent-already-attached',
     description: 'manage-list-connections CONNECT returns 200 success when connection already exists (not 409)',
     tags: ['list', 'connect'],

@@ -3090,7 +3090,11 @@ Deno.serve(async (req) => {
 
           // Turn 2: if Claude returned no actions (planning mode), simulate the
           // 'yes' confirm turn so B4y sees a valid confirm-turn and emits the action.
-          if (taskActions.length === 0 && r1Speech) {
+          // SKIP Turn 2 if Turn 1 is a clarifying question (speech ends with "?" or
+          // contains "?" with no actions) — a fake "yes" would generate an incomplete
+          // action (e.g. SET_ACTION_RULE with no coordinates) that fails at execution.
+          const isClarifyingQuestion = taskActions.length === 0 && r1Speech.trim().includes('?');
+          if (taskActions.length === 0 && r1Speech && !isClarifyingQuestion) {
             const fakeHistory = [
               { role: 'user', content: task },
               { role: 'assistant', content: r1Speech },
