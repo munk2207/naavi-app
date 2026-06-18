@@ -1729,11 +1729,11 @@ function buildActionConfirm(
         // Location requires mobile resolve-place flow — emit action immediately so
         // useOrchestrator handles place resolution before writing the rule.
         // V57.19: default one_shot=true unless user explicitly said "every time" / "recurring".
-        const place    = String(params.location ?? params.place ?? '');
+        const place    = String(params.location ?? params.place ?? '').replace(/^my\s+/i, '').trim();
         const dir      = params.direction === 'leave' ? 'leave' : 'arrive at';
         const s        = place ? `Setting up an alert for when you ${dir} ${place}.` : '';
         const one_shot = params.one_shot === 'false' || params.recurring === 'true' ? false : true;
-        return { speech: s, display: s, actions: [{ type: 'SET_ACTION_RULE', ...params, one_shot }] };
+        return { speech: s, display: s, actions: [{ type: 'SET_ACTION_RULE', trigger_type: 'location', trigger_config: { place_name: place, direction: String((params as any).direction ?? 'arrive') }, action_type: String((params as any).action_type ?? 'sms'), action_config: (params as any).action_config ?? {}, label: String((params as any).label ?? ''), one_shot }] };
       }
       // Other trigger types (time, contact_silence, weather) — fall through to Claude
       return { speech: '', display: '', actions: [], missingParam: '__FALLTHROUGH__' };
@@ -3939,6 +3939,7 @@ Deno.serve(async (req) => {
       `stop=${(response as any).stop_reason ?? '?'}`
     );
     console.log(`[cache-debug] usage=${JSON.stringify(usage)}`);
+    console.log(`[diag-loc] actions=${JSON.stringify(actions.map((a: any) => ({ type: a.type, trigger_type: a.trigger_type, place_name: a.trigger_config?.place_name })))}`);
 
     // V57.9.8 normalizeRawText() was the legacy ```json fence stripper.
     // With Phase 2 we already produce clean JSON.stringify output, so the
