@@ -101,8 +101,10 @@ export const session2026_06_17Tests: TestCase[] = [
     tags: ['compound', 'queue'],
     run: async () => {
       const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
-      // The delete should be inside the Step 1.5 block and happen before returning
-      const step15Block = src.slice(src.indexOf('[Step1.5]'), src.indexOf('[Step1.5]') + 2000);
+      // The delete is inside the Step 1.5 block, just before the console.log('[Step1.5]').
+      // Slice 2000 chars ending at the [Step1.5] log line to capture it.
+      const logIdx = src.indexOf('[Step1.5]');
+      const step15Block = src.slice(Math.max(0, logIdx - 2000), logIdx + 200);
       expectTruthy(
         step15Block.includes('.delete()') && step15Block.includes("eq('id', compoundRow.id)"),
         'Step 1.5 does not delete the compound pending_actions row after execution — row will linger and misfire on next yes',

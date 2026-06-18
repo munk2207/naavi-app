@@ -181,7 +181,7 @@ export const listConnectionsTests: TestCase[] = [
   {
     id: 'list-connections.connect-adds-not-replaces',
     category: 'list-connections',
-    description: 'M:N — second CONNECT on same entity adds (both lists attached after); same pair twice → 409',
+    description: 'M:N — second CONNECT on same entity adds (both lists attached after); same pair twice → 200 idempotent',
     timeoutMs: 15_000,
     async run(ctx) {
       const marker = uniqueTag();
@@ -207,10 +207,10 @@ export const listConnectionsTests: TestCase[] = [
         expectTruthy(ids.has(listA), 'listA still attached');
         expectTruthy(ids.has(listB), 'listB attached too');
 
-        // Same (list, entity) pair twice → 409 already_attached.
+        // Same (list, entity) pair twice → 200 idempotent success (already_attached:true).
         const r3 = await callConnect(ctx, { list_id: listA, entity_type: 'action_rule', entity_id: entityId });
-        expectEqual(r3.status, 409, 'duplicate (list, entity) pair returns 409');
-        expectEqual((r3.data as any)?.error, 'already_attached', 'error=already_attached');
+        expect2xx(r3.status, 'duplicate (list, entity) pair returns 200 idempotent');
+        expectEqual((r3.data as any)?.already_attached, true, 'already_attached=true');
       } finally {
         await deleteTestLists(ctx, marker);
       }
