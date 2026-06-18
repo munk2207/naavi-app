@@ -2933,6 +2933,10 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                 // 2026-05-22 (Wael) — let, not const: the possessive contact
                 // resolver below may rewrite placeName to a street address.
                 let placeName = String((action.trigger_config ?? {}).place_name ?? '').trim();
+                // Capture spoken name before possessive resolver may overwrite placeName
+                // with a physical address. Used for trigger_config.place_name storage so
+                // the UI shows "Home" / "James Home" instead of the resolved street address.
+                const spokenLabel = placeName;
                 console.log(`[orch:loc] entering intercept | place="${placeName}" | one_shot=${action.one_shot} | label="${action.label}"`);
                 if (!placeName) {
                   locationIntercepted = true;
@@ -3030,7 +3034,15 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                 // "you already have one" BEFORE calling Google Places.
                 // Skipped for possessive contact resolutions (placeName was
                 // rewritten to a street address, no longer a name to match).
-                if (!possessiveContactSource) {
+                // Personal-address keywords must always go to resolve-place (user_settings),
+                // never match against stored alert place_names (e.g. "home" is a substring
+                // of "The Home Depot" which would produce a false memory-hit).
+                const PERSONAL_PLACE_KEYWORDS = new Set([
+                  'home','my home','house','my house','the house','my place','home address',
+                  'office','my office','work','my work','work address',
+                ]);
+                const isPersonalKeyword = PERSONAL_PLACE_KEYWORDS.has(placeName.toLowerCase().trim());
+                if (!possessiveContactSource && !isPersonalKeyword) {
                   try {
                     const { data: existingRows } = await queryWithTimeout(
                       supabase!
@@ -3177,7 +3189,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                     // Claude provided a value.
                     const triggerConfig = {
                       ...(action.trigger_config ?? {}),
-                      place_name: data.place_name,
+                      place_name: formatLocationLabel(spokenLabel) || data.place_name,
                       address: data.address ?? null,
                       resolved_lat: data.lat,
                       resolved_lng: data.lng,
@@ -3361,7 +3373,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       originalAction: action,
                       placeName,
                       resolved: {
-                        place_name:      data.place_name,
+                        place_name:      formatLocationLabel(spokenLabel) || data.place_name,
                         address:         data.address,
                         lat:             data.lat,
                         lng:             data.lng,
