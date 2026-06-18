@@ -345,6 +345,17 @@ function formatMoney(cents: number, currency: string | null): string {
   return currency ? `${dollars} ${currency}` : `$${dollars}`;
 }
 
+/**
+ * Convert a spoken place name to a readable alert title.
+ * "james's home" → "James's Home", "my office" → "My Office"
+ * Only capitalizes after spaces (not after apostrophes), so "James's" stays correct.
+ */
+function formatLocationLabel(spokenName: string): string {
+  const s = (spokenName ?? '').trim();
+  if (!s) return 'Location alert';
+  return s.replace(/(?:^|\s)\S/g, c => c.toUpperCase());
+}
+
 /** Render a SPEND_SUMMARY period_label as a natural English phrase. */
 function formatPeriodPhrase(label: string): string {
   const k = (label || '').trim().toLowerCase();
@@ -1188,7 +1199,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               trigger_config: triggerConfig,
               action_type:    String(pending.originalAction?.action_type ?? 'sms'),
               action_config:  actionConfigWithTasks,
-              label:          String(pending.originalAction?.label ?? 'Location alert'),
+              label:          formatLocationLabel(pending.placeName) || String(pending.originalAction?.label ?? 'Location alert'),
               one_shot:       oneShot,
             })
             .select('id')
@@ -3273,7 +3284,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                           trigger_config: triggerConfig,
                           action_type:    actionType,
                           action_config:  actionConfig,
-                          label:          String(action.label ?? 'Location alert'),
+                          label:          formatLocationLabel(placeName) || String(action.label ?? 'Location alert'),
                           one_shot:       oneShot,
                         })
                         .select('id')
