@@ -269,6 +269,28 @@ serve(async (req) => {
       }
     }
 
+    // ── SMS confirmation for phone-based channels ────────────────────
+    // voice-call and internal-relay originate from phone interactions —
+    // the reporter may not have email open. Send an SMS with the ticket
+    // number as a safety net so they have immediate confirmation.
+    if ((channel === 'voice-call' || channel === 'internal-relay') && reporterPhone) {
+      try {
+        const smsBody = `MyNaavi support ticket #${ticket.ticket_number} received. We'll follow up by email within 2 business days.`;
+        await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': serviceKey,
+            'Authorization': `Bearer ${serviceKey}`,
+          },
+          body: JSON.stringify({ to: reporterPhone, body: smsBody, user_id: userId }),
+        });
+        console.log(`[ingest-ticket] SMS confirmation sent to ${reporterPhone} for ticket #${ticket.ticket_number}`);
+      } catch (smsErr) {
+        console.warn('[ingest-ticket] SMS confirmation failed (non-fatal):', smsErr);
+      }
+    }
+
     return json({
       success:       true,
       ticket_id:     ticket.id,
