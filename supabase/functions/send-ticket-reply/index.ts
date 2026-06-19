@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
     // ── Load ticket ──────────────────────────────────────────────────
     const { data: ticket, error: tErr } = await admin
       .from('tickets')
-      .select('id, ticket_number, subject, reporter_email, reporter_name, status, replies, audit_trail')
+      .select('id, ticket_number, subject, reporter_email, reporter_name, reporter_phone, source_channel, status, replies, audit_trail')
       .eq('id', ticket_id)
       .maybeSingle();
     if (tErr || !ticket) return json({ error: 'ticket_not_found' }, 404);
@@ -106,6 +106,26 @@ Deno.serve(async (req) => {
     const pmData = await pmRes.json();
     const messageId = pmData.MessageID ?? '';
     console.log(`[send-ticket-reply] reply sent for ticket #${ticket.ticket_number} → ${ticket.reporter_email}, MessageID: ${messageId}`);
+
+    // ── SMS for voice-call tickets ───────────────────────────────────
+    // Voice callers may not check email — send the reply via SMS too.
+    if (ticket.source_channel === 'voice-call' && ticket.reporter_phone) {
+      try {
+        const smsText = `MyNaavi support (ticket #${ticket.ticket_number}): ${cleanBody.slice(0, 140)}`;
+        await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': serviceKey,
+            'Authorization': `Bearer ${serviceKey}`,
+          },
+          body: JSON.stringify({ to: ticket.reporter_phone, body: smsText }),
+        });
+        console.log(`[send-ticket-reply] SMS reply sent to ${ticket.reporter_phone} for ticket #${ticket.ticket_number}`);
+      } catch (smsErr) {
+        console.warn('[send-ticket-reply] SMS reply failed (non-fatal):', smsErr);
+      }
+    }
 
     // ── Append to replies ────────────────────────────────────────────
     const newReply = {
