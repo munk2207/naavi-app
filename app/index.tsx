@@ -76,7 +76,7 @@ import { fetchOttawaWeather } from '@/lib/weather';
 import { sendDriveFileAsEmail } from '@/lib/drive';
 import { lookupContact, type Contact } from '@/lib/contacts';
 import { resolveRecipient } from '@/lib/recipientLookup';
-import { saveContact, loadTodayConversation, signInWithGoogle, signOut, checkOAuthScopeVersion, markOAuthScopeVersionCurrent } from '@/lib/supabase';
+import { saveContact, loadTodayConversation, signInWithGoogle, signOut, checkOAuthScopeVersion, markOAuthScopeVersionCurrent, checkGrantedScopes } from '@/lib/supabase';
 import { getBackgroundPermission, getForegroundPermission, requestLocationPermissions } from '@/lib/location';
 import { syncGeofencesForUser } from '@/hooks/useGeofencing';
 import { fetchUpcomingEvents, fetchUpcomingBirthdays, captureAndStoreGoogleToken, triggerCalendarSync, isCalendarConnected } from '@/lib/calendar';
@@ -790,6 +790,7 @@ export default function HomeScreen() {
   // happened on this device) AND current session is null (auth not
   // restored). Banner offers one-tap re-sign-in.
   const [staleAuth, setStaleAuth] = useState(false);
+  const [showScopePrompt, setShowScopePrompt] = useState(false);
 
   // Resolve user ID — from getSession on mount OR onAuthStateChange
   useEffect(() => {
@@ -829,6 +830,16 @@ export default function HomeScreen() {
             await captureAndStoreGoogleToken();
           }
           await markOAuthScopeVersionCurrent();
+          // Silently probe Google API scope groups. provider_token is only
+          // present right after OAuth — this is the correct window to check.
+          if (session?.provider_token) {
+            checkGrantedScopes(session.provider_token).then((failed) => {
+              if (failed.length > 0) {
+                console.warn('[Home] Missing OAuth scopes:', failed);
+                setShowScopePrompt(true);
+              }
+            }).catch(() => {}); // non-fatal
+          }
         }
         if (session?.user) {
           setCurrentUserId(session.user.id);
@@ -1517,6 +1528,37 @@ export default function HomeScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={90}
       >
+        {/* Scope-grant prompt — shown when probe detects missing OAuth scopes.
+            Instructs user to tap "Select all" before continuing on the Google
+            consent screen that opens automatically when they tap OK. */}
+        <Modal
+          visible={showScopePrompt}
+          animationType="fade"
+          transparent
+          onRequestClose={() => setShowScopePrompt(false)}
+        >
+          <View style={styles.scopePromptOverlay}>
+            <View style={styles.scopePromptSheet}>
+              <Text style={styles.scopePromptTitle}>One more step</Text>
+              <Text style={styles.scopePromptBody}>
+                On the next screen, tap <Text style={styles.scopePromptBold}>Select all</Text> and then Continue to enable all Naavi features.
+              </Text>
+              <TouchableOpacity
+                style={styles.scopePromptButton}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setShowScopePrompt(false);
+                  signInWithGoogle().catch(err =>
+                    console.error('[Home] scope re-auth failed:', err)
+                  );
+                }}
+              >
+                <Text style={styles.scopePromptButtonText}>OK, open the screen</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
         {/* V57.9.7 — stale-auth recovery banner. Shown when we have a
             cached user_id (prior sign-in on this device) but no current
             session — which means the auth tokens didn't survive the last
@@ -2738,6 +2780,49 @@ const styles = StyleSheet.create({
     fontSize: Typography.body,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  scopePromptOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  scopePromptSheet: {
+    backgroundColor: Colors.bgElevated,
+    borderRadius: 16,
+    padding: 28,
+    width: '100%',
+    maxWidth: 360,
+  },
+  scopePromptTitle: {
+    color: Colors.textPrimary,
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  scopePromptBody: {
+    color: Colors.textSecondary,
+    fontSize: Typography.body,
+    lineHeight: 24,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  scopePromptBold: {
+    color: Colors.textPrimary,
+    fontWeight: '700',
+  },
+  scopePromptButton: {
+    backgroundColor: Colors.accent,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  scopePromptButtonText: {
+    color: Colors.accentDark,
+    fontSize: Typography.body,
+    fontWeight: '700',
   },
   greetingRow: {
     flexDirection: 'row',

@@ -11,6 +11,9 @@
  * 7. receive-sms-reply: "close" keyword closes ticket (F8b)
  * 8. receive-sms-reply: unknown phone is silently ignored (F8b)
  * 9. send-ticket-reply: SMS fires for both voice-call and internal-relay (F8b)
+ * 10. checkGrantedScopes: returns failed scope names for 401/403 responses (F8c)
+ * 11. checkGrantedScopes: ignores network errors, never blocks sign-in (F8c)
+ * 12. scope prompt modal: scopePromptOverlay style present in app/index.tsx (F8c)
  */
 
 import { readFileSync } from 'node:fs';
@@ -18,6 +21,8 @@ import { join } from 'node:path';
 import { expectTruthy, expectEqual } from '../lib/assertions';
 import type { TestCase, TestContext } from '../lib/types';
 
+const SUPABASE_LIB_PATH       = join(process.cwd(), 'lib', 'supabase.ts');
+const APP_INDEX_PATH          = join(process.cwd(), 'app', 'index.tsx');
 const INGEST_TICKET_PATH      = join(process.cwd(), 'supabase', 'functions', 'ingest-ticket', 'index.ts');
 const SEND_TICKET_REPLY_PATH  = join(process.cwd(), 'supabase', 'functions', 'send-ticket-reply', 'index.ts');
 const VOICE_SERVER_PATH       = join(process.cwd(), 'naavi-voice-server', 'src', 'index.js');
@@ -234,6 +239,74 @@ export const session2026_06_19Tests: TestCase[] = [
       expectTruthy(
         src.includes("source_channel === 'voice-call' || ticket.source_channel === 'internal-relay'"),
         'send-ticket-reply missing internal-relay in SMS send condition',
+      );
+    },
+  },
+
+  // ── F8c: OAuth scope probe ────────────────────────────────────────────
+
+  {
+    id: 'f8c.check-granted-scopes-detects-failures',
+    category: 'smoke',
+    description: 'checkGrantedScopes: returns names of scope groups that returned 401/403',
+    async run() {
+      const src = readFileSync(SUPABASE_LIB_PATH, 'utf8');
+      // Verify all 4 scope groups are probed
+      expectTruthy(src.includes("name: 'Calendar'"), 'checkGrantedScopes missing Calendar probe');
+      expectTruthy(src.includes("name: 'Gmail'"),    'checkGrantedScopes missing Gmail probe');
+      expectTruthy(src.includes("name: 'Contacts'"), 'checkGrantedScopes missing Contacts probe');
+      expectTruthy(src.includes("name: 'Drive'"),    'checkGrantedScopes missing Drive probe');
+      // Verify 401 and 403 both treated as failures
+      expectTruthy(
+        src.includes('res.status === 401 || res.status === 403'),
+        'checkGrantedScopes must treat both 401 and 403 as scope failures',
+      );
+      // Verify network errors are swallowed
+      expectTruthy(
+        src.includes('return null; // network error'),
+        'checkGrantedScopes must swallow network errors and return null (never block sign-in)',
+      );
+    },
+  },
+
+  {
+    id: 'f8c.scope-probe-hooked-into-signed-in',
+    category: 'smoke',
+    description: 'checkGrantedScopes: called in SIGNED_IN handler with session.provider_token',
+    async run() {
+      const src = readFileSync(APP_INDEX_PATH, 'utf8');
+      expectTruthy(
+        src.includes('checkGrantedScopes'),
+        'app/index.tsx missing checkGrantedScopes call in SIGNED_IN handler',
+      );
+      expectTruthy(
+        src.includes('session?.provider_token'),
+        'app/index.tsx must pass session.provider_token to checkGrantedScopes',
+      );
+      expectTruthy(
+        src.includes('setShowScopePrompt(true)'),
+        'app/index.tsx missing setShowScopePrompt(true) on scope failure',
+      );
+    },
+  },
+
+  {
+    id: 'f8c.scope-prompt-modal-present',
+    category: 'smoke',
+    description: 'Scope prompt modal rendered in app/index.tsx with instruction text',
+    async run() {
+      const src = readFileSync(APP_INDEX_PATH, 'utf8');
+      expectTruthy(
+        src.includes('showScopePrompt'),
+        'app/index.tsx missing showScopePrompt state',
+      );
+      expectTruthy(
+        src.includes('Select all'),
+        'Scope prompt modal missing "Select all" instruction text',
+      );
+      expectTruthy(
+        src.includes('scopePromptOverlay'),
+        'app/index.tsx missing scopePromptOverlay style',
       );
     },
   },

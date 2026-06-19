@@ -115,6 +115,39 @@ export function isSupabaseConfigured(): boolean {
   return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 }
 
+// ─── OAuth scope probe ────────────────────────────────────────────────────────
+//
+// Called right after SIGNED_IN with the short-lived Google access token
+// (session.provider_token). Makes one lightweight call per scope group.
+// Returns the names of any scope groups that returned 403/401 (not granted).
+// Only meaningful immediately after OAuth — provider_token may be absent on
+// later session restores.
+
+export async function checkGrantedScopes(providerToken: string): Promise<string[]> {
+  const checks = [
+    { name: 'Calendar', url: 'https://www.googleapis.com/calendar/v3/calendars/primary' },
+    { name: 'Gmail',    url: 'https://www.googleapis.com/gmail/v1/users/me/profile' },
+    { name: 'Contacts', url: 'https://people.googleapis.com/v1/people/me?personFields=names' },
+    { name: 'Drive',    url: 'https://www.googleapis.com/drive/v3/about?fields=user' },
+  ];
+  const results = await Promise.allSettled(
+    checks.map(async ({ name, url }) => {
+      try {
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${providerToken}` },
+          signal: AbortSignal.timeout(8_000),
+        });
+        return (res.status === 401 || res.status === 403) ? name : null;
+      } catch {
+        return null; // network error — don't block sign-in
+      }
+    })
+  );
+  return results
+    .map(r => (r.status === 'fulfilled' ? r.value : null))
+    .filter((v): v is string => v !== null);
+}
+
 // ─── Google Sign-In ───────────────────────────────────────────────────────────
 
 export async function signInWithGoogle(): Promise<void> {
