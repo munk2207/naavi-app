@@ -7,15 +7,69 @@
  * 3. voice server: F8a support trigger regex matches expected phrases
  * 4. voice server: F8a confirmation marker regex matches expected wording
  * 5. voice server: /test/ask endpoint guard rejects wrong secret
+ * 6. receive-sms-reply: inbound SMS appends to ticket thread (F8b)
+ * 7. receive-sms-reply: "close" keyword closes ticket (F8b)
+ * 8. receive-sms-reply: unknown phone is silently ignored (F8b)
+ * 9. send-ticket-reply: SMS fires for both voice-call and internal-relay (F8b)
  */
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expectTruthy, expectEqual } from '../lib/assertions';
-import type { TestCase } from '../lib/types';
+import type { TestCase, TestContext } from '../lib/types';
 
-const INGEST_TICKET_PATH  = join(process.cwd(), 'supabase', 'functions', 'ingest-ticket', 'index.ts');
-const VOICE_SERVER_PATH   = join(process.cwd(), 'naavi-voice-server', 'src', 'index.js');
+const INGEST_TICKET_PATH      = join(process.cwd(), 'supabase', 'functions', 'ingest-ticket', 'index.ts');
+const SEND_TICKET_REPLY_PATH  = join(process.cwd(), 'supabase', 'functions', 'send-ticket-reply', 'index.ts');
+const VOICE_SERVER_PATH       = join(process.cwd(), 'naavi-voice-server', 'src', 'index.js');
+
+const SMOKE_PHONE = '+15550000001'; // fake phone used only in SMS ingest tests
+
+async function createSmsTestTicket(ctx: TestContext): Promise<{ id: string; ticket_number: number }> {
+  const res = await fetch(`${ctx.supabaseUrl}/rest/v1/tickets`, {
+    method: 'POST',
+    headers: {
+      apikey: ctx.serviceRoleKey,
+      Authorization: `Bearer ${ctx.serviceRoleKey}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify({
+      source_channel: 'voice-call',
+      subject: 'TICKET-TEST-sms-inbound',
+      body: 'SMS inbound test fixture',
+      reporter_email: 'autotester@example.com',
+      reporter_phone: SMOKE_PHONE,
+      status: 'sent',
+    }),
+  });
+  const rows = await res.json();
+  return rows[0] as { id: string; ticket_number: number };
+}
+
+async function deleteSmsTestTickets(ctx: TestContext) {
+  await fetch(
+    `${ctx.supabaseUrl}/rest/v1/tickets?subject=ilike.${encodeURIComponent('TICKET-TEST-sms-inbound%')}`,
+    {
+      method: 'DELETE',
+      headers: {
+        apikey: ctx.serviceRoleKey,
+        Authorization: `Bearer ${ctx.serviceRoleKey}`,
+      },
+    },
+  );
+}
+
+async function postSmsWebhook(ctx: TestContext, from: string, body: string): Promise<Response> {
+  const params = new URLSearchParams({ From: from, To: '+12495235394', Body: body, MessageSid: 'SMtest000' });
+  return fetch(`${ctx.supabaseUrl}/functions/v1/receive-sms-reply`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      apikey: ctx.serviceRoleKey,
+    },
+    body: params.toString(),
+  });
+}
 
 const VOICE_SERVER_URL  = process.env.VOICE_SERVER_URL  || '';
 const VOICE_TEST_SECRET = process.env.VOICE_TEST_SECRET || '';
@@ -107,6 +161,80 @@ export const session2026_06_19Tests: TestCase[] = [
         body: JSON.stringify({ secret: 'wrong-secret', user_id: 'test', message: 'hello' }),
       });
       expectEqual(res.status, 403, `Expected 403 for wrong secret, got ${res.status}`);
+    },
+  },
+
+  // ── F8b: receive-sms-reply tests ────────────────────────────────────
+
+  {
+    id: 'f8b.sms-inbound-appends-to-thread',
+    category: 'smoke',
+    description: 'receive-sms-reply: inbound SMS appends reply to ticket thread with direction=inbound',
+    timeoutMs: 15_000,
+    async setup(ctx) { await deleteSmsTestTickets(ctx); },
+    async teardown(ctx) { await deleteSmsTestTickets(ctx); },
+    async run(ctx) {
+      const ticket = await createSmsTestTicket(ctx);
+      const res = await postSmsWebhook(ctx, SMOKE_PHONE, 'This is my reply');
+      expectEqual(res.status, 200, `receive-sms-reply should return 200, got ${res.status}`);
+
+      const verify = await fetch(
+        `${ctx.supabaseUrl}/rest/v1/tickets?id=eq.${ticket.id}&select=replies,status`,
+        { headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}` } },
+      );
+      const rows = await verify.json();
+      const row = rows[0];
+      const inbound = (row.replies as Array<Record<string, unknown>>).find(r => r.direction === 'inbound');
+      expectTruthy(!!inbound, 'No inbound reply found in ticket thread after SMS webhook');
+      expectEqual(inbound!.channel as string, 'sms', 'Inbound reply should have channel=sms');
+      expectEqual(row.status, 'new', 'Status should be new after inbound SMS reply');
+    },
+  },
+
+  {
+    id: 'f8b.sms-close-keyword-closes-ticket',
+    category: 'smoke',
+    description: 'receive-sms-reply: SMS body containing "close" sets ticket status to closed',
+    timeoutMs: 15_000,
+    async setup(ctx) { await deleteSmsTestTickets(ctx); },
+    async teardown(ctx) { await deleteSmsTestTickets(ctx); },
+    async run(ctx) {
+      const ticket = await createSmsTestTicket(ctx);
+      const res = await postSmsWebhook(ctx, SMOKE_PHONE, 'Please close this ticket');
+      expectEqual(res.status, 200, `receive-sms-reply should return 200, got ${res.status}`);
+
+      const verify = await fetch(
+        `${ctx.supabaseUrl}/rest/v1/tickets?id=eq.${ticket.id}&select=status`,
+        { headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}` } },
+      );
+      const rows = await verify.json();
+      expectEqual(rows[0]?.status, 'closed', `Ticket should be closed after "close" SMS, got ${rows[0]?.status}`);
+    },
+  },
+
+  {
+    id: 'f8b.sms-unknown-phone-ignored',
+    category: 'smoke',
+    description: 'receive-sms-reply: SMS from unknown phone returns 200 and skips silently',
+    timeoutMs: 15_000,
+    async run(ctx) {
+      const res = await postSmsWebhook(ctx, '+15559999999', 'hello from unknown');
+      expectEqual(res.status, 200, `receive-sms-reply should return 200 for unknown phone, got ${res.status}`);
+      const text = await res.text();
+      expectTruthy(text.includes('<Response>'), 'Should return TwiML response');
+    },
+  },
+
+  {
+    id: 'f8b.send-ticket-reply-sms-for-internal-relay',
+    category: 'smoke',
+    description: 'send-ticket-reply: SMS fires for internal-relay channel (code guard check)',
+    async run() {
+      const src = readFileSync(SEND_TICKET_REPLY_PATH, 'utf8');
+      expectTruthy(
+        src.includes("source_channel === 'voice-call' || ticket.source_channel === 'internal-relay'"),
+        'send-ticket-reply missing internal-relay in SMS send condition',
+      );
     },
   },
 ];

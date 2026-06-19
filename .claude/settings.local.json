@@ -284,7 +284,8 @@
       "PowerShell(Get-ChildItem \"$env:APPDATA\\\\supabase\" -ErrorAction SilentlyContinue; Get-ChildItem \"$env:USERPROFILE\\\\.supabase\" -ErrorAction SilentlyContinue)",
       "WebFetch(domain:hhgyppbxgmjrwdpdubcx.supabase.co)",
       "Bash(grep -v \"//\")",
-      "Bash(grep -v \"//\\\\|confirmed\\\\|confirmDelete\\\\|setDeletingId\\\\|setError\\\\|setPendingDelete\\\\|pendingDelete !==\\\\|pendingDelete ?\")"
+      "Bash(grep -v \"//\\\\|confirmed\\\\|confirmDelete\\\\|setDeletingId\\\\|setError\\\\|setPendingDelete\\\\|pendingDelete !==\\\\|pendingDelete ?\")",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }

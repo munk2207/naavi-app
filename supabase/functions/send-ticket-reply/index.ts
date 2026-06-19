@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
     // ── SMS for voice-call tickets ───────────────────────────────────
     // Voice callers may not check email — send the full reply via SMS too.
     let smsSent = false;
-    if (ticket.source_channel === 'voice-call' && ticket.reporter_phone) {
+    if ((ticket.source_channel === 'voice-call' || ticket.source_channel === 'internal-relay') && ticket.reporter_phone) {
       try {
         const smsText = `MyNaavi support (ticket #${ticket.ticket_number}):\n${cleanBody}`;
         await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
