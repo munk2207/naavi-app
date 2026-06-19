@@ -1,0 +1,47 @@
+appId: ca.naavi.app
+name: 07 — collapse/expand chat toggle (V57.9.7 one-way bug catcher)
+tags:
+  - chat-ui
+---
+# Catches the V57.9.7 regression where collapsing chat worked but tapping
+# the collapsed bar to expand again had no effect — the toggle was one-way.
+# Requires at least one chat turn so the collapse button appears.
+
+- stopApp
+- launchApp:
+    clearState: false
+
+# Send one message to create a chat turn.
+- assertVisible:
+    text: "Ask MyNaavi"
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "What day is it today?"
+- waitForAnimationToEnd
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      text: "Collapse Chat"
+    timeout: 30000
+
+# ── Step 1: collapse ──────────────────────────────────────────────────────────
+- tapOn:
+    text: "Collapse Chat"
+- extendedWaitUntil:
+    visible:
+      text: "tap to expand"
+    timeout: 5000
+- assertNotVisible:
+    text: "Collapse Chat"
+- takeScreenshot: 07-collapsed
+
+# ── Step 2: expand ────────────────────────────────────────────────────────────
+- tapOn:
+    text: "tap to expand"
+- extendedWaitUntil:
+    visible:
+      text: "Collapse Chat"
+    timeout: 5000
+- assertNotVisible:
+    text: "tap to expand"
+- takeScreenshot: 07-expanded

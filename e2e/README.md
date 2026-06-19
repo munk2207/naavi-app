@@ -56,6 +56,6 @@ Bugs that **Maestro still cannot catch** (need real-device manual testing):
   exact timestamps or other dynamic strings.
 - Wait timeouts default to 10s. Override with `optional: true` for
   best-effort assertions.
-- All scenarios assume the `Wael (auto-tester)` Google account is signed
-  into the emulator's Google account. The first run after a clean
-  install requires a manual sign-in.
+- All scenarios run against the dedicated test account `mynaavidemo@gmail.com`,
+  which must be signed into the emulator before running. This is the same
+  account used by `npm run test:auto` (TEST_USER_ID) and Firebase Test Lab.
