@@ -108,10 +108,11 @@ Deno.serve(async (req) => {
     console.log(`[send-ticket-reply] reply sent for ticket #${ticket.ticket_number} → ${ticket.reporter_email}, MessageID: ${messageId}`);
 
     // ── SMS for voice-call tickets ───────────────────────────────────
-    // Voice callers may not check email — send the reply via SMS too.
+    // Voice callers may not check email — send the full reply via SMS too.
+    let smsSent = false;
     if (ticket.source_channel === 'voice-call' && ticket.reporter_phone) {
       try {
-        const smsText = `MyNaavi support (ticket #${ticket.ticket_number}): ${cleanBody.slice(0, 140)}`;
+        const smsText = `MyNaavi support (ticket #${ticket.ticket_number}):\n${cleanBody}`;
         await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
           method: 'POST',
           headers: {
@@ -121,6 +122,7 @@ Deno.serve(async (req) => {
           },
           body: JSON.stringify({ to: ticket.reporter_phone, body: smsText }),
         });
+        smsSent = true;
         console.log(`[send-ticket-reply] SMS reply sent to ${ticket.reporter_phone} for ticket #${ticket.ticket_number}`);
       } catch (smsErr) {
         console.warn('[send-ticket-reply] SMS reply failed (non-fatal):', smsErr);
@@ -128,7 +130,7 @@ Deno.serve(async (req) => {
     }
 
     // ── Append to replies ────────────────────────────────────────────
-    const newReply = {
+    const newReply: Record<string, unknown> = {
       at:         new Date().toISOString(),
       from_email: SUPPORT_EMAIL,
       from_name:  SUPPORT_NAME,
@@ -136,6 +138,8 @@ Deno.serve(async (req) => {
       body:       reply_body.trim(),
       message_id: messageId,
       sent_by:    staff_email,
+      sms_sent:   smsSent,
+      sms_to:     smsSent ? ticket.reporter_phone : null,
     };
     const replies = Array.isArray(ticket.replies) ? [...ticket.replies, newReply] : [newReply];
 
