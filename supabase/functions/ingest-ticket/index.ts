@@ -211,7 +211,10 @@ serve(async (req) => {
     console.log(`[ingest-ticket] new ticket #${ticket.ticket_number} via ${channel}: "${ticket.subject.slice(0, 60)}"`);
 
     // ── Send acknowledgment email to customer (Postmark) ────────────
-    if (reporterEmail && pmToken) {
+    // Skip all email/SMS sends for known test addresses — prevents auto-tester
+    // runs from flooding support@mynaavi.com with notification emails.
+    const isTestTicket = /\.example\.com$/i.test(reporterEmail) || subject.startsWith('TICKET-TEST-');
+    if (reporterEmail && pmToken && !isTestTicket) {
       const firstName = reporterName.split(/\s+/)[0] || 'there';
       const submittedDate = new Date().toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
       const ackText =
@@ -273,7 +276,7 @@ serve(async (req) => {
     // voice-call and internal-relay originate from phone interactions —
     // the reporter may not have email open. Send an SMS with the ticket
     // number as a safety net so they have immediate confirmation.
-    if ((channel === 'voice-call' || channel === 'internal-relay') && reporterPhone) {
+    if ((channel === 'voice-call' || channel === 'internal-relay') && reporterPhone && !isTestTicket) {
       try {
         const smsBody = `MyNaavi support ticket #${ticket.ticket_number} received. We'll follow up by email within 2 business days.`;
         await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
