@@ -213,7 +213,9 @@ serve(async (req) => {
     // ── Send acknowledgment email to customer (Postmark) ────────────
     // Skip all email/SMS sends for known test addresses — prevents auto-tester
     // runs from flooding support@mynaavi.com with notification emails.
-    const isTestTicket = /\.example\.com$/i.test(reporterEmail) || subject.startsWith('TICKET-TEST-');
+    const isTestTicket = /\.example\.com$/i.test(reporterEmail)
+      || reporterEmail === 'firebase-testlab@mynaavi.com'
+      || subject.startsWith('TICKET-TEST-');
     if (reporterEmail && pmToken && !isTestTicket) {
       const firstName = reporterName.split(/\s+/)[0] || 'there';
       const submittedDate = new Date().toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });

@@ -42,7 +42,6 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 
 | ID | Description | Surface | Notes | Server/AAB | Status |
 |----|-------------|---------|-------|------------|--------|
-| F8a | Support ticket creation from voice phone line | voice | Robert can open a support ticket from the mobile app today. No equivalent path exists on the voice phone line (+1 249 523 5394). Robert should be able to say "I need help" or "something isn't working" and have Naavi open a ticket on his behalf — same ticket system as mobile (F6a). Design needed: trigger phrase detection, ticket body from voice input, confirmation readback. | Server | open |
 | F2b | Demo line maturity (richer scenarios + conversion path + telemetry) | voice | Demo phone line gets richer scenarios, a conversion path back to a real account, and telemetry to see what works. Postponed 2026-05-09 — marketing/growth decisions need a focused session. Three sub-pieces in sequence: telemetry first (total calls, scenario popularity, opt-in rate, signup conversion), conversion attribution second (per-call token in the SMS link), scenario richness third (medication scheduling, navigation, recurring delegation, variable data, light branching). Already shipped: 5 canned scenarios, name capture, personalized SMS recap. | Server | open (postponed) |
 | F5b | Self-cleansing memory on voice | voice | STT mistranscriptions create malformed entries — one "Hussein" can become three knowledge_fragments rows under "Houssain", "Hussein", "Hoosein". Fix: phonetic-merge on read (Soundex / Metaphone variant matching) + detect-and-flag malformed memory at fetch time. **POSTPONED 2026-06-10 (Wael) — needs design decision first.** The `knowledge_fragments` table stores free-text with no structured slot/key column. Schema redesign (adding a structured `slot` column at write time) or Claude-judges-at-read-time are the only viable paths. Design decision required before any code. | Server | postponed — design decision required |
 
@@ -52,7 +51,6 @@ Four lists, each with the same column shape (`ID | Description | Surface | Notes
 
 | ID | Description | Surface | Notes | Server/AAB | Status |
 |----|-------------|---------|-------|------------|--------|
-| T3c | Voice regression suite — automated call-path testing for naavi-voice-server | voice | No automated regression coverage exists for the Twilio voice path today. Every voice change is manually tested by calling +1 249 523 5394. Required: a suite of scripted test calls (or call simulations) that verify the core voice flows — greeting, intent classification, action execution (SET_ACTION_RULE, LOOKUP_CONTACT, READ_CALENDAR, MAKE_CALL, etc.), disambiguation, confirm-then-act, and error paths — without requiring a human caller each time. Approach options: (1) Mock the Twilio/Deepgram layer and unit-test `askClaude` + `executeAction` directly in Node; (2) Use Twilio's test credentials to place real calls and assert on TwiML responses; (3) Extend `npm run test:auto` with a voice-server adapter that posts directly to the Railway endpoint. Referenced in ARCH-1 as remaining work before that item can close. | server | open — approach decision required before coding |
 
 ---
 
@@ -146,6 +144,7 @@ All items confirmed done. Moved here to keep active tables clean.
 
 | ID | Description | Surface | Closed | Reason |
 |----|-------------|---------|--------|--------|
+| F8a | Support ticket creation from voice phone line | voice | 2026-06-19 | Shipped: "I need help" → 3-turn bypass flow (trigger → description → confirmation → ticket creation). SMS confirmation to caller. `ingest-ticket` suppresses email/SMS for test tickets. 6 regression tests in `session-2026-06-19.ts`. |
 | B8a | LIST_RULES synthesize-action backstop | both | 2026-06-17 | Tested by Wael — works on both mobile and voice. No backstop code needed. |
 | F4f | Caller PIN for off-phone verification — 4-digit PIN lets Wael call from any phone and be recognized | mobile | 2026-06-17 | Built and live in mobile Settings. Design in `project_naavi_caller_pin_chosen_over_biometric.md`. |
 | F2a | Onboarding Review (multi-phone + 7 other gaps) | mobile | 2026-06-16 | Closed by Wael — done. |
@@ -184,6 +183,7 @@ All items confirmed done. Moved here to keep active tables clean.
 | T4b | Mobile vs Voice parity audit | docs | 2026-06-12 | Audit produced: `docs/MOBILE_VS_VOICE_PARITY_AUDIT_2026-06-12.md`. 5 voice gaps + 1 mobile gap identified and ranked. Doc is now a live standing document — see CLAUDE.md rule for update obligation. |
 | T4c | Soft-tick presence audit on voice | voice | 2026-06-12 | Audited all silent gaps. One real gap fixed: tick now plays on all inbound calls (including morning-brief) from connect to first user word. Bypass paths inside askClaude() were already covered (tick starts before askClaude() is called). |
 | T2a | Maestro full-suite mobile UI test coverage | mobile | 2026-06-17 | 16 scenarios, 12/16 pass on emulator. 4 failures (08, 11, 12, 13) confirmed working on real phone — emulator timing/state issues only, not product bugs. Suite accepted as-is. |
+| T3c | Voice regression suite — automated call-path testing for naavi-voice-server | voice | 2026-06-19 | Approach #3 shipped: `POST /test/ask` endpoint added to voice server (guarded by VOICE_TEST_SECRET), 6 tests in `tests/catalogue/voice-regression.ts` registered in runner. Covers: endpoint reachability, calendar query, contact lookup, email alert intent, location alert "arrive home" regression guard, graceful unknown intent. All 6 green. Coverage gaps: Deepgram STT accuracy, Twilio TwiML generation, real outbound action execution, audio/TTS output. |
 
 ## Closed Architecture (ARCH)
 

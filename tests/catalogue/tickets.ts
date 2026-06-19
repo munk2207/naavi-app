@@ -20,7 +20,7 @@ const SMOKE_PREFIX = 'TICKET-TEST-';
 
 async function deleteTestTickets(ctx: TestContext) {
   await fetch(
-    `${ctx.supabaseUrl}/rest/v1/tickets?subject=ilike.${encodeURIComponent(SMOKE_PREFIX)}%`,
+    `${ctx.supabaseUrl}/rest/v1/tickets?subject=ilike.${encodeURIComponent(SMOKE_PREFIX + '%')}`,
     {
       method: 'DELETE',
       headers: {
