@@ -700,7 +700,7 @@ async function resolveBeforeEventDate(
 
   // groups: [1]=optional 'a ', [2]=number digit or word, [3]=day|week, [4]=person, [5]=event
   const rawNum     = (m[2] ?? '').toLowerCase().trim();
-  const offsetNum  = WORD_TO_NUM[rawNum] ?? parseInt(rawNum, 10) || 1;
+  const offsetNum  = (WORD_TO_NUM[rawNum] ?? parseInt(rawNum, 10)) || 1;
   const offsetUnit = m[3].toLowerCase(); // 'day' | 'week'
   const personName = m[4].trim();
   const eventType  = m[5].toLowerCase();
