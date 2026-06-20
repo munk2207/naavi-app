@@ -1,0 +1,30 @@
+appId: ca.naavi.app
+name: 00 — test-lab sign-in (runs once before all flows)
+tags:
+  - setup
+---
+# Wipes app state and signs in via the Test Lab button (email/password,
+# no Google OAuth). The session is then live for all subsequent flows
+# which use clearState: false. This flow makes the full Maestro suite
+# self-contained — no snapshot or manual sign-in required.
+
+- stopApp
+- launchApp:
+    clearState: true
+
+# Wait for the sign-in screen to appear
+- extendedWaitUntil:
+    visible:
+      id: "test-lab-sign-in"
+    timeout: 15000
+
+- tapOn:
+    id: "test-lab-sign-in"
+
+# Wait for home screen — confirms session is live
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 30000
+
+- takeScreenshot: 00-sign-in-complete
