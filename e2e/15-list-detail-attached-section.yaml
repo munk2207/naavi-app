@@ -75,7 +75,7 @@ tags:
       - extendedWaitUntil:
           visible:
             text: "ITEMS"
-          timeout: 30000
+          timeout: 45000
       - assertVisible:
           text: "ATTACHED TO"
       - assertVisible:

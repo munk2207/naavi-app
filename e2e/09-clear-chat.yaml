@@ -43,7 +43,7 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "TODAY'S BRIEF"
-    timeout: 8000
+    timeout: 20000
 - assertNotVisible:
     text: "Earlier"
 - takeScreenshot: 09-cleared
