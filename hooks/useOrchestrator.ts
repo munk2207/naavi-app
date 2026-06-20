@@ -902,6 +902,16 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       return;
     }
 
+    // Auto-discard any unconfirmed DRAFT_MESSAGE cards in prior turns before
+    // advancing — they would otherwise stay visible with live Send/Discard buttons
+    // while Naavi has already moved to the next compound item.
+    setTurns(prev => prev.map(t => ({
+      ...t,
+      drafts: (t.drafts ?? []).map((d: any) =>
+        d.type === 'DRAFT_MESSAGE' && !d._voiceConfirmed ? { ...d, _discarded: true } : d
+      ),
+    })));
+
     const action = queue[0];
     compoundQueueRef.current = queue.slice(1);
     const isLast   = compoundQueueRef.current.length === 0;

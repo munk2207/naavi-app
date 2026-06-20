@@ -391,7 +391,11 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
   const [selectedRecipientIdx, setSelectedRecipientIdx] = useState<number>(0);
   const [manualEmail, setManualEmail] = useState<string>('');
   const [overrideManualEntry, setOverrideManualEntry] = useState<boolean>(false);
-  const [discarded, setDiscarded] = useState<boolean>(false);
+  const [discarded, setDiscarded] = useState<boolean>(!!(action as any)._discarded);
+  // Sync if compound queue auto-discards this card after advancing
+  React.useEffect(() => {
+    if ((action as any)._discarded) setDiscarded(true);
+  }, [(action as any)._discarded]);
 
   const channel = String(action.channel ?? 'email').toLowerCase() as 'email' | 'sms' | 'whatsapp';
   const isMessaging = channel === 'sms' || channel === 'whatsapp';
