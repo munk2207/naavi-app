@@ -454,6 +454,23 @@ async function reArmLocationRule(
   }
 }
 
+// Detect bullet-point or numbered compound requests in the USER's own message.
+// Returns individual items, or null if not compound.
+function splitUserCompound(message: string): string[] | null {
+  const lines = message.split('\n').map(l => l.trim()).filter(Boolean);
+  const bulletItems = lines
+    .filter(l => /^[•\-\*]\s+/.test(l))
+    .map(l => l.replace(/^[•\-\*]\s+/, '').trim())
+    .filter(Boolean);
+  if (bulletItems.length >= 2) return bulletItems;
+  const numberedItems = lines
+    .filter(l => /^[1-9]\d*[.)]\s+/.test(l))
+    .map(l => l.replace(/^[1-9]\d*[.)]\s+/, '').trim())
+    .filter(Boolean);
+  if (numberedItems.length >= 2) return numberedItems;
+  return null;
+}
+
 // Extract numbered list items from Claude's pre-confirm text.
 // Used by the compound pre-confirm intercept to process items one at a time.
 function parseCompoundItems(text: string): string[] {
@@ -2011,6 +2028,30 @@ const oneShot = pending.originalAction?.one_shot ?? true;
 
     try {
       let enrichedMessage = userMessage;
+
+      // ── USER-COMPOUND SPLIT ────────────────────────────────────────────────────
+      // Detect bullet-point or numbered compound requests in the USER's own message
+      // and split BEFORE Claude sees the full list. Each item is sent to Claude
+      // individually so Claude never enters a compound pre-confirmation loop.
+      // Path B (isCompoundPreConfirm below) remains as fallback for natural-language
+      // compound phrases not caught here.
+      if (
+        !pendingActionRef.current &&
+        compoundQueueRef.current.length === 0 &&
+        pendingCompoundItemsRef.current.length === 0
+      ) {
+        const splitItems = splitUserCompound(userMessage);
+        if (splitItems && splitItems.length >= 2) {
+          const total = splitItems.length;
+          const original = userMessage.slice(0, 400);
+          pendingCompoundItemsRef.current = splitItems.slice(1).map(
+            (item, i) =>
+              `[COMPOUND-ITEM ${i + 2} of ${total} — full request for context: ${original}]\n${item}`
+          );
+          enrichedMessage = `[COMPOUND-ITEM 1 of ${total} — full request for context: ${original}]\n${splitItems[0]}`;
+          console.log(`[send] user-compound split: ${total} items detected — sending item 1 to Claude`);
+        }
+      }
 
       // ── COMPOUND PRE-CONFIRMATION INTERCEPT ────────────────────────────────────
       // Claude sometimes does a two-step pre-confirmation: lists all N items in

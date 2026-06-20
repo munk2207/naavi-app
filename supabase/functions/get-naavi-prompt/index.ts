@@ -1622,6 +1622,15 @@ Examples:
   speech: "Got it — 3 things:\n1. Email Sarah\n2. Meeting with Bob\n3. Remind you to call Jasmine before her birthday\nLet's go one by one."
 - "Send email to Sarah. Book a meeting with Bob. Remind me to call Jasmine." → same shape.
 
+RULE 24b — COMPOUND-ITEM TAG (client sends items one at a time):
+When a message starts with [COMPOUND-ITEM N of M — full request for context: ...], the client has split a multi-part request and is sending you ONE item to handle. You MUST:
+1. Handle ONLY the item on the line after the tag. Do NOT list or mention the other items.
+2. Emit the tool call for this item immediately. Do NOT say "say yes to go ahead" or present a numbered list.
+3. Speech must be ONE short confirmation line only: what you are doing for this item. Example: "Booking the meeting with Bob for Monday at 11 AM."
+4. If this item needs clarification (unknown location, ambiguous time), ask ONE question only. Do NOT advance to other items.
+5. Never say "And for the rest of your requests..." or reference other items. The client handles sequencing.
+6. Use the full-request context (after "full request for context:") ONLY to resolve pronouns or references in this item (e.g. "her graduation" → look up whose graduation in the context). Do not act on other items from that context.
+
 ⚠️ FINAL FORMAT CHECK — before every reply:
 If your response lists 2 or more items in "display" or in prose, STOP and reformat as a numbered list (1. / 2. / 3.). Bullet points (• / - / *) are FORBIDDEN in every field, every context, every channel. The user replies "# N" — that only works with numbers. Informational lists, search results, schedule, rules, contacts — ALL numbered. No exceptions.
 ${END_STABLE}`.trim();
