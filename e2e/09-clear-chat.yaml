@@ -5,45 +5,35 @@ tags:
 ---
 # Verifies the Clear chat affordance unwinds chat state and
 # returns the user to the brief view.
-#
-# V57.x: sectionTitle has textTransform:uppercase so the brief renders
-# as "TODAY'S BRIEF" in the accessibility tree (not "Today's brief").
-#
-# extendedWaitUntil for "Ask MyNaavi" (40s) mirrors flow 07: it waits
-# for the app to be fully ready after a cold start before submitting.
-# Without this, the placeholder passes assertVisible immediately but
-# the Claude response takes >30s because the app wasn't warmed up.
 
 - stopApp
 - launchApp:
     clearState: false
-
-# Wait for app to be fully ready (not just placeholder visible).
-- extendedWaitUntil:
-    visible:
-      text: "Ask MyNaavi"
-    timeout: 40000
-
+- assertVisible:
+    text: "Ask MyNaavi"
 - tapOn:
     text: "Ask MyNaavi"
 - inputText: "Hello"
 - waitForAnimationToEnd
 - pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 30000
 
-# Collapse Chat appears after Naavi replies. 60s covers cold start
-# response time on an emulator without a pre-warmed snapshot.
+# Collapse Chat button appears once a turn exists.
 - extendedWaitUntil:
     visible:
       text: "Collapse Chat"
-    timeout: 60000
+    timeout: 5000
 - tapOn:
     text: "Collapse Chat"
 
-# sectionTitle style has textTransform:uppercase → "TODAY'S BRIEF".
+# Brief must be visible again.
 - extendedWaitUntil:
     visible:
-      text: "TODAY'S BRIEF"
-    timeout: 20000
+      text: "Today's brief"
+    timeout: 5000
 - assertNotVisible:
-    text: "Earlier"
+    text: "Earlier:"
 - takeScreenshot: 09-cleared

@@ -20,7 +20,7 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "LIST CREATED"
-    timeout: 90000
+    timeout: 30000
 - assertNotVisible:
     text: "what would you like"
 - takeScreenshot: 08-list-created
