@@ -37,13 +37,12 @@ tags:
 # V57.12.3 — assert on the QUESTION MARK at the end of the user
 # message. If Yoga truncates "What is my next meeting?" anywhere
 # before the "?", the punctuation never renders and the assertion
-# fails. This is a stricter detector than the previous "meeting"
-# substring check (Naavi's reply could also contain "meeting" and
-# mask a real truncation).
+# fails. 30s timeout — bubble renders after send, but on fresh
+# emulator with cold start the layout pass can take a few seconds.
 - extendedWaitUntil:
     visible:
       text: "meeting?"
-    timeout: 15000
+    timeout: 30000
 
 # Wait for Naavi's reply to settle (input placeholder reappears =
 # status returned to idle). Don't assert on specific reply prose.

@@ -20,9 +20,21 @@ tags:
 - launchApp:
     clearState: false
 
-# Navigate to Alerts.
-- tapOn:
-    label: "Open menu"
+# Navigate to Alerts — dual strategy for menu tap.
+- runFlow:
+    when:
+      visible:
+        id: "topbar-menu"
+    commands:
+      - tapOn:
+          id: "topbar-menu"
+- runFlow:
+    when:
+      notVisible:
+        id: "topbar-menu"
+    commands:
+      - tapOn:
+          label: "Open menu"
 
 - extendedWaitUntil:
     visible:
