@@ -43,7 +43,7 @@ if (fs.existsSync(envPath)) {
 
 const TWILIO_SID        = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_TOKEN      = process.env.TWILIO_AUTH_TOKEN;
-const NOTIFY_PHONE      = process.env.NOTIFY_PHONE      || '+16137697957';
+const NOTIFY_PHONE      = process.env.NOTIFY_PHONE      || '+16138796681';
 const FROM_PHONE        = '+12495235394';
 const FIREBASE_PROJECT  = process.env.FIREBASE_PROJECT_ID || 'mynaavi-3b74b';
 const GCS_BUCKET        = 'mynaavi-testlab-uploads';
@@ -351,7 +351,7 @@ async function pollUntilDone(matrixId, token, tokenMintedAt) {
   console.log(`     ✓ APK ready (${apkSizeMB} MB)`);
 
   // 3. Upload APK to GCS
-  const apkGcsName = `${GCS_FOLDER}/naavi-v239.apk`;
+  const apkGcsName = `${GCS_FOLDER}/naavi-v267.apk`;
   console.log(`\n3/5  Uploading APK to gs://${GCS_BUCKET}/${apkGcsName}…`);
   const apkUpload = await uploadToGCS(token, tmpApk, apkGcsName, 'application/vnd.android.package-archive');
   if (apkUpload.error) throw new Error(`APK upload failed: ${JSON.stringify(apkUpload.error)}`);
