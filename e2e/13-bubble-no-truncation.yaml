@@ -9,17 +9,18 @@ tags:
 # meeting?" (28 chars) — the data is stored fully but the chat bubble
 # crops to "What is my next" (19 chars) on render.
 #
-# stopApp before launchApp ensures a clean state so cascading failures
-# from the prior flow (12 — long 60s wait) don't leave the app stuck
-# in a "thinking" state that would block the new message submission.
+# No stopApp here: by the time this flow runs, flow 12 has already
+# timed out and the orchestrator finished processing its request
+# (~15-30s into flow 12's 90s window). The app is in 'idle' state.
+# Using stopApp forces a cold start which makes the calendar response
+# take longer and causes the "meeting?" user-bubble timeout to fire.
 
-- stopApp
 - launchApp:
     clearState: false
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
-    timeout: 40000
+    timeout: 20000
 
 - tapOn:
     text: "Ask MyNaavi"
@@ -27,13 +28,14 @@ tags:
 - waitForAnimationToEnd
 - pressKey: Enter
 
-# The user bubble renders immediately after submit. textTransform does
-# NOT apply to ConversationBubble, so "meeting?" (with lowercase) is
-# the actual accessibility text. 30s covers cold app start + render.
+# The user bubble renders after the turn is added (post-response).
+# textTransform does NOT apply to ConversationBubble, so "meeting?"
+# (lowercase) is the actual accessibility text.
+# 45s covers warm response time including any calendar API call.
 - extendedWaitUntil:
     visible:
       text: "meeting?"
-    timeout: 30000
+    timeout: 45000
 
 - extendedWaitUntil:
     visible:
