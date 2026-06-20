@@ -24,5 +24,11 @@ CREATE INDEX IF NOT EXISTS geofence_events_user_fired
 -- RLS: only service role can write; no direct client access
 ALTER TABLE geofence_events ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "service_role_all" ON geofence_events
-  FOR ALL USING (auth.role() = 'service_role');
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='geofence_events' AND policyname='service_role_all'
+  ) THEN
+    CREATE POLICY "service_role_all" ON geofence_events FOR ALL USING (auth.role() = 'service_role');
+  END IF;
+END $$;
