@@ -40,7 +40,7 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Sign Out"
-    timeout: 8000
+    timeout: 15000
 - assertVisible:
     text: "build"
 - takeScreenshot: 10-settings

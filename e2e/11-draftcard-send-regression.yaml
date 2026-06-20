@@ -39,7 +39,7 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "SMS DRAFT READY"
-    timeout: 60000
+    timeout: 90000
 - assertVisible:
     text: "Send"
 

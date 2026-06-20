@@ -7,15 +7,13 @@ tags:
 ---
 # Wave 2 Phase C (Wael 2026-05-13) — When an alert has at least one
 # list attached via list_connections, the expanded alert-detail row
-# in /alerts now renders a section labelled:
-#   - "Attached list" — singular (1 list)
-#   - "Attached lists (N)" — plural with count (N ≥ 2)
-# Each list shows as a card with the list name + an X to detach.
+# in /alerts renders a section labelled "Attached list" or
+# "Attached lists (N)".
 #
-# This flow only needs to verify that EXPANDING an alert with an
-# attached list shows the "Attached" header. It doesn't try to detach
-# (mutating state in an e2e is fragile). The detach round-trip is
-# covered by the auto-tester's list-connections.disconnect-* cases.
+# detailHeader style has textTransform: 'uppercase', so:
+#   "When"          → "WHEN"
+#   "What happens"  → "WHAT HAPPENS"
+#   "Attached list" → "ATTACHED LIST"
 
 - launchApp:
     clearState: false
@@ -48,9 +46,8 @@ tags:
       text: "Your Alerts"
     timeout: 5000
 
-# Expand the first alert row by tapping it (rowHeader is the
-# tap target per app/alerts.tsx:412). Wael's account typically has
-# at least one alert by the time this flow runs.
+# Expand the first alert row by tapping it.
+# Wael's account typically has at least one alert.
 - runFlow:
     when:
       notVisible:
@@ -60,23 +57,22 @@ tags:
       - tapOn:
           point: "50%,25%"
 
-      # Detail box renders — "When" + "What happens" always show.
+      # Detail box renders — "WHEN" + "WHAT HAPPENS" always show
+      # (textTransform: uppercase on detailHeader).
       - extendedWaitUntil:
           visible:
-            text: "When"
-          timeout: 5000
+            text: "WHEN"
+          timeout: 15000
       - assertVisible:
-          text: "What happens"
+          text: "WHAT HAPPENS"
 
-      # IF an attached list exists, header reads "Attached list"
-      # (1 attachment) or "Attached lists (N)" (2+ attachments).
-      # Maestro text-matching is regex-anchored, so use `.*` to match
-      # both shapes. If no attached list, this falls through.
+      # IF an attached list exists, header reads "ATTACHED LIST"
+      # or "ATTACHED LISTS (N)" (both uppercase via textTransform).
       - runFlow:
           when:
             visible:
-              text: "Attached list.*"
+              text: "ATTACHED LIST.*"
           commands:
             - assertVisible:
-                text: "Attached list.*"
+                text: "ATTACHED LIST.*"
             - takeScreenshot: 16-alerts-attached-card

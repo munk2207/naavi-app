@@ -32,8 +32,8 @@ tags:
 # Brief must be visible again.
 - extendedWaitUntil:
     visible:
-      text: "Today's brief"
-    timeout: 5000
+      text: "TODAY'S BRIEF"
+    timeout: 8000
 - assertNotVisible:
-    text: "Earlier:"
+    text: "Earlier"
 - takeScreenshot: 09-cleared

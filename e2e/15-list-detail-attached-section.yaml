@@ -12,6 +12,12 @@ tags:
 #   - "Items" — body lines from the Drive Doc
 # Plus a "Delete list" button at the bottom.
 #
+# sectionHeader style has textTransform: 'uppercase', so all section
+# headers render as uppercase in the accessibility tree:
+#   "Attached to" → "ATTACHED TO"
+#   "Items"       → "ITEMS"
+#   "Delete list" → "DELETE LIST" (button text, also uppercase)
+#
 # This flow assumes there is at least ONE list in the account when it
 # runs (typical for Wael's account post-Wave-2 testing). If the Lists
 # screen is empty, the flow falls through gracefully.
@@ -33,7 +39,7 @@ tags:
         id: "topbar-menu"
     commands:
       - tapOn:
-          point: "95%,9%"
+          label: "Open menu"
 
 - extendedWaitUntil:
     visible:
@@ -63,16 +69,16 @@ tags:
       - tapOn:
           point: "50%,30%"
 
-      # List-detail screen — "Items" + "Attached to" + "Delete list"
-      # always render. Generous timeout because the Drive Doc fetch
-      # can take a few seconds on cold path.
+      # List-detail screen — section headers have textTransform:uppercase
+      # so "Items" → "ITEMS", "Attached to" → "ATTACHED TO".
+      # Generous timeout because the Drive Doc fetch can take a few seconds.
       - extendedWaitUntil:
           visible:
-            text: "Items"
+            text: "ITEMS"
           timeout: 20000
       - assertVisible:
-          text: "Attached to"
+          text: "ATTACHED TO"
       - assertVisible:
-          text: "Delete list"
+          text: "DELETE LIST"
 
       - takeScreenshot: 15-list-detail

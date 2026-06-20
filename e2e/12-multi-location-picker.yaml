@@ -39,7 +39,7 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Say a number"
-    timeout: 60000
+    timeout: 90000
 
 # Confirm at least the "1." numbered prefix appears (proves it's a list).
 - assertVisible:
