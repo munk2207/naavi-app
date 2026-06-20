@@ -726,7 +726,7 @@ async function resolveBeforeEventDate(
     });
     if (!res.ok) return null;
     const data = await res.json();
-    const results: any[] = (data?.results ?? []).flat();
+    const results: any[] = (data?.ranked ?? data?.results ?? []).flat();
 
     // Filter to upcoming results that also match the event type keyword in the title
     const upcoming = results.filter((r: any) => {
