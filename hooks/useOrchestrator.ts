@@ -989,6 +989,13 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         pendingActionRef.current = null;
         setPendingAction(null);
       }
+    } else if (compoundQueueRef.current.length > 0 && AFFIRMATIVE_RE.test(userMessage.trim())) {
+      // Compound queue is mid-flight but pendingActionRef is momentarily null
+      // (race: confirmPending/inline-confirm cleared it before advanceCompoundQueue
+      // set it for the next item). Block this "Yes" from reaching Claude — the
+      // queue will continue on its own once the current step resolves.
+      console.log('[send] compound queue active + affirmative during null-pending window — suppressing Claude round-trip');
+      return;
     } else if (AFFIRMATIVE_RE.test(userMessage.trim())) {
       // Fallback: pendingActionRef is null but user typed Yes.
       // Check if the last turn has an unsent confirmable draft.
@@ -4099,7 +4106,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       if (isCancelled()) return;
       setStatus('speaking');
       setAudioPlaying(true);
-      speakResponse(finalSpeech, language).then(() => {
+      speakResponse(finalSpeech, language).then(async () => {
         // Audio finished (or never started in voice-off mode). Either way the
         // playback path is done.
         setAudioPlaying(false);
@@ -4120,8 +4127,17 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         // send() turn handle teardown. Wael 2026-05-05: Send button
         // was broken because the old logic cleared pendingActionRef
         // immediately after speech ended in tap-to-talk mode.
-        setStatus('idle');
-      }).catch(() => {
+        //
+        // Compound queue: if action[0] was a non-DRAFT_MESSAGE type (CREATE_EVENT,
+        // REMEMBER, SET_ACTION_RULE, etc.) it executes silently without setting
+        // pendingActionRef. After its speech ends, advance the queue so items 2-N
+        // are presented one-by-one instead of being left stuck.
+        if (compoundQueueRef.current.length > 0 && !pendingActionRef.current) {
+          await advanceCompoundQueue(language);
+        } else {
+          setStatus('idle');
+        }
+      }).catch(async () => {
         setAudioPlaying(false);
         if (isCancelled()) return;
         if (statusRef.current === 'answer_active') {
@@ -4129,7 +4145,11 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           return;
         }
         if (statusRef.current === 'cooldown') return;
-        setStatus('idle');
+        if (compoundQueueRef.current.length > 0 && !pendingActionRef.current) {
+          await advanceCompoundQueue(language);
+        } else {
+          setStatus('idle');
+        }
       });
 
     } catch (err) {
