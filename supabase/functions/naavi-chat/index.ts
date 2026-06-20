@@ -685,7 +685,8 @@ async function fetchCalendarPdfBlock(
 // exactly ONE upcoming result exists we inject the resolved date as plain text
 // so Haiku can emit set_action_rule directly — no numbered list shown to user.
 
-const BEFORE_EVENT_RE = /remind\b.{0,80}\b(a\s+)?(\d+|one|two|three|four|five|six|seven)\s*(day|week)s?\s+before\b.{0,80}\b([a-z]+(?:\s+[a-z]+)?)'s?\s+(birthday|graduation|anniversary|wedding|party|event|ceremony)/i;
+// Matches both "one day before her graduation" and "one day before Jasmine's graduation"
+const BEFORE_EVENT_RE = /remind\b.{0,80}\b(a\s+)?(\d+|one|two|three|four|five|six|seven)\s*(day|week)s?\s+before\b.{0,80}\b(?:(?:her|his|their)\s+(birthday|graduation|anniversary|wedding|party|event|ceremony)|([a-z]+(?:\s+[a-z]+)?)'s?\s+(birthday|graduation|anniversary|wedding|party|event|ceremony))/i;
 const WORD_TO_NUM: Record<string, number> = { one:1,two:2,three:3,four:4,five:5,six:6,seven:7 };
 
 async function resolveBeforeEventDate(
@@ -698,12 +699,18 @@ async function resolveBeforeEventDate(
   const m = BEFORE_EVENT_RE.exec(userText);
   if (!m) return null;
 
-  // groups: [1]=optional 'a ', [2]=number digit or word, [3]=day|week, [4]=person, [5]=event
+  // groups: [1]=optional 'a', [2]=number, [3]=day|week
+  // [4]=event type (pronoun branch: "her graduation"), [5]=person name, [6]=event type (possessive branch)
   const rawNum     = (m[2] ?? '').toLowerCase().trim();
   const offsetNum  = (WORD_TO_NUM[rawNum] ?? parseInt(rawNum, 10)) || 1;
-  const offsetUnit = m[3].toLowerCase(); // 'day' | 'week'
-  const personName = m[4].trim();
-  const eventType  = m[5].toLowerCase();
+  const offsetUnit = m[3].toLowerCase();
+  const eventType  = (m[4] ?? m[6] ?? '').toLowerCase();
+  // For possessive branch person name is m[5]; for pronoun branch extract from "call/text/message [name]"
+  let personName   = (m[5] ?? '').trim();
+  if (!personName) {
+    const callMatch = /(?:call|text|message|contact|email|reach)\s+([a-z]+)/i.exec(userText);
+    personName = callMatch ? callMatch[1].trim() : '';
+  }
 
   const query = `${personName} ${eventType}`;
   console.log(`[naavi-chat] before-event pre-search | query="${query}" | offset=${offsetNum} ${offsetUnit}`);
