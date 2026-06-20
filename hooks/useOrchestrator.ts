@@ -4451,6 +4451,13 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     if (compoundQueueRef.current.length > 0) return;
     const nextItem = pendingCompoundItemsRef.current.shift()!;
     console.log(`[compound-pre-confirm] auto-advancing to next item: "${nextItem}"`);
+    // Discard any unconfirmed draft cards from prior turns before advancing
+    setTurns(prev => prev.map(t => ({
+      ...t,
+      drafts: (t.drafts ?? []).map((d: any) =>
+        d.type === 'DRAFT_MESSAGE' && !d._voiceConfirmed ? { ...d, _discarded: true } : d
+      ),
+    })));
     send(nextItem);
   }, [status, send]);
 
