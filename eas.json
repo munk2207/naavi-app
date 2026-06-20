@@ -8,10 +8,10 @@
       "distribution": "internal",
       "channel": "staging",
       "android": {
-        "buildType": "apk",
-        "package": "ca.naavi.app.staging"
+        "buildType": "apk"
       },
       "env": {
+        "APP_VARIANT": "staging",
         "EXPO_PUBLIC_SUPABASE_URL": "https://xugvnfudofuskxoknhve.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh1Z3ZuZnVkb2Z1c2t4b2tuaHZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5OTQ0MDMsImV4cCI6MjA5NzU3MDQwM30.QTwlSyP4c1-jIHQ_PryQFwCiKlk-GhBQ6wdfJv1lzlg"
       }
