@@ -2578,6 +2578,32 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── Before-event reminder: "remind me N days before her graduation" ─────────
+    // Detect, resolve the date server-side, return a confirm response — no Haiku
+    // or Claude call needed. Turn 2 "yes" executes SET_REMINDER via Step 1.4.
+    if (userId && BEFORE_EVENT_RE.test(userText)) {
+      const _beTodayISO = new Date().toISOString().slice(0, 10);
+      const _beSuUrl    = Deno.env.get('SUPABASE_URL') ?? '';
+      const _beInjected = await resolveBeforeEventDate(userText, userId, _beSuUrl, serviceKey, _beTodayISO);
+      if (_beInjected) {
+        // _beInjected is the system note we were injecting — extract the reminder date from it
+        const _beReminderISO = (_beInjected.match(/Reminder date[^:]*:\s*(\d{4}-\d{2}-\d{2})/) ?? [])[1];
+        const _beEventTitle  = (_beInjected.match(/Event:\s*(.+)/) ?? [])[1]?.trim() ?? 'the event';
+        const _bePersonMatch = /(?:call|text|message|contact|email|reach)\s+([a-z]+)/i.exec(userText);
+        const _bePerson      = _bePersonMatch ? _bePersonMatch[1] : '';
+        const _beLabel       = _beReminderISO ? fmtDtLocal(_beReminderISO + 'T09:00:00') : null;
+        if (_beReminderISO && _beLabel) {
+          const _beTitle   = _bePerson ? `Call ${_bePerson}` : `Reminder — ${_beEventTitle}`;
+          const _beDatetime = `${_beReminderISO}T09:00:00`;
+          const _bePending = { intent: 'SET_REMINDER', params: { title: _beTitle, datetime: _beDatetime } };
+          const _beSpeech  = `I'll remind you to ${_beTitle.toLowerCase()} on ${_beLabel}. Say yes to confirm, or no to cancel.`;
+          const _beDisplay = `${_beSpeech}\n<!--PENDING_INTENT:${JSON.stringify(_bePending)}-->`;
+          console.log(`[timing] ${elapsed()} | before-event direct confirm | date=${_beReminderISO} title="${_beTitle}"`);
+          return jsonResponse({ rawText: JSON.stringify({ speech: _beSpeech, display: _beDisplay, actions: [], pendingThreads: [] }) });
+        }
+      }
+    }
+
     // FAST_CHAT_RE — messages that skip the classifier (no Haiku pre-call).
     // Group A: short social/acknowledgement phrases.
     // Group B: common question patterns that are clearly conversational and
