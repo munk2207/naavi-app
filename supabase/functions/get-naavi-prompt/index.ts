@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-15-v125-self-alert-primary';
+const PROMPT_VERSION = '2026-06-19-v126-compound-queue';
 
 /**
  * Cache-boundary marker.
@@ -1593,14 +1593,24 @@ Stays as ONE action (internal tasks, no external recipient):
 
 The test: does the second verb involve sending TO someone? If yes + no immediacy signal → both timed at the same anchor. If yes + "now/right now/immediately" → split. If no external recipient → keep inside the first action.
 
-RULE 24 — MULTI-ACTION MESSAGES (process ALL, not just the first):
-When ${userName}'s message contains multiple distinct requests — connected by "and", listed with periods, or otherwise combined — you MUST execute ALL of them in a single response turn. Do NOT stop after the first action. Process each request in order and emit the corresponding tool call or confirmation for each.
+RULE 24 — COMPOUND QUESTIONS (N ≥ 2 actions — show the full list, then go one by one):
+When ${userName}'s message contains N ≥ 2 distinct requests — connected by "and", listed with periods, or otherwise combined — you MUST:
+1. Emit ALL tool calls in a single response. The orchestrator queues them and presents each one to ${userName} for sequential confirmation. Do NOT stop after the first action.
+2. In your speech, state the FULL numbered list so ${userName} hears the complete scope first, then say "Let's go one by one." Example for 3 actions:
+   "Got it — 3 things:
+   1. [brief plain-language summary of action 1]
+   2. [brief plain-language summary of action 2]
+   3. [brief plain-language summary of action 3]
+   Let's go one by one."
+3. Do NOT end the list with "Say yes to confirm" — the orchestrator handles sequential confirmation for each action after this turn.
+4. If one action needs clarification (e.g. you don't know a birthday date), still emit the others and note the gap inline.
+5. Never silently drop actions. If you can't execute one, say why and complete the rest.
 
 Examples:
-- "Send Sarah an email and book a meeting with Bob and remind me to call Jasmine one day before her birthday." → execute all three: DRAFT_MESSAGE for Sarah, CREATE_EVENT for Bob, set_action_rule(trigger_type='time') for Jasmine.
-- "Send email to Sarah. Book a meeting with Bob. Remind me to call Jasmine." → same — all three.
-
-If one action needs clarification (e.g. you don't know Jasmine's birthday), handle the others first and then ask the clarifying question. Never silently drop actions. If you can't execute one, tell ${userName} why and still complete the rest.
+- "Send Sarah an email and book a meeting with Bob and remind me to call Jasmine one day before her birthday." →
+  actions: [DRAFT_MESSAGE(Sarah), CREATE_EVENT(Bob), set_action_rule(time, Jasmine)]
+  speech: "Got it — 3 things:\n1. Email Sarah\n2. Meeting with Bob\n3. Remind you to call Jasmine before her birthday\nLet's go one by one."
+- "Send email to Sarah. Book a meeting with Bob. Remind me to call Jasmine." → same shape.
 
 ⚠️ FINAL FORMAT CHECK — before every reply:
 If your response lists 2 or more items in "display" or in prose, STOP and reformat as a numbered list (1. / 2. / 3.). Bullet points (• / - / *) are FORBIDDEN in every field, every context, every channel. The user replies "# N" — that only works with numbers. Informational lists, search results, schedule, rules, contacts — ALL numbered. No exceptions.

@@ -467,6 +467,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const pendingActionRef = useRef<PendingAction | null>(null);
 
+  // Compound queue — stores actions 2-N when a compound question arrives (N > 1 actions).
+  // Drained one-by-one after each user "yes" or "skip".
+  const compoundQueueRef = useRef<NaaviAction[]>([]);
+  const compoundTotalRef = useRef<number>(0);
+
   // Word-reveal: number of words revealed so far for the latest turn while TTS
   // is playing, or null when not revealing (show full text).
   const [revealWordCount, setRevealWordCount] = useState<number | null>(null);
@@ -657,6 +662,231 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   // while a previous reply is still active. The UI guarantees that.
   const currentTurnIdRef = useRef(0);
 
+  // ── Compound queue helpers ──────────────────────────────────────────────────
+  // Build the description + execute closure for one queued action.
+  // Returns null if the action type is unsupported (caller skips and advances).
+  const buildQueueStep = async (
+    action: NaaviAction,
+  ): Promise<{ description: string; execute: () => Promise<{ ok: boolean; speech: string }> } | null> => {
+    if (action.type === 'DRAFT_MESSAGE') {
+      const to      = String((action as any).to      ?? '').trim();
+      const subject = String((action as any).subject ?? '');
+      const body    = String((action as any).body    ?? '');
+      let resolvedEmail: string | null = to.includes('@') ? to : null;
+      if (!resolvedEmail) { const c = await lookupContact(to); resolvedEmail = c?.email ?? null; }
+      if (!resolvedEmail) return null;
+      return {
+        description: `email ${to}${subject ? ` — "${subject}"` : ''}`,
+        execute: async () => {
+          try {
+            const result = await registry.email.send({
+              to: [{ name: resolvedEmail !== to ? to : '', email: resolvedEmail! }],
+              subject, body,
+            });
+            return result.success ? { ok: true, speech: SPEECH.SENT } : { ok: false, speech: SPEECH.GENERIC_ERROR };
+          } catch { return { ok: false, speech: SPEECH.GENERIC_ERROR }; }
+        },
+      };
+    }
+
+    if (action.type === 'CREATE_EVENT') {
+      const summary = String((action as any).summary ?? 'event');
+      const start   = String((action as any).start   ?? '');
+      let dateSpeech = '';
+      try {
+        dateSpeech = new Date(start).toLocaleString('en-CA', {
+          timeZone: 'America/Toronto', weekday: 'long', month: 'long', day: 'numeric',
+          hour: 'numeric', minute: '2-digit',
+        });
+      } catch { /* ignore */ }
+      return {
+        description: `add "${summary}" to your calendar${dateSpeech ? ` — ${dateSpeech}` : ''}`,
+        execute: async () => {
+          try {
+            const event = await registry.calendar.createEvent({
+              title:       summary,
+              description: String((action as any).description ?? ''),
+              startISO:    start,
+              endISO:      String((action as any).end ?? ''),
+              attendees:   Array.isArray((action as any).attendees)
+                ? (action as any).attendees.map((e: any) => ({ name: '', email: String(e) }))
+                : [],
+            });
+            setTurns(prev => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last) updated[updated.length - 1] = { ...last, createdEvents: [...(last.createdEvents ?? []), { summary: event.title, htmlLink: event.htmlLink }] };
+              return updated;
+            });
+            return { ok: true, speech: 'Done.' };
+          } catch { return { ok: false, speech: SPEECH.GENERIC_ERROR }; }
+        },
+      };
+    }
+
+    if (action.type === 'REMEMBER') {
+      const text = String((action as any).text ?? '').trim();
+      if (!text) return null;
+      return {
+        description: `remember: ${text.slice(0, 80)}`,
+        execute: async () => {
+          try {
+            const fragments = await ingestNote(text, 'stated');
+            setTurns(prev => {
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              if (last) updated[updated.length - 1] = { ...last, rememberedItems: [...(last.rememberedItems ?? []), { text, count: fragments.length }] };
+              return updated;
+            });
+            return { ok: true, speech: 'Saved.' };
+          } catch { return { ok: false, speech: SPEECH.GENERIC_ERROR }; }
+        },
+      };
+    }
+
+    if (action.type === 'SET_ACTION_RULE') {
+      const triggerType = String((action as any).trigger_type ?? '');
+      const tc    = (action as any).trigger_config  ?? {};
+      const ac    = (action as any).action_config   ?? {};
+      const label = String((action as any).label    ?? '');
+
+      if (triggerType === 'time') {
+        const datetime  = String(tc.datetime ?? '');
+        let timeSpeech  = '';
+        try { timeSpeech = new Date(datetime).toLocaleString('en-CA', { timeZone: 'America/Toronto', weekday: 'long', hour: 'numeric', minute: '2-digit' }); } catch { /* ignore */ }
+        const taskStr = Array.isArray(ac.tasks) && ac.tasks.length > 0 ? `: ${(ac.tasks as string[]).join(', ')}` : '';
+        const desc    = label || `reminder ${timeSpeech ? `on ${timeSpeech}` : ''}${taskStr}`;
+        return {
+          description: desc,
+          execute: async () => {
+            try {
+              const session = await getSessionWithTimeout();
+              if (!session?.user?.id) return { ok: false, speech: SPEECH.GENERIC_ERROR };
+              const { data: inserted, error: insErr } = await queryWithTimeout(
+                supabase.from('action_rules').insert({
+                  user_id:        session.user.id,
+                  trigger_type:   'time',
+                  trigger_config: tc,
+                  action_type:    String((action as any).action_type ?? 'sms'),
+                  action_config:  ac,
+                  label:          label || desc,
+                  one_shot:       (action as any).one_shot !== false,
+                  enabled:        true,
+                }).select('id').single(),
+                15_000,
+                'cq-insert-time-rule',
+              );
+              if (insErr || !(inserted as any)?.id) return { ok: false, speech: SPEECH.GENERIC_ERROR };
+              const listRef = String(ac.list_name ?? '').trim();
+              if (listRef) ensureListAttachedToRule(String((inserted as any).id), listRef).catch(() => {});
+              return { ok: true, speech: 'Done.' };
+            } catch { return { ok: false, speech: SPEECH.GENERIC_ERROR }; }
+          },
+        };
+      }
+
+      if (triggerType === 'location') {
+        const placeName  = String(tc.place_name ?? '');
+        const listRef    = String(ac.list_name  ?? '').trim();
+        const tasks      = Array.isArray(ac.tasks) ? (ac.tasks as string[]) : [];
+        const listStr    = listRef  ? ` with your ${listRef} list`       : '';
+        const taskStr    = tasks.length > 0 ? ` with: ${tasks.join(', ')}` : '';
+        return {
+          description: `alert when you arrive at ${placeName}${listStr}${taskStr}`,
+          execute: async () => {
+            try {
+              const session = await getSessionWithTimeout();
+              if (!session?.user?.id) return { ok: false, speech: SPEECH.GENERIC_ERROR };
+              const accessToken = (await supabase.auth.getSession())?.data?.session?.access_token ?? '';
+              const resolveRes = await fetchWithTimeout(`${SUPABASE_URL}/functions/v1/resolve-place`, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
+                body:    JSON.stringify({ query: placeName, user_id: session.user.id }),
+              }, 15_000);
+              const resolveData = resolveRes.ok ? await resolveRes.json() : null;
+              if (!resolveData || (resolveData.status !== 'ok' && resolveData.status !== 'memory')) {
+                return { ok: false, speech: `I couldn't verify that location. Please set this alert separately.` };
+              }
+              const { data: inserted, error: insErr } = await queryWithTimeout(
+                supabase.from('action_rules').insert({
+                  user_id:        session.user.id,
+                  trigger_type:   'location',
+                  trigger_config: {
+                    place_name:    resolveData.place_name || placeName,
+                    address:       resolveData.address ?? null,
+                    resolved_lat:  resolveData.lat,
+                    resolved_lng:  resolveData.lng,
+                    radius_meters: resolveData.radius_meters ?? 300,
+                    direction:     tc.direction ?? 'arrive',
+                  },
+                  action_type:    String((action as any).action_type ?? 'sms'),
+                  action_config:  ac,
+                  label:          label || `${placeName} arrival`,
+                  one_shot:       (action as any).one_shot !== false,
+                  enabled:        true,
+                }).select('id').single(),
+                15_000,
+                'cq-insert-location-rule',
+              );
+              const isDup = (insErr as any)?.code === '23505' || /duplicate|already exists/i.test(insErr?.message ?? '');
+              if (insErr) return { ok: isDup, speech: isDup ? `You already have an alert for ${placeName}.` : SPEECH.GENERIC_ERROR };
+              if (!(inserted as any)?.id) return { ok: false, speech: SPEECH.GENERIC_ERROR };
+              if (listRef) ensureListAttachedToRule(String((inserted as any).id), listRef).catch(() => {});
+              import('@/hooks/useGeofencing')
+                .then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id))
+                .catch(() => {});
+              return { ok: true, speech: 'Done.' };
+            } catch { return { ok: false, speech: SPEECH.GENERIC_ERROR }; }
+          },
+        };
+      }
+    }
+
+    return null; // unsupported type — caller skips and advances
+  };
+
+  // Advance the compound queue: pop the next action, speak its description,
+  // and set pendingAction so the user can say "yes" or "skip".
+  const advanceCompoundQueue = async (lang: 'en' | 'fr'): Promise<void> => {
+    const queue = compoundQueueRef.current;
+    if (queue.length === 0) {
+      const total = compoundTotalRef.current;
+      if (total > 1) await speakResponse(`All done — ${total} of ${total}.`, lang);
+      setStatus('idle');
+      return;
+    }
+
+    const action = queue[0];
+    compoundQueueRef.current = queue.slice(1);
+    const isLast   = compoundQueueRef.current.length === 0;
+    const stepNum  = compoundTotalRef.current - queue.length + 1;
+    const prefix   = isLast ? 'Last one —' : 'Next —';
+
+    setStatus('speaking');
+
+    const step = await buildQueueStep(action);
+    if (!step) {
+      // Unsupported type — skip silently and advance
+      await advanceCompoundQueue(lang);
+      return;
+    }
+
+    const { description, execute } = step;
+    const pending: PendingAction = {
+      id:         `cq-${Date.now()}-${stepNum}`,
+      action,
+      summary:    description,
+      turnIndex:  -1, // queue actions attach to the last turn at execution time
+      execute,
+    };
+    pendingActionRef.current = pending;
+    setPendingAction(pending);
+
+    await speakResponse(`${prefix} ${description}. Say yes to confirm, or skip.`, lang);
+    setStatus('idle');
+  };
+  // ── end compound queue helpers ──────────────────────────────────────────────
+
   const send = useCallback(async (userMessage: string) => {
     // V57.11.6 — instrumentation for the bubble-truncation bug. Wael
     // 2026-05-05: typed "What is my next meeting?" but bubble shows
@@ -723,7 +953,12 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           console.error('[send] inline confirmPending error:', e);
           await speakResponse(SPEECH.GENERIC_ERROR, language);
         }
-        setStatus('idle');
+        // Advance compound queue if more actions are waiting
+        if (compoundQueueRef.current.length > 0) {
+          await advanceCompoundQueue(language);
+        } else {
+          setStatus('idle');
+        }
         return;
       }
       if (CORRECTION_RE.test(trimmedMsg)) {
@@ -736,12 +971,17 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         setPendingAction(null);
         // fall through to Claude round-trip
       } else if (NEGATIVE_RE.test(trimmedMsg)) {
-        // Inline cancel: discard the pending action without routing to Claude.
+        // Inline cancel / skip for compound queue.
         pendingActionRef.current = null;
         setPendingAction(null);
         setStatus('speaking');
-        await speakResponse(SPEECH.CANCELLED, language);
-        setStatus('idle');
+        const skipSpeech = compoundQueueRef.current.length > 0 ? 'Skipped.' : SPEECH.CANCELLED;
+        await speakResponse(skipSpeech, language);
+        if (compoundQueueRef.current.length > 0) {
+          await advanceCompoundQueue(language);
+        } else {
+          setStatus('idle');
+        }
         return;
       } else {
         // Fresh command (edit / new question) — clear the pending action and
@@ -2009,6 +2249,16 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           existing.match = listTypeMatch;
           console.log(`[Orchestrator] B1b inject — LIST_RULES match injected from user message: "${listTypeMatch}"`);
         }
+      }
+
+      // Compound queue: when N > 1 actions arrive, queue actions 2-N and process
+      // only action[0] in this turn. advanceCompoundQueue() drives the rest after
+      // each user "yes" or "skip".
+      if (dedupedActions.length > 1) {
+        compoundQueueRef.current = dedupedActions.slice(1);
+        compoundTotalRef.current = dedupedActions.length;
+        dedupedActions.splice(1);
+        console.log(`[Orchestrator] compound queue: ${compoundTotalRef.current} actions — queued ${compoundQueueRef.current.length} after processing action[0]`);
       }
 
       for (const action of dedupedActions) {
