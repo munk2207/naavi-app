@@ -678,6 +678,83 @@ async function fetchCalendarPdfBlock(
   }
 }
 
+// ── Pre-search: "remind me N days before person's event" injection ────────────
+// When the user asks to be reminded before someone's birthday/graduation/etc.,
+// Claude normally emits GLOBAL_SEARCH and the mobile displays raw results.
+// Instead, we detect the pattern here, run the search server-side, and if
+// exactly ONE upcoming result exists we inject the resolved date as plain text
+// so Haiku can emit set_action_rule directly — no numbered list shown to user.
+
+const BEFORE_EVENT_RE = /remind\b.{0,60}\b(\d+)\s*(day|week)s?\s+before\b.{0,80}\b([a-z]+(?:\s+[a-z]+)?)'s?\s+(birthday|graduation|anniversary|wedding|party|event|ceremony)/i;
+
+async function resolveBeforeEventDate(
+  userText: string,
+  userId: string,
+  supabaseUrl: string,
+  serviceKey: string,
+  todayISO: string,
+): Promise<string | null> {
+  const m = BEFORE_EVENT_RE.exec(userText);
+  if (!m) return null;
+
+  const offsetNum  = parseInt(m[1], 10);
+  const offsetUnit = m[2].toLowerCase(); // 'day' | 'week'
+  const personName = m[3].trim();
+  const eventType  = m[4].toLowerCase();
+
+  const query = `${personName} ${eventType}`;
+  console.log(`[naavi-chat] before-event pre-search | query="${query}" | offset=${offsetNum} ${offsetUnit}`);
+
+  try {
+    const res = await fetch(`${supabaseUrl}/functions/v1/global-search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${serviceKey}`,
+      },
+      body: JSON.stringify({ query, user_id: userId, adapters: ['calendar', 'knowledge'] }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const results: any[] = (data?.results ?? []).flat();
+
+    // Filter to upcoming results only (date >= today)
+    const upcoming = results.filter((r: any) => {
+      const dateStr = r.date ?? r.start ?? r.event_date ?? '';
+      if (!dateStr) return false;
+      return dateStr.slice(0, 10) >= todayISO;
+    });
+
+    if (upcoming.length !== 1) {
+      console.log(`[naavi-chat] before-event pre-search | ${upcoming.length} upcoming results — falling through to Claude`);
+      return null;
+    }
+
+    const hit = upcoming[0];
+    const eventDateStr: string = (hit.date ?? hit.start ?? hit.event_date ?? '').slice(0, 10);
+    const eventDate = new Date(eventDateStr + 'T12:00:00Z');
+    const offsetDays = offsetUnit === 'week' ? offsetNum * 7 : offsetNum;
+    const reminderDate = new Date(eventDate.getTime() - offsetDays * 86_400_000);
+    const reminderISO = reminderDate.toISOString().slice(0, 10);
+
+    const eventTitle = hit.title ?? hit.name ?? hit.summary ?? query;
+    const injection = `[SYSTEM NOTE — do NOT show this to the user]
+Calendar search found exactly one upcoming match for "${query}":
+  Event: ${eventTitle}
+  Event date: ${eventDateStr}
+  Reminder date (${offsetNum} ${offsetUnit}${offsetNum > 1 ? 's' : ''} before): ${reminderISO}
+
+Emit set_action_rule immediately with trigger_type="time", datetime="${reminderISO}T09:00:00", and include the confirm prompt "Say yes to confirm, or tell me what to change."
+Do NOT show a numbered list. Do NOT ask what date the event is on. Use the date above.`;
+
+    console.log(`[naavi-chat] before-event pre-search | injecting reminder date ${reminderISO} for event ${eventDateStr}`);
+    return injection;
+  } catch (err) {
+    console.error('[naavi-chat] before-event pre-search failed:', err);
+    return null;
+  }
+}
+
 // ── Google Contacts lookup ────────────────────────────────────────────────────
 
 async function lookupContactsByName(
@@ -2973,12 +3050,33 @@ Deno.serve(async (req) => {
     // Only fires for calendar-shaped queries; otherwise no-op.
     let augmentedMessages = messages;
     if (userId) {
+      const supaUrl = Deno.env.get('SUPABASE_URL') ?? '';
+
+      // "Remind me N days before person's event" pre-search injection.
+      // If exactly one upcoming calendar match found, inject the resolved date
+      // so Haiku emits set_action_rule directly instead of emitting GLOBAL_SEARCH.
+      const todayISO = new Date().toISOString().slice(0, 10);
+      const beforeEventInjection = await resolveBeforeEventDate(
+        userText, userId, supaUrl, serviceKey, todayISO,
+      );
+      if (beforeEventInjection) {
+        console.log(`[timing] ${elapsed()} | before-event date injected for Claude`);
+        const copy = [...messages];
+        const lastIdx = copy.map((m: { role: string }) => m.role).lastIndexOf('user');
+        if (lastIdx !== -1) {
+          const lastMsg = copy[lastIdx];
+          const existingText = typeof lastMsg.content === 'string' ? lastMsg.content : userText;
+          copy[lastIdx] = { ...lastMsg, content: `${existingText}\n\n${beforeEventInjection}` };
+          augmentedMessages = copy;
+        }
+      }
+
       const calBlock = await fetchCalendarPdfBlock(supabase, userId, userText);
       if (calBlock) {
         console.log(`[timing] ${elapsed()} | calendar PDF attached for Claude`);
         // Append the PDF to the last user message's content. If content is a
         // plain string, upgrade to an array so we can mix text + document.
-        const copy = [...messages];
+        const copy = [...augmentedMessages];
         const lastIdx = copy.map((m: { role: string }) => m.role).lastIndexOf('user');
         if (lastIdx !== -1) {
           const lastMsg = copy[lastIdx];
