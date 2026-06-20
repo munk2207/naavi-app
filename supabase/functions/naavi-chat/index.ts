@@ -718,11 +718,13 @@ async function resolveBeforeEventDate(
     const data = await res.json();
     const results: any[] = (data?.results ?? []).flat();
 
-    // Filter to upcoming results only (date >= today)
+    // Filter to upcoming results that also match the event type keyword in the title
     const upcoming = results.filter((r: any) => {
       const dateStr = r.date ?? r.start ?? r.event_date ?? '';
       if (!dateStr) return false;
-      return dateStr.slice(0, 10) >= todayISO;
+      if (dateStr.slice(0, 10) < todayISO) return false;
+      const title = (r.title ?? r.name ?? r.summary ?? '').toLowerCase();
+      return title.includes(eventType);
     });
 
     if (upcoming.length !== 1) {
