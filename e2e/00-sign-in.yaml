@@ -1,30 +1,48 @@
 appId: ca.naavi.app
-name: 00 — test-lab sign-in (runs once before all flows)
+name: 00 — Google OAuth sign-in for mynaavidemo@gmail.com
 tags:
   - setup
 ---
-# Wipes app state and signs in via the Test Lab button (email/password,
-# no Google OAuth). The session is then live for all subsequent flows
-# which use clearState: false. This flow makes the full Maestro suite
+# Signs in with mynaavidemo@gmail.com via Google OAuth.
+# The system-level Google account is already on the emulator so Maestro
+# can tap through the account picker automatically. This makes the suite
 # self-contained — no snapshot or manual sign-in required.
 
 - stopApp
 - launchApp:
     clearState: true
 
-# Wait for the sign-in screen to appear
+# Wait for the sign-in screen
 - extendedWaitUntil:
     visible:
-      id: "test-lab-sign-in"
+      text: "Sign in with Google"
     timeout: 15000
 
 - tapOn:
-    id: "test-lab-sign-in"
+    text: "Sign in with Google"
 
-# Wait for home screen — confirms session is live
+# Chrome Custom Tab opens — tap the mynaavidemo account in the picker
+- extendedWaitUntil:
+    visible:
+      text: "mynaavidemo@gmail.com"
+    timeout: 20000
+
+- tapOn:
+    text: "mynaavidemo@gmail.com"
+
+# Google may show a consent/continue screen — tap through if present
+- runFlow:
+    when:
+      visible:
+        text: "Continue"
+    commands:
+      - tapOn:
+          text: "Continue"
+
+# Wait for home screen — confirms OAuth completed and session is live
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
-    timeout: 30000
+    timeout: 45000
 
 - takeScreenshot: 00-sign-in-complete
