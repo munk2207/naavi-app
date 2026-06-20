@@ -92,8 +92,8 @@ export const session2026_05_27Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-06-19-v126-compound-queue',
-        `Expected version "2026-06-19-v126-compound-queue", got "${version}"`,
+        version === '2026-06-20-v127-compound-no-repeat',
+        `Expected version "2026-06-20-v127-compound-no-repeat", got "${version}"`,
       );
     },
   },
