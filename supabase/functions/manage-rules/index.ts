@@ -296,8 +296,38 @@ serve(async (req) => {
         .select('id')
         .single();
       if (insErr) {
-        // 23505 = unique_violation — row already exists, treat as idempotent success
+        // 23505 = unique_violation — existing rule at this trigger slot.
+        // If the new request carries tasks or list_name, merge them in rather
+        // than silently dropping the request (user intended to add to the rule).
         if ((insErr as any).code === '23505') {
+          const newAC: Record<string, any> = body.action_config ?? {};
+          const newTasks: string[] = Array.isArray(newAC.tasks) ? newAC.tasks
+            : (typeof newAC.body === 'string' && newAC.body ? [newAC.body] : []);
+          const newListName = String(newAC.list_name ?? '').trim();
+          if (newTasks.length > 0 || newListName) {
+            // Find the conflicting rule to merge into.
+            let q = admin.from('action_rules').select('id, action_config')
+              .eq('user_id', userId).eq('trigger_type', body.trigger_type).eq('enabled', true);
+            if (body.trigger_type === 'time') {
+              const dt = String((body.trigger_config as any)?.datetime ?? '');
+              if (dt) q = (q as any).eq('trigger_config->>datetime', dt);
+            }
+            const { data: existingRule } = await (q as any).maybeSingle();
+            if (existingRule) {
+              const ec = existingRule.action_config ?? {};
+              const merged: Record<string, any> = { ...ec };
+              if (newTasks.length > 0) {
+                const et = Array.isArray(ec.tasks) ? ec.tasks : [];
+                merged.tasks = [...new Set([...et, ...newTasks])];
+              }
+              if (newListName) merged.list_name = newListName;
+              await admin.from('action_rules').update({ action_config: merged }).eq('id', existingRule.id);
+              console.log(`[manage-rules] merged tasks into existing rule ${existingRule.id}`);
+              return new Response(JSON.stringify({ ok: true, merged: true, id: existingRule.id }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              });
+            }
+          }
           return new Response(JSON.stringify({ ok: true, duplicate: true }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });

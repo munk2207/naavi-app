@@ -793,7 +793,36 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
                 15_000,
                 'cq-insert-time-rule',
               );
-              if (insErr || !(inserted as any)?.id) return { ok: false, speech: SPEECH.GENERIC_ERROR };
+              if (insErr) {
+                // 23505 = unique_violation — a rule already exists at this datetime.
+                // Merge tasks/list_name into the existing rule instead of failing.
+                if ((insErr as any).code === '23505') {
+                  const newTasks: string[] = Array.isArray(ac.tasks) ? (ac.tasks as string[])
+                    : (typeof ac.body === 'string' && ac.body ? [ac.body] : []);
+                  const newListName = String(ac.list_name ?? '').trim();
+                  const dtVal = String((tc as any).datetime ?? '');
+                  const { data: existing } = await queryWithTimeout(
+                    (supabase.from('action_rules').select('id, action_config')
+                      .eq('user_id', session.user.id).eq('trigger_type', 'time').eq('enabled', true)
+                      .filter('trigger_config->>datetime', 'eq', dtVal) as any).maybeSingle(),
+                    10_000, 'cq-find-time-rule',
+                  );
+                  if (existing) {
+                    const ec = (existing as any).action_config ?? {};
+                    const merged: Record<string, any> = { ...ec };
+                    if (newTasks.length > 0) {
+                      const et: string[] = Array.isArray(ec.tasks) ? ec.tasks : [];
+                      merged.tasks = [...new Set([...et, ...newTasks])];
+                    }
+                    if (newListName) merged.list_name = newListName;
+                    await supabase.from('action_rules').update({ action_config: merged }).eq('id', (existing as any).id);
+                    if (newListName) ensureListAttachedToRule(String((existing as any).id), newListName).catch(() => {});
+                    return { ok: true, speech: 'Done. Added to your existing reminder at that time.' };
+                  }
+                }
+                return { ok: false, speech: SPEECH.GENERIC_ERROR };
+              }
+              if (!(inserted as any)?.id) return { ok: false, speech: SPEECH.GENERIC_ERROR };
               const listRef = String(ac.list_name ?? '').trim();
               if (listRef) ensureListAttachedToRule(String((inserted as any).id), listRef).catch(() => {});
               return { ok: true, speech: 'Done.' };

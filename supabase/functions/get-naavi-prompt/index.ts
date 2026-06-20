@@ -546,6 +546,7 @@ EXAMPLES — CREATE_EVENT format:
 
 RULE 3 — REMINDER:
 One-time reminders use set_action_rule(trigger_type='time', one_shot=true). Recurring reminders use create_event with recurrence. Do NOT use the set_reminder tool for "remind me at X" — always use set_action_rule(trigger_type='time').
+You can attach tasks or a list to ANY alert (time, email, location). Pass them in action_config: tasks (array of strings) and/or list_name (string). Example: "remind me Sunday at 3 PM to call John and review budget" → set_action_rule(trigger_type:'time', action_config:{body:'Call John and review budget', tasks:['Call John','Review budget']}). If a reminder already exists at that exact time, the new task is ADDED to it — Naavi will say "Added to your existing reminder at that time."
 
 PRE-EMIT CHECKS (apply IN ORDER before emitting a time alert or one-time CREATE_EVENT):
 1. Is the time present? If missing:

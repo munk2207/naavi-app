@@ -2289,9 +2289,11 @@ Deno.serve(async (req) => {
               const insErr = (!_mrRes.ok || _mrData.error) ? (_mrData.error ?? 'manage-rules failed') : null;
               const speech = insErr
                 ? `I had trouble saving that alert — please try again.`
-                : `Done. ${desc}`;
+                : _mrData.merged
+                  ? `Done. Added to your existing reminder at that time.`
+                  : `Done. ${desc}`;
               if (insErr) console.error(`[timing] ${elapsed()} | SET_ACTION_RULE manage-rules failed: ${insErr}`);
-              else console.log(`[timing] ${elapsed()} | SET_ACTION_RULE manage-rules succeeded`);
+              else console.log(`[timing] ${elapsed()} | SET_ACTION_RULE manage-rules succeeded | merged=${!!_mrData.merged}`);
               return jsonResponse({ rawText: JSON.stringify({ speech, display: speech, actions: [], pendingThreads: [] }) });
             }
           } catch (_) { /* fall through to Claude */ }
