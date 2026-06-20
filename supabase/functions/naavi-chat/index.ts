@@ -685,7 +685,8 @@ async function fetchCalendarPdfBlock(
 // exactly ONE upcoming result exists we inject the resolved date as plain text
 // so Haiku can emit set_action_rule directly — no numbered list shown to user.
 
-const BEFORE_EVENT_RE = /remind\b.{0,60}\b(\d+)\s*(day|week)s?\s+before\b.{0,80}\b([a-z]+(?:\s+[a-z]+)?)'s?\s+(birthday|graduation|anniversary|wedding|party|event|ceremony)/i;
+const BEFORE_EVENT_RE = /remind\b.{0,80}\b(a\s+)?(\d+|one|two|three|four|five|six|seven)\s*(day|week)s?\s+before\b.{0,80}\b([a-z]+(?:\s+[a-z]+)?)'s?\s+(birthday|graduation|anniversary|wedding|party|event|ceremony)/i;
+const WORD_TO_NUM: Record<string, number> = { one:1,two:2,three:3,four:4,five:5,six:6,seven:7 };
 
 async function resolveBeforeEventDate(
   userText: string,
@@ -697,10 +698,12 @@ async function resolveBeforeEventDate(
   const m = BEFORE_EVENT_RE.exec(userText);
   if (!m) return null;
 
-  const offsetNum  = parseInt(m[1], 10);
-  const offsetUnit = m[2].toLowerCase(); // 'day' | 'week'
-  const personName = m[3].trim();
-  const eventType  = m[4].toLowerCase();
+  // groups: [1]=optional 'a ', [2]=number digit or word, [3]=day|week, [4]=person, [5]=event
+  const rawNum     = (m[2] ?? '').toLowerCase().trim();
+  const offsetNum  = WORD_TO_NUM[rawNum] ?? parseInt(rawNum, 10) || 1;
+  const offsetUnit = m[3].toLowerCase(); // 'day' | 'week'
+  const personName = m[4].trim();
+  const eventType  = m[5].toLowerCase();
 
   const query = `${personName} ${eventType}`;
   console.log(`[naavi-chat] before-event pre-search | query="${query}" | offset=${offsetNum} ${offsetUnit}`);
