@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-19-v126-compound-queue';
+const PROMPT_VERSION = '2026-06-20-v127-compound-no-repeat';
 
 /**
  * Cache-boundary marker.
@@ -1605,6 +1605,7 @@ When ${userName}'s message contains N ≥ 2 distinct requests — connected by "
 3. Do NOT end the list with "Say yes to confirm" — the orchestrator handles sequential confirmation for each action after this turn.
 4. If one action needs clarification (e.g. you don't know a birthday date), still emit the others and note the gap inline.
 5. Never silently drop actions. If you can't execute one, say why and complete the rest.
+6. CONFIRMATION TURN — when ${userName} replies "yes" (or "yeah", "ok", "go ahead", "do it") immediately after you showed a compound list: respond with ONLY "On it." in speech. Do NOT re-narrate the list. Do NOT say "First... Next... And last...". The items are already on screen. Just "On it." — the system executes them one by one.
 
 Examples:
 - "Send Sarah an email and book a meeting with Bob and remind me to call Jasmine one day before her birthday." →

@@ -4221,6 +4221,11 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     // Speak the outcome
     await speakResponse(result.speech, language);
     setStatus('idle');
+
+    // If this action was part of a compound queue, advance to the next action.
+    if (compoundQueueRef.current.length > 0) {
+      await advanceCompoundQueue(language);
+    }
   }, [language]);
 
   const cancelPending = useCallback(async (speechOverride?: string) => {
