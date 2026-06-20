@@ -1956,6 +1956,29 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     try {
       let enrichedMessage = userMessage;
 
+      // ── COMPOUND PRE-CONFIRMATION INTERCEPT ────────────────────────────────────
+      // Claude sometimes does a two-step pre-confirmation: lists all N items in
+      // text (no tool calls), ends with "say yes to confirm", waits for user.
+      // When "Yes" arrives in this state (no pending action, empty queue), Claude
+      // re-narrates everything instead of just executing. Fix: detect this pattern
+      // and inject a hard execution directive into the enriched message so Claude
+      // responds with "On it." + tool calls only.
+      if (
+        AFFIRMATIVE_RE.test(userMessage.trim()) &&
+        !pendingActionRef.current &&
+        compoundQueueRef.current.length === 0
+      ) {
+        const lastNaaviTurn = [...turns].reverse().find(t => t.role === 'assistant');
+        const lastText = lastNaaviTurn?.text ?? '';
+        const isCompoundPreConfirm =
+          /\n\s*[1-9]\./m.test(lastText) &&             // numbered list present
+          /say\s+yes|yes\s+to\s+(go\s+ahead|confirm)/i.test(lastText); // pre-confirm phrase
+        if (isCompoundPreConfirm) {
+          enrichedMessage = `${userMessage}\n\n[SYSTEM — EXECUTE NOW]: The user confirmed. You MUST: (1) Emit ALL tool calls immediately — include every item from your previous list. (2) Your speech MUST be ONLY "On it." — no re-narration, no "First... Next...", no repeating the list. (3) For any item still needing clarification, emit the clear ones and ask ONE brief question at the end of speech. Do not re-list everything.`;
+          console.log('[send] compound pre-confirm intercept — injecting execute-now directive');
+        }
+      }
+
       // ── STEP 1: Person context lookup (async) ──────────────────────────────────
       const personName = extractPersonQuery(userMessage);
       console.log('[Orchestrator] extractPersonQuery result:', personName);
