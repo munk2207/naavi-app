@@ -1,5 +1,27 @@
 # CLAUDE.md — MyNaavi Project Instructions
 
+## ⭐⭐⭐⭐ STAGING-FIRST — ALL DEV WORK GOES TO STAGING, NEVER PRODUCTION (Wael 2026-06-20)
+
+**Two Supabase projects exist. Default is ALWAYS staging. Production is read-only unless Wael explicitly says "deploy to production."**
+
+| Environment | Supabase project ref | App package | App name |
+|---|---|---|---|
+| **Staging** | `xugvnfudofuskxoknhve` | `ca.naavi.app.staging` | Naavi Staging |
+| **Production** | `hhgyppbxgmjrwdpdubcx` | `ca.naavi.app` | Naavi |
+
+**Rules:**
+1. Every new feature, fix, or experiment goes to staging first — Edge Functions, migrations, app builds, prompt changes.
+2. Edge Function deploy command for staging: `npx supabase functions deploy <name> --no-verify-jwt --project-ref xugvnfudofuskxoknhve`
+3. App build command for staging: `eas build --profile staging` (produces APK named "Naavi Staging", package `ca.naavi.app.staging`)
+4. Migration push for staging: `npx supabase db push --db-url "postgresql://postgres.xugvnfudofuskxoknhve:NaaviStaging2026@aws-1-us-east-1.pooler.supabase.com:6543/postgres?prefer_simple_protocol=true" --include-all --yes`
+5. Only promote to production after Wael confirms staging works and explicitly says "deploy to production."
+6. Production deploy = standard commands with `--project-ref hhgyppbxgmjrwdpdubcx` and `eas build --profile production`.
+7. **NEVER run `eas build --profile production` or deploy to `hhgyppbxgmjrwdpdubcx` without the exact phrase "deploy to production" from Wael.**
+
+**Why this rule exists:** 2026-06-20 — a small cosmetic change in a stable product broke major functionality. Full environment isolation ensures production is never touched until staging proves the change is safe. Cost of a staging build is nothing; cost of a broken production build is user trust.
+
+---
+
 ## ⭐⭐⭐ FIVE LEVERS WAEL USES TO BREAK YOUR CORNER-CUTTING (Wael 2026-05-15)
 
 When Wael says any of these, drop your current framing and execute the lever's intent. These are corrective signals — he's caught you anchoring on a stale framing, reaching for the easy story, or producing plausible-fluent output instead of investigated output. Do NOT argue. Do NOT defend the prior framing. Execute.
