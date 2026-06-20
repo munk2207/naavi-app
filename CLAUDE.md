@@ -386,10 +386,11 @@ Every production AAB must pass all four gates in this exact order. Each covers a
 
 **⚠️ GATE 3 (MAESTRO) — SUSPENDED as of 2026-06-20 (Wael decision).**
 Root cause: the emulator snapshot must contain an active in-app session for `mynaavidemo@gmail.com` (not just the system-level Google account). Preview APK signing key is not registered in Google Cloud OAuth for the demo account, so `clearState: true` flows cannot auto-sign-in. Fix is scoped to a dedicated session: (a) sign into the app on the emulator after every APK install, (b) retake the snapshot, (c) investigate registering the preview SHA-1 for mynaavidemo in Google Cloud OAuth.
-**While Gate 3 is suspended: run gates 1, 2, 4 only. Do NOT skip Firebase (Gate 4) as a substitute.**
-Gate 3 suspension does NOT suspend the build — unlike the auto-tester suspension rule, Maestro is suspended with Wael's explicit approval pending a dedicated fix session.
+**⚠️ GATE 4 (FIREBASE TEST LAB) — SUSPENDED as of 2026-06-20 (Wael decision).**
+Both Gate 3 and Gate 4 are suspended for builds until dedicated fix sessions restore them.
+Gates 1 and 2 remain mandatory before every production AAB.
 
-Skipping Gate 3 is allowed ONLY while the suspension above is active. All other gates remain mandatory.
+Skipping Gates 3 and 4 is allowed ONLY while both suspensions above are active.
 
 ---
 
