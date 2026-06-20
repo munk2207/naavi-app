@@ -2679,8 +2679,10 @@ Deno.serve(async (req) => {
                 const _ftKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
                 if (!_ftToName) {
-                  const msg = `Who should I send the message to?`;
-                  return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                  // Self-reminder ("remind me to X") — no recipient needed.
+                  // Fall through to Claude so it uses set_action_rule(trigger_type='time').
+                  pathB = true;
+                  console.log(`[timing] ${elapsed()} | SET_ACTION_RULE time — no to_name (self-reminder), falling to Claude (Path B)`);
                 }
                 if (!_ftDatetime) {
                   const msg = `What time should I send it?`;
