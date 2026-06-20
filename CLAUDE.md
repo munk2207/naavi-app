@@ -367,6 +367,27 @@ Rules that are already covered elsewhere are NOT duplicated here — see CONFIGU
 
 14. **"# N" MEANS THE USER PICKED OPTION N.** When you offer numbered choices and the user replies with `# 2`, `# 5`, etc., the digit after the `#` is the option they chose. The user prefixes the hash because the chat interface auto-renumbers a bare number reply (typing just `2` can render as `1`). Always honor this convention literally — `# 2` = option 2, never something else, never ask what it means.
 
+### FOUR TEST GATES — MANDATORY BEFORE EVERY PRODUCTION BUILD (Wael 2026-06-19)
+
+Every production AAB must pass all four gates in this exact order. Each covers a distinct layer the others cannot reach.
+
+| Gate | Platform | What it tests | How to run |
+|------|----------|---------------|------------|
+| 1 | **Auto-tester** | Business logic, Edge Function behavior, prompt emissions, data integrity | `npm run test:auto` — must be 100% green |
+| 2 | **Voice regression** | Voice server call flows, STT/TTS pipeline, Twilio webhook behavior | Run voice regression suite — all tests must pass |
+| 3 | **Maestro** | Mobile UI flows on emulator (tap targets, screen transitions, accessibility labels) | `.\scripts\run-maestro.ps1` — all flows must pass |
+| 4 | **Firebase Test Lab** | Hardware/OS compatibility on real physical devices (Pixel 6 Android 13, Samsung Galaxy S22 Android 14) | `node scripts/submit-firebase-test.js <apk-url>` — all devices must show ✅ in console |
+
+**Why this order:** Gates 1 and 2 are server-side and require no build — run them first so a logic or voice error never costs a build. Gate 3 (Maestro) needs a preview APK on the emulator. Gate 4 (Firebase) uses the same APK but runs on cloud devices — most expensive, so last.
+
+**Full pre-build gate sequence: (1) auto-tester green → (2) voice regression green → (3) Maestro green → (4) Firebase Test Lab PASSED → (5) production AAB.**
+
+**Test account for all four gates:** `mynaavidemo@gmail.com` — no other account.
+
+Skipping any gate is not allowed.
+
+---
+
 15. **⭐ `npm run test:auto` 100% GREEN IS A HARD PREREQUISITE TO EVERY NEW BUILD — AAB AND APK ALIKE** (Wael 2026-05-01 after V57.9.8 first 44/44 green; strengthened 2026-05-22). No exceptions. The stable baseline is the safety net that protects every build.
 
 **The converse is equally binding:** *if for any reason the auto-tester is suspended, the pushing of a new build is also suspended.* No build (AAB, APK, preview, production) ships while the test gate is off. A green auto-tester run is the literal pre-condition for any `eas build` command. If you see a CLAUDE.md or memory entry claiming the auto-tester is "suspended", you do NOT proceed to build — you stop, surface the suspension, and wait for Wael to re-enable. Removing the suspension is a separate step that requires Wael's explicit go-ahead.
@@ -392,7 +413,7 @@ A short-lived 2026-05-16 suspension related to an Expo build error was removed 2
 
 **Before running step 3:** update the GCS filename in `scripts/submit-firebase-test.js` to match the actual build version (currently hardcoded as `naavi-v205.apk`).
 
-**The full pre-build gate sequence is: (1) auto-tester green → (2) Firebase Test Lab PASSED → (3) production AAB.** Skipping either gate is not allowed.
+**The full pre-build gate sequence is documented in the "FOUR TEST GATES" section above.** Firebase is gate 4 of 4 — do not skip any gate before it.
 
 15a. **⭐ EVERY NEW FUNCTIONALITY OR MODIFICATION MUST HAVE AN AUTO-TESTER TEST BEFORE MOVING ON** (Wael 2026-05-24). Sister rule to Rule 15. When Claude ships any new feature, fix, or modification to user-visible behavior or server-side code, Claude MUST add a corresponding regression test to `tests/catalogue/*.ts` and register it in `tests/runner.ts` so it runs as part of `npm run test:auto`. The test must lock in the new behavior (positive control) and/or guard against the prior buggy behavior (negative control), and must pass green before the work is considered done.
 
