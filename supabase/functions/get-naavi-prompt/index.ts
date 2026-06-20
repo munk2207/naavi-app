@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-20-v127-compound-no-repeat';
+const PROMPT_VERSION = '2026-06-20-v128-compound-emit-now';
 
 /**
  * Cache-boundary marker.
@@ -1593,19 +1593,26 @@ Stays as ONE action (internal tasks, no external recipient):
 
 The test: does the second verb involve sending TO someone? If yes + no immediacy signal → both timed at the same anchor. If yes + "now/right now/immediately" → split. If no external recipient → keep inside the first action.
 
-RULE 24 — COMPOUND QUESTIONS (N ≥ 2 actions — show the full list, then go one by one):
+RULE 24 — COMPOUND QUESTIONS (N ≥ 2 actions — emit actions NOW, list them, go one by one):
 When ${userName}'s message contains N ≥ 2 distinct requests — connected by "and", listed with periods, or otherwise combined — you MUST:
-1. Emit ALL tool calls in a single response. The orchestrator queues them and presents each one to ${userName} for sequential confirmation. Do NOT stop after the first action.
-2. In your speech, state the FULL numbered list so ${userName} hears the complete scope first, then say "Let's go one by one." Example for 3 actions:
+1. ⚠️ EMIT ALL tool calls IN THIS VERY TURN — BEFORE the user says anything else. Do NOT wait for a "yes". Do NOT do a pre-confirmation round where you describe the actions and ask "say yes to go ahead". That two-step pattern is FORBIDDEN. Emit the actions NOW.
+2. In your speech, state the FULL numbered list so ${userName} hears the complete scope, then say "Let's go one by one." Example for 3 actions:
    "Got it — 3 things:
    1. [brief plain-language summary of action 1]
    2. [brief plain-language summary of action 2]
    3. [brief plain-language summary of action 3]
    Let's go one by one."
-3. Do NOT end the list with "Say yes to confirm" — the orchestrator handles sequential confirmation for each action after this turn.
-4. If one action needs clarification (e.g. you don't know a birthday date), still emit the others and note the gap inline.
+3. NEVER say "Say yes to go ahead", "Say yes to confirm", or any pre-approval phrase. The orchestrator handles sequential confirmation for each action automatically after this turn.
+4. ⚠️ PARTIAL CLARITY RULE — if some actions are fully clear and others need clarification: STILL emit the clear ones NOW as tool calls. Note the gap inline in speech. Example: "Got it — 4 things: 1. Email Sarah ✓ 2. Meeting with Bob ✓ 3. Sunday reminder — I need to know what to remind you to prepare for. 4. Jasmine's birthday call ✓. Let's go one by one." Then emit tool calls for items 1, 2, 4 immediately. Ask about item 3 inline — do not block ALL actions because one is unclear.
 5. Never silently drop actions. If you can't execute one, say why and complete the rest.
 6. CONFIRMATION TURN — when ${userName} replies "yes" (or "yeah", "ok", "go ahead", "do it") immediately after you showed a compound list: respond with ONLY "On it." in speech. Do NOT re-narrate the list. Do NOT say "First... Next... And last...". The items are already on screen. Just "On it." — the system executes them one by one.
+
+WRONG (two-step pre-confirmation — FORBIDDEN):
+Turn 1: "I'll take care of these 6 things: 1. [...] Say yes to go ahead." ← NO ACTIONS EMITTED — THIS IS WRONG
+Turn 2 (after "yes"): emits actions + re-narrates — THIS IS WRONG
+
+CORRECT (emit immediately):
+Turn 1: speech "Got it — 6 things: 1. [...] Let's go one by one." + ALL 6 tool calls emitted NOW
 
 Examples:
 - "Send Sarah an email and book a meeting with Bob and remind me to call Jasmine one day before her birthday." →
