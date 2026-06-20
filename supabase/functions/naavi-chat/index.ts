@@ -1325,6 +1325,7 @@ async function assembleSystemPromptServerSide(
       .from('action_rules')
       .select('label, trigger_type, trigger_config, enabled')
       .eq('user_id', userId)
+      .eq('enabled', true)
       .order('created_at', { ascending: false })
       .limit(100);
     if (Array.isArray(alertRows) && alertRows.length > 0) {
@@ -1335,27 +1336,15 @@ async function assembleSystemPromptServerSide(
           ? `- ${label} (at ${place})`
           : `- ${label}`;
       };
-      const enabledRows = (alertRows as any[]).filter((r) => r.enabled);
-      const disabledRows = (alertRows as any[]).filter((r) => !r.enabled);
-      if (enabledRows.length > 0 || disabledRows.length > 0) {
-        let sections = '';
-        if (enabledRows.length > 0) {
-          sections += `\nACTIVE:\n` + enabledRows.map(formatRow).join('\n');
-        }
-        if (disabledRows.length > 0) {
-          sections += `\n\nDISABLED (can be reactivated):\n` + disabledRows.map(formatRow).join('\n');
-        }
+      const enabledRows = alertRows as any[];
+      if (enabledRows.length > 0) {
+        const sections = `\nACTIVE:\n` + enabledRows.map(formatRow).join('\n');
         alertsContext =
-          `\n\n## ${userName}'s alerts (active + disabled)\n` +
-          `When ${userName} references "the X alert", match against BOTH lists below. Reply rules:\n` +
-          `- Match in ACTIVE only → proceed as normal (use the standard "I'll … Say yes to confirm" shape for connect/disconnect).\n` +
-          `- Match in DISABLED only (exactly 1 row). Two-turn flow:\n` +
-          `    (a) If your IMMEDIATELY PREVIOUS reply did NOT contain "Want me to reactivate it and" for this alert → say "You have a disabled X alert at Y. Want me to reactivate it and [original intent]? Say yes to confirm, no to cancel, or tell me what to change." Do NOT emit a connect/disconnect action this turn. Wait for the user's yes/no.\n` +
-          `    (b) If your IMMEDIATELY PREVIOUS reply DID contain "Want me to reactivate it and" for this alert AND the user just replied with yes/yeah/yep/confirm/sure/ok/please → EMIT the LIST_CONNECT (or LIST_DISCONNECT) action NOW with this disabled rule as entityRef. The server auto-reactivates the rule before executing the connect. Do NOT repeat the combined ask — that's an infinite loop.\n` +
-          `- Match in multiple DISABLED rows → ask "You have N disabled X alerts — at A, B, …. Which one?" Wait for the answer.\n` +
-          `- Match in BOTH ACTIVE and DISABLED → ask "You have an active X alert at A. You also have a disabled one at B. Which one?" Wait for the answer.\n` +
-          `- No match in either list → say plainly "I don't have a [name] alert" and offer to create one.\n` +
-          `NEVER agree to attach/disconnect/change an alert that isn't in either list.\n` +
+          `\n\n## ${userName}'s active alerts\n` +
+          `When ${userName} references "the X alert", match against the list below.\n` +
+          `- Match found → proceed as normal.\n` +
+          `- No match → say plainly "I don't have a [name] alert" and offer to create one.\n` +
+          `NEVER agree to attach/disconnect/change an alert that isn't in this list.\n` +
           sections;
       }
     }
@@ -1598,7 +1587,7 @@ chat = conversational, no data question — ALSO use for multi-action messages (
 Level A params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). CALENDAR_SEARCH ONLY when user asks about a SPECIFIC event by name ("do I have a dentist appointment", "is my board meeting on Tuesday") — NEVER for email queries. READ_CALENDAR (no keyword param) for general schedule reads with no specific event named: "what do I have today", "what's coming up", "show me my schedule", "do I have anything tomorrow", "what's next" — use READ_CALENDAR, NOT CALENDAR_SEARCH, when there is no specific event name to search for. GMAIL_SEARCH→keyword (sender name or specific subject topic ONLY — never temporal/generic words). GMAIL_SEARCH for PAST email queries only: "Did I get email from X", "Did I receive email from X", "Any email from X", "Check my email for X" → GMAIL_SEARCH. keyword must be the sender name or topic (e.g. "Bob", "invoice", "board meeting") — NOT words like "new", "any", "recent", "latest", "email" which mean "show recent emails" → use empty keyword "" for those. IMPORTANT: "alert me when I receive email from X" or "notify me when email from X arrives" = SET_ACTION_RULE (action level), NOT GMAIL_SEARCH — the presence of "alert me"/"notify me"/"let me know" + "when" signals a future rule, not a past query. LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic. CREATE_TICKET→reporter_email, body.
 
 Level action intents and params (extract what's present, empty string if not mentioned):
-SET_ACTION_RULE (trigger_type:'time') → for ALL "remind me at [time]" or "remind me on [day]" requests. Params: trigger_type:'time', datetime (ISO8601 Toronto), body (what to remind). e.g. "remind me to call John tomorrow at 3pm" → {trigger_type:'time',datetime:'<ISO8601>',body:'Call John.'}. NEVER use SET_REMINDER for time-based reminders — always SET_ACTION_RULE with trigger_type:'time'.
+SET_ACTION_RULE (trigger_type:'time') → for ALL "remind me at [time]" or "remind me on [day]" requests. Params: trigger_type:'time', datetime (ISO8601 Toronto), body (what to remind), tasks (array of task strings if user lists multiple things). e.g. "remind me to call John tomorrow at 3pm" → {trigger_type:'time',datetime:'<ISO8601>',body:'Call John.',tasks:['Call John.']}. "remind me Sunday to call John and review budget" → {trigger_type:'time',datetime:'<ISO8601 Sunday>',body:'Call John and review budget.',tasks:['Call John.','Review budget.']}. NEVER use SET_REMINDER for time-based reminders — always SET_ACTION_RULE with trigger_type:'time'.
 CREATE_EVENT → summary (event name), start (ISO8601 Toronto), end (ISO8601 Toronto, default start+1h)
 REMEMBER → text (exact statement to save). Use for "remember that X", "note that X", "my wife is Sarah" — no time component.
 DELETE_RULE → match (keyword describing the alert to delete), all ("true" only if user says delete all alerts)
