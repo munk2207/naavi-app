@@ -454,6 +454,19 @@ async function reArmLocationRule(
   }
 }
 
+// Extract numbered list items from Claude's pre-confirm text.
+// Used by the compound pre-confirm intercept to process items one at a time.
+function parseCompoundItems(text: string): string[] {
+  const items: string[] = [];
+  const regex = /(?:^|\n)\s*[1-9]\d*[.)]\s+([^\n]+)/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const item = match[1].trim();
+    if (item && !/^say\s+yes/i.test(item)) items.push(item);
+  }
+  return items;
+}
+
 // V57.11.3 — `isHandsfree` parameter retained for call-site compatibility
 // but always false. Hands-free mode was removed; the phone is the always-
 // listening surface. Tap-to-talk + press-and-hold-anywhere are the only
@@ -471,6 +484,10 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   // Drained one-by-one after each user "yes" or "skip".
   const compoundQueueRef = useRef<NaaviAction[]>([]);
   const compoundTotalRef = useRef<number>(0);
+  // Compound pre-confirm item queue — when Claude lists N items and asks
+  // "say yes to go ahead", we parse the list and send items to Claude
+  // one at a time instead of asking Claude to emit all N tool calls at once.
+  const pendingCompoundItemsRef = useRef<string[]>([]);
 
   // Word-reveal: number of words revealed so far for the latest turn while TTS
   // is playing, or null when not revealing (show full text).
@@ -1974,8 +1991,16 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           /\n\s*[1-9]\./m.test(lastText) &&             // numbered list present
           /say\s+yes|yes\s+to\s+(go\s+ahead|confirm)/i.test(lastText); // pre-confirm phrase
         if (isCompoundPreConfirm) {
-          enrichedMessage = `${userMessage}\n\n[SYSTEM — EXECUTE NOW]: The user confirmed. You MUST: (1) Emit ALL tool calls immediately — include every item from your previous list. (2) Your speech MUST be ONLY "On it." — no re-narration, no "First... Next...", no repeating the list. (3) For any item still needing clarification, emit the clear ones and ask ONE brief question at the end of speech. Do not re-list everything.`;
-          console.log('[send] compound pre-confirm intercept — injecting execute-now directive');
+          const items = parseCompoundItems(lastText);
+          if (items.length > 0) {
+            pendingCompoundItemsRef.current = items.slice(1); // queue items 2-N
+            enrichedMessage = items[0]; // send item 1 to Claude as standalone request
+            console.log(`[send] compound pre-confirm: parsed ${items.length} items — sending item 1 to Claude: "${items[0]}"`);
+          } else {
+            // Fallback: list parse failed — use EXECUTE NOW injection
+            enrichedMessage = `${userMessage}\n\n[SYSTEM — EXECUTE NOW]: The user confirmed. Emit ALL tool calls immediately. Speech must be "On it." only — no re-narration.`;
+            console.log('[send] compound pre-confirm: parse failed, falling back to EXECUTE NOW injection');
+          }
         }
       }
 
@@ -4293,6 +4318,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     stopSpeaking();
     pendingActionRef.current = null;
     setPendingAction(null);
+    pendingCompoundItemsRef.current = [];
     setTurns([]);
     setError(null);
     setStatus('idle');
@@ -4308,6 +4334,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     clearCooldownTimer();
     pendingActionRef.current = null;
     setPendingAction(null);
+    pendingCompoundItemsRef.current = [];
     setStatus('idle');
   }, [clearCooldownTimer, setAudioPlaying]);
 
@@ -4333,6 +4360,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       clearCooldownTimer();
       pendingActionRef.current = null;
       setPendingAction(null);
+      pendingCompoundItemsRef.current = [];
       setStatus('idle');
     } else if (s === 'speaking') {
       // Silence voice.
@@ -4350,6 +4378,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         clearCooldownTimer();
         pendingActionRef.current = null;
         setPendingAction(null);
+        pendingCompoundItemsRef.current = [];
         setStatus('idle');
       }
     } else if (s === 'answer_active') {
@@ -4367,10 +4396,24 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       clearCooldownTimer();
       pendingActionRef.current = null;
       setPendingAction(null);
+      pendingCompoundItemsRef.current = [];
       setStatus('idle');
     }
     // cooldown / idle / pending_confirm / error: no-op.
   }, [clearCooldownTimer, setAudioPlaying, startCooldown]);
+
+  // Auto-advance compound pre-confirm items when each item's cycle completes.
+  // When status returns to idle and there are still parsed items queued,
+  // send the next item to Claude as a standalone request.
+  useEffect(() => {
+    if (status !== 'idle') return;
+    if (pendingCompoundItemsRef.current.length === 0) return;
+    if (pendingActionRef.current) return;
+    if (compoundQueueRef.current.length > 0) return;
+    const nextItem = pendingCompoundItemsRef.current.shift()!;
+    console.log(`[compound-pre-confirm] auto-advancing to next item: "${nextItem}"`);
+    send(nextItem);
+  }, [status, send]);
 
   // Cleanup on unmount — make sure no stray timer fires after the hook unmounts.
   useEffect(() => {
