@@ -550,10 +550,23 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
     );
   }
 
+  // Sent card — collapse to a single receipt line so it doesn't persist
+  // as a large card blocking the rest of the conversation.
+  if (sent) {
+    const toLabel = String(action.to ?? '');
+    return (
+      <View style={[styles.draftCard, { opacity: 0.7, paddingVertical: 8 }]}>
+        <Text style={[styles.draftLabel, { color: Colors.accent }]}>
+          ✓ {channelLabel} sent to {toLabel}
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.draftCard}>
       <Text style={styles.draftLabel}>
-        {sent ? `✓ ${channelLabel} sent` : `${channelIcon} ${channelLabel} draft ready`}
+        {`${channelIcon} ${channelLabel} draft ready`}
       </Text>
       <Text style={styles.draftField}>
         <Text style={styles.draftFieldLabel}>To: </Text>
