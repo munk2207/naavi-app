@@ -497,14 +497,11 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const pendingActionRef = useRef<PendingAction | null>(null);
 
-  // Compound queue — stores actions 2-N when a compound question arrives (N > 1 actions).
-  // Drained one-by-one after each user "yes" or "skip".
-  const compoundQueueRef = useRef<NaaviAction[]>([]);
+  // Client-side compound buffer — stores items 2-N when a compound question
+  // is detected. Item 1 is sent immediately; remaining items are sent
+  // one at a time after each turn completes naturally.
+  const compoundBufferRef = useRef<string[]>([]);
   const compoundTotalRef = useRef<number>(0);
-  // Compound pre-confirm item queue — when Claude lists N items and asks
-  // "say yes to go ahead", we parse the list and send items to Claude
-  // one at a time instead of asking Claude to emit all N tool calls at once.
-  const pendingCompoundItemsRef = useRef<string[]>([]);
 
   // Word-reveal: number of words revealed so far for the latest turn while TTS
   // is playing, or null when not revealing (show full text).
@@ -908,57 +905,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     return null; // unsupported type — caller skips and advances
   };
 
-  // Advance the compound queue: pop the next action, speak its description,
-  // and set pendingAction so the user can say "yes" or "skip".
-  const advanceCompoundQueue = async (lang: 'en' | 'fr'): Promise<void> => {
-    const queue = compoundQueueRef.current;
-    if (queue.length === 0) {
-      const total = compoundTotalRef.current;
-      if (total > 1) await speakResponse(`All done — ${total} of ${total}.`, lang);
-      setStatus('idle');
-      return;
-    }
-
-    // Auto-discard any unconfirmed DRAFT_MESSAGE cards in prior turns before
-    // advancing — they would otherwise stay visible with live Send/Discard buttons
-    // while Naavi has already moved to the next compound item.
-    setTurns(prev => prev.map(t => ({
-      ...t,
-      drafts: (t.drafts ?? []).map((d: any) =>
-        d.type === 'DRAFT_MESSAGE' && !d._voiceConfirmed ? { ...d, _discarded: true } : d
-      ),
-    })));
-
-    const action = queue[0];
-    compoundQueueRef.current = queue.slice(1);
-    const isLast   = compoundQueueRef.current.length === 0;
-    const stepNum  = compoundTotalRef.current - queue.length + 1;
-    const prefix   = isLast ? 'Last one —' : 'Next —';
-
-    setStatus('speaking');
-
-    const step = await buildQueueStep(action);
-    if (!step) {
-      // Unsupported type — skip silently and advance
-      await advanceCompoundQueue(lang);
-      return;
-    }
-
-    const { description, execute } = step;
-    const pending: PendingAction = {
-      id:         `cq-${Date.now()}-${stepNum}`,
-      action,
-      summary:    description,
-      turnIndex:  -1, // queue actions attach to the last turn at execution time
-      execute,
-    };
-    pendingActionRef.current = pending;
-    setPendingAction(pending);
-
-    await speakResponse(`${prefix} ${description}. Say yes to confirm, or skip.`, lang);
-    setStatus('idle');
-  };
-  // ── end compound queue helpers ──────────────────────────────────────────────
 
   const send = useCallback(async (userMessage: string) => {
     // V57.11.6 — instrumentation for the bubble-truncation bug. Wael
@@ -1026,12 +972,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
           console.error('[send] inline confirmPending error:', e);
           await speakResponse(SPEECH.GENERIC_ERROR, language);
         }
-        // Advance compound queue if more actions are waiting
-        if (compoundQueueRef.current.length > 0) {
-          await advanceCompoundQueue(language);
-        } else {
-          setStatus('idle');
-        }
+        setStatus('idle');
         return;
       }
       if (CORRECTION_RE.test(trimmedMsg)) {
@@ -1048,13 +989,8 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         pendingActionRef.current = null;
         setPendingAction(null);
         setStatus('speaking');
-        const skipSpeech = compoundQueueRef.current.length > 0 ? 'Skipped.' : SPEECH.CANCELLED;
-        await speakResponse(skipSpeech, language);
-        if (compoundQueueRef.current.length > 0) {
-          await advanceCompoundQueue(language);
-        } else {
-          setStatus('idle');
-        }
+        await speakResponse(SPEECH.CANCELLED, language);
+        setStatus('idle');
         return;
       } else {
         // Fresh command (edit / new question) — clear the pending action and
@@ -1062,13 +998,6 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         pendingActionRef.current = null;
         setPendingAction(null);
       }
-    } else if (compoundQueueRef.current.length > 0 && AFFIRMATIVE_RE.test(userMessage.trim())) {
-      // Compound queue is mid-flight but pendingActionRef is momentarily null
-      // (race: confirmPending/inline-confirm cleared it before advanceCompoundQueue
-      // set it for the next item). Block this "Yes" from reaching Claude — the
-      // queue will continue on its own once the current step resolves.
-      console.log('[send] compound queue active + affirmative during null-pending window — suppressing Claude round-trip');
-      return;
     } else if (AFFIRMATIVE_RE.test(userMessage.trim())) {
       // Fallback: pendingActionRef is null but user typed Yes.
       // Check if the last turn has an unsent confirmable draft.
@@ -2029,15 +1958,28 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     try {
       let enrichedMessage = userMessage;
 
-      // ── COMPOUND SPLIT — DISABLED (2026-06-21) ────────────────────────────────
-      // The client-side compound splitter (user-compound split + pre-confirm
-      // intercept + auto-advance) caused recursive COMPOUND-ITEM nesting and
-      // snowballing context when Claude sub-responses also contained numbered
-      // lists or "say yes to go ahead". RULE 24 (v129) now handles compound
-      // sequencing entirely server-side via PENDING_INTENT chains — each "yes"
-      // goes straight to Step 1.4 which executes item N and presents item N+1.
-      // No client splitting, no auto-advance, no COMPOUND-ITEM tags needed.
-      pendingCompoundItemsRef.current = [];
+      // ── COMPOUND SPLIT — CLIENT BUFFER ───────────────────────────────────────
+      // If Robert sends a compound question (2+ bullet/numbered items), split
+      // it client-side. Inform Robert, then send item 1 now. Items 2-N are
+      // stored in compoundBufferRef and sent one at a time after each turn
+      // completes naturally. Nothing goes to the server about compounding.
+      const compoundItems = splitUserCompound(userMessage);
+      if (compoundItems && compoundItems.length >= 2 && compoundBufferRef.current.length === 0) {
+        const total = compoundItems.length;
+        compoundBufferRef.current = compoundItems.slice(1);
+        compoundTotalRef.current = total;
+        // Show Robert the informational message (local only, no server call)
+        const infoText = `I found ${total} things on your list — I'll handle them one at a time.`;
+        setTurns(prev => [...prev, {
+          id: `compound-info-${Date.now()}`,
+          role: 'assistant' as const,
+          text: infoText,
+          timestamp: new Date(),
+          drafts: [],
+        }]);
+        // Send only item 1 — remaining items handled after each turn completes
+        enrichedMessage = compoundItems[0];
+      }
 
       // ── STEP 1: Person context lookup (async) ──────────────────────────────────
       const personName = extractPersonQuery(userMessage);
@@ -2339,16 +2281,6 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           existing.match = listTypeMatch;
           console.log(`[Orchestrator] B1b inject — LIST_RULES match injected from user message: "${listTypeMatch}"`);
         }
-      }
-
-      // Compound queue: when N > 1 actions arrive, queue actions 2-N and process
-      // only action[0] in this turn. advanceCompoundQueue() drives the rest after
-      // each user "yes" or "skip".
-      if (dedupedActions.length > 1) {
-        compoundQueueRef.current = dedupedActions.slice(1);
-        compoundTotalRef.current = dedupedActions.length;
-        dedupedActions.splice(1);
-        console.log(`[Orchestrator] compound queue: ${compoundTotalRef.current} actions — queued ${compoundQueueRef.current.length} after processing action[0]`);
       }
 
       for (const action of dedupedActions) {
@@ -4215,11 +4147,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         // REMEMBER, SET_ACTION_RULE, etc.) it executes silently without setting
         // pendingActionRef. After its speech ends, advance the queue so items 2-N
         // are presented one-by-one instead of being left stuck.
-        if (compoundQueueRef.current.length > 0 && !pendingActionRef.current) {
-          await advanceCompoundQueue(language);
-        } else {
-          setStatus('idle');
-        }
+        setStatus('idle');
       }).catch(async () => {
         setAudioPlaying(false);
         if (isCancelled()) return;
@@ -4228,11 +4156,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           return;
         }
         if (statusRef.current === 'cooldown') return;
-        if (compoundQueueRef.current.length > 0 && !pendingActionRef.current) {
-          await advanceCompoundQueue(language);
-        } else {
-          setStatus('idle');
-        }
+        setStatus('idle');
       });
 
     } catch (err) {
@@ -4325,10 +4249,6 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     await speakResponse(result.speech, language);
     setStatus('idle');
 
-    // If this action was part of a compound queue, advance to the next action.
-    if (compoundQueueRef.current.length > 0) {
-      await advanceCompoundQueue(language);
-    }
   }, [language]);
 
   const cancelPending = useCallback(async (speechOverride?: string) => {
@@ -4353,7 +4273,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     stopSpeaking();
     pendingActionRef.current = null;
     setPendingAction(null);
-    pendingCompoundItemsRef.current = [];
+    compoundBufferRef.current = [];
     setTurns([]);
     setError(null);
     setStatus('idle');
@@ -4369,7 +4289,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     clearCooldownTimer();
     pendingActionRef.current = null;
     setPendingAction(null);
-    pendingCompoundItemsRef.current = [];
+    compoundBufferRef.current = [];
     setStatus('idle');
   }, [clearCooldownTimer, setAudioPlaying]);
 
@@ -4395,7 +4315,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       clearCooldownTimer();
       pendingActionRef.current = null;
       setPendingAction(null);
-      pendingCompoundItemsRef.current = [];
+      compoundBufferRef.current = [];
       setStatus('idle');
     } else if (s === 'speaking') {
       // Silence voice.
@@ -4413,7 +4333,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         clearCooldownTimer();
         pendingActionRef.current = null;
         setPendingAction(null);
-        pendingCompoundItemsRef.current = [];
+        compoundBufferRef.current = [];
         setStatus('idle');
       }
     } else if (s === 'answer_active') {
@@ -4431,19 +4351,28 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       clearCooldownTimer();
       pendingActionRef.current = null;
       setPendingAction(null);
-      pendingCompoundItemsRef.current = [];
+      compoundBufferRef.current = [];
       setStatus('idle');
     }
     // cooldown / idle / pending_confirm / error: no-op.
   }, [clearCooldownTimer, setAudioPlaying, startCooldown]);
 
-  // Auto-advance DISABLED (2026-06-21) — pendingCompoundItemsRef is always
-  // empty now; compound sequencing is handled server-side via PENDING_INTENT.
-
   // Cleanup on unmount — make sure no stray timer fires after the hook unmounts.
   useEffect(() => {
     return () => clearCooldownTimer();
   }, [clearCooldownTimer]);
+
+  // Auto-send next compound item when the current turn finishes naturally.
+  useEffect(() => {
+    if (status !== 'idle') return;
+    if (compoundBufferRef.current.length === 0) return;
+    const nextItem = compoundBufferRef.current[0];
+    compoundBufferRef.current = compoundBufferRef.current.slice(1);
+    const itemNum = compoundTotalRef.current - compoundBufferRef.current.length;
+    console.log(`[compound] auto-sending item ${itemNum}/${compoundTotalRef.current}: "${nextItem.slice(0, 60)}"`);
+    // Small delay so the UI settles before the next turn starts
+    setTimeout(() => { send(nextItem); }, 600);
+  }, [status, send]);
 
   return {
     status, turns, error, send, clearHistory, loadHistory,

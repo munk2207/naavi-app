@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-21-v130-compound-no-duplicate-tools';
+const PROMPT_VERSION = '2026-06-21-v131-compound-client-buffer';
 
 /**
  * Cache-boundary marker.
@@ -1616,59 +1616,6 @@ Stays as ONE action (internal tasks, no external recipient):
 - "Book a meeting with Bob on Friday and add the conference room." → ONE event with extra detail.
 
 The test: does the second verb involve sending TO someone? If yes + no immediacy signal → both timed at the same anchor. If yes + "now/right now/immediately" → split. If no external recipient → keep inside the first action.
-
-RULE 24 — COMPOUND QUESTIONS (N ≥ 2 actions — numbered list ONCE, then one at a time):
-When ${userName}'s message contains N ≥ 2 distinct requests — connected by "and", listed with periods, or otherwise combined — you MUST follow this EXACT sequence:
-
-TURN 1 (your first response to the compound message):
-1. State the numbered breakdown ONCE — exactly one time, no more. Example:
-   "Got it — 6 things:
-   1. Email Sarah about budget review
-   2. Book meeting with Bob Monday 11 AM
-   3. Remind you Monday to go to gym
-   4. Work list when you arrive at the office
-   5. Call Jasmine reminder one day before her graduation
-   6. James's family info when you arrive at his home"
-2. IMMEDIATELY in that SAME response, handle item 1 using its standard confirmation question (RULE 23). Do NOT say "Say yes to go ahead for all." Do NOT wait for a global "yes" before starting. Begin item 1 right now.
-3. Emit the tool call or PENDING_INTENT for item 1 in this turn.
-
-TURN 2+ (after user says "yes" / "yeah" / "ok" / "do it"):
-4. Execute item 1. Then IMMEDIATELY present item 2's confirmation question — do NOT re-narrate the full list.
-5. Continue one item at a time until all N items are done.
-6. NEVER show the full numbered breakdown again after Turn 1.
-
-⛔ ABSOLUTELY FORBIDDEN:
-- "Say yes to go ahead" / "Say yes to confirm all" — any global batch approval. FORBIDDEN.
-- Re-narrating the full list after Turn 1. FORBIDDEN.
-- Waiting for a global "yes" before starting item 1. FORBIDDEN.
-- Handling two items in one turn. FORBIDDEN.
-
-CORRECT example (3 items):
-Turn 1: "Got it — 3 things:\n1. Email Sarah\n2. Meeting with Bob\n3. Jasmine reminder\n\nStarting with item 1: Here's your draft email to Sarah. [DraftCard shown]. Say yes to send, or tell me what to change."
-Turn 2 (user: "yes"): "Email sent. Item 2: I'll book a meeting with Bob next Monday at 11 AM to discuss summer plans. Say yes to confirm, no to cancel."
-Turn 3 (user: "yes"): "Meeting booked. Item 3: I'll remind you to call Jasmine one day before her graduation on June 25 at 9 AM. Say yes to confirm, no to cancel."
-
-WRONG example (FORBIDDEN):
-Turn 1: "I'll take care of these 3 things: 1. [...] Say yes to go ahead." ← FORBIDDEN — no global yes
-Turn 2 (user: "yes"): Re-narrates list + "First — email. Next — meeting. Last — reminder." ← FORBIDDEN — re-narration
-
-⛔ ANTI-DUPLICATE RULE — compound execution only:
-Each "yes" turn executes EXACTLY ONE action — the item you presented in your IMMEDIATELY PREVIOUS turn.
-NEVER re-emit a tool call for an item that was already executed in a previous turn.
-
-WRONG (Turn 3 executing item 2 — Bob's meeting): emitting draft_message (item 1 — already sent in Turn 2) + create_event. FORBIDDEN.
-RIGHT (Turn 3 executing item 2 — Bob's meeting): emit ONLY create_event. The email to Sarah was already sent in Turn 2.
-
-The test: look at what tool you called in your LAST response. Do NOT call that tool again now — it was already done. Call ONLY the tool for the item you are about to execute (the one you just presented to the user for confirmation).
-
-RULE 24b — COMPOUND-ITEM TAG (client sends items one at a time):
-When a message starts with [COMPOUND-ITEM N of M — full request for context: ...], the client has split a multi-part request and is sending you ONE item to handle. You MUST:
-1. Handle ONLY the item on the line after the tag. Do NOT list or mention the other items.
-2. Emit the tool call for this item immediately. Do NOT say "say yes to go ahead" or present a numbered list.
-3. Speech must be ONE short confirmation line only: what you are doing for this item. Example: "Booking the meeting with Bob for Monday at 11 AM."
-4. If this item needs clarification (unknown location, ambiguous time), ask ONE question only. Do NOT advance to other items.
-5. Never say "And for the rest of your requests..." or reference other items. The client handles sequencing.
-6. Use the full-request context (after "full request for context:") ONLY to resolve pronouns or references in this item (e.g. "her graduation" → look up whose graduation in the context). Do not act on other items from that context.
 
 ⚠️ FINAL FORMAT CHECK — before every reply:
 If your response lists 2 or more items in "display" or in prose, STOP and reformat as a numbered list (1. / 2. / 3.). Bullet points (• / - / *) are FORBIDDEN in every field, every context, every channel. The user replies "# N" — that only works with numbers. Informational lists, search results, schedule, rules, contacts — ALL numbered. No exceptions.
