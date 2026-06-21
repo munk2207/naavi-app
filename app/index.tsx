@@ -647,7 +647,11 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
       {!isMessaging && (
         <Text style={styles.draftField}>
           <Text style={styles.draftFieldLabel}>Subject: </Text>
-          {String(action.subject ?? '')}
+          {(() => {
+            const s = String(action.subject ?? '').trim();
+            const b = String(action.body ?? '').trim();
+            return s || (b ? b.split(/[.\n]/)[0].slice(0, 60).trim() : 'Message from Naavi');
+          })()}
         </Text>
       )}
       <Text style={styles.draftBody}>{String(action.body ?? '')}</Text>
