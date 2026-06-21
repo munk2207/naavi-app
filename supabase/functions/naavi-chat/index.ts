@@ -3453,6 +3453,57 @@ Deno.serve(async (req) => {
       return action;
     }).filter((a: any) => a !== null);
 
+    // ── Server-side execution for time-trigger reminders (2026-06-21) ─────────
+    // In compound (6-item) mode, Haiku classifies the message as "chat" so
+    // Claude handles all items via tool calls. Those tool call results land in
+    // the `actions` array and are returned to the client, which tries to write
+    // action_rules with user-JWT. RLS blocks user-JWT inserts on action_rules.
+    // Fix: execute SET_ACTION_RULE(time) and SET_REMINDER writes here with the
+    // service-role admin client. The action object is still returned to the
+    // client so the reminder card renders, but the DB write is already done.
+    if (userId && actions.length > 0) {
+      const _ssUrl = Deno.env.get('SUPABASE_URL') ?? '';
+      const _ssKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+      const _ssTz  = typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined;
+      for (const _a of actions) {
+        const _ao = _a as any;
+        // SET_ACTION_RULE with time trigger — used by Claude for "remind me at X"
+        if (_ao.type === 'SET_ACTION_RULE' && _ao.trigger_type === 'time' && (_ao.trigger_config as any)?.datetime) {
+          try {
+            const { data: _settingsRow } = await supabase.from('user_settings').select('phone').eq('user_id', userId).maybeSingle();
+            const _phone = (_settingsRow as any)?.phone ?? null;
+            const _safeDateTime = correctDatetime(String((_ao.trigger_config as any).datetime), _ssTz);
+            const _ac = _ao.action_config ?? {};
+            const _adminClient = createClient(_ssUrl, _ssKey);
+            const { error: _insErr } = await _adminClient.from('action_rules').insert({
+              user_id:        userId,
+              trigger_type:   'time',
+              trigger_config: { datetime: _safeDateTime },
+              action_type:    String(_ao.action_type ?? 'sms'),
+              action_config:  { ..._ac, to_phone: (_ac as any).to_phone || _phone },
+              label:          String(_ao.label || (_ac as any).body || 'Reminder'),
+              one_shot:       _ao.one_shot !== false,
+              enabled:        true,
+            });
+            if (_insErr && (_insErr as any).code !== '23505') {
+              console.error('[naavi-chat] server-side SET_ACTION_RULE(time) save failed:', _insErr.message);
+            } else {
+              console.log(`[naavi-chat] server-side SET_ACTION_RULE(time) saved: ${_ao.label}`);
+            }
+          } catch (_ssErr) {
+            console.error('[naavi-chat] server-side SET_ACTION_RULE(time) exception:', (_ssErr as Error).message);
+          }
+        }
+        // SET_REMINDER (fallback tool — same RLS issue if client tries to write)
+        if (_ao.type === 'SET_REMINDER' && _ao.title && _ao.datetime) {
+          handleSetReminderExec(
+            { title: String(_ao.title), datetime: String(_ao.datetime) },
+            userId, supabase, _ssUrl, _ssKey, _ssTz,
+          ).catch((_e: Error) => console.error('[naavi-chat] server-side SET_REMINDER save failed:', _e.message));
+        }
+      }
+    }
+
     // 2026-05-23 (Wael) — server-side entity-existence validation for
     // list_connect / list_disconnect / list_connection_query actions
     // targeting action_rule entities. Haiku has repeatedly ignored prompt

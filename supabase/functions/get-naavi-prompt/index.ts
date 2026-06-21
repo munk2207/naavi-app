@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-21-v129-compound-one-at-a-time';
+const PROMPT_VERSION = '2026-06-21-v130-compound-no-duplicate-tools';
 
 /**
  * Cache-boundary marker.
@@ -1651,6 +1651,15 @@ Turn 3 (user: "yes"): "Meeting booked. Item 3: I'll remind you to call Jasmine o
 WRONG example (FORBIDDEN):
 Turn 1: "I'll take care of these 3 things: 1. [...] Say yes to go ahead." ← FORBIDDEN — no global yes
 Turn 2 (user: "yes"): Re-narrates list + "First — email. Next — meeting. Last — reminder." ← FORBIDDEN — re-narration
+
+⛔ ANTI-DUPLICATE RULE — compound execution only:
+Each "yes" turn executes EXACTLY ONE action — the item you presented in your IMMEDIATELY PREVIOUS turn.
+NEVER re-emit a tool call for an item that was already executed in a previous turn.
+
+WRONG (Turn 3 executing item 2 — Bob's meeting): emitting draft_message (item 1 — already sent in Turn 2) + create_event. FORBIDDEN.
+RIGHT (Turn 3 executing item 2 — Bob's meeting): emit ONLY create_event. The email to Sarah was already sent in Turn 2.
+
+The test: look at what tool you called in your LAST response. Do NOT call that tool again now — it was already done. Call ONLY the tool for the item you are about to execute (the one you just presented to the user for confirmation).
 
 RULE 24b — COMPOUND-ITEM TAG (client sends items one at a time):
 When a message starts with [COMPOUND-ITEM N of M — full request for context: ...], the client has split a multi-part request and is sending you ONE item to handle. You MUST:
