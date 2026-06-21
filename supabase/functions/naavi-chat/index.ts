@@ -728,11 +728,12 @@ async function resolveBeforeEventDate(
     const data = await res.json();
     const results: any[] = (data?.ranked ?? data?.results ?? []).flat();
 
-    // Filter to upcoming results that also match the event type keyword in the title
+    // Filter to upcoming results that also match the event type keyword in the title.
+    // Calendar adapter returns dates in createdAt (ISO) and metadata.start_time.
     const upcoming = results.filter((r: any) => {
-      const dateStr = r.date ?? r.start ?? r.event_date ?? '';
+      const dateStr = (r.createdAt ?? r.metadata?.start_time ?? r.date ?? r.start ?? r.event_date ?? '');
       if (!dateStr) return false;
-      if (dateStr.slice(0, 10) < todayISO) return false;
+      if (String(dateStr).slice(0, 10) < todayISO) return false;
       const title = (r.title ?? r.name ?? r.summary ?? '').toLowerCase();
       return title.includes(eventType);
     });
@@ -743,7 +744,7 @@ async function resolveBeforeEventDate(
     }
 
     const hit = upcoming[0];
-    const eventDateStr: string = (hit.date ?? hit.start ?? hit.event_date ?? '').slice(0, 10);
+    const eventDateStr: string = String(hit.createdAt ?? hit.metadata?.start_time ?? hit.date ?? hit.start ?? hit.event_date ?? '').slice(0, 10);
     const eventDate = new Date(eventDateStr + 'T12:00:00Z');
     const offsetDays = offsetUnit === 'week' ? offsetNum * 7 : offsetNum;
     const reminderDate = new Date(eventDate.getTime() - offsetDays * 86_400_000);
