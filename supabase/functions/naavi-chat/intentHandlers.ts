@@ -824,13 +824,18 @@ export async function handleSetReminderExec(
 
   const safeDateTime = correctDatetime(params.datetime);
 
-  const { error } = await supabase.from('reminders').insert({
-    user_id:      userId,
-    title:        params.title,
-    datetime:     safeDateTime,
-    phone_number: phoneNumber,
-    fired:        false,
-    is_priority:  false,
+  // Write reminders as action_rules (trigger_type='time') so they appear in
+  // the Alerts screen alongside all other time-based alerts and support
+  // attached lists + notes.
+  const { error } = await supabase.from('action_rules').insert({
+    user_id:        userId,
+    trigger_type:   'time',
+    trigger_config: { datetime: safeDateTime },
+    action_type:    'sms',
+    action_config:  { body: params.title, to_phone: phoneNumber },
+    label:          params.title,
+    one_shot:       true,
+    enabled:        true,
   });
 
   if (error) {
