@@ -389,9 +389,19 @@ Rules that are already covered elsewhere are NOT duplicated here — see CONFIGU
 
 14. **"# N" MEANS THE USER PICKED OPTION N.** When you offer numbered choices and the user replies with `# 2`, `# 5`, etc., the digit after the `#` is the option they chose. The user prefixes the hash because the chat interface auto-renumbers a bare number reply (typing just `2` can render as `1`). Always honor this convention literally — `# 2` = option 2, never something else, never ask what it means.
 
-### FOUR TEST GATES — MANDATORY BEFORE EVERY PRODUCTION BUILD (Wael 2026-06-19)
+### ⭐⭐⭐ TWO-PHASE BUILD PROCESS (Wael 2026-06-21)
 
-Every production AAB must pass all four gates in this exact order. Each covers a distinct layer the others cannot reach.
+**Phase 1 — Iterative testing (staging APKs):** Build as many staging APKs as needed. NO gates required. No auto-tester, no voice regression, no Maestro, no Firebase. Just build and test on device. Keep iterating until Wael confirms the staging APK is approved.
+
+**Phase 2 — Promote to production AAB:** Only when Wael explicitly says "approved — push to production." At that point, run the applicable gates (currently 1 and 2 — see suspensions below), then build the production AAB.
+
+The gates below apply to Phase 2 ONLY — never to staging APK builds.
+
+---
+
+### FOUR TEST GATES — MANDATORY BEFORE EVERY PRODUCTION AAB (Wael 2026-06-19, updated 2026-06-21)
+
+Every production AAB must pass all applicable gates in this exact order. Each covers a distinct layer the others cannot reach.
 
 | Gate | Platform | What it tests | How to run |
 |------|----------|---------------|------------|
@@ -416,11 +426,9 @@ Skipping Gates 3 and 4 is allowed ONLY while both suspensions above are active.
 
 ---
 
-15. **⭐ `npm run test:auto` 100% GREEN IS A HARD PREREQUISITE TO EVERY NEW BUILD — AAB AND APK ALIKE** (Wael 2026-05-01 after V57.9.8 first 44/44 green; strengthened 2026-05-22). No exceptions. The stable baseline is the safety net that protects every build.
+15. **⭐ `npm run test:auto` 100% GREEN IS A HARD PREREQUISITE TO EVERY PRODUCTION AAB** (Wael 2026-05-01; updated scope 2026-06-21). Applies to production AABs only — NOT to staging APKs built during iterative testing. See TWO-PHASE BUILD PROCESS above.
 
-**The converse is equally binding:** *if for any reason the auto-tester is suspended, the pushing of a new build is also suspended.* No build (AAB, APK, preview, production) ships while the test gate is off. A green auto-tester run is the literal pre-condition for any `eas build` command. If you see a CLAUDE.md or memory entry claiming the auto-tester is "suspended", you do NOT proceed to build — you stop, surface the suspension, and wait for Wael to re-enable. Removing the suspension is a separate step that requires Wael's explicit go-ahead.
-
-A short-lived 2026-05-16 suspension related to an Expo build error was removed 2026-05-22 (Wael) — run the suite unconditionally before every build. No future "temporary suspension" survives without simultaneously suspending all build commands.
+**The converse is equally binding for production:** *if for any reason the auto-tester is suspended, production AAB builds are also suspended.* Staging APK builds are unaffected. If you see a CLAUDE.md or memory entry claiming the auto-tester is "suspended", you do NOT proceed to a production AAB — you stop, surface the suspension, and wait for Wael to re-enable.
 
 **15b. ⭐ FIREBASE TEST LAB IS A MANDATORY GATE BEFORE EVERY PRODUCTION AAB** (Wael 2026-05-29, hold lifted 2026-06-09). After `npm run test:auto` is 100% green and before `eas build --profile production`, the APK must be submitted to Firebase Test Lab. No exceptions.
 
