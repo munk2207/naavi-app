@@ -2128,6 +2128,7 @@ Deno.serve(async (req) => {
               const result = await handleSetReminderExec(
                 pending.params as { title: string; datetime: string },
                 userId, supabase, _url, _key,
+                typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined,
               );
               console.log(`[timing] ${elapsed()} | SET_REMINDER executed`);
               return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
@@ -2138,6 +2139,7 @@ Deno.serve(async (req) => {
               const result = await handleCreateEventExec(
                 pending.params as { summary: string; start: string; end?: string; description?: string },
                 userId, _url, _key,
+                typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined,
               );
               console.log(`[timing] ${elapsed()} | CREATE_EVENT executed`);
               return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });

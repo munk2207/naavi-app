@@ -776,10 +776,11 @@ export const HANDLED_ACTION_INTENTS = new Set([
 ]);
 
 // Format ISO datetime to human-readable EST string.
-function fmtDatetime(iso: string): string {
+function fmtDatetime(iso: string, tz?: string): string {
+  const timeZone = tz || 'America/Toronto';
   try {
     return new Date(iso).toLocaleString('en-CA', {
-      timeZone: 'America/Toronto',
+      timeZone,
       weekday: 'short', month: 'short', day: 'numeric',
       hour: 'numeric', minute: '2-digit',
     });
@@ -788,16 +789,17 @@ function fmtDatetime(iso: string): string {
   }
 }
 
-// Correct naive datetimes (no TZ suffix) to America/Toronto offset.
-// Mirrors lib/supabase.ts::saveReminder — keeps behaviour consistent.
-export function correctDatetime(raw: string): string {
+// Correct naive datetimes (no TZ suffix) to the user's device timezone offset.
+// Falls back to America/Toronto when no timezone is provided.
+export function correctDatetime(raw: string, tz?: string): string {
   if (!raw || /[Zz]|[+-]\d{2}:\d{2}$/.test(raw)) return raw;
+  const timeZone = tz || 'America/Toronto';
   try {
     const datePart = raw.includes('T') ? raw.split('T')[0] : raw;
     const timePart = raw.includes('T') ? raw.split('T')[1] : '00:00:00';
     const testDate = new Date(`${datePart}T12:00:00Z`);
     const offset   = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Toronto', timeZoneName: 'shortOffset',
+      timeZone, timeZoneName: 'shortOffset',
     }).formatToParts(testDate).find(p => p.type === 'timeZoneName')?.value ?? 'GMT-4';
     const sign  = offset.includes('-') ? '-' : '+';
     const hours = offset.replace('GMT', '').replace(/[+-]/, '').padStart(2, '0');
@@ -814,6 +816,7 @@ export async function handleSetReminderExec(
   supabase: ReturnType<typeof createClient>,
   supabaseUrl: string,
   serviceKey: string,
+  clientTimezone?: string,
 ): Promise<HandlerResult> {
   const { data: settingsRow } = await supabase
     .from('user_settings')
@@ -822,7 +825,7 @@ export async function handleSetReminderExec(
     .maybeSingle();
   const phoneNumber = (settingsRow as any)?.phone ?? null;
 
-  const safeDateTime = correctDatetime(params.datetime);
+  const safeDateTime = correctDatetime(params.datetime, clientTimezone);
 
   // Write reminders as action_rules (trigger_type='time') so they appear in
   // the Alerts screen alongside all other time-based alerts and support
@@ -855,7 +858,7 @@ export async function handleSetReminderExec(
     console.warn('[handleSetReminderExec] calendar event failed (non-fatal):', (e as Error).message);
   }
 
-  const label = fmtDatetime(safeDateTime);
+  const label = fmtDatetime(safeDateTime, clientTimezone);
   const msg   = `Done. Reminder set: ${params.title} on ${label}.`;
   return { speech: msg, display: msg, actions: [] };
 }
@@ -866,10 +869,11 @@ export async function handleCreateEventExec(
   userId: string,
   supabaseUrl: string,
   serviceKey: string,
+  clientTimezone?: string,
 ): Promise<HandlerResult> {
-  const safeStart = correctDatetime(params.start);
+  const safeStart = correctDatetime(params.start, clientTimezone);
   const safeEnd   = params.end
-    ? correctDatetime(params.end)
+    ? correctDatetime(params.end, clientTimezone)
     : new Date(new Date(safeStart).getTime() + 60 * 60000).toISOString();
 
   try {
@@ -883,7 +887,7 @@ export async function handleCreateEventExec(
       const msg = `I couldn't add that to your calendar. Please try again.`;
       return { speech: msg, display: msg, actions: [] };
     }
-    const label = fmtDatetime(safeStart);
+    const label = fmtDatetime(safeStart, clientTimezone);
     const msg   = `Done. Added "${params.summary}" to your calendar on ${label}.`;
     return { speech: msg, display: msg, actions: [] };
   } catch (e) {
