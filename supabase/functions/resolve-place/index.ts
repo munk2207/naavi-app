@@ -459,7 +459,34 @@ async function resolveByAddress(opts: {
     }
   }
 
+  // Fallback: Places Text Search without location bias. Used when Geocoding API
+  // is unavailable (key not enabled) or returns nothing. A full address string
+  // (city + state + zip) is specific enough that the top Places result is correct.
   if (!coords) {
+    const queryForPlaces = opts.addressQuery.replace(/^[^,\d]+,\s*/, '').trim() || opts.addressQuery;
+    console.log(`[resolveByAddress] geocoding failed, trying Places Text Search for "${queryForPlaces}"`);
+    try {
+      const qs = new URLSearchParams({ query: queryForPlaces, key: opts.apiKey! });
+      const pr = await fetch(`${PLACES_TEXT_SEARCH}?${qs.toString()}`);
+      if (pr.ok) {
+        const pd = await pr.json();
+        const first = pd?.results?.[0];
+        const lat = first?.geometry?.location?.lat;
+        const lng = first?.geometry?.location?.lng;
+        if (typeof lat === 'number' && typeof lng === 'number') {
+          return jsonResponse({
+            status: 'ok',
+            source: opts.source,
+            place_name: opts.addressQuery,
+            address: first.formatted_address ?? opts.addressQuery,
+            lat, lng,
+            radius_meters: opts.radiusOverride,
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[resolveByAddress] Places Text Search fallback failed:', e);
+    }
     return jsonResponse({ status: 'not_found' });
   }
   return jsonResponse({
