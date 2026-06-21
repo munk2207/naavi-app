@@ -730,16 +730,23 @@ async function resolveBeforeEventDate(
 
     // Filter to upcoming results that also match the event type keyword in the title.
     // Calendar adapter returns dates in createdAt (ISO) and metadata.start_time.
-    const upcoming = results.filter((r: any) => {
+    const isUpcoming = (r: any) => {
       const dateStr = (r.createdAt ?? r.metadata?.start_time ?? r.date ?? r.start ?? r.event_date ?? '');
-      if (!dateStr) return false;
-      if (String(dateStr).slice(0, 10) < todayISO) return false;
+      return dateStr && String(dateStr).slice(0, 10) >= todayISO;
+    };
+    // Strict pass: title must contain the user's event-type word(s).
+    const strictUpcoming = results.filter((r: any) => {
+      if (!isUpcoming(r)) return false;
       const title = (r.title ?? r.name ?? r.summary ?? '').toLowerCase();
       return title.includes(eventType);
     });
+    // Loose pass: if strict got 0 hits (e.g. user typo), trust global-search relevance
+    // and accept any upcoming result. Only used when exactly 1 result survives.
+    const upcoming = strictUpcoming.length > 0 ? strictUpcoming
+      : results.filter(isUpcoming);
 
     if (upcoming.length !== 1) {
-      console.log(`[naavi-chat] before-event pre-search | ${upcoming.length} upcoming results — falling through to Claude`);
+      console.log(`[naavi-chat] before-event pre-search | ${upcoming.length} upcoming results (strict=${strictUpcoming.length}) — falling through to Claude`);
       return null;
     }
 

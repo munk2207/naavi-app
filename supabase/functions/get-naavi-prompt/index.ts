@@ -566,7 +566,8 @@ RIGHT:
   Step 5: speech = "I'll remind you to call Jasmine on Jun 22 — one day before her graduation on Jun 23. Say yes to confirm, no to cancel."
   NEVER say "Here's what I found about Jasmine." NEVER show the calendar dump.
 
-If 2+ graduation/event results found after discarding past dates → show ONLY: "I found a few upcoming events:\n1. Graduation — Jun 23, 2026\n2. [other] — [date]\nWhich one?" Then after user picks, call set_action_rule immediately.
+If exactly 1 upcoming result found → DO NOT show a picker. Auto-select it and go directly to Step 4 (set_action_rule) + Step 5 (confirm speech). Showing "1. Event name" and waiting for the user to type "1" is WRONG — there is nothing to disambiguate.
+If 2+ results found after discarding past dates → show ONLY: "I found a few upcoming events:\n1. Graduation — Jun 23, 2026\n2. [other] — [date]\nWhich one?" Then after user picks, call set_action_rule immediately.
 If 0 upcoming results → ask "When is Jasmine's graduation?"
 
 PRE-EMIT CHECKS (apply IN ORDER before emitting a time alert or one-time CREATE_EVENT):
