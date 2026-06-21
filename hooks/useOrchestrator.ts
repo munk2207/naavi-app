@@ -2029,71 +2029,15 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     try {
       let enrichedMessage = userMessage;
 
-      // ── USER-COMPOUND SPLIT ────────────────────────────────────────────────────
-      // Detect bullet-point or numbered compound requests in the USER's own message
-      // and split BEFORE Claude sees the full list. Each item is sent to Claude
-      // individually so Claude never enters a compound pre-confirmation loop.
-      // Path B (isCompoundPreConfirm below) remains as fallback for natural-language
-      // compound phrases not caught here.
-      if (
-        !pendingActionRef.current &&
-        compoundQueueRef.current.length === 0 &&
-        pendingCompoundItemsRef.current.length === 0
-      ) {
-        const splitItems = splitUserCompound(userMessage);
-        if (splitItems && splitItems.length >= 2) {
-          const total = splitItems.length;
-          const original = userMessage.slice(0, 400);
-          pendingCompoundItemsRef.current = splitItems.slice(1).map(
-            (item, i) =>
-              `[COMPOUND-ITEM ${i + 2} of ${total} — full request for context: ${original}]\n${item}`
-          );
-          enrichedMessage = `[COMPOUND-ITEM 1 of ${total} — full request for context: ${original}]\n${splitItems[0]}`;
-          console.log(`[send] user-compound split: ${total} items detected — sending item 1 to Claude`);
-        }
-      }
-
-      // ── COMPOUND PRE-CONFIRMATION INTERCEPT ────────────────────────────────────
-      // Claude sometimes does a two-step pre-confirmation: lists all N items in
-      // text (no tool calls), ends with "say yes to confirm", waits for user.
-      // When "Yes" arrives in this state (no pending action, empty queue), Claude
-      // re-narrates everything instead of just executing. Fix: detect this pattern
-      // and inject a hard execution directive into the enriched message so Claude
-      // responds with "On it." + tool calls only.
-      if (
-        AFFIRMATIVE_RE.test(userMessage.trim()) &&
-        !pendingActionRef.current &&
-        compoundQueueRef.current.length === 0
-      ) {
-        const lastNaaviTurn = [...turns].reverse().find(t => t.role === 'assistant');
-        const lastText = lastNaaviTurn?.text ?? '';
-        // Do NOT intercept if a PENDING_INTENT is already embedded — "yes" belongs
-        // to the server's Step 1.4 executor, not the client compound-item splitter.
-        const hasPendingIntent = /<!--PENDING_INTENT:/m.test(lastText);
-        const isCompoundPreConfirm =
-          !hasPendingIntent &&
-          /\n\s*[1-9]\./m.test(lastText) &&             // numbered list present
-          /say\s+yes\s+to\s+go\s+ahead/i.test(lastText); // only batch pre-confirm phrase
-        if (isCompoundPreConfirm) {
-          const items = parseCompoundItems(lastText);
-          if (items.length > 0) {
-            const total = items.length;
-            // Strip "I'll " / "I will " prefix so Claude receives a command, not a statement.
-            // Add [COMPOUND-ITEM] tag so RULE 24b fires: emit tool call immediately, no re-confirmation.
-            const toCommand = (text: string) => text.replace(/^I'?ll\s+/i, '').replace(/^I will\s+/i, '');
-            const taggedItems = items.map((item, i) =>
-              `[COMPOUND-ITEM ${i + 1} of ${total} — execute immediately, no pre-confirmation needed]\n${toCommand(item)}`
-            );
-            pendingCompoundItemsRef.current = taggedItems.slice(1); // queue items 2-N
-            enrichedMessage = taggedItems[0]; // send item 1 to Claude as standalone request
-            console.log(`[send] compound pre-confirm: parsed ${total} items — sending item 1 to Claude`);
-          } else {
-            // Fallback: list parse failed — use EXECUTE NOW injection
-            enrichedMessage = `${userMessage}\n\n[SYSTEM — EXECUTE NOW]: The user confirmed. Emit ALL tool calls immediately. Speech must be "On it." only — no re-narration.`;
-            console.log('[send] compound pre-confirm: parse failed, falling back to EXECUTE NOW injection');
-          }
-        }
-      }
+      // ── COMPOUND SPLIT — DISABLED (2026-06-21) ────────────────────────────────
+      // The client-side compound splitter (user-compound split + pre-confirm
+      // intercept + auto-advance) caused recursive COMPOUND-ITEM nesting and
+      // snowballing context when Claude sub-responses also contained numbered
+      // lists or "say yes to go ahead". RULE 24 (v129) now handles compound
+      // sequencing entirely server-side via PENDING_INTENT chains — each "yes"
+      // goes straight to Step 1.4 which executes item N and presents item N+1.
+      // No client splitting, no auto-advance, no COMPOUND-ITEM tags needed.
+      pendingCompoundItemsRef.current = [];
 
       // ── STEP 1: Person context lookup (async) ──────────────────────────────────
       const personName = extractPersonQuery(userMessage);
@@ -4493,25 +4437,8 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     // cooldown / idle / pending_confirm / error: no-op.
   }, [clearCooldownTimer, setAudioPlaying, startCooldown]);
 
-  // Auto-advance compound pre-confirm items when each item's cycle completes.
-  // When status returns to idle and there are still parsed items queued,
-  // send the next item to Claude as a standalone request.
-  useEffect(() => {
-    if (status !== 'idle') return;
-    if (pendingCompoundItemsRef.current.length === 0) return;
-    if (pendingActionRef.current) return;
-    if (compoundQueueRef.current.length > 0) return;
-    const nextItem = pendingCompoundItemsRef.current.shift()!;
-    console.log(`[compound-pre-confirm] auto-advancing to next item: "${nextItem}"`);
-    // Discard any unconfirmed draft cards from prior turns before advancing
-    setTurns(prev => prev.map(t => ({
-      ...t,
-      drafts: (t.drafts ?? []).map((d: any) =>
-        d.type === 'DRAFT_MESSAGE' && !d._voiceConfirmed ? { ...d, _discarded: true } : d
-      ),
-    })));
-    send(nextItem);
-  }, [status, send]);
+  // Auto-advance DISABLED (2026-06-21) — pendingCompoundItemsRef is always
+  // empty now; compound sequencing is handled server-side via PENDING_INTENT.
 
   // Cleanup on unmount — make sure no stray timer fires after the hook unmounts.
   useEffect(() => {
