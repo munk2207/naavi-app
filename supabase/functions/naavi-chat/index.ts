@@ -1748,6 +1748,7 @@ function buildActionConfirm(
   intent: string,
   params: Record<string, string>,
   clientTimezone?: string,
+  rawUserText?: string,
 ): { speech: string; display: string; actions: unknown[]; missingParam?: string } {
   switch (intent) {
     case 'SET_REMINDER': {
@@ -1799,7 +1800,19 @@ function buildActionConfirm(
       if (!params.to_name) return { speech: '', display: '', actions: [], missingParam: "Who should I send the message to?" };
       if (!params.body)    return { speech: '', display: '', actions: [], missingParam: "What should the message say?" };
       const s = `Here's your draft to ${params.to_name}: "${params.body.slice(0, 100)}". Review it in the card below.`;
-      const action = { type: 'DRAFT_MESSAGE', to: params.to_name, to_phone: params.to_phone ?? '', body: params.body };
+      let draftSubject = String(params.subject ?? '').trim();
+      if (!draftSubject && rawUserText) {
+        const subjectWords = rawUserText
+          .replace(/^send\s+\w+\s+(an?\s+)?email\s*(asking|about|regarding|re:|for|saying|to\s+tell|to\s+let)?\s*/i, '')
+          .replace(/^email\s+\w+\s+(about|regarding|to\s+ask)?\s*/i, '')
+          .split(/\s+/)
+          .filter((w: string) => w.length > 3 && !/^(that|this|them|they|your|have|will|with|from|into|been|also|some|what|when|where|please|could|would|should|asking|about|regarding|sarah|email|send|seend)$/i.test(w))
+          .slice(0, 5)
+          .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+          .join(' ');
+        draftSubject = subjectWords || 'Message from Naavi';
+      }
+      const action = { type: 'DRAFT_MESSAGE', to: params.to_name, to_phone: params.to_phone ?? '', body: params.body, subject: draftSubject };
       return { speech: s, display: s, actions: [action] };
     }
     case 'MAKE_CALL':
@@ -2781,7 +2794,7 @@ Deno.serve(async (req) => {
             // Haiku extracted structured params. Validate completeness, then
             // generate templated confirm speech + embed PENDING_INTENT marker.
             // Turn 2: Step 1.4 resolver executes server-side. Same result every time.
-            const confirmed = buildActionConfirm(classification.intent, classification.params, typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined);
+            const confirmed = buildActionConfirm(classification.intent, classification.params, typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined, userText);
 
             if (confirmed.missingParam === '__FALLTHROUGH__') {
               const _ftTrigger = String((classification.params as any)?.trigger_type ?? '');

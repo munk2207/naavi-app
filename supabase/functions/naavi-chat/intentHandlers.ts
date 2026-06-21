@@ -830,7 +830,9 @@ export async function handleSetReminderExec(
   // Write reminders as action_rules (trigger_type='time') so they appear in
   // the Alerts screen alongside all other time-based alerts and support
   // attached lists + notes.
-  const { error } = await supabase.from('action_rules').insert({
+  // Use admin client — RLS blocks user-JWT inserts on action_rules.
+  const adminClient = createClient(supabaseUrl, serviceKey);
+  const { error } = await adminClient.from('action_rules').insert({
     user_id:        userId,
     trigger_type:   'time',
     trigger_config: { datetime: safeDateTime },

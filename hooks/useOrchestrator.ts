@@ -2067,9 +2067,13 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       ) {
         const lastNaaviTurn = [...turns].reverse().find(t => t.role === 'assistant');
         const lastText = lastNaaviTurn?.text ?? '';
+        // Do NOT intercept if a PENDING_INTENT is already embedded — "yes" belongs
+        // to the server's Step 1.4 executor, not the client compound-item splitter.
+        const hasPendingIntent = /<!--PENDING_INTENT:/m.test(lastText);
         const isCompoundPreConfirm =
+          !hasPendingIntent &&
           /\n\s*[1-9]\./m.test(lastText) &&             // numbered list present
-          /say\s+yes|yes\s+to\s+(go\s+ahead|confirm)/i.test(lastText); // pre-confirm phrase
+          /say\s+yes\s+to\s+go\s+ahead/i.test(lastText); // only batch pre-confirm phrase
         if (isCompoundPreConfirm) {
           const items = parseCompoundItems(lastText);
           if (items.length > 0) {

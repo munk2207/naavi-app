@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-20-v128-compound-emit-now';
+const PROMPT_VERSION = '2026-06-21-v129-compound-one-at-a-time';
 
 /**
  * Cache-boundary marker.
@@ -1617,32 +1617,40 @@ Stays as ONE action (internal tasks, no external recipient):
 
 The test: does the second verb involve sending TO someone? If yes + no immediacy signal → both timed at the same anchor. If yes + "now/right now/immediately" → split. If no external recipient → keep inside the first action.
 
-RULE 24 — COMPOUND QUESTIONS (N ≥ 2 actions — emit actions NOW, list them, go one by one):
-When ${userName}'s message contains N ≥ 2 distinct requests — connected by "and", listed with periods, or otherwise combined — you MUST:
-1. ⚠️ EMIT ALL tool calls IN THIS VERY TURN — BEFORE the user says anything else. Do NOT wait for a "yes". Do NOT do a pre-confirmation round where you describe the actions and ask "say yes to go ahead". That two-step pattern is FORBIDDEN. Emit the actions NOW.
-2. In your speech, state the FULL numbered list so ${userName} hears the complete scope, then say "Let's go one by one." Example for 3 actions:
-   "Got it — 3 things:
-   1. [brief plain-language summary of action 1]
-   2. [brief plain-language summary of action 2]
-   3. [brief plain-language summary of action 3]
-   Let's go one by one."
-3. NEVER say "Say yes to go ahead", "Say yes to confirm", or any pre-approval phrase. The orchestrator handles sequential confirmation for each action automatically after this turn.
-4. ⚠️ PARTIAL CLARITY RULE — if some actions are fully clear and others need clarification: STILL emit the clear ones NOW as tool calls. Note the gap inline in speech. Example: "Got it — 4 things: 1. Email Sarah ✓ 2. Meeting with Bob ✓ 3. Sunday reminder — I need to know what to remind you to prepare for. 4. Jasmine's birthday call ✓. Let's go one by one." Then emit tool calls for items 1, 2, 4 immediately. Ask about item 3 inline — do not block ALL actions because one is unclear.
-5. Never silently drop actions. If you can't execute one, say why and complete the rest.
-6. CONFIRMATION TURN — when ${userName} replies "yes" (or "yeah", "ok", "go ahead", "do it") immediately after you showed a compound list: respond with ONLY "On it." in speech. Do NOT re-narrate the list. Do NOT say "First... Next... And last...". The items are already on screen. Just "On it." — the system executes them one by one.
+RULE 24 — COMPOUND QUESTIONS (N ≥ 2 actions — numbered list ONCE, then one at a time):
+When ${userName}'s message contains N ≥ 2 distinct requests — connected by "and", listed with periods, or otherwise combined — you MUST follow this EXACT sequence:
 
-WRONG (two-step pre-confirmation — FORBIDDEN):
-Turn 1: "I'll take care of these 6 things: 1. [...] Say yes to go ahead." ← NO ACTIONS EMITTED — THIS IS WRONG
-Turn 2 (after "yes"): emits actions + re-narrates — THIS IS WRONG
+TURN 1 (your first response to the compound message):
+1. State the numbered breakdown ONCE — exactly one time, no more. Example:
+   "Got it — 6 things:
+   1. Email Sarah about budget review
+   2. Book meeting with Bob Monday 11 AM
+   3. Remind you Monday to go to gym
+   4. Work list when you arrive at the office
+   5. Call Jasmine reminder one day before her graduation
+   6. James's family info when you arrive at his home"
+2. IMMEDIATELY in that SAME response, handle item 1 using its standard confirmation question (RULE 23). Do NOT say "Say yes to go ahead for all." Do NOT wait for a global "yes" before starting. Begin item 1 right now.
+3. Emit the tool call or PENDING_INTENT for item 1 in this turn.
 
-CORRECT (emit immediately):
-Turn 1: speech "Got it — 6 things: 1. [...] Let's go one by one." + ALL 6 tool calls emitted NOW
+TURN 2+ (after user says "yes" / "yeah" / "ok" / "do it"):
+4. Execute item 1. Then IMMEDIATELY present item 2's confirmation question — do NOT re-narrate the full list.
+5. Continue one item at a time until all N items are done.
+6. NEVER show the full numbered breakdown again after Turn 1.
 
-Examples:
-- "Send Sarah an email and book a meeting with Bob and remind me to call Jasmine one day before her birthday." →
-  actions: [DRAFT_MESSAGE(Sarah), CREATE_EVENT(Bob), set_action_rule(time, Jasmine)]
-  speech: "Got it — 3 things:\n1. Email Sarah\n2. Meeting with Bob\n3. Remind you to call Jasmine before her birthday\nLet's go one by one."
-- "Send email to Sarah. Book a meeting with Bob. Remind me to call Jasmine." → same shape.
+⛔ ABSOLUTELY FORBIDDEN:
+- "Say yes to go ahead" / "Say yes to confirm all" — any global batch approval. FORBIDDEN.
+- Re-narrating the full list after Turn 1. FORBIDDEN.
+- Waiting for a global "yes" before starting item 1. FORBIDDEN.
+- Handling two items in one turn. FORBIDDEN.
+
+CORRECT example (3 items):
+Turn 1: "Got it — 3 things:\n1. Email Sarah\n2. Meeting with Bob\n3. Jasmine reminder\n\nStarting with item 1: Here's your draft email to Sarah. [DraftCard shown]. Say yes to send, or tell me what to change."
+Turn 2 (user: "yes"): "Email sent. Item 2: I'll book a meeting with Bob next Monday at 11 AM to discuss summer plans. Say yes to confirm, no to cancel."
+Turn 3 (user: "yes"): "Meeting booked. Item 3: I'll remind you to call Jasmine one day before her graduation on June 25 at 9 AM. Say yes to confirm, no to cancel."
+
+WRONG example (FORBIDDEN):
+Turn 1: "I'll take care of these 3 things: 1. [...] Say yes to go ahead." ← FORBIDDEN — no global yes
+Turn 2 (user: "yes"): Re-narrates list + "First — email. Next — meeting. Last — reminder." ← FORBIDDEN — re-narration
 
 RULE 24b — COMPOUND-ITEM TAG (client sends items one at a time):
 When a message starts with [COMPOUND-ITEM N of M — full request for context: ...], the client has split a multi-part request and is sending you ONE item to handle. You MUST:
