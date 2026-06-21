@@ -416,16 +416,16 @@ export const NAAVI_TOOLS: NaaviTool[] = [
   // 8. DRAFT_MESSAGE
   {
     name: 'draft_message',
-    description: 'Draft a message for confirm-then-send. Subject is required for email channel only.',
+    description: 'Draft a message for confirm-then-send. Subject is required for email channel — always provide a short 3-7 word subject line (e.g. "Budget Review Request", "Meeting Confirmation"). Never leave subject blank for emails.',
     input_schema: {
       type: 'object',
       properties: {
         to: { type: 'string', description: 'Contact NAME only. Orchestrator resolves email/phone.' },
-        subject: { type: 'string', description: 'Required when channel=email.' },
+        subject: { type: 'string', description: 'Short 3-7 word subject line. REQUIRED when channel=email. Never use the body text as subject.' },
         body: { type: 'string' },
         channel: { type: 'string', enum: ['email', 'sms', 'whatsapp'] },
       },
-      required: ['to', 'body', 'channel'],
+      required: ['to', 'body', 'channel', 'subject'],
       additionalProperties: false,
     },
   },
