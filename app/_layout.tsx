@@ -79,6 +79,23 @@ import { useGeofencing } from '@/hooks/useGeofencing';
 async function handleAuthCallback(url: string) {
   try {
     if (!url.includes('auth/callback')) return;
+
+    // PKCE flow (newer Supabase projects) — callback arrives as ?code=XXX
+    const queryString = url.includes('?') ? url.split('?')[1] : '';
+    const queryParams = new URLSearchParams(queryString.split('#')[0]);
+    const code = queryParams.get('code');
+    if (code && supabase) {
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) { console.error('[layout] exchangeCodeForSession failed:', error.message); return; }
+      const googleToken = data.session?.provider_refresh_token ?? null;
+      if (googleToken) {
+        invokeWithTimeout('store-google-token', { body: { refresh_token: googleToken } }, 15_000)
+          .catch((err) => console.error('[layout] store-google-token failed:', err));
+      }
+      return;
+    }
+
+    // Implicit flow (older Supabase projects) — tokens in URL fragment #access_token=...
     const fragment = url.includes('#') ? url.split('#')[1] : url.split('?')[1] ?? '';
     const params = new URLSearchParams(fragment);
     const access_token           = params.get('access_token');
@@ -86,21 +103,15 @@ async function handleAuthCallback(url: string) {
     const provider_refresh_token = params.get('provider_refresh_token');
 
     if (access_token && refresh_token && supabase) {
-      // Set the Supabase session so the user is logged in
       await supabase.auth.setSession({ access_token, refresh_token });
-
-      // Get the Google refresh token — first try the URL, then the session object
-      // Supabase doesn't always include it in the URL so session is more reliable
       let googleToken = provider_refresh_token;
       if (!googleToken) {
         const session = await getSessionWithTimeout();
         googleToken = session?.provider_refresh_token ?? null;
       }
-
       if (googleToken) {
-        invokeWithTimeout('store-google-token', {
-          body: { refresh_token: googleToken },
-        }, 15_000).catch((err) => console.error('[layout] store-google-token failed:', err));
+        invokeWithTimeout('store-google-token', { body: { refresh_token: googleToken } }, 15_000)
+          .catch((err) => console.error('[layout] store-google-token failed:', err));
       }
     }
   } catch (err) {
