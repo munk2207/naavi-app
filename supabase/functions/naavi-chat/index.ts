@@ -1724,10 +1724,14 @@ Use "low" confidence when ambiguous.`,
 // missingParam is set when a required param is absent — caller asks for it instead.
 // For DRAFT_MESSAGE, returns the action immediately (DraftCard is the confirm UI).
 
-function fmtDtLocal(iso: string): string {
+function fmtDtLocal(iso: string, tz?: string): string {
+  const timeZone = tz || 'America/Toronto';
   try {
-    return new Date(iso).toLocaleString('en-CA', {
-      timeZone: 'America/Toronto', weekday: 'long', month: 'long', day: 'numeric',
+    // correctDatetime anchors naive datetimes to the user's timezone so
+    // Deno (which runs UTC) doesn't silently reinterpret them as UTC.
+    const anchored = correctDatetime(iso, timeZone);
+    return new Date(anchored).toLocaleString('en-CA', {
+      timeZone, weekday: 'long', month: 'long', day: 'numeric',
       hour: 'numeric', minute: '2-digit',
     });
   } catch { return iso; }
@@ -1736,19 +1740,20 @@ function fmtDtLocal(iso: string): string {
 function buildActionConfirm(
   intent: string,
   params: Record<string, string>,
+  clientTimezone?: string,
 ): { speech: string; display: string; actions: unknown[]; missingParam?: string } {
   switch (intent) {
     case 'SET_REMINDER': {
       if (!params.title)    return { speech: '', display: '', actions: [], missingParam: "What should I remind you about?" };
       if (!params.datetime) return { speech: '', display: '', actions: [], missingParam: "When should I remind you?" };
-      const label = fmtDtLocal(params.datetime);
+      const label = fmtDtLocal(params.datetime, clientTimezone);
       const s = `I'll remind you: ${params.title} on ${label}. Say yes to confirm, no to cancel.`;
       return { speech: s, display: s, actions: [] };
     }
     case 'CREATE_EVENT': {
       if (!params.summary) return { speech: '', display: '', actions: [], missingParam: "What's the event name?" };
       if (!params.start)   return { speech: '', display: '', actions: [], missingParam: "When is it?" };
-      const label = fmtDtLocal(params.start);
+      const label = fmtDtLocal(params.start, clientTimezone);
       const s = `I'll add "${params.summary}" to your calendar on ${label}. Say yes to confirm, no to cancel.`;
       return { speech: s, display: s, actions: [] };
     }
@@ -2572,7 +2577,7 @@ Deno.serve(async (req) => {
         const _eaParams: Record<string, string> = { trigger_type: 'email' };
         if (_eaFrom)    _eaParams.from             = _eaFrom;
         if (_eaSubject) _eaParams.subject_keyword   = _eaSubject;
-        const _eaConfirm = buildActionConfirm('SET_ACTION_RULE', _eaParams);
+        const _eaConfirm = buildActionConfirm('SET_ACTION_RULE', _eaParams, typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined);
         if (_eaConfirm.speech) {
           const _eaPi = JSON.stringify({ intent: 'SET_ACTION_RULE', level: 'action', confidence: 'high', params: _eaParams });
           console.log(`[timing] ${elapsed()} | EMAIL_ALERT bypass from="${_eaFrom}" subject="${_eaSubject}"`);
@@ -2594,7 +2599,7 @@ Deno.serve(async (req) => {
         const _beEventTitle  = (_beInjected.match(/Event:\s*(.+)/) ?? [])[1]?.trim() ?? 'the event';
         const _bePersonMatch = /(?:call|text|message|contact|email|reach)\s+([a-z]+)/i.exec(userText);
         const _bePerson      = _bePersonMatch ? _bePersonMatch[1] : '';
-        const _beLabel       = _beReminderISO ? fmtDtLocal(_beReminderISO + 'T09:00:00') : null;
+        const _beLabel       = _beReminderISO ? fmtDtLocal(_beReminderISO + 'T09:00:00', typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined) : null;
         if (_beReminderISO && _beLabel) {
           const _beTitle   = _bePerson ? `Call ${_bePerson}` : `Reminder — ${_beEventTitle}`;
           const _beDatetime = `${_beReminderISO}T09:00:00`;
@@ -2769,7 +2774,7 @@ Deno.serve(async (req) => {
             // Haiku extracted structured params. Validate completeness, then
             // generate templated confirm speech + embed PENDING_INTENT marker.
             // Turn 2: Step 1.4 resolver executes server-side. Same result every time.
-            const confirmed = buildActionConfirm(classification.intent, classification.params);
+            const confirmed = buildActionConfirm(classification.intent, classification.params, typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined);
 
             if (confirmed.missingParam === '__FALLTHROUGH__') {
               const _ftTrigger = String((classification.params as any)?.trigger_type ?? '');
@@ -2812,7 +2817,7 @@ Deno.serve(async (req) => {
                   const _ftLd = await _ftLr.json();
                   const _ftAllC: Array<Record<string, any>> = Array.isArray(_ftLd.contacts)
                     ? _ftLd.contacts : (_ftLd.contact ? [_ftLd.contact] : []);
-                  const _ftDtLabel = fmtDtLocal(_ftDatetime);
+                  const _ftDtLabel = fmtDtLocal(_ftDatetime, typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined);
 
                   if (_ftIsEmail) {
                     // ── Email action branch ──────────────────────────────────────────
