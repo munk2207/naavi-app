@@ -506,10 +506,14 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
       }
 
       const originalName = to;
+      const rawSubject = String(action.subject ?? '').trim();
+      const rawBody = String(action.body ?? '').trim();
+      const derivedSubject = rawSubject ||
+        (rawBody ? rawBody.split(/[.\n]/)[0].slice(0, 60).trim() : 'Message from Naavi');
       const result = await registry.email.send({
         to:      [{ name: email !== originalName ? originalName : '', email }],
-        subject: String(action.subject ?? ''),
-        body:    String(action.body    ?? ''),
+        subject: derivedSubject,
+        body:    rawBody,
       });
       setSending(false);
       if (result.success) {
