@@ -3407,7 +3407,23 @@ Deno.serve(async (req) => {
       if (b.name === 'set_location_rule_chain' || b.name === 'set_location_rule_address') {
         return convertLocationToolToActionRule(b.name, b.input ?? {});
       }
-      return { type: actionType, ...(b.input ?? {}) };
+      const action: any = { type: actionType, ...(b.input ?? {}) };
+      // Email subject fallback — Claude occasionally sends "" to satisfy the
+      // required schema constraint. Derive a short subject from the user's
+      // last message when the tool provides none.
+      if (action.type === 'DRAFT_MESSAGE' && action.channel === 'email' && !action.subject?.trim()) {
+        const subjectWords = userText
+          .replace(/^send\s+\w+\s+(an?\s+)?email\s*(asking|about|regarding|re:|for|saying|to\s+tell|to\s+let)?\s*/i, '')
+          .replace(/^email\s+\w+\s+(about|regarding|to\s+ask)?\s*/i, '')
+          .split(/\s+/)
+          .filter((w: string) => w.length > 3 && !/^(that|this|them|they|your|have|will|with|from|into|been|also|some|what|when|where|please|could|would|should|asking|about|regarding|sarah|email)$/i.test(w))
+          .slice(0, 5)
+          .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+          .join(' ');
+        action.subject = subjectWords || 'Message from Naavi';
+        console.log(`[naavi-chat] derived email subject: "${action.subject}" from userText`);
+      }
+      return action;
     }).filter((a: any) => a !== null);
 
     // 2026-05-23 (Wael) — server-side entity-existence validation for
