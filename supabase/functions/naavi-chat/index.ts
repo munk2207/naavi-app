@@ -3197,6 +3197,11 @@ Deno.serve(async (req) => {
         return convertLocationToolToActionRule(b.name, b.input ?? {});
       }
       const action: any = { type: actionType, ...(b.input ?? {}) };
+      // Normalize trigger_config — Claude occasionally serializes it as a JSON
+      // string instead of an object. Parse it so downstream checks work correctly.
+      if (action.trigger_config && typeof action.trigger_config === 'string') {
+        try { action.trigger_config = JSON.parse(action.trigger_config); } catch { /* leave as-is */ }
+      }
       // Email subject fallback — Claude occasionally sends "" to satisfy the
       // required schema constraint. Derive a short subject from the user's
       // last message when the tool provides none.
