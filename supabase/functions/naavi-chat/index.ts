@@ -18,7 +18,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@0.79.0';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { NAAVI_TOOLS, TOOL_NAME_TO_ACTION_TYPE } from '../_shared/anthropic_tools.ts';
 import { computeContactHash, COMMUNITY_PERSON_FIELDS } from '../_shared/community_hash.ts';
-import { HANDLED_INTENTS, handleListRules, handleLookupContact, handleCalendarSearch, handleGmailSearch, handlePersonLookup, handleListRead, handleReminderRead, handleMemorySearch, handleCreateTicket, HANDLED_ACTION_INTENTS, handleSetReminderExec, handleCreateEventExec, handleRememberExec, handleDeleteRuleExec, handleDeleteMemoryExec, handleAddContactExec, handleDeleteEventExec } from './intentHandlers.ts';
+import { HANDLED_INTENTS, handleListRules, handleLookupContact, handleCalendarSearch, handleGmailSearch, handlePersonLookup, handleListRead, handleReminderRead, handleMemorySearch, handleCreateTicket, HANDLED_ACTION_INTENTS, handleSetReminderExec, handleCreateEventExec, handleRememberExec, handleDeleteRuleExec, handleDeleteMemoryExec, handleAddContactExec, handleDeleteEventExec, correctDatetime } from './intentHandlers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
