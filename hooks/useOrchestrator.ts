@@ -502,6 +502,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   // one at a time after each turn completes naturally.
   const compoundBufferRef = useRef<string[]>([]);
   const compoundTotalRef = useRef<number>(0);
+  const sendRef = useRef<((msg: string) => void) | null>(null);
 
   // Word-reveal: number of words revealed so far for the latest turn while TTS
   // is playing, or null when not revealing (show full text).
@@ -4362,6 +4363,10 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     return () => clearCooldownTimer();
   }, [clearCooldownTimer]);
 
+  // Keep sendRef current so the compound effect can call send without
+  // listing it as a dependency (avoids infinite re-render loop).
+  useEffect(() => { sendRef.current = send; }, [send]);
+
   // Auto-send next compound item when the current turn finishes naturally.
   useEffect(() => {
     if (status !== 'idle') return;
@@ -4370,9 +4375,8 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     compoundBufferRef.current = compoundBufferRef.current.slice(1);
     const itemNum = compoundTotalRef.current - compoundBufferRef.current.length;
     console.log(`[compound] auto-sending item ${itemNum}/${compoundTotalRef.current}: "${nextItem.slice(0, 60)}"`);
-    // Small delay so the UI settles before the next turn starts
-    setTimeout(() => { send(nextItem); }, 600);
-  }, [status, send]);
+    setTimeout(() => { sendRef.current?.(nextItem); }, 600);
+  }, [status]);
 
   return {
     status, turns, error, send, clearHistory, loadHistory,
