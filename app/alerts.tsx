@@ -706,7 +706,7 @@ export default function AlertsScreen() {
               activeOpacity={0.7}
             >
               <Text style={styles.groupTitle}>{groupLabel(type)}</Text>
-              <Text style={styles.groupCount}>{groupRules.length}</Text>
+              <Text style={styles.groupCount}>{groupRules.filter(r => r.enabled !== false).length}</Text>
               <Text style={styles.groupArrow}>{isCollapsed ? '+' : '−'}</Text>
             </TouchableOpacity>
             {!isCollapsed && groupRules.map(rule => {

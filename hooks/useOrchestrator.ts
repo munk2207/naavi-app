@@ -1972,11 +1972,18 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         // Show Robert the informational message (local only, no server call)
         const infoText = `I found ${total} things on your list — I'll handle them one at a time.`;
         setTurns(prev => [...prev, {
-          id: `compound-info-${Date.now()}`,
-          role: 'assistant' as const,
-          text: infoText,
-          timestamp: new Date(),
+          userMessage: '',
+          assistantSpeech: infoText,
           drafts: [],
+          createdEvents: [],
+          deletedEvents: [],
+          savedDocs: [],
+          rememberedItems: [],
+          driveFiles: [],
+          navigationResults: [],
+          listResults: [],
+          locationRules: [],
+          timestamp: new Date().toISOString(),
         }]);
         // Send only item 1 — remaining items handled after each turn completes
         enrichedMessage = compoundItems[0];
