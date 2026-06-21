@@ -849,17 +849,6 @@ export async function handleSetReminderExec(
     return { speech: msg, display: msg, actions: [] };
   }
 
-  try {
-    const end = new Date(new Date(safeDateTime).getTime() + 15 * 60000).toISOString();
-    await fetch(`${supabaseUrl}/functions/v1/create-calendar-event`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
-      body:    JSON.stringify({ summary: params.title, description: params.title, start: safeDateTime, end, attendees: [], user_id: userId, suppress_reminders: true }),
-    });
-  } catch (e) {
-    console.warn('[handleSetReminderExec] calendar event failed (non-fatal):', (e as Error).message);
-  }
-
   const label = fmtDatetime(safeDateTime, clientTimezone);
   const msg   = `Done. Reminder set: ${params.title} on ${label}.`;
   return { speech: msg, display: msg, actions: [] };
