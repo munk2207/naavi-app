@@ -1112,7 +1112,12 @@ export default function HomeScreen() {
   // tap-to-talk + press-and-hold-anywhere on the chat. The phone (Twilio)
   // surface remains the always-listening voice channel — that is the
   // strategic moat. See docs/SESSION_HANDOFF_V57.11.3.md for the rationale.
-  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, onOrangeButtonPressed, isAudioPlaying, pendingAction, confirmPending, cancelPending, editPending, revealWordCount, currentChunk } = useOrchestrator('en', brief, avoidHighwaysRef.current, false);
+  const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, onOrangeButtonPressed, isAudioPlaying, pendingAction, confirmPending, cancelPending, editPending, revealWordCount, currentChunk, compoundProgress, compoundActiveTurnStart } = useOrchestrator('en', brief, avoidHighwaysRef.current, false);
+
+  // In compound mode, only show turns from the current item's start index.
+  const visibleTurns = compoundActiveTurnStart >= 0 ? turns.slice(compoundActiveTurnStart) : turns;
+  // Offset for isLatest calculation when sliced.
+  const visibleTurnOffset = compoundActiveTurnStart >= 0 ? compoundActiveTurnStart : 0;
 
   // Lock-model derived flags — wired into every voice-channel button below.
   const inputLocked = isInputLocked(status);
@@ -1152,6 +1157,14 @@ export default function HomeScreen() {
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     }
   }, [turns.length]);
+
+  // In compound mode, scroll to top when advancing to the next item so the
+  // compound header and fresh response are the first thing Robert sees.
+  useEffect(() => {
+    if (compoundProgress && compoundProgress.current > 1) {
+      setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 150);
+    }
+  }, [compoundProgress?.current]);
 
   // Chunk-scroll sync — scroll to the active TTS chunk as Naavi speaks.
   // chunkIdx 0 = first chunk → scroll to top so Robert reads from the start.
@@ -1902,13 +1915,23 @@ export default function HomeScreen() {
           })()}
 
 
+          {/* Compound question focused header — pinned above turns */}
+          {!chatCollapsed && compoundProgress && (
+            <View style={styles.compoundHeader}>
+              <Text style={styles.compoundHeaderNumber}>{compoundProgress.current} of {compoundProgress.total}</Text>
+              <Text style={styles.compoundHeaderItem}>{compoundProgress.currentItem}</Text>
+            </View>
+          )}
+
           {/* Conversation turns — each turn shows bubbles then its own cards.
               V57.8 — older turns auto-collapse to 1-line summaries to reduce
               cognitive load (per Wael 2026-04-29). Latest turn stays expanded.
               Tap a collapsed bubble to expand it. Cards (drafts, alerts,
               prescriptions, etc.) ALWAYS stay visible regardless of collapse
-              state — those are the actionable items Robert needs. */}
-          {!chatCollapsed && turns.map((turn, ti) => {
+              state — those are the actionable items Robert needs.
+              In compound mode, visibleTurns is sliced to the current item window. */}
+          {!chatCollapsed && visibleTurns.map((turn, vi) => {
+            const ti = visibleTurnOffset + vi;
             const isLatest = ti === turns.length - 1;
             const isCollapsed = !isLatest && !expandedTurns.has(ti);
             return (
@@ -1927,7 +1950,10 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               ) : (
                 <>
-                  <ConversationBubble role="user" content={turn.userMessage} timestamp={turn.timestamp} />
+                  {/* In compound mode the header shows the question — suppress the user bubble */}
+                  {!compoundProgress && (
+                    <ConversationBubble role="user" content={turn.userMessage} timestamp={turn.timestamp} />
+                  )}
                   <ConversationBubble role="assistant" content={(() => {
                     const full = turn.assistantSpeech.replace(/<!--PENDING_INTENT:[\s\S]*?-->/g, '').trim();
                     if (isLatest && revealWordCount !== null) {
@@ -2733,6 +2759,29 @@ const styles = StyleSheet.create({
     color: Colors.accent,
     fontSize: 13,
     fontWeight: '600',
+  },
+  compoundHeader: {
+    backgroundColor: 'rgba(93,202,165,0.12)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#5DCAA5',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  compoundHeaderNumber: {
+    color: '#5DCAA5',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  compoundHeaderItem: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 20,
   },
   collapsedTurn: {
     flexDirection: 'row',

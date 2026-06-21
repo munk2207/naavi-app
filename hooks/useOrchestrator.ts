@@ -503,6 +503,14 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   const compoundBufferRef = useRef<string[]>([]);
   const compoundTotalRef = useRef<number>(0);
   const sendRef = useRef<((msg: string) => void) | null>(null);
+  // Compound progress — null when not in compound mode.
+  const [compoundProgress, setCompoundProgress] = useState<{ current: number; total: number; currentItem: string } | null>(null);
+  // Index in turns[] where the current compound item's display starts.
+  // -1 when not in compound mode. Used by UI to hide previous items.
+  const [compoundActiveTurnStart, setCompoundActiveTurnStart] = useState<number>(-1);
+  // Mirror of turns.length kept as a ref so the auto-advance effect can read
+  // it without a stale closure (turns itself is not in the deps array).
+  const turnsLengthRef = useRef<number>(0);
 
   // Word-reveal: number of words revealed so far for the latest turn while TTS
   // is playing, or null when not revealing (show full text).
@@ -1969,10 +1977,15 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         const total = compoundItems.length;
         compoundBufferRef.current = compoundItems.slice(1);
         compoundTotalRef.current = total;
-        // Show Robert the informational message (local only, no server call)
+        // Info turn lands at current turns.length (before the turn is added).
+        const startIdx = turnsLengthRef.current;
+        setCompoundActiveTurnStart(startIdx);
+        setCompoundProgress({ current: 1, total, currentItem: compoundItems[0] });
+        // userMessage holds the compound question so it appears alongside
+        // "I found N things..." instead of as a floating empty bubble.
         const infoText = `I found ${total} things on your list — I'll handle them one at a time.`;
         setTurns(prev => [...prev, {
-          userMessage: '',
+          userMessage: userMessage,
           assistantSpeech: infoText,
           drafts: [],
           createdEvents: [],
@@ -4282,6 +4295,8 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     pendingActionRef.current = null;
     setPendingAction(null);
     compoundBufferRef.current = [];
+    setCompoundProgress(null);
+    setCompoundActiveTurnStart(-1);
     setTurns([]);
     setError(null);
     setStatus('idle');
@@ -4298,6 +4313,8 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     pendingActionRef.current = null;
     setPendingAction(null);
     compoundBufferRef.current = [];
+    setCompoundProgress(null);
+    setCompoundActiveTurnStart(-1);
     setStatus('idle');
   }, [clearCooldownTimer, setAudioPlaying]);
 
@@ -4324,6 +4341,8 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       pendingActionRef.current = null;
       setPendingAction(null);
       compoundBufferRef.current = [];
+      setCompoundProgress(null);
+      setCompoundActiveTurnStart(-1);
       setStatus('idle');
     } else if (s === 'speaking') {
       // Silence voice.
@@ -4342,6 +4361,8 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         pendingActionRef.current = null;
         setPendingAction(null);
         compoundBufferRef.current = [];
+        setCompoundProgress(null);
+        setCompoundActiveTurnStart(-1);
         setStatus('idle');
       }
     } else if (s === 'answer_active') {
@@ -4360,6 +4381,8 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       pendingActionRef.current = null;
       setPendingAction(null);
       compoundBufferRef.current = [];
+      setCompoundProgress(null);
+      setCompoundActiveTurnStart(-1);
       setStatus('idle');
     }
     // cooldown / idle / pending_confirm / error: no-op.
@@ -4374,16 +4397,37 @@ const oneShot = pending.originalAction?.one_shot ?? true;
   // listing it as a dependency (avoids infinite re-render loop).
   useEffect(() => { sendRef.current = send; }, [send]);
 
-  // Auto-send next compound item when the current turn finishes naturally.
+  // Keep turnsLengthRef in sync so the compound effect can read turns.length
+  // without a stale closure.
+  useEffect(() => { turnsLengthRef.current = turns.length; }, [turns]);
+
+  // Auto-send next compound item when the current turn finishes AND the user
+  // has resolved any pending confirmation or draft card.
   useEffect(() => {
     if (status !== 'idle') return;
-    if (compoundBufferRef.current.length === 0) return;
+    // Wait if Naavi is holding a pre-confirm action ("say yes to confirm").
+    if (pendingActionRef.current !== null) return;
+    // Wait if the latest turn has unresolved draft cards (e.g. email picker).
+    const lastTurn = turns[turns.length - 1];
+    if (lastTurn?.drafts?.length > 0) return;
+
+    if (compoundBufferRef.current.length === 0) {
+      // Compound sequence complete — clear progress state.
+      if (compoundProgress !== null) {
+        setCompoundProgress(null);
+        setCompoundActiveTurnStart(-1);
+      }
+      return;
+    }
     const nextItem = compoundBufferRef.current[0];
     compoundBufferRef.current = compoundBufferRef.current.slice(1);
     const itemNum = compoundTotalRef.current - compoundBufferRef.current.length;
     console.log(`[compound] auto-sending item ${itemNum}/${compoundTotalRef.current}: "${nextItem.slice(0, 60)}"`);
+    // Shift the display window to where the next item's turn will land.
+    setCompoundActiveTurnStart(turnsLengthRef.current);
+    setCompoundProgress({ current: itemNum, total: compoundTotalRef.current, currentItem: nextItem });
     setTimeout(() => { sendRef.current?.(nextItem); }, 600);
-  }, [status]);
+  }, [status, pendingAction, turns, compoundProgress]);
 
   return {
     status, turns, error, send, clearHistory, loadHistory,
@@ -4400,6 +4444,8 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     revealWordCount,
     // Chunk-scroll: which chunk is currently playing (for auto-scroll sync).
     currentChunk,
+    // Compound question focused mode
+    compoundProgress, compoundActiveTurnStart,
   };
 }
 
