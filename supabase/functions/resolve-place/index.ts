@@ -446,7 +446,19 @@ async function resolveByAddress(opts: {
   if (!opts.apiKey) {
     return jsonResponse({ status: 'error', error: 'GOOGLE_PLACES_API_KEY not configured' }, 500);
   }
-  const coords = await geocodeAddress(opts.addressQuery, opts.apiKey);
+  let coords = await geocodeAddress(opts.addressQuery, opts.apiKey);
+
+  // Google Contacts sometimes prepends a non-address label (e.g. "Parking lot,
+  // Home,") before the actual street number. Strip that label and retry once
+  // if the first geocode attempt returns nothing.
+  if (!coords) {
+    const stripped = opts.addressQuery.replace(/^[^,\d]+,\s*/, '').trim();
+    if (stripped && stripped !== opts.addressQuery) {
+      console.log(`[resolveByAddress] retrying after stripping label prefix: "${stripped}"`);
+      coords = await geocodeAddress(stripped, opts.apiKey);
+    }
+  }
+
   if (!coords) {
     return jsonResponse({ status: 'not_found' });
   }
