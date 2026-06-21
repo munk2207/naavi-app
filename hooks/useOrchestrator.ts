@@ -2073,9 +2073,16 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         if (isCompoundPreConfirm) {
           const items = parseCompoundItems(lastText);
           if (items.length > 0) {
-            pendingCompoundItemsRef.current = items.slice(1); // queue items 2-N
-            enrichedMessage = items[0]; // send item 1 to Claude as standalone request
-            console.log(`[send] compound pre-confirm: parsed ${items.length} items — sending item 1 to Claude: "${items[0]}"`);
+            const total = items.length;
+            // Strip "I'll " / "I will " prefix so Claude receives a command, not a statement.
+            // Add [COMPOUND-ITEM] tag so RULE 24b fires: emit tool call immediately, no re-confirmation.
+            const toCommand = (text: string) => text.replace(/^I'?ll\s+/i, '').replace(/^I will\s+/i, '');
+            const taggedItems = items.map((item, i) =>
+              `[COMPOUND-ITEM ${i + 1} of ${total} — execute immediately, no pre-confirmation needed]\n${toCommand(item)}`
+            );
+            pendingCompoundItemsRef.current = taggedItems.slice(1); // queue items 2-N
+            enrichedMessage = taggedItems[0]; // send item 1 to Claude as standalone request
+            console.log(`[send] compound pre-confirm: parsed ${total} items — sending item 1 to Claude`);
           } else {
             // Fallback: list parse failed — use EXECUTE NOW injection
             enrichedMessage = `${userMessage}\n\n[SYSTEM — EXECUTE NOW]: The user confirmed. Emit ALL tool calls immediately. Speech must be "On it." only — no re-narration.`;
