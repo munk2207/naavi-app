@@ -328,12 +328,12 @@ export interface ConversationTurn {
   navigationResults: NavigationResult[];
   listResults: { action: string; listName: string; items?: string[]; webViewLink?: string }[];
   globalSearch?: { query: string; results: GlobalSearchResult[] };
-  // V57.4 — location rules created in this turn. Renders an inline card
-  // showing the alert + a "Make it recurring / Make it one-time" toggle so
-  // Robert can flip the mode with a tap instead of having to re-issue a
-  // verbal command. Empty array on every other turn type.
   locationRules: { ruleId: string; placeName: string; address?: string | null; oneShot: boolean }[];
   timestamp?: string;
+  // Compound result — "One Request. Six Actions." demo mode
+  isCompoundResult?: boolean;
+  compoundPlan?: Array<{ label: string; cardSlot: 'draft' | 'calendar' | 'location' | 'list' | 'sent' | null }>;
+  sentMessages?: Array<{ to: string; channel: string; body: string }>;
 }
 
 /** Format a cents amount + currency code into a spoken-friendly string. */
@@ -1930,6 +1930,10 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     // SET_ACTION_RULE intercept after a successful insert; rendered as an
     // inline card with a "Make it recurring / Make it one-time" toggle.
     const turnLocationRules: { ruleId: string; placeName: string; address?: string | null; oneShot: boolean }[] = [];
+    const turnSentMessages: Array<{ to: string; channel: string; body: string }> = [];
+    // Compound result detection — parse breakdown from previous turn
+    const lastTurnSpeech = turns[turns.length - 1]?.assistantSpeech ?? '';
+    const compoundBreakdownLines = lastTurnSpeech.split('\n').filter((l: string) => /^\d+\./.test(l.trim())).map((l: string) => l.trim());
     let turnGlobalSearch: {
       query: string;
       results: GlobalSearchResult[];
@@ -3000,6 +3004,28 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         }
 
         if (action.type === 'DRAFT_MESSAGE' || action.type === 'ADD_CONTACT') {
+          // On compound confirmation turns (multiple actions returned at once),
+          // auto-execute SMS/WhatsApp instead of showing the draft card —
+          // user already confirmed "yes" for all actions.
+          const ch = String((action as any).channel ?? 'sms').toLowerCase();
+          const isAutoSend = action.type === 'DRAFT_MESSAGE' && dedupedActions.length > 1 && (ch === 'sms' || ch === 'whatsapp');
+          if (isAutoSend) {
+            const to = String((action as any).to ?? '').trim();
+            const body = String((action as any).body ?? '');
+            try {
+              const contact = await lookupContact(to);
+              const phone = contact?.phone ?? (to.replace(/[^+\d]/g, '').startsWith('+') ? to.replace(/[^+\d]/g, '') : null);
+              if (phone) {
+                const ep = ch === 'whatsapp' ? 'send-whatsapp' : 'send-sms';
+                await invokeWithTimeout(ep, { body: { to: phone, message: body } }, 15_000);
+                console.log(`[Orchestrator] compound auto-send ${ch} to ${phone}`);
+                turnSentMessages.push({ to, channel: ch, body });
+              }
+            } catch (err) {
+              console.error('[Orchestrator] compound auto-send failed:', err);
+            }
+            continue;
+          }
           turnDrafts.push(action);
         }
 
@@ -3954,6 +3980,24 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         tail: userMessage.slice(-30),
       });
       endDiagSession(bubbleDiag);
+      // Build compound plan for "One Request. Six Actions." demo rendering
+      const isCompoundResult = compoundBreakdownLines.length >= 3 && dedupedActions.length >= 3;
+      let compoundPlan: ConversationTurn['compoundPlan'];
+      if (isCompoundResult) {
+        let draftCursor = 0, calCursor = 0, locCursor = 0, listCursor = 0, sentCursor = 0;
+        compoundPlan = dedupedActions.map((action: any, i: number) => {
+          const label = compoundBreakdownLines[i] ?? `${i + 1}.`;
+          const t = action.type ?? '';
+          if (t === 'DRAFT_MESSAGE') {
+            if (sentCursor < turnSentMessages.length) { sentCursor++; return { label, cardSlot: 'sent' as const }; }
+            if (draftCursor < turnDrafts.length) { draftCursor++; return { label, cardSlot: 'draft' as const }; }
+          }
+          if (t === 'CREATE_EVENT' && calCursor < turnEvents.length) { calCursor++; return { label, cardSlot: 'calendar' as const }; }
+          if ((t === 'SET_ACTION_RULE' || t === 'set_location_rule_chain' || t === 'set_location_rule_address') && action.trigger_type === 'location' && locCursor < turnLocationRules.length) { locCursor++; return { label, cardSlot: 'location' as const }; }
+          if ((t === 'LIST_ADD' || t === 'LIST_CONNECT') && listCursor < turnLists.length) { listCursor++; return { label, cardSlot: 'list' as const }; }
+          return { label, cardSlot: null as const };
+        });
+      }
       const newTurn: ConversationTurn = {
         userMessage,
         enrichedUserMessage: enrichedMessage !== userMessage ? enrichedMessage : undefined,
@@ -3969,6 +4013,9 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         locationRules:    turnLocationRules,
         globalSearch:     turnGlobalSearch,
         timestamp: new Date().toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' }) + ', ' + new Date().toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit', hour12: true }),
+        isCompoundResult: isCompoundResult || undefined,
+        compoundPlan,
+        sentMessages: turnSentMessages.length > 0 ? turnSentMessages : undefined,
       };
       setTurns(prev => [...prev, newTurn]);
       saveConversationTurn(newTurn).catch(() => {});

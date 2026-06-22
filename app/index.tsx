@@ -10,7 +10,7 @@
  * Phase 7.5: voice recording via expo-av replaces the text input
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,7 @@ import {
   Alert,
   Keyboard,
   Linking as RNLinking,
+  Animated,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Vibration } from 'react-native';
@@ -687,6 +688,110 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
     </View>
   );
 }
+
+// ─── Compound Result View — "One Request. Six Actions." ──────────────────────
+// Renders numbered labels + cards in a staggered fade-in for demo mode.
+function CompoundResultView({ turn }: { turn: import('@/hooks/useOrchestrator').ConversationTurn }) {
+  const plan = turn.compoundPlan ?? [];
+  const anims = useRef<Animated.Value[]>([]);
+
+  // Initialize anims array once per plan length
+  if (anims.current.length !== plan.length) {
+    anims.current = plan.map(() => new Animated.Value(0));
+  }
+
+  useEffect(() => {
+    if (!plan.length) return;
+    anims.current.forEach((anim, i) => {
+      Animated.timing(anim, {
+        toValue: 1,
+        duration: 450,
+        delay: i * 700,
+        useNativeDriver: true,
+      }).start();
+    });
+  }, [plan.length]);
+
+  // Cursors into each card array
+  let draftCursor = 0, calCursor = 0, locCursor = 0, listCursor = 0, sentCursor = 0;
+
+  return (
+    <View>
+      {plan.map((item, i) => {
+        let card: React.ReactNode = null;
+
+        if (item.cardSlot === 'sent') {
+          const msg = (turn.sentMessages ?? [])[sentCursor++];
+          if (msg) card = (
+            <View style={compoundStyles.sentCard}>
+              <Text style={compoundStyles.sentLabel}>✉ Sent</Text>
+              <Text style={compoundStyles.sentTo}>To: {msg.to}</Text>
+              <Text style={compoundStyles.sentBody}>{msg.body}</Text>
+            </View>
+          );
+        } else if (item.cardSlot === 'draft') {
+          const draft = turn.drafts[draftCursor++];
+          if (draft) card = <DraftCard key={`d-${i}`} action={draft} />;
+        } else if (item.cardSlot === 'calendar') {
+          const ev = turn.createdEvents[calCursor++];
+          if (ev) card = (
+            <TouchableOpacity style={compoundStyles.calCard} onPress={() => { if (ev.htmlLink) WebBrowser.openBrowserAsync(ev.htmlLink).catch(() => {}); }}>
+              <Text style={compoundStyles.calLabel}>📅 Event added to calendar</Text>
+              <Text style={compoundStyles.calTitle}>{ev.summary}</Text>
+              {ev.htmlLink ? <Text style={compoundStyles.calLink}>Tap to view in Google Calendar</Text> : null}
+            </TouchableOpacity>
+          );
+        } else if (item.cardSlot === 'location') {
+          const loc = turn.locationRules[locCursor++];
+          if (loc) card = (
+            <LocationRuleCard
+              key={`loc-${loc.ruleId}-${i}`}
+              ruleId={loc.ruleId}
+              placeName={loc.placeName}
+              address={loc.address ?? null}
+              initialOneShot={loc.oneShot}
+            />
+          );
+        } else if (item.cardSlot === 'list') {
+          const lr = (turn.listResults ?? [])[listCursor++];
+          if (lr) card = (
+            <View style={compoundStyles.listCard}>
+              <Text style={compoundStyles.listLabel}>📋 {lr.action === 'connected' ? 'List attached' : lr.action === 'added' ? 'Added to list' : 'List updated'}</Text>
+              <Text style={compoundStyles.listTitle}>{lr.listName}{lr.entityLabel ? ` → ${lr.entityLabel}` : ''}</Text>
+              {(lr.items ?? []).map((it: string, j: number) => <Text key={j} style={compoundStyles.listItem}>• {it}</Text>)}
+            </View>
+          );
+        }
+
+        return (
+          <Animated.View
+            key={i}
+            style={{ opacity: anims.current[i], transform: [{ translateY: anims.current[i].interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }] }}
+          >
+            <Text style={compoundStyles.stepLabel}>{item.label}</Text>
+            {card}
+          </Animated.View>
+        );
+      })}
+    </View>
+  );
+}
+
+const compoundStyles = StyleSheet.create({
+  stepLabel: { color: '#9EFFC9', fontSize: 13, fontWeight: '600', marginTop: 14, marginBottom: 4, marginHorizontal: 16 },
+  sentCard: { backgroundColor: '#1a2a1a', borderLeftWidth: 3, borderLeftColor: '#9EFFC9', borderRadius: 10, padding: 12, marginHorizontal: 16, marginBottom: 4 },
+  sentLabel: { color: '#9EFFC9', fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  sentTo: { color: '#ccc', fontSize: 13 },
+  sentBody: { color: '#eee', fontSize: 14, marginTop: 4 },
+  calCard: { backgroundColor: '#1c2233', borderLeftWidth: 3, borderLeftColor: '#6fa3ef', borderRadius: 10, padding: 12, marginHorizontal: 16, marginBottom: 4 },
+  calLabel: { color: '#6fa3ef', fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  calTitle: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  calLink: { color: '#6fa3ef', fontSize: 12, marginTop: 4 },
+  listCard: { backgroundColor: '#1e1e2e', borderLeftWidth: 3, borderLeftColor: '#a78bfa', borderRadius: 10, padding: 12, marginHorizontal: 16, marginBottom: 4 },
+  listLabel: { color: '#a78bfa', fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  listTitle: { color: '#fff', fontSize: 14 },
+  listItem: { color: '#ccc', fontSize: 13, marginTop: 2 },
+});
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -1950,21 +2055,20 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               ) : (
                 <>
-                  {/* In compound mode the header shows the question — suppress the user bubble */}
-                  {!compoundProgress && (
+                  {/* Compound result: suppress "Yes." user bubble + assistant speech bubble.
+                      Cards render below via CompoundResultView with staggered animation. */}
+                  {!turn.isCompoundResult && !compoundProgress && (
                     <ConversationBubble role="user" content={turn.userMessage} timestamp={turn.timestamp} />
                   )}
-                  <ConversationBubble role="assistant" content={(() => {
-                    const full = turn.assistantSpeech.replace(/<!--PENDING_INTENT:[\s\S]*?-->/g, '').trim();
-                    if (isLatest && revealWordCount !== null) {
-                      return full.split(/\s+/).slice(0, revealWordCount).join(' ');
-                    }
-                    return full;
-                  })()} timestamp={turn.timestamp} />
-                  {/* V57.9.7 — collapse-back affordance for older turns
-                      that were expanded. Without this, expand was a one-way
-                      action (Wael 2026-05-01). Latest turn never gets this
-                      because it's always expanded. */}
+                  {!turn.isCompoundResult && (
+                    <ConversationBubble role="assistant" content={(() => {
+                      const full = turn.assistantSpeech.replace(/<!--PENDING_INTENT:[\s\S]*?-->/g, '').trim();
+                      if (isLatest && revealWordCount !== null) {
+                        return full.split(/\s+/).slice(0, revealWordCount).join(' ');
+                      }
+                      return full;
+                    })()} timestamp={turn.timestamp} />
+                  )}
                   {!isLatest && (
                     <TouchableOpacity
                       onPress={() => setExpandedTurns(prev => {
@@ -1982,8 +2086,13 @@ export default function HomeScreen() {
                 </>
               )}
 
-              {/* Draft emails */}
-              {turn.drafts.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => (
+              {/* Compound result: staggered numbered cards */}
+              {turn.isCompoundResult && !isCollapsed && (
+                <CompoundResultView turn={turn} />
+              )}
+
+              {/* Draft emails — non-compound turns only */}
+              {!turn.isCompoundResult && turn.drafts.filter(a => a.type === 'DRAFT_MESSAGE').map((action, i) => (
                 <DraftCard
                   key={i}
                   action={action}
@@ -2142,8 +2251,8 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               ))}
 
-              {/* Calendar events created */}
-              {turn.createdEvents.map((ev, i) => (
+              {/* Calendar events created — non-compound turns only */}
+              {!turn.isCompoundResult && turn.createdEvents.map((ev, i) => (
                 <TouchableOpacity key={i} style={styles.eventCard} onPress={() => { if (ev.htmlLink) WebBrowser.openBrowserAsync(ev.htmlLink).catch(() => {}); }} accessibilityLabel="Open event in Google Calendar">
                   <Text style={styles.eventLabel}>📅 Event added to calendar</Text>
                   <Text style={styles.eventTitle}>{ev.summary}</Text>
@@ -2160,8 +2269,8 @@ export default function HomeScreen() {
                 </View>
               ))}
 
-              {/* Location rules — V57.4 Part B toggle card */}
-              {(turn.locationRules ?? []).map((rule, i) => (
+              {/* Location rules — non-compound turns only */}
+              {!turn.isCompoundResult && (turn.locationRules ?? []).map((rule, i) => (
                 <LocationRuleCard
                   key={`loc-${rule.ruleId}-${i}`}
                   ruleId={rule.ruleId}
@@ -2171,12 +2280,8 @@ export default function HomeScreen() {
                 />
               ))}
 
-              {/* List results — V57.15.4 (Wael 2026-05-13) handles the
-                  Wave 2 / 2.5 action types (query / connected / disconnected /
-                  deleted / error) with tappable rows where appropriate.
-                  Legacy actions (created / added / removed / read) keep
-                  the existing single-card render unchanged. */}
-              {(turn.listResults ?? []).map((lr: any, i: number) => {
+              {/* List results — non-compound turns only */}
+              {!turn.isCompoundResult && (turn.listResults ?? []).map((lr: any, i: number) => {
                 // LIST_CONNECTION_QUERY mode=what_list_is_on — render each
                 // attached list as its own tappable row that navigates to
                 // the list-detail screen.

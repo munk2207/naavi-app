@@ -749,7 +749,7 @@ Calendar search found exactly one upcoming match for "${query}":
   Reminder date (${offsetNum} ${offsetUnit}${offsetNum > 1 ? 's' : ''} before): ${reminderISO}
 
 Emit set_action_rule immediately with trigger_type="time", datetime="${reminderISO}T09:00:00", and include the confirm prompt "Say yes to confirm, or tell me what to change."
-Do NOT show a numbered list. Do NOT ask what date the event is on. Use the date above.`;
+Do NOT ask what date the event is on. Use the date above.`;
 
     console.log(`[naavi-chat] before-event pre-search | injecting reminder date ${reminderISO} for event ${eventDateStr}`);
     return injection;
@@ -1488,12 +1488,14 @@ async function matchAlertByName(
 ): Promise<{ enabledMatches: AlertRow[]; disabledMatches: AlertRow[] }> {
   const refLower = ref.toLowerCase();
   const core = refLower
-    .replace(/\b(alert|alerts|notification|notifications|arrival|reminder|reminders)\b/g, '')
+    .replace(/\b(alert|alerts|notification|notifications|arrival|reminder|reminders|my|your|the|an?)\b/g, '')
     .trim();
   const normCore = normalizeForEntityMatch(core);
   if (normCore.length < 2) {
     return { enabledMatches: [], disabledMatches: [] };
   }
+  // Split into meaningful words for partial matching (handles "office" matching "Arrive at Office")
+  const coreWords = normCore.split(/\s+/).filter((w: string) => w.length >= 3);
   const { data: rows } = await supabase
     .from('action_rules')
     .select('id, label, trigger_config, enabled, last_fired_at')
@@ -1507,10 +1509,14 @@ async function matchAlertByName(
     enabled: !!r.enabled,
     last_fired_at: r.last_fired_at ?? null,
   }));
-  const matched = all.filter((r) =>
-    normalizeForEntityMatch(r.label).includes(normCore) ||
-    (r.place && normalizeForEntityMatch(r.place).includes(normCore))
-  );
+  const matched = all.filter((r) => {
+    const normLabel = normalizeForEntityMatch(r.label);
+    const normPlace = r.place ? normalizeForEntityMatch(r.place) : '';
+    // Full-phrase match first, then fall back to any meaningful word hit
+    const fullMatch = normLabel.includes(normCore) || normPlace.includes(normCore);
+    const wordMatch = coreWords.length > 0 && coreWords.some((w: string) => normLabel.includes(w) || normPlace.includes(w));
+    return fullMatch || wordMatch;
+  });
   return {
     enabledMatches: matched.filter((m) => m.enabled),
     disabledMatches: matched.filter((m) => !m.enabled),
@@ -1874,11 +1880,12 @@ Deno.serve(async (req) => {
       client_time: bodyClientTime,
       demo_mode: bodyDemoMode,
     } = body;
-    // V57.7 cost audit — cap output at 1024 tokens (was 2048). Naavi
-    // replies are short by design ("3 sentences unless asked for more"),
-    // so 1024 is plenty. 2048 was unused headroom inflating cost.
-    // 100 beta users × 50 chat turns/day × 2x output = $$ savings.
-    const max_tokens = Math.min(rawMaxTokens ?? 1024, 1024);
+    // V282 — raised cap back to 2048. The 1024 cap from V57.7 was too low
+    // for compound requests (6 tool_use blocks × ~200 tokens = ~1200 tokens
+    // minimum), causing Claude to cut off mid-response after 2 actions.
+    // Single-action queries still complete well under 1024 tokens so cost
+    // impact is minimal.
+    const max_tokens = Math.min(rawMaxTokens ?? 2048, 2048);
 
     const messageCount = Array.isArray(messages) ? messages.length : 0;
     const hasInlineSystem = typeof rawSystem === 'string' && rawSystem.length > 0;
@@ -3184,6 +3191,65 @@ Deno.serve(async (req) => {
         ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
         : system;
     }
+    // V282 — Compound request detection.
+    // When the user sends 4+ non-trivial lines in one message, use
+    // tool_choice:"none" to force a text-only numbered breakdown.
+    // On the confirmation turn the user says "yes" / "confirm" and normal
+    // tool use resumes — max_tokens=2048 ensures all 6+ tools fit.
+    let lastUserMsgText = '';
+    const allMsgs = augmentedMessages || messages || [];
+    for (let mi = allMsgs.length - 1; mi >= 0; mi--) {
+      const mm = allMsgs[mi];
+      if (mm && (mm as any).role === 'user') {
+        const mc = (mm as any).content;
+        if (typeof mc === 'string') { lastUserMsgText = mc; }
+        else if (Array.isArray(mc)) { lastUserMsgText = mc.filter((b: any) => b.type === 'text').map((b: any) => b.text || '').join('\n'); }
+        break;
+      }
+    }
+    const msgNonEmptyLines = lastUserMsgText.split('\n').filter((l: any) => l.trim().length > 8);
+    const isCompoundTurn = msgNonEmptyLines.length >= 4;
+    // Detect compound confirmation turn: user says "yes" and last assistant message was a compound list
+    let lastAssistantText = '';
+    for (let mi = allMsgs.length - 1; mi >= 0; mi--) {
+      const mm = allMsgs[mi];
+      if (mm && (mm as any).role === 'assistant') {
+        const mc = (mm as any).content;
+        if (typeof mc === 'string') { lastAssistantText = mc; }
+        else if (Array.isArray(mc)) { lastAssistantText = mc.filter((b: any) => b.type === 'text').map((b: any) => b.text || '').join('\n'); }
+        break;
+      }
+    }
+    // Detect compound list in last assistant message: 3+ lines starting with "N."
+    const compoundListLines = lastAssistantText.split('\n').filter((l: string) => /^\d+\./.test(l.trim()));
+    const lastAssistantWasCompoundList = compoundListLines.length >= 3;
+    const isCompoundConfirmTurn = !isCompoundTurn
+      && isAffirmativeConfirmTurn(lastUserMsgText)
+      && lastAssistantWasCompoundList;
+    console.log(`[compound-detection] lines=${msgNonEmptyLines.length} isCompound=${isCompoundTurn} isCompoundConfirm=${isCompoundConfirmTurn} cachedSystemIsArray=${Array.isArray(cachedSystem)} lastUserMsg="${lastUserMsgText.slice(0, 80).replace(/\n/g, '|')}"`);
+    if (isCompoundTurn && Array.isArray(cachedSystem)) {
+      cachedSystem.push({
+        type: 'text',
+        text: [
+          '\n\n[COMPOUND REQUEST — planning turn, NO tool calls allowed]',
+          'Output a numbered list of every action you plan to take, one line each.',
+          'After the last item, your response MUST end with this exact sentence on its own line:',
+          'Say yes to confirm all, or no to cancel.',
+          'Do NOT say "Let me set these up" or anything else after the list. Only that exact sentence.',
+        ].join('\n'),
+      });
+    }
+    if (isCompoundConfirmTurn && Array.isArray(cachedSystem)) {
+      cachedSystem.push({
+        type: 'text',
+        text: [
+          '\n\n[COMPOUND CONFIRMATION — execute all actions now]',
+          'The user said YES. Execute EVERY action from your previous numbered list using tool calls.',
+          'Do not repeat the list. Do not ask for confirmation again. Just execute all tools.',
+        ].join('\n'),
+      });
+    }
+
     // V57.11.9 Phase 2 — Anthropic Structured Outputs migration.
     // Switch from "JSON-in-prose" parsing to schema-constrained tool use.
     // temperature=0 + tool schemas eliminate the prompt-drift cycle. Claude
@@ -3191,14 +3257,24 @@ Deno.serve(async (req) => {
     // We synthesize the legacy { speech, actions, pendingThreads } rawText
     // shape so existing downstream consumers (orchestrator, voice server,
     // auto-tester) keep working unchanged. Phase 4 will remove the synthesis.
-    const response = await client.messages.create({
+    const claudeParams: any = {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: max_tokens ?? 2048,
       system: cachedSystem as any,
       messages: augmentedMessages,
       tools: NAAVI_TOOLS as any,
       temperature: 0,
-    });
+    };
+    // Force text-only output on compound turns — tool_choice:"none" is the
+    // reliable way to prevent tool calls; prompt instructions alone aren't enough.
+    if (isCompoundTurn) {
+      claudeParams.tool_choice = { type: 'none' };
+    }
+    // On compound confirmation turns, boost max_tokens to fit 6+ tool calls.
+    if (isCompoundConfirmTurn) {
+      claudeParams.max_tokens = 2048;
+    }
+    const response = await client.messages.create(claudeParams);
     const claudeMs = Date.now() - claudeStart;
 
     // Extract speech (text blocks) and actions (tool_use blocks) from the
