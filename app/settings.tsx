@@ -23,11 +23,12 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserNameAsync, syncUserNameToSupabase } from '@/lib/naavi-client';
+import { saveApiKey, getApiKey, hasApiKey, saveUserName, getUserNameAsync, syncUserNameToSupabase, getDemoMode, setDemoMode, DEMO_MODE_EMAIL } from '@/lib/naavi-client';
 import { isVoiceEnabledSync, refreshVoicePref, setVoicePref } from '@/lib/voicePref';
 import { signOut, supabase } from '@/lib/supabase';
 import { queryWithTimeout } from '@/lib/invokeWithTimeout';
@@ -112,6 +113,10 @@ export default function SettingsScreen() {
   const [pushEnabled, setPushEnabled]             = useState(false);
   const [pushLoading, setPushLoading]             = useState(false);
   const [voicePlayback, setVoicePlayback]         = useState(true);
+  // V282 — Demo Mode (gated to wael.aggan@gmail.com). Skips confirmation and
+  // auto-sends drafts so a compound question records as one uncut take.
+  const [userEmail, setUserEmail]                 = useState('');
+  const [demoMode, setDemoModeState]              = useState(false);
   const [morningCallEnabled, setMorningCallEnabled] = useState(true);
   const [morningCallTime, setMorningCallTime]       = useState('08:00');
   const [morningCallLoading, setMorningCallLoading] = useState(false);
@@ -225,6 +230,9 @@ export default function SettingsScreen() {
       (async () => {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
+        // V282 — Demo Mode visibility + current state.
+        setUserEmail(user.email ?? '');
+        getDemoMode().then(setDemoModeState).catch(() => {});
         const { data } = await queryWithTimeout(
           supabase
             .from('user_settings')
@@ -1278,8 +1286,30 @@ export default function SettingsScreen() {
           <Text style={styles.signOutBtnText}>Sign Out</Text>
         </TouchableOpacity>
 
+        {/* V282 — Demo Mode (only visible to wael.aggan@gmail.com). Skips
+            confirmation and auto-sends drafts for uncut demo recordings. */}
+        {userEmail.toLowerCase() === DEMO_MODE_EMAIL && (
+          <View style={styles.demoModeRow}>
+            <View style={{ flex: 1, paddingRight: 12 }}>
+              <Text style={styles.demoModeTitle}>Demo Mode</Text>
+              <Text style={styles.demoModeHint}>
+                Skips confirmations and auto-sends messages for recording a live demo. Only you can see this.
+              </Text>
+            </View>
+            <Switch
+              value={demoMode}
+              onValueChange={(v) => {
+                setDemoModeState(v);
+                setDemoMode(v).catch(() => {});
+              }}
+              trackColor={{ false: '#3A3A3A', true: '#5DCAA5' }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+        )}
+
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V57.64.0 (build 281)</Text>
+        <Text style={styles.version}>MyNaavi — V57.65.0 (build 282)</Text>
 
       </ScrollView>
       </KeyboardAvoidingView>
@@ -1602,6 +1632,25 @@ const styles = StyleSheet.create({
     color: Colors.textHint,
     textAlign: 'center',
     marginTop: 8,
+  },
+  demoModeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(93,202,165,0.08)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginTop: 20,
+  },
+  demoModeTitle: {
+    fontSize: Typography.body,
+    color: Colors.textPrimary,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  demoModeHint: {
+    fontSize: Typography.caption,
+    color: Colors.textHint,
   },
 
 

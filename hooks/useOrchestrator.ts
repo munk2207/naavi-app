@@ -17,7 +17,7 @@ import * as Speech from 'expo-speech';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
-import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem, type GlobalSearchResult } from '@/lib/naavi-client';
+import { sendToNaavi, getDemoMode, type NaaviMessage, type NaaviAction, type BriefItem, type GlobalSearchResult } from '@/lib/naavi-client';
 import { isVoiceEnabledSync } from '@/lib/voicePref';
 import { saveContact, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
 import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
@@ -458,16 +458,20 @@ async function reArmLocationRule(
 // Returns individual items, or null if not compound.
 function splitUserCompound(message: string): string[] | null {
   const lines = message.split('\n').map(l => l.trim()).filter(Boolean);
+  // 1. Bullet list (•, -, *)
   const bulletItems = lines
     .filter(l => /^[•\-\*]\s+/.test(l))
     .map(l => l.replace(/^[•\-\*]\s+/, '').trim())
     .filter(Boolean);
   if (bulletItems.length >= 2) return bulletItems;
+  // 2. Numbered list (1. 2. or 1) 2))
   const numberedItems = lines
     .filter(l => /^[1-9]\d*[.)]\s+/.test(l))
     .map(l => l.replace(/^[1-9]\d*[.)]\s+/, '').trim())
     .filter(Boolean);
   if (numberedItems.length >= 2) return numberedItems;
+  // 3. Plain newline-separated sentences (one action per line, 2+ lines)
+  if (lines.length >= 2) return lines;
   return null;
 }
 
@@ -1967,40 +1971,14 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     try {
       let enrichedMessage = userMessage;
 
-      // ── COMPOUND SPLIT — CLIENT BUFFER ───────────────────────────────────────
-      // If Robert sends a compound question (2+ bullet/numbered items), split
-      // it client-side. Inform Robert, then send item 1 now. Items 2-N are
-      // stored in compoundBufferRef and sent one at a time after each turn
-      // completes naturally. Nothing goes to the server about compounding.
-      const compoundItems = splitUserCompound(userMessage);
-      if (compoundItems && compoundItems.length >= 2 && compoundBufferRef.current.length === 0) {
-        const total = compoundItems.length;
-        compoundBufferRef.current = compoundItems.slice(1);
-        compoundTotalRef.current = total;
-        // Info turn lands at current turns.length (before the turn is added).
-        const startIdx = turnsLengthRef.current;
-        setCompoundActiveTurnStart(startIdx);
-        setCompoundProgress({ current: 1, total, currentItem: compoundItems[0] });
-        // userMessage holds the compound question so it appears alongside
-        // "I found N things..." instead of as a floating empty bubble.
-        const infoText = `I found ${total} things on your list — I'll handle them one at a time.`;
-        setTurns(prev => [...prev, {
-          userMessage: userMessage,
-          assistantSpeech: infoText,
-          drafts: [],
-          createdEvents: [],
-          deletedEvents: [],
-          savedDocs: [],
-          rememberedItems: [],
-          driveFiles: [],
-          navigationResults: [],
-          listResults: [],
-          locationRules: [],
-          timestamp: new Date().toISOString(),
-        }]);
-        // Send only item 1 — remaining items handled after each turn completes
-        enrichedMessage = compoundItems[0];
-      }
+      // ── COMPOUND QUESTIONS — SERVER-SIDE (V282) ──────────────────────────────
+      // The client-side compound buffer (V279-V281) was removed. It split a
+      // compound question into items 2-N and replayed them one at a time, but
+      // that path failed most items (5-of-6 in V281 testing) and the focused
+      // per-item UI never synced reliably. The whole compound question now goes
+      // to Claude in one turn — Claude lays the items out as a numbered list and
+      // executes them after one confirmation (or immediately in Demo Mode). This
+      // is the path Wael verified working 2026-06-21 (all 6 actions, one "Yes").
 
       // ── STEP 1: Person context lookup (async) ──────────────────────────────────
       const personName = extractPersonQuery(userMessage);
@@ -2211,8 +2189,10 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       }
 
       stepLog('pre-naavi-chat done');
+      // V282 — Demo Mode (gated to wael.aggan@gmail.com, re-checked server-side).
+      const demoMode = await getDemoMode().catch(() => false);
       const [response, knowledgeResult] = await Promise.all([
-        sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language, diagSession),
+        sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language, diagSession, demoMode),
         isBroadQuery ? fetchAllKnowledge(100) : Promise.resolve([]),
       ]);
       stepLog('naavi-chat returned');
@@ -4271,6 +4251,26 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     setStatus('idle');
 
   }, [language]);
+
+  // V282 — Demo Mode auto-send. When a confirmable draft (SMS/email) creates a
+  // pending action AND Demo Mode is on, fire confirmPending automatically so
+  // the message sends without a Send tap — needed for an uncut demo recording.
+  // Demo Mode is gated to wael.aggan@gmail.com in Settings, so the flag can
+  // only be set on Wael's own device.
+  useEffect(() => {
+    if (!pendingAction) return;
+    let cancelled = false;
+    getDemoMode()
+      .then(on => {
+        if (on && !cancelled && pendingActionRef.current) {
+          // Small delay so the draft card renders on screen before it flips to
+          // "sent" — keeps the demo readable.
+          setTimeout(() => { if (!cancelled) confirmPending(); }, 700);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [pendingAction, confirmPending]);
 
   const cancelPending = useCallback(async (speechOverride?: string) => {
     pendingActionRef.current = null;

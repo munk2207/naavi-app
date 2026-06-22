@@ -1283,6 +1283,7 @@ async function assembleSystemPromptServerSide(
     clientTimezone?: string;
     clientTime?: string;
     userText?: string;
+    demoMode?: boolean;
   },
 ): Promise<string | null> {
   // 1. user_settings → user name + phone + home/work addresses (drives
@@ -1433,7 +1434,13 @@ async function assembleSystemPromptServerSide(
     console.warn('[assembleSystemPrompt] alerts lookup failed:', (err as Error)?.message);
   }
 
-  return base + languageNote + userRefSection + briefContext + listsContext + alertsContext + healthSuffix + knowledgeSuffix;
+  // V282 — Demo Mode suffix. Appended to the no-cache tail so it never
+  // pollutes the cached prompt blocks. Gated upstream to wael.aggan@gmail.com.
+  const demoSuffix = opts.demoMode
+    ? `\n\n## DEMO MODE (ACTIVE)\nThis is a live demo recording. For THIS session only, override the confirm-then-act rule:\n- Do NOT ask "say yes to confirm" for any action. Execute every requested action immediately.\n- For a compound request (multiple actions in one message), execute ALL of them in this single turn — emit every action.\n- Still emit DRAFT_MESSAGE for texts/emails (the app auto-sends them in demo mode); do not ask for confirmation.\n- Speak ONE brief past-tense summary covering everything you did, in a natural numbered list. Keep it warm and concise.\n- Do not mention "demo mode" to the user.`
+    : '';
+
+  return base + languageNote + userRefSection + briefContext + listsContext + alertsContext + healthSuffix + knowledgeSuffix + demoSuffix;
 }
 
 // 2026-05-23 (Wael) — normalize a string for entity-existence matching.
@@ -1865,6 +1872,7 @@ Deno.serve(async (req) => {
       knowledge_context: bodyKnowledgeContext,
       client_timezone: bodyClientTimezone,
       client_time: bodyClientTime,
+      demo_mode: bodyDemoMode,
     } = body;
     // V57.7 cost audit — cap output at 1024 tokens (was 2048). Naavi
     // replies are short by design ("3 sentences unless asked for more"),
@@ -2977,6 +2985,23 @@ Deno.serve(async (req) => {
     // build it here from user_settings + get-naavi-prompt + the small mobile
     // context. Falls through with `system = rawSystem` (legacy V57.9.2 mobile
     // and any voice-server-style caller that already builds the prompt).
+    // V282 — Demo Mode gate. Only honor demo_mode when the authenticated caller
+    // is wael.aggan@gmail.com. A leaked flag from any other account is ignored.
+    let demoModeActive = false;
+    if (bodyDemoMode === true && userId) {
+      try {
+        const adminClient = createClient(
+          Deno.env.get('SUPABASE_URL') ?? '',
+          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+        );
+        const { data: udata } = await adminClient.auth.admin.getUserById(userId);
+        demoModeActive = (udata?.user?.email ?? '').toLowerCase() === 'wael.aggan@gmail.com';
+      } catch (err) {
+        console.warn('[naavi-chat] demo-mode email gate failed:', (err as Error)?.message);
+      }
+      console.log(`[naavi-chat] demo_mode requested; active=${demoModeActive}`);
+    }
+
     let system: any = rawSystem;
     if (!hasInlineSystem) {
       const assembled = await assembleSystemPromptServerSide(supabase, userId, {
@@ -2988,6 +3013,7 @@ Deno.serve(async (req) => {
         clientTimezone: typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined,
         clientTime: typeof bodyClientTime === 'string' ? bodyClientTime : undefined,
         userText,
+        demoMode: demoModeActive,
       });
       if (!assembled) {
         console.error('[naavi-chat] server-side prompt assembly failed; cannot proceed');

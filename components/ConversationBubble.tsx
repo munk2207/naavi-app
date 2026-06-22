@@ -46,8 +46,24 @@ const DOT_RULER = '. '.repeat(20);
 // faded-visible there because its background hides the bleed).
 const NAAVI_INVISIBLE_RULER = ' '.repeat(50);
 
-export function ConversationBubble({ role, content, timestamp }: Props) {
+// V282 — strip Markdown emphasis so it never renders as literal characters in
+// the bubble. Claude returns numbered lists like "**1. Meeting with Bob**";
+// without this the asterisks show on screen (Wael 2026-06-21). We strip rather
+// than render bold because the ruler+overlay layout below measures width on a
+// normal-weight string — bold glyphs are wider and would risk reviving the
+// Samsung Yoga truncation bug this component spent many versions fixing.
+function stripMarkdown(s: string): string {
+  return String(s ?? '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')   // **bold**
+    .replace(/__(.+?)__/g, '$1')        // __bold__
+    .replace(/(^|\s)\*(?!\s)(.+?)\*/g, '$1$2') // *italic* (not bullet "* ")
+    .replace(/^#{1,6}\s+/gm, '')        // # headings
+    .replace(/`([^`]+)`/g, '$1');       // `code`
+}
+
+export function ConversationBubble({ role, content: rawContent, timestamp }: Props) {
   const isNaavi = role === 'assistant';
+  const content = stripMarkdown(rawContent);
 
   // V57.11.5 — bubble layout reworked. The maxWidth + alignSelf approach
   // kept tripping Android's Yoga text measurement and dropping trailing
