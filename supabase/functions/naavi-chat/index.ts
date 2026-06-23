@@ -3327,10 +3327,34 @@ Deno.serve(async (req) => {
       tools: NAAVI_TOOLS as any,
       temperature: 0,
     };
-    // Force text-only output on compound turns — remove tools entirely so
-    // Anthropic never sees tool_choice:none (unsupported on Haiku 4.5 → 500).
+    // Compound PLANNING turn: build the list server-side and short-circuit —
+    // Haiku reliably drops items when restating 8+ requests, so we skip the
+    // Claude call entirely and return a deterministic plan.
     if (isCompoundTurn) {
-      delete claudeParams.tools;
+      const ACTION_VERB_RE_SC = /^(book|schedule|remind|add|attach|text|call|email|save|create|set|list|find|check|send|buy|get|pick|make|cancel|delete|move|update|note|remember|connect|disconnect|tell|ask|message|alert|notify|invite)\b/i;
+      const CONTACT_DETAIL_RE_SC = /^[\w.+-]+@|^\+?\d[\d\s\-().]{6,}$|^(phone|email|contact info):/i;
+      // Join continuation lines (those not starting with an action verb) to the
+      // preceding action line so "Remind me with James... \nwhen I arrive at X"
+      // becomes one complete line.
+      const joined: string[] = [];
+      for (const line of msgNonEmptyLines) {
+        const t = line.trim();
+        if (CONTACT_DETAIL_RE_SC.test(t)) continue; // skip contact detail lines
+        if (ACTION_VERB_RE_SC.test(t)) {
+          joined.push(t);
+        } else if (joined.length > 0) {
+          // Continuation — append to previous action line
+          joined[joined.length - 1] += ' ' + t;
+        }
+      }
+      const planItems = joined.filter((l: string) => l.length > 0);
+      const planList = planItems.map((l: string, i: number) => `${i + 1}. ${l}`).join('\n');
+      const planSpeech = `Here are your ${planItems.length} actions:\n\n${planList}\n\nSay yes to confirm all, or no to cancel.`;
+      console.log(`[compound-plan] short-circuit: ${planItems.length} items`);
+      return new Response(
+        JSON.stringify({ speech: planSpeech, actions: [], isCompoundResult: false }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
     }
     // On compound confirmation turns, boost max_tokens to fit 6+ tool calls.
     if (isCompoundConfirmTurn) {
