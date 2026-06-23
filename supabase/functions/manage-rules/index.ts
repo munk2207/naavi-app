@@ -228,8 +228,18 @@ serve(async (req) => {
       const mergedConfig: Record<string, unknown> = { ...existingConfig };
       const newTasks: string[] = Array.isArray(body.tasks) ? body.tasks : [];
       if (newTasks.length > 0) {
-        const existingTasks = Array.isArray(existingConfig.tasks) ? existingConfig.tasks : [];
-        mergedConfig.tasks = [...new Set([...existingTasks, ...newTasks])];
+        const existingTasks: string[] = Array.isArray(existingConfig.tasks) ? existingConfig.tasks as string[] : [];
+        // Normalize for dedup: lowercase, collapse whitespace, strip trailing punctuation
+        const normalize = (s: string) => s.toLowerCase().replace(/[,;]/g, ' ').replace(/\s+/g, ' ').trim();
+        const seenNorm = new Set(existingTasks.map(normalize));
+        const deduped = [...existingTasks];
+        for (const t of newTasks) {
+          if (t.trim() && !seenNorm.has(normalize(t))) {
+            deduped.push(t.trim());
+            seenNorm.add(normalize(t));
+          }
+        }
+        mergedConfig.tasks = deduped;
       }
       if (body.list_name) mergedConfig.list_name = body.list_name;
       const { error: updErr } = await admin

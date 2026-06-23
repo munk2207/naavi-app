@@ -3297,7 +3297,7 @@ Deno.serve(async (req) => {
           '4. NEVER ask about channel — "text" = SMS, "message" = SMS, "email" = email.',
           '5. NEVER ask about schedule ambiguity — interpret the schedule as stated and execute it.',
           '6. Fill every missing detail with a default: morning→08:00, evening→20:00, noon→12:00, night→21:00.',
-          '7. If one item is truly impossible, skip it silently and execute the rest. Do NOT mention it.',
+          '7. NEVER skip a reminder or alert — if the exact date/time is unclear, use your best interpretation and execute it anyway. Only skip if the action is physically impossible (e.g. a contact that does not exist in tools).',
           'After all tools: one short confirmation line per completed action. Nothing else.',
         ].join('\n'),
       });
@@ -3962,6 +3962,15 @@ Deno.serve(async (req) => {
       ?? ((speechBlocks && speechBlocks.trim().length > 0)
             ? speechBlocks
             : buildFallbackSpeech(actions));
+
+    // Fix compound planning count mismatch — Haiku miscounts items.
+    // Count the actual numbered lines and replace the header count.
+    if (isCompoundTurn && /^Here are your \d+ actions:/m.test(speech)) {
+      const actualCount = (speech.match(/^\d+\./gm) ?? []).length;
+      if (actualCount > 0) {
+        speech = speech.replace(/^Here are your \d+ actions:/m, `Here are your ${actualCount} actions:`);
+      }
+    }
 
     // If we resolved a phone for the time-trigger confirm, inject it into speech
     // so Robert sees the exact number before saying yes.
