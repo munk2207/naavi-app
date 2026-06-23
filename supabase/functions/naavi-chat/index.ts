@@ -3238,21 +3238,25 @@ Deno.serve(async (req) => {
       && lastAssistantWasCompoundList;
     console.log(`[compound-detection] lines=${msgNonEmptyLines.length} isCompound=${isCompoundTurn} isCompoundConfirm=${isCompoundConfirmTurn} cachedSystemIsArray=${Array.isArray(cachedSystem)} lastUserMsg="${lastUserMsgText.slice(0, 80).replace(/\n/g, '|')}"`);
     if (isCompoundTurn && Array.isArray(cachedSystem)) {
+      // Pre-number the lines server-side so Claude cannot drop or merge any.
+      const preNumbered = msgNonEmptyLines
+        .map((l: string, i: number) => `${i + 1}. ${l.trim()}`)
+        .join('\n');
       cachedSystem.push({
         type: 'text',
         text: [
           '\n\n[COMPOUND REQUEST — planning turn, NO tool calls allowed]',
-          'Start your response with exactly this line: "Here are your [N] actions:" — replace [N] with the exact count of items in your list below.',
-          'Then output a numbered list — ONE line per action the user EXPLICITLY requested. No more, no less.',
-          'STRICT RULES for the list:',
-          '- Only include actions the user directly asked for in their message.',
-          '- Do NOT add contact saves, calendar invites, or invitations unless the user asked.',
-          '- Do NOT add confirmation steps, internal process steps, or follow-up actions.',
-          '- Do NOT duplicate actions (e.g. "create event" and "invite to event" count as one item).',
-          '- NEVER combine two separate user requests into one numbered item, even if they seem related. Each sentence the user wrote that contains a distinct intent is its own line. "Remind me to call X" AND "remind me about Y when I arrive at Z" are ALWAYS two separate lines.',
-          '- NEVER drop any item from the user\'s message. If the user wrote 8 requests, you MUST list 8 items. Dropping an item silently is a critical error.',
-          '- The count in the header MUST match the number of items in the list.',
-          'After the last item, your response MUST end with this exact sentence on its own line:',
+          `The user's message contains EXACTLY ${msgNonEmptyLines.length} distinct requests. You MUST include all ${msgNonEmptyLines.length} in your output — dropping even one is a critical error. Here they are, pre-numbered for you:`,
+          preNumbered,
+          '',
+          'Your response MUST start with this exact line:',
+          `Here are your ${msgNonEmptyLines.length} actions:`,
+          '',
+          `Then output a numbered list with EXACTLY ${msgNonEmptyLines.length} items — one per request above. Restate each item concisely in one line.`,
+          'STRICT RULES:',
+          '- Do NOT add contact saves, calendar invites, or follow-up steps unless the user asked.',
+          '- Do NOT combine two items into one. Each pre-numbered request above is its own line.',
+          'After the last item, end with this exact sentence on its own line:',
           'Say yes to confirm all, or no to cancel.',
           'Do NOT add anything after that sentence.',
         ].join('\n'),
