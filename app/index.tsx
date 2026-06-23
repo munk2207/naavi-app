@@ -730,7 +730,7 @@ function CompoundResultView({ turn }: { turn: import('@/hooks/useOrchestrator').
             </View>
           );
         } else if (item.cardSlot === 'draft') {
-          const draft = turn.drafts[draftCursor++];
+          const draft = (turn.drafts ?? [])[draftCursor++];
           if (draft) card = <DraftCard key={`d-${i}`} action={draft} />;
         } else if (item.cardSlot === 'calendar') {
           const ev = turn.createdEvents[calCursor++];
@@ -742,7 +742,7 @@ function CompoundResultView({ turn }: { turn: import('@/hooks/useOrchestrator').
             </TouchableOpacity>
           );
         } else if (item.cardSlot === 'location') {
-          const loc = turn.locationRules[locCursor++];
+          const loc = (turn.locationRules ?? [])[locCursor++];
           if (loc) card = (
             <LocationRuleCard
               key={`loc-${loc.ruleId}-${i}`}
