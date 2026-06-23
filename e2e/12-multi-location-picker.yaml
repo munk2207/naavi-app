@@ -4,6 +4,7 @@ tags:
   - regression
   - prompt
 ---
+- runFlow: 00-sign-in.yaml
 # This scenario verifies the chain-store rule (prompt v57+): when the user
 # says "alert me at Walmart" (a chain with no specific branch), Naavi must
 # emit SET_ACTION_RULE immediately and the orchestrator's resolve-place

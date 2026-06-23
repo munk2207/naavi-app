@@ -4,6 +4,7 @@ tags:
   - smoke
   - settings
 ---
+- runFlow: 00-sign-in.yaml
 # Quick smoke that the Settings page is reachable and renders the
 # version line.
 #

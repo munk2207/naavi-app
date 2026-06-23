@@ -24,4 +24,9 @@ tags:
       text: "Ask MyNaavi"
     timeout: 30000
 
+# Wait for background syncs (calendar, email) to complete or time out
+# before Maestro starts interacting — prevents ANR on emulator
+- waitForAnimationToEnd:
+    timeout: 8000
+
 - takeScreenshot: 00-sign-in-complete

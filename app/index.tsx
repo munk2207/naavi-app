@@ -299,12 +299,16 @@ async function fetchTodayTimeAlerts(userId: string): Promise<BriefItem[]> {
     if (!sb) return [];
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const todayEnd   = new Date(); todayEnd.setHours(23, 59, 59, 999);
-    const { data, error } = await sb
+    const query = sb
       .from('action_rules')
       .select('id, label, trigger_config, action_config')
       .eq('user_id', userId)
       .eq('trigger_type', 'time')
       .eq('enabled', true);
+    const timeout = new Promise<{ data: null; error: Error }>(resolve =>
+      setTimeout(() => resolve({ data: null, error: new Error('timeout') }), 8_000)
+    );
+    const { data, error } = await Promise.race([query, timeout]);
     if (error || !data) return [];
     return (data as any[]).flatMap(rule => {
       const dt: string | undefined = rule.trigger_config?.datetime ?? rule.trigger_config?.time;

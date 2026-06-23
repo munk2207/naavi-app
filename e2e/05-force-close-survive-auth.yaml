@@ -5,6 +5,7 @@ tags:
   - critical
   - auth
 ---
+- runFlow: 00-sign-in.yaml
 # Reproduces the V57.9.7 fix: force-killing and reopening the app
 # should NOT log the user out or show "Sign-in expired" banner.
 

@@ -4,6 +4,7 @@ tags:
   - prompt
   - lists
 ---
+- runFlow: 00-sign-in.yaml
 # "Create a shopping list" must emit LIST_CREATE, not a clarifying
 # question. Catches prompt regressions.
 

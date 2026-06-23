@@ -27,6 +27,8 @@ export interface GmailMessageRow {
 // ─── Trigger sync ─────────────────────────────────────────────────────────────
 
 export async function triggerGmailSync(): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
   try {
     await fetch(`${SUPABASE_URL}/functions/v1/sync-gmail`, {
       method: 'POST',
@@ -34,9 +36,12 @@ export async function triggerGmailSync(): Promise<void> {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
       },
+      signal: controller.signal,
     });
   } catch (err) {
     console.error('[Gmail] Sync trigger failed:', err);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

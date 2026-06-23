@@ -4,6 +4,7 @@ tags:
   - regression
   - critical
 ---
+- runFlow: 00-sign-in.yaml
 # This scenario reproduces the bug pattern that broke V57.11.6 in production:
 # after hands-free mode was removed in V57.11.3, the voice-confirm block
 # guarded by `handsfreeRef.current` never ran. pendingActionRef was never

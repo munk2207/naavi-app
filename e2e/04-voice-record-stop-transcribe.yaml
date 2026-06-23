@@ -4,6 +4,7 @@ tags:
   - voice
   - feature
 ---
+- runFlow: 00-sign-in.yaml
 # Verifies the voice memo path:
 #   - Tap mic → recording state
 #   - Tap stop → transcribing state

@@ -3,6 +3,7 @@ name: 07 — collapse/expand chat toggle (V57.9.7 one-way bug catcher)
 tags:
   - chat-ui
 ---
+- runFlow: 00-sign-in.yaml
 # Catches the V57.9.7 regression where collapsing chat worked but tapping
 # the collapsed bar to expand again had no effect — the toggle was one-way.
 # Requires at least one chat turn so the collapse button appears.

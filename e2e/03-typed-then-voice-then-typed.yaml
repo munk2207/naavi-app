@@ -3,6 +3,7 @@ name: 03 — typed → voice → typed (mode-switch state)
 tags:
   - mode-switch
 ---
+- runFlow: 00-sign-in.yaml
 # Verifies the orchestrator transitions correctly between text and voice
 # input modes without leaking state.
 
