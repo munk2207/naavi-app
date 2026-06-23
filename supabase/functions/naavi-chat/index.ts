@@ -3238,29 +3238,20 @@ Deno.serve(async (req) => {
       && lastAssistantWasCompoundList;
     console.log(`[compound-detection] lines=${msgNonEmptyLines.length} isCompound=${isCompoundTurn} isCompoundConfirm=${isCompoundConfirmTurn} cachedSystemIsArray=${Array.isArray(cachedSystem)} lastUserMsg="${lastUserMsgText.slice(0, 80).replace(/\n/g, '|')}"`);
     if (isCompoundTurn && Array.isArray(cachedSystem)) {
-      // Extract action-starting lines so Claude gets an explicit reference list.
-      // Filters out continuation lines ("when I arrive..."), artifacts ("home..."),
-      // and contact-detail lines (email@/phone digits).
-      const ACTION_VERB_RE = /^(book|schedule|remind|add|attach|text|call|email|save|create|set|list|find|check|send|buy|get|pick|make|cancel|delete|move|update|note|remember|connect|disconnect|tell|ask|message|alert|notify|invite)\b/i;
-      const CONTACT_DETAIL_RE = /^[\w.+-]+@|^\+?\d[\d\s\-().]{6,}$|^(phone|email|contact info):/i;
-      const actionLines = msgNonEmptyLines.filter((l: string) =>
-        ACTION_VERB_RE.test(l.trim()) && !CONTACT_DETAIL_RE.test(l.trim())
-      );
-      const refList = actionLines.map((l: string, i: number) => `${i + 1}. ${l.trim()}`).join('\n');
       cachedSystem.push({
         type: 'text',
         text: [
           '\n\n[COMPOUND REQUEST — planning turn, NO tool calls allowed]',
-          `The user sent ${actionLines.length} separate action requests. Here they are — you MUST include ALL ${actionLines.length} in your output:`,
-          refList,
-          '',
-          `Start your response with: "Here are your ${actionLines.length} actions:"`,
-          `Then restate each of the ${actionLines.length} items above as a concise numbered line. Include location context ("when I arrive at X") when it appears nearby in the user's message.`,
-          'STRICT RULES:',
-          '- Do NOT add contact saves, calendar invites, or follow-up steps unless the user asked.',
-          '- Do NOT combine two separate requests into one item.',
-          '- Do NOT drop any of the items listed above.',
-          'After the last item, end with this exact sentence on its own line:',
+          'Start your response with exactly this line: "Here are your [N] actions:" — replace [N] with the exact count of items in your list below.',
+          'Then output a numbered list — ONE line per action the user EXPLICITLY requested. No more, no less.',
+          'STRICT RULES for the list:',
+          '- Only include actions the user directly asked for in their message.',
+          '- Do NOT add contact saves, calendar invites, or invitations unless the user asked.',
+          '- Do NOT add confirmation steps, internal process steps, or follow-up actions.',
+          '- Do NOT duplicate actions (e.g. "create event" and "invite to event" count as one item).',
+          '- NEVER combine two separate user requests into one numbered item, even if they seem related. Each sentence the user wrote that contains a distinct intent is its own line. "Remind me to call X" AND "remind me about Y when I arrive at Z" are ALWAYS two separate lines.',
+          '- The count in the header MUST match the number of items in the list.',
+          'After the last item, your response MUST end with this exact sentence on its own line:',
           'Say yes to confirm all, or no to cancel.',
           'Do NOT add anything after that sentence.',
         ].join('\n'),
@@ -3305,7 +3296,7 @@ Deno.serve(async (req) => {
           '4. NEVER ask about channel — "text" = SMS, "message" = SMS, "email" = email.',
           '5. NEVER ask about schedule ambiguity — interpret the schedule as stated and execute it.',
           '6. Fill every missing detail with a default: morning→08:00, evening→20:00, noon→12:00, night→21:00.',
-          '7. NEVER skip a reminder or alert — if the exact date/time is unclear, use your best interpretation and execute it anyway. Only skip if the action is physically impossible (e.g. a contact that does not exist in tools).',
+          '7. If one item is truly impossible, skip it silently and execute the rest. Do NOT mention it.',
           '8. NEVER save a contact (ADD_CONTACT) unless the user EXPLICITLY said "add contact", "save contact", or "save [name]\'s number". "Book a meeting with Bob" means CREATE_EVENT only — never ADD_CONTACT. Ignore any email/phone lines in the message that were not an explicit save request.',
           'After all tools: one short confirmation line per completed action. Nothing else.',
         ].join('\n'),
@@ -3327,17 +3318,10 @@ Deno.serve(async (req) => {
       tools: NAAVI_TOOLS as any,
       temperature: 0,
     };
-    // Compound PLANNING turn: build the list server-side and short-circuit —
-    // Haiku reliably drops items when restating 8+ requests, so we skip the
-    // Claude call entirely and return a deterministic plan.
-    // Filter only obvious non-content lines: all-dots artifacts and bare email addresses.
+    // Force text-only output on compound turns — remove tools entirely so
+    // Anthropic never sees tool_choice:none (unsupported on Haiku 4.5 → 500).
     if (isCompoundTurn) {
-      const ARTIFACT_RE = /^[.\s*#_-]{3,}$|^[\w.+-]+@[\w.-]+\.[a-z]{2,}/i;
-      const planItems = msgNonEmptyLines.filter((l: string) => !ARTIFACT_RE.test(l.trim()));
-      const planList = planItems.map((l: string, i: number) => `${i + 1}. ${l.trim()}`).join('\n');
-      const planSpeech = `Here are your ${planItems.length} actions:\n\n${planList}\n\nSay yes to confirm all, or no to cancel.`;
-      console.log(`[compound-plan] short-circuit: ${planItems.length} items`);
-      return jsonResponse({ rawText: JSON.stringify({ speech: planSpeech, display: planSpeech, actions: [], pendingThreads: [] }) });
+      delete claudeParams.tools;
     }
     // On compound confirmation turns, boost max_tokens to fit 6+ tool calls.
     if (isCompoundConfirmTurn) {
