@@ -1260,7 +1260,13 @@ export default function HomeScreen() {
   useEffect(() => {
     if (turns.length > 0) {
       setChatCollapsed(false); // auto-expand when new message arrives
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+      const latest = turns[turns.length - 1];
+      if (latest?.isCompoundResult) {
+        // Compound result: scroll to top so item #1 is visible first
+        setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 100);
+      } else {
+        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+      }
     }
   }, [turns.length]);
 
