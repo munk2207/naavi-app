@@ -4012,17 +4012,25 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       }
       let compoundPlan: ConversationTurn['compoundPlan'];
       if (isCompoundResult) {
-        let draftCursor = 0, calCursor = 0, locCursor = 0, listCursor = 0, sentCursor = 0;
-        compoundPlan = dedupedActions.slice(0, compoundBreakdownLines.length).map((action: any, i: number) => {
-          const label = compoundBreakdownLines[i] ?? `${i + 1}.`;
-          const t = action.type ?? '';
-          if (t === 'DRAFT_MESSAGE') {
-            if (sentCursor < turnSentMessages.length) { sentCursor++; return { label, cardSlot: 'sent' as const }; }
-            if (draftCursor < turnDrafts.length) { draftCursor++; return { label, cardSlot: 'draft' as const }; }
-          }
-          if (t === 'CREATE_EVENT' && calCursor < turnEvents.length) { calCursor++; return { label, cardSlot: 'calendar' as const }; }
-          if ((t === 'SET_ACTION_RULE' || t === 'set_location_rule_chain' || t === 'set_location_rule_address') && action.trigger_type === 'location' && locCursor < turnLocationRules.length) { locCursor++; return { label, cardSlot: 'location' as const }; }
-          if ((t === 'LIST_ADD' || t === 'LIST_CONNECT') && listCursor < turnLists.length) { listCursor++; return { label, cardSlot: 'list' as const }; }
+        // Detect expected card type from breakdown line keywords — avoids
+        // card/label mismatch when Claude emits tools in a different order
+        // than the numbered list the user sees.
+        const detectSlot = (line: string): 'sent' | 'calendar' | 'location' | 'list' | null => {
+          const l = line.toLowerCase();
+          if (/\btext\b|\bsms\b|\bmessage\b|\bsend\b|\bwhatsapp\b/.test(l)) return 'sent';
+          if (/\bmeeting\b|\bcalendar\b|\bbook\b|\bevent\b/.test(l)) return 'calendar';
+          if (/\barrive\b|\bwhen i\b|\bat his\b|\bat her\b|\bat my\b|\bat the\b|\btoyota\b/.test(l)) return 'location';
+          if (/\blist\b|\battach\b/.test(l)) return 'list';
+          return null;
+        };
+        let sentCursor = 0, draftCursor = 0, calCursor = 0, locCursor = 0, listCursor = 0;
+        compoundPlan = compoundBreakdownLines.map((label: string) => {
+          const slot = detectSlot(label);
+          if (slot === 'sent' && sentCursor < turnSentMessages.length) { sentCursor++; return { label, cardSlot: 'sent' as const }; }
+          if (slot === 'sent' && draftCursor < turnDrafts.length) { draftCursor++; return { label, cardSlot: 'draft' as const }; }
+          if (slot === 'calendar' && calCursor < turnEvents.length) { calCursor++; return { label, cardSlot: 'calendar' as const }; }
+          if (slot === 'location' && locCursor < turnLocationRules.length) { locCursor++; return { label, cardSlot: 'location' as const }; }
+          if (slot === 'list' && listCursor < turnLists.length) { listCursor++; return { label, cardSlot: 'list' as const }; }
           return { label, cardSlot: null as const };
         });
       }
