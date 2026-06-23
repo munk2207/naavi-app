@@ -3250,6 +3250,7 @@ Deno.serve(async (req) => {
           '- Do NOT add confirmation steps, internal process steps, or follow-up actions.',
           '- Do NOT duplicate actions (e.g. "create event" and "invite to event" count as one item).',
           '- NEVER combine two separate user requests into one numbered item, even if they seem related. Each sentence the user wrote that contains a distinct intent is its own line. "Remind me to call X" AND "remind me about Y when I arrive at Z" are ALWAYS two separate lines.',
+          '- NEVER drop any item from the user\'s message. If the user wrote 8 requests, you MUST list 8 items. Dropping an item silently is a critical error.',
           '- The count in the header MUST match the number of items in the list.',
           'After the last item, your response MUST end with this exact sentence on its own line:',
           'Say yes to confirm all, or no to cancel.',
