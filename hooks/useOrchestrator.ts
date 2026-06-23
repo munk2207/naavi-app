@@ -4039,7 +4039,8 @@ const oneShot = pending.originalAction?.one_shot ?? true;
 
       // Build final speech — append list items for LIST_READ so Naavi reads them aloud
       // Location intercept takes precedence over Claude's speech (no list-append).
-      let finalSpeech = turnSpeechOverride !== null ? turnSpeechOverride : response.speech;
+      // Exception: compound result turns always use Claude's full summary so all completions are spoken.
+      let finalSpeech = (turnSpeechOverride !== null && !isCompoundResult) ? turnSpeechOverride : response.speech;
       if (turnSpeechOverride === null) {
         for (const lr of turnLists) {
           if (lr.action === 'read' && lr.items && lr.items.length > 0) {

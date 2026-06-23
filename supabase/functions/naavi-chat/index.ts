@@ -3254,6 +3254,8 @@ Deno.serve(async (req) => {
           '\n\n[COMPOUND CONFIRMATION — execute all actions now]',
           'The user said YES. Execute EVERY action from your previous numbered list using tool calls.',
           'Do not repeat the list. Do not ask for confirmation again. Just execute all tools.',
+          'DEFAULTS — never ask the user for missing details, fill them in: "morning"→08:00, "evening"→20:00, "noon"→12:00, "night"→21:00 for medication/reminder times. "text"→SMS, "message"→SMS for draft_message channel. If a detail is truly unresolvable, skip that one item and execute the rest.',
+          'After executing all tools, your text response MUST briefly confirm every action completed — one short line per action, e.g. "Done. 1. Meeting booked. 2. Medication scheduled. 3. Reminder set…" so the user hears ALL completions, not just one.',
         ].join('\n'),
       });
     }

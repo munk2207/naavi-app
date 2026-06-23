@@ -2565,7 +2565,7 @@ export default function HomeScreen() {
                 onChangeText={setInputText}
                 placeholder={t('home.inputPlaceholder')}
                 placeholderTextColor={Colors.textMuted}
-                maxLength={500}
+                maxLength={2000}
                 returnKeyType="send"
                 onSubmitEditing={handleSend}
                 // Always editable — typing has no audio-pickup risk and Robert
