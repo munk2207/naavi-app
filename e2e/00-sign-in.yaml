@@ -1,16 +1,24 @@
 appId: ca.naavi.app
-name: 00 — sign-in check (session already live on emulator)
+name: 00 — sign-in via Test Lab button
 tags:
   - setup
 ---
-# User has signed in with Google manually on the emulator.
-# This flow just launches the app and confirms the session is live.
-# Do NOT use clearState: true — that would wipe the Google session.
+# Uses the "Test Lab Sign In" button baked into staging APKs
+# (EXPO_PUBLIC_TEST_LOGIN_ENABLED=true in eas.json staging profile).
+# clearState ensures a fresh session on every run — the test button
+# signs in with firebase-testlab@mynaavi.com without Google OAuth.
 
-- stopApp
+- clearState
 - launchApp
 
-# Wait for home screen — confirms session is live
+- extendedWaitUntil:
+    visible:
+      id: "test-lab-sign-in"
+    timeout: 15000
+
+- tapOn:
+    id: "test-lab-sign-in"
+
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"

@@ -393,7 +393,7 @@ export const NAAVI_TOOLS: NaaviTool[] = [
   // 7. SCHEDULE_MEDICATION
   {
     name: 'schedule_medication',
-    description: 'Expand a medication schedule into per-dose calendar events. Defaults: times=[08:00,20:00], on_days=5, off_days=3, duration=30.',
+    description: 'Expand a medication schedule into per-dose calendar events. RULES: (1) Continuous daily: "twice daily for 2 weeks" → on_days=14, off_days=0, duration_days=14. (2) Cycle with repeat: "take 7 days, stop 7 days, repeat for another week" → on_days=7, off_days=7, duration_days=21 (cover the full span including the repeat). duration_days must span ALL cycles the user described — never just the first on-period. Default times=[08:00,20:00].',
     input_schema: {
       type: 'object',
       properties: {
@@ -403,10 +403,10 @@ export const NAAVI_TOOLS: NaaviTool[] = [
           type: 'array',
           items: { type: 'string', description: 'HH:MM 24h.' },
         },
-        on_days: { type: 'integer' },
-        off_days: { type: 'integer', description: 'Set 0 for continuous daily.' },
+        on_days: { type: 'integer', description: 'For daily dosing set this equal to duration_days. For cycle dosing set to the number of on-days per cycle.' },
+        off_days: { type: 'integer', description: '0 for continuous daily dosing. >0 for cycle dosing (days off between on-cycles).' },
         start_date: { type: 'string', description: 'YYYY-MM-DD.' },
-        duration_days: { type: 'integer' },
+        duration_days: { type: 'integer', description: 'Total number of days the schedule runs. e.g. "2 weeks" = 14.' },
       },
       required: ['name'],
       additionalProperties: false,

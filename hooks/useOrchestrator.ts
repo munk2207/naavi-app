@@ -2534,61 +2534,77 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         }
 
         if (action.type === 'SCHEDULE_MEDICATION') {
-          const medName       = String(action.name ?? 'Medication');
-          const doseNote      = String(action.dose_instruction ?? '');
-          const times         = Array.isArray(action.times) ? action.times as string[] : ['08:00', '20:00'];
-          const onDays        = Number(action.on_days  ?? 5);
-          const offDays       = Number(action.off_days ?? 3);
-          const durationDays  = Number(action.duration_days ?? 30);
-          const startDate     = String(action.start_date ?? new Date().toISOString().split('T')[0]);
+          const medName      = String(action.name ?? 'Medication');
+          const doseNote     = String(action.dose_instruction ?? '');
+          const times        = Array.isArray(action.times) ? action.times as string[] : ['08:00', '20:00'];
+          const offDays      = Number(action.off_days ?? 0);
+          const durationDays = Number(action.duration_days ?? 30);
+          const startDate    = String(action.start_date ?? new Date().toISOString().split('T')[0]);
 
-          // Calculate all active dose dates
-          const events: { title: string; start: string; end: string }[] = [];
-          let dayOffset = 0;
-          let cycleDay  = 0; // position within the current on+off cycle
-
-          while (dayOffset < durationDays) {
-            const isOnDay = cycleDay < onDays;
-            if (isOnDay) {
-              const base = new Date(`${startDate}T00:00:00`);
-              base.setDate(base.getDate() + dayOffset);
-              const dateStr = base.toISOString().split('T')[0];
-
-              for (const time of times) {
-                const [h, m] = time.split(':').map(Number);
-                const start = new Date(`${dateStr}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`);
-                const end   = new Date(start.getTime() + 30 * 60 * 1000); // 30 min block
-                events.push({
-                  title: `💊 ${medName}`,
-                  start: start.toISOString(),
-                  end:   end.toISOString(),
+          if (offDays === 0) {
+            // Continuous daily dosing — one recurring calendar event per dose time.
+            // This matches what Google Calendar shows as a "Repeat" event and works
+            // for any duration (days, weeks, months) without hitting API rate limits.
+            console.log(`[Orchestrator] SCHEDULE_MEDICATION: continuous — ${times.length} recurring events × ${durationDays} days for ${medName}`);
+            for (const time of times) {
+              const [h, m] = time.split(':').map(Number);
+              const start = new Date(`${startDate}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`);
+              const end   = new Date(start.getTime() + 30 * 60 * 1000);
+              try {
+                const result = await registry.calendar.createEvent({
+                  title:       `💊 ${medName}`,
+                  description: doseNote,
+                  startISO:    start.toISOString(),
+                  endISO:      end.toISOString(),
+                  attendees:   [],
+                  recurrence:  [`RRULE:FREQ=DAILY;COUNT=${durationDays}`],
                 });
+                turnEvents.push({ summary: result.title, htmlLink: result.htmlLink });
+              } catch (err) {
+                console.error('[Orchestrator] SCHEDULE_MEDICATION recurring event failed:', err);
               }
             }
-            cycleDay = (cycleDay + 1) % (onDays + offDays);
-            dayOffset++;
-          }
+          } else {
+            // Cycle dosing (on X days, off Y days) — one RRULE recurring group per on-period.
+            // e.g. "take 7 days, stop 7 days, repeat for another week" →
+            //   group 1: start=day0,  COUNT=7
+            //   group 2: start=day14, COUNT=7
+            const onDays = Number(action.on_days ?? durationDays);
+            const cycleLen = onDays + offDays;
+            let periodStart = 0;
+            let groupsCreated = 0;
 
-          console.log(`[Orchestrator] SCHEDULE_MEDICATION: creating ${events.length} events for ${medName}`);
+            while (periodStart < durationDays) {
+              const remaining = durationDays - periodStart;
+              const count = Math.min(onDays, remaining);
+              const base = new Date(`${startDate}T00:00:00`);
+              base.setDate(base.getDate() + periodStart);
+              const periodDateStr = base.toISOString().split('T')[0];
 
-          // Create all events (batched sequentially to avoid rate limits)
-          let created = 0;
-          for (const ev of events) {
-            try {
-              const result = await registry.calendar.createEvent({
-                title:       ev.title,
-                description: doseNote,
-                startISO:    ev.start,
-                endISO:      ev.end,
-                attendees:   [],
-              });
-              turnEvents.push({ summary: result.title, htmlLink: result.htmlLink });
-              created++;
-            } catch (err) {
-              console.error('[Orchestrator] SCHEDULE_MEDICATION event failed:', err);
+              console.log(`[Orchestrator] SCHEDULE_MEDICATION: cycle group starting ${periodDateStr}, COUNT=${count}`);
+              for (const time of times) {
+                const [h, m] = time.split(':').map(Number);
+                const start = new Date(`${periodDateStr}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`);
+                const end   = new Date(start.getTime() + 30 * 60 * 1000);
+                try {
+                  const result = await registry.calendar.createEvent({
+                    title:       `💊 ${medName}`,
+                    description: doseNote,
+                    startISO:    start.toISOString(),
+                    endISO:      end.toISOString(),
+                    attendees:   [],
+                    recurrence:  [`RRULE:FREQ=DAILY;COUNT=${count}`],
+                  });
+                  turnEvents.push({ summary: result.title, htmlLink: result.htmlLink });
+                  groupsCreated++;
+                } catch (err) {
+                  console.error('[Orchestrator] SCHEDULE_MEDICATION cycle group failed:', err);
+                }
+              }
+              periodStart += cycleLen;
             }
+            console.log(`[Orchestrator] SCHEDULE_MEDICATION: created ${groupsCreated} recurring groups for ${medName}`);
           }
-          console.log(`[Orchestrator] SCHEDULE_MEDICATION: created ${created}/${events.length} events`);
         }
 
         if (action.type === 'LIST_CREATE') {

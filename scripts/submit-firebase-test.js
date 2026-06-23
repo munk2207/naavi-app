@@ -351,7 +351,7 @@ async function pollUntilDone(matrixId, token, tokenMintedAt) {
   console.log(`     ✓ APK ready (${apkSizeMB} MB)`);
 
   // 3. Upload APK to GCS
-  const apkGcsName = `${GCS_FOLDER}/naavi-v282.apk`;
+  const apkGcsName = `${GCS_FOLDER}/naavi-v283.apk`;
   console.log(`\n3/5  Uploading APK to gs://${GCS_BUCKET}/${apkGcsName}…`);
   const apkUpload = await uploadToGCS(token, tmpApk, apkGcsName, 'application/vnd.android.package-archive');
   if (apkUpload.error) throw new Error(`APK upload failed: ${JSON.stringify(apkUpload.error)}`);
