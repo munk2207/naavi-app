@@ -3,30 +3,16 @@ name: 00 — sign-in via Test Lab button
 tags:
   - setup
 ---
-# Uses the "Test Lab Sign In" button baked into preview APKs
-# (EXPO_PUBLIC_TEST_LOGIN_ENABLED=true in eas.json preview profile).
-# clearState ensures a fresh session on every run — the test button
-# signs in with mynaavidemo@gmail.com without Google OAuth.
+# Auto sign-in: when EXPO_PUBLIC_TEST_LOGIN_ENABLED=true the app signs in
+# automatically on startup (no button tap needed). Avoids React Native
+# accessibility-tree issues where TouchableOpacity text is invisible to Maestro.
 
 - clearState
 - launchApp
 
 - extendedWaitUntil:
     visible:
-      id: "test-lab-sign-in"
-    timeout: 15000
-
-- tapOn:
-    id: "test-lab-sign-in"
-
-- extendedWaitUntil:
-    visible:
       text: "Ask MyNaavi"
-    timeout: 30000
-
-# Wait for background syncs (calendar, email) to complete or time out
-# before Maestro starts interacting — prevents ANR on emulator
-- waitForAnimationToEnd:
-    timeout: 8000
+    timeout: 35000
 
 - takeScreenshot: 00-sign-in-complete

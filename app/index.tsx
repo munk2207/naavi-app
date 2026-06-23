@@ -927,6 +927,19 @@ export default function HomeScreen() {
   const [staleAuth, setStaleAuth] = useState(false);
   const [showScopePrompt, setShowScopePrompt] = useState(false);
 
+  // Auto sign-in for Maestro / Firebase Test Lab runs — no button tap needed
+  useEffect(() => {
+    if (process.env.EXPO_PUBLIC_TEST_LOGIN_ENABLED !== 'true') return;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) {
+        supabase.auth.signInWithPassword({
+          email: 'mynaavidemo@gmail.com',
+          password: 'MaestroTest2026!#',
+        });
+      }
+    });
+  }, []);
+
   // Resolve user ID — from getSession on mount OR onAuthStateChange
   useEffect(() => {
     if (!supabase) return;
