@@ -3240,6 +3240,7 @@ Deno.serve(async (req) => {
           '- Do NOT add contact saves, calendar invites, or invitations unless the user asked.',
           '- Do NOT add confirmation steps, internal process steps, or follow-up actions.',
           '- Do NOT duplicate actions (e.g. "create event" and "invite to event" count as one item).',
+          '- Do NOT merge two distinct actions into one numbered item. Two reminders at different places are TWO separate lines.',
           '- The count in the header MUST match the number of items in the list.',
           'After the last item, your response MUST end with this exact sentence on its own line:',
           'Say yes to confirm all, or no to cancel.',

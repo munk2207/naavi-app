@@ -4013,7 +4013,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       let compoundPlan: ConversationTurn['compoundPlan'];
       if (isCompoundResult) {
         let draftCursor = 0, calCursor = 0, locCursor = 0, listCursor = 0, sentCursor = 0;
-        compoundPlan = dedupedActions.map((action: any, i: number) => {
+        compoundPlan = dedupedActions.slice(0, compoundBreakdownLines.length).map((action: any, i: number) => {
           const label = compoundBreakdownLines[i] ?? `${i + 1}.`;
           const t = action.type ?? '';
           if (t === 'DRAFT_MESSAGE') {
