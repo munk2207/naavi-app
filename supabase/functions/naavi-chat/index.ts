@@ -3238,17 +3238,28 @@ Deno.serve(async (req) => {
       && lastAssistantWasCompoundList;
     console.log(`[compound-detection] lines=${msgNonEmptyLines.length} isCompound=${isCompoundTurn} isCompoundConfirm=${isCompoundConfirmTurn} cachedSystemIsArray=${Array.isArray(cachedSystem)} lastUserMsg="${lastUserMsgText.slice(0, 80).replace(/\n/g, '|')}"`);
     if (isCompoundTurn && Array.isArray(cachedSystem)) {
+      // Extract action-starting lines so Claude gets an explicit reference list.
+      // Filters out continuation lines ("when I arrive..."), artifacts ("home..."),
+      // and contact-detail lines (email@/phone digits).
+      const ACTION_VERB_RE = /^(book|schedule|remind|add|attach|text|call|email|save|create|set|list|find|check|send|buy|get|pick|make|cancel|delete|move|update|note|remember|connect|disconnect|tell|ask|message|alert|notify|invite)\b/i;
+      const CONTACT_DETAIL_RE = /^[\w.+-]+@|^\+?\d[\d\s\-().]{6,}$|^(phone|email|contact info):/i;
+      const actionLines = msgNonEmptyLines.filter((l: string) =>
+        ACTION_VERB_RE.test(l.trim()) && !CONTACT_DETAIL_RE.test(l.trim())
+      );
+      const refList = actionLines.map((l: string, i: number) => `${i + 1}. ${l.trim()}`).join('\n');
       cachedSystem.push({
         type: 'text',
         text: [
           '\n\n[COMPOUND REQUEST — planning turn, NO tool calls allowed]',
-          'Start your response with exactly "Here are your N actions:" where N is the count of items in your list.',
-          'Then output a numbered list — ONE item per distinct user intent. Group continuation lines into one item (e.g. "Remind me with James kids... when I arrive to his home" = one item). Ignore contact detail lines (email/phone/address) unless the user asked to save a contact.',
+          `The user sent ${actionLines.length} separate action requests. Here they are — you MUST include ALL ${actionLines.length} in your output:`,
+          refList,
+          '',
+          `Start your response with: "Here are your ${actionLines.length} actions:"`,
+          `Then restate each of the ${actionLines.length} items above as a concise numbered line. Include location context ("when I arrive at X") when it appears nearby in the user's message.`,
           'STRICT RULES:',
-          '- Only include actions the user directly asked for.',
           '- Do NOT add contact saves, calendar invites, or follow-up steps unless the user asked.',
-          '- Do NOT combine two SEPARATE requests into one item. "Remind me to call Jasmine" and "Remind me with James kids names" are ALWAYS two separate items.',
-          '- NEVER drop a user request. If you identify N intents, list all N.',
+          '- Do NOT combine two separate requests into one item.',
+          '- Do NOT drop any of the items listed above.',
           'After the last item, end with this exact sentence on its own line:',
           'Say yes to confirm all, or no to cancel.',
           'Do NOT add anything after that sentence.',
