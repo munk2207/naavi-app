@@ -1982,6 +1982,15 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── Compound guard — skip ALL Level A/B early-returns for multi-line messages ──
+    // If the user sent 4+ non-empty lines (compound turn), jump past every early-return
+    // handler below. Those handlers fire on single-intent patterns and misclassify
+    // compound messages (e.g. "Remind me to call Jasmine" triggers SET_REMINDER).
+    const _earlyNonEmptyLines = userText.split('\n').filter((l: string) => l.trim().length > 8);
+    const _isEarlyCompound = _earlyNonEmptyLines.length >= 4;
+    // do-while(false) lets compound messages break out before any early return fires.
+    do { if (_isEarlyCompound) break;
+
     // ── Step 1.5 (B6e 2026-05-26): pre-Claude calendar-read bypass ─────────────
     // Haiku at the 111 KB assembled prompt misroutes "what is on my calendar
     // DATE/TIME BYPASS — "what is the date today?", "what day is it?", "what time is it?"
@@ -3192,6 +3201,8 @@ Deno.serve(async (req) => {
         ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
         : system;
     }
+    } while (false); // end compound guard
+
     // V282 — Compound request detection.
     // When the user sends 4+ non-trivial lines in one message, use
     // tool_choice:"none" to force a text-only numbered breakdown.
