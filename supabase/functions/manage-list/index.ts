@@ -343,8 +343,12 @@ Deno.serve(async (req) => {
 
       const current = await readDriveDoc(accessToken, list.drive_file_id);
       const lines = current.split('\n').filter((l: string) => l.trim());
+      const existingLower = new Set(lines.map((l: string) => l.trim().toLowerCase()));
       for (const item of items) {
-        if (item.trim()) lines.push(item.trim());
+        if (item.trim() && !existingLower.has(item.trim().toLowerCase())) {
+          lines.push(item.trim());
+          existingLower.add(item.trim().toLowerCase());
+        }
       }
 
       const ok = await updateDriveDoc(accessToken, list.drive_file_id, lines.join('\n') + '\n');

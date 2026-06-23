@@ -735,7 +735,7 @@ async function resolveBeforeEventDate(
     }
 
     const hit = upcoming[0];
-    const eventDateStr: string = String(hit.createdAt ?? hit.metadata?.start_time ?? hit.date ?? hit.start ?? hit.event_date ?? '').slice(0, 10);
+    const eventDateStr: string = String(hit.metadata?.start_time ?? hit.date ?? hit.start ?? hit.event_date ?? hit.createdAt ?? '').slice(0, 10);
     const eventDate = new Date(eventDateStr + 'T12:00:00Z');
     const offsetDays = offsetUnit === 'week' ? offsetNum * 7 : offsetNum;
     const reminderDate = new Date(eventDate.getTime() - offsetDays * 86_400_000);
@@ -3257,6 +3257,32 @@ Deno.serve(async (req) => {
         ].join('\n'),
       });
     }
+    // On compound confirm turns, re-run resolveBeforeEventDate against the
+    // original compound message (not "Yes") so date-dependent reminders get
+    // their resolved date injected before Claude executes.
+    if (isCompoundConfirmTurn && userId) {
+      const supaUrl = Deno.env.get('SUPABASE_URL') ?? '';
+      const todayISO = new Date().toISOString().slice(0, 10);
+      // Find the original compound user message by scanning back for the one with 4+ lines.
+      let originalCompoundText = '';
+      for (let mi = allMsgs.length - 1; mi >= 0; mi--) {
+        const mm = allMsgs[mi];
+        if (!mm || (mm as any).role !== 'user') continue;
+        const mc = (mm as any).content;
+        const txt = typeof mc === 'string' ? mc : Array.isArray(mc) ? mc.filter((b: any) => b.type === 'text').map((b: any) => b.text || '').join('\n') : '';
+        if (txt.split('\n').filter((l: string) => l.trim().length > 8).length >= 4) {
+          originalCompoundText = txt;
+          break;
+        }
+      }
+      if (originalCompoundText) {
+        const compoundBeforeEventInjection = await resolveBeforeEventDate(originalCompoundText, userId, supaUrl, serviceKey, todayISO);
+        if (compoundBeforeEventInjection && Array.isArray(cachedSystem)) {
+          cachedSystem.push({ type: 'text', text: compoundBeforeEventInjection });
+          console.log('[compound-confirm] before-event date injected from original compound message');
+        }
+      }
+    }
     if (isCompoundConfirmTurn && Array.isArray(cachedSystem)) {
       cachedSystem.push({
         type: 'text',
@@ -3291,10 +3317,10 @@ Deno.serve(async (req) => {
       tools: NAAVI_TOOLS as any,
       temperature: 0,
     };
-    // Force text-only output on compound turns — tool_choice:"none" is the
-    // reliable way to prevent tool calls; prompt instructions alone aren't enough.
+    // Force text-only output on compound turns — remove tools entirely so
+    // Anthropic never sees tool_choice:none (unsupported on Haiku 4.5 → 500).
     if (isCompoundTurn) {
-      claudeParams.tool_choice = { type: 'none' };
+      delete claudeParams.tools;
     }
     // On compound confirmation turns, boost max_tokens to fit 6+ tool calls.
     if (isCompoundConfirmTurn) {

@@ -77,6 +77,8 @@ export default function ListDetailScreen() {
   const [deleteMode, setDeleteMode]           = useState<'disable' | 'delete'>('disable');
   const [deleting, setDeleting]               = useState(false);
   const [reactivating, setReactivating]       = useState(false);
+  const [selectedItems, setSelectedItems]     = useState<Set<string>>(new Set());
+  const [deletingItems, setDeletingItems]     = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -202,6 +204,32 @@ export default function ListDetailScreen() {
     }
   };
 
+  const toggleItemSelection = (item: string) => {
+    setSelectedItems(prev => {
+      const next = new Set(prev);
+      if (next.has(item)) { next.delete(item); } else { next.add(item); }
+      return next;
+    });
+  };
+
+  const onDeleteSelectedItems = async () => {
+    if (!list || selectedItems.size === 0) return;
+    setDeletingItems(true);
+    try {
+      const { data, error: err } = await invokeWithTimeout('manage-list', {
+        body: { type: 'LIST_REMOVE', listName: list.name, items: Array.from(selectedItems) },
+      }, 20_000);
+      if (err) { setError(`Couldn't remove items: ${err.message}`); return; }
+      if (!(data as any)?.success) { setError('Failed to remove items'); return; }
+      setItems(prev => prev.filter(it => !selectedItems.has(it)));
+      setSelectedItems(new Set());
+    } catch (e: any) {
+      setError(e?.message || 'Failed to remove items');
+    } finally {
+      setDeletingItems(false);
+    }
+  };
+
   const onConfirmDelete = async () => {
     if (!list) return;
     setDeleting(true);
@@ -317,10 +345,35 @@ export default function ListDetailScreen() {
           <Text style={styles.emptySection}>No items yet. Try: "Add milk to {list?.name ?? 'this list'}"</Text>
         ) : (
           <View style={styles.itemsBox}>
-            {items.map((it, i) => (
-              <Text key={i} style={styles.itemLine}>• {it}</Text>
-            ))}
+            {items.map((it, i) => {
+              const selected = selectedItems.has(it);
+              return (
+                <TouchableOpacity
+                  key={i}
+                  style={[styles.itemRow, selected && styles.itemRowSelected]}
+                  onPress={() => toggleItemSelection(it)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.itemLine}>• {it}</Text>
+                  {selected && <Ionicons name="checkmark-circle" size={18} color={Colors.alert} />}
+                </TouchableOpacity>
+              );
+            })}
           </View>
+        )}
+        {selectedItems.size > 0 && (
+          <TouchableOpacity
+            style={styles.deleteItemsBtn}
+            onPress={onDeleteSelectedItems}
+            disabled={deletingItems}
+          >
+            {deletingItems
+              ? <ActivityIndicator size="small" color="#fff" />
+              : (<>
+                  <Ionicons name="trash" size={16} color="#fff" />
+                  <Text style={styles.deleteBtnText}>Delete {selectedItems.size} item{selectedItems.size > 1 ? 's' : ''}</Text>
+                </>)}
+          </TouchableOpacity>
         )}
 
         {/* Action buttons — layout mirrors the alerts.tsx disabled/active pattern */}
@@ -512,10 +565,31 @@ const styles = StyleSheet.create({
   itemsBox: {
     backgroundColor: Colors.bgElevated,
     borderRadius: 10,
-    paddingVertical: 10,
+    paddingVertical: 4,
     paddingHorizontal: 14,
   },
-  itemLine: { color: Colors.textPrimary, fontSize: 15, lineHeight: 22 },
+  itemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderRadius: 6,
+    paddingHorizontal: 4,
+  },
+  itemRowSelected: {
+    backgroundColor: 'rgba(220,50,50,0.12)',
+  },
+  itemLine: { color: Colors.textPrimary, fontSize: 15, lineHeight: 22, flex: 1 },
+  deleteItemsBtn: {
+    marginTop: 12,
+    backgroundColor: Colors.alert,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 8,
+  },
 
   // Action button row — mirrors alerts.tsx F2e actionBtnRow pattern
   actionBtnRow: {

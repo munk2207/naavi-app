@@ -914,7 +914,7 @@ export default function AlertsScreen() {
               >
                 {deletingId === pendingDelete?.id
                   ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={styles.modalBtnDangerText}>Disable</Text>}
+                  : <Text style={styles.modalBtnDangerText}>{pendingDelete?.enabled === false ? 'Delete' : 'Disable'}</Text>}
               </TouchableOpacity>
             </View>
           </Pressable>

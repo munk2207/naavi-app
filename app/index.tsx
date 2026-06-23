@@ -1261,8 +1261,9 @@ export default function HomeScreen() {
     if (turns.length > 0) {
       setChatCollapsed(false); // auto-expand when new message arrives
       const latest = turns[turns.length - 1];
-      if (latest?.isCompoundResult) {
-        // Compound result: scroll to top so item #1 is visible first
+      const isCompoundPlan = latest?.assistantSpeech?.startsWith('Here are your');
+      if (latest?.isCompoundResult || isCompoundPlan) {
+        // Compound result or planning breakdown: scroll to top so item #1 is visible first
         setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 100);
       } else {
         setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
