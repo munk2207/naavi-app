@@ -3232,10 +3232,11 @@ Deno.serve(async (req) => {
         type: 'text',
         text: [
           '\n\n[COMPOUND REQUEST — planning turn, NO tool calls allowed]',
-          'Output a numbered list of every action you plan to take, one line each.',
+          `Start your response with exactly this line: "Here are your ${msgNonEmptyLines.length} actions:"`,
+          'Then output a numbered list of every action you plan to take, one line each.',
           'After the last item, your response MUST end with this exact sentence on its own line:',
           'Say yes to confirm all, or no to cancel.',
-          'Do NOT say "Let me set these up" or anything else after the list. Only that exact sentence.',
+          'Do NOT say "I\'m planning" or "Let me set these up" or anything else. Only the header, the list, and that exact closing sentence.',
         ].join('\n'),
       });
     }

@@ -691,7 +691,7 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
 
 // ─── Compound Result View — "One Request. Six Actions." ──────────────────────
 // Renders numbered labels + cards in a staggered fade-in for demo mode.
-function CompoundResultView({ turn }: { turn: import('@/hooks/useOrchestrator').ConversationTurn }) {
+function CompoundResultView({ turn, onComplete }: { turn: import('@/hooks/useOrchestrator').ConversationTurn; onComplete?: () => void }) {
   const plan = turn.compoundPlan ?? [];
   const anims = useRef<Animated.Value[]>([]);
 
@@ -703,12 +703,13 @@ function CompoundResultView({ turn }: { turn: import('@/hooks/useOrchestrator').
   useEffect(() => {
     if (!plan.length) return;
     anims.current.forEach((anim, i) => {
+      const isLast = i === plan.length - 1;
       Animated.timing(anim, {
         toValue: 1,
         duration: 450,
         delay: i * 700,
         useNativeDriver: true,
-      }).start();
+      }).start(isLast ? () => { onComplete?.(); } : undefined);
     });
   }, [plan.length]);
 
@@ -2088,7 +2089,7 @@ export default function HomeScreen() {
 
               {/* Compound result: staggered numbered cards */}
               {turn.isCompoundResult && !isCollapsed && (
-                <CompoundResultView turn={turn} />
+                <CompoundResultView turn={turn} onComplete={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150)} />
               )}
 
               {/* Draft emails — non-compound turns only */}
