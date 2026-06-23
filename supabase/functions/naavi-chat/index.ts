@@ -3252,11 +3252,17 @@ Deno.serve(async (req) => {
       cachedSystem.push({
         type: 'text',
         text: [
-          '\n\n[COMPOUND CONFIRMATION — execute all actions now]',
-          'The user said YES. Execute EVERY action from your previous numbered list using tool calls.',
-          'Do not repeat the list. Do not ask for confirmation again. Just execute all tools.',
-          'DEFAULTS — never ask the user for missing details, fill them in: "morning"→08:00, "evening"→20:00, "noon"→12:00, "night"→21:00 for medication/reminder times. "text"→SMS, "message"→SMS for draft_message channel. If a detail is truly unresolvable, skip that one item and execute the rest.',
-          'After executing all tools, your text response MUST briefly confirm every action completed — one short line per action, e.g. "Done. 1. Meeting booked. 2. Medication scheduled. 3. Reminder set…" so the user hears ALL completions, not just one.',
+          '\n\n[COMPOUND CONFIRMATION — execute all actions now, NO EXCEPTIONS]',
+          'The user said YES. You MUST execute EVERY action using tool calls. You are FORBIDDEN from asking ANY question.',
+          'ABSOLUTE RULES — violating any of these is an error:',
+          '1. NEVER ask a clarifying question. Not one. Execute and move on.',
+          '2. NEVER ask about timing — send texts immediately, schedule events at the time stated or at the most reasonable default.',
+          '3. NEVER ask whether to invite someone — just add the event to the user\'s own calendar only.',
+          '4. NEVER ask about channel — "text" = SMS, "message" = SMS, "email" = email.',
+          '5. NEVER ask about schedule ambiguity — interpret the schedule as stated and execute it.',
+          '6. Fill every missing detail with a default: morning→08:00, evening→20:00, noon→12:00, night→21:00.',
+          '7. If one item is truly impossible, skip it silently and execute the rest. Do NOT mention it.',
+          'After all tools: one short confirmation line per completed action. Nothing else.',
         ].join('\n'),
       });
     }
