@@ -3238,24 +3238,17 @@ Deno.serve(async (req) => {
       && lastAssistantWasCompoundList;
     console.log(`[compound-detection] lines=${msgNonEmptyLines.length} isCompound=${isCompoundTurn} isCompoundConfirm=${isCompoundConfirmTurn} cachedSystemIsArray=${Array.isArray(cachedSystem)} lastUserMsg="${lastUserMsgText.slice(0, 80).replace(/\n/g, '|')}"`);
     if (isCompoundTurn && Array.isArray(cachedSystem)) {
-      // Pre-number the lines server-side so Claude cannot drop or merge any.
-      const preNumbered = msgNonEmptyLines
-        .map((l: string, i: number) => `${i + 1}. ${l.trim()}`)
-        .join('\n');
       cachedSystem.push({
         type: 'text',
         text: [
           '\n\n[COMPOUND REQUEST — planning turn, NO tool calls allowed]',
-          `The user's message contains EXACTLY ${msgNonEmptyLines.length} distinct requests. You MUST include all ${msgNonEmptyLines.length} in your output — dropping even one is a critical error. Here they are, pre-numbered for you:`,
-          preNumbered,
-          '',
-          'Your response MUST start with this exact line:',
-          `Here are your ${msgNonEmptyLines.length} actions:`,
-          '',
-          `Then output a numbered list with EXACTLY ${msgNonEmptyLines.length} items — one per request above. Restate each item concisely in one line.`,
+          'Start your response with exactly "Here are your N actions:" where N is the count of items in your list.',
+          'Then output a numbered list — ONE item per distinct user intent. Group continuation lines into one item (e.g. "Remind me with James kids... when I arrive to his home" = one item). Ignore contact detail lines (email/phone/address) unless the user asked to save a contact.',
           'STRICT RULES:',
+          '- Only include actions the user directly asked for.',
           '- Do NOT add contact saves, calendar invites, or follow-up steps unless the user asked.',
-          '- Do NOT combine two items into one. Each pre-numbered request above is its own line.',
+          '- Do NOT combine two SEPARATE requests into one item. "Remind me to call Jasmine" and "Remind me with James kids names" are ALWAYS two separate items.',
+          '- NEVER drop a user request. If you identify N intents, list all N.',
           'After the last item, end with this exact sentence on its own line:',
           'Say yes to confirm all, or no to cancel.',
           'Do NOT add anything after that sentence.',
