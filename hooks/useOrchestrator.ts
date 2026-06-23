@@ -334,6 +334,7 @@ export interface ConversationTurn {
   isCompoundResult?: boolean;
   compoundPlan?: Array<{ label: string; cardSlot: 'draft' | 'calendar' | 'location' | 'list' | 'sent' | null }>;
   sentMessages?: Array<{ to: string; channel: string; body: string }>;
+  compoundNotesLink?: string; // Drive Notes link saved after compound execution
 }
 
 /** Format a cents amount + currency code into a spoken-friendly string. */
@@ -3998,6 +3999,17 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       endDiagSession(bubbleDiag);
       // Build compound plan for "One Request. Six Actions." demo rendering
       const isCompoundResult = compoundBreakdownLines.length >= 3 && dedupedActions.length >= 3;
+      let compoundNotesLink: string | undefined;
+      if (isCompoundResult) {
+        try {
+          const summaryTitle = `Naavi Summary — ${new Date().toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+          const summaryContent = compoundBreakdownLines.join('\n');
+          const file = await registry.storage.save(summaryTitle, summaryContent, '', 'note');
+          compoundNotesLink = file.webViewLink;
+        } catch (err) {
+          console.warn('[Orchestrator] compound summary Drive save failed:', err);
+        }
+      }
       let compoundPlan: ConversationTurn['compoundPlan'];
       if (isCompoundResult) {
         let draftCursor = 0, calCursor = 0, locCursor = 0, listCursor = 0, sentCursor = 0;
@@ -4032,6 +4044,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         isCompoundResult: isCompoundResult || undefined,
         compoundPlan,
         sentMessages: turnSentMessages.length > 0 ? turnSentMessages : undefined,
+        compoundNotesLink,
       };
       setTurns(prev => [...prev, newTurn]);
       saveConversationTurn(newTurn).catch(() => {});

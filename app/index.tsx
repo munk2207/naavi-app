@@ -1928,6 +1928,19 @@ export default function HomeScreen() {
           {/* Collapse / expand chat history row */}
           {turns.length > 0 && !chatCollapsed && (
             <View style={styles.clearChatRow}>
+              {(() => {
+                const compoundTurn = [...turns].reverse().find(t => t.isCompoundResult && t.compoundNotesLink);
+                return compoundTurn?.compoundNotesLink ? (
+                  <TouchableOpacity
+                    style={styles.compoundNotesBtn}
+                    onPress={() => WebBrowser.openBrowserAsync(compoundTurn.compoundNotesLink!).catch(() => {})}
+                    accessibilityLabel="Review summary in Notes"
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.compoundNotesBtnText}>📝 Review summary in Notes</Text>
+                  </TouchableOpacity>
+                ) : null;
+              })()}
               <TouchableOpacity
                 style={styles.clearChatBtn}
                 onPress={() => setChatCollapsed(true)}
@@ -1939,14 +1952,29 @@ export default function HomeScreen() {
             </View>
           )}
           {turns.length > 0 && chatCollapsed && (
-            <TouchableOpacity
-              style={styles.chatCollapsedBar}
-              onPress={() => setChatCollapsed(false)}
-              accessibilityLabel="Expand chat history"
-              accessibilityRole="button"
-            >
-              <Text style={styles.chatCollapsedBarText}>＋ {turns.length} message{turns.length === 1 ? '' : 's'} — tap to expand</Text>
-            </TouchableOpacity>
+            <View style={styles.clearChatRow}>
+              {(() => {
+                const compoundTurn = [...turns].reverse().find(t => t.isCompoundResult && t.compoundNotesLink);
+                return compoundTurn?.compoundNotesLink ? (
+                  <TouchableOpacity
+                    style={styles.compoundNotesBtn}
+                    onPress={() => WebBrowser.openBrowserAsync(compoundTurn.compoundNotesLink!).catch(() => {})}
+                    accessibilityLabel="Review summary in Notes"
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.compoundNotesBtnText}>📝 Review summary in Notes</Text>
+                  </TouchableOpacity>
+                ) : null;
+              })()}
+              <TouchableOpacity
+                style={styles.chatCollapsedBar}
+                onPress={() => setChatCollapsed(false)}
+                accessibilityLabel="Expand chat history"
+                accessibilityRole="button"
+              >
+                <Text style={styles.chatCollapsedBarText}>＋ {turns.length} message{turns.length === 1 ? '' : 's'} — tap to expand</Text>
+              </TouchableOpacity>
+            </View>
           )}
 
           {/* Morning brief — grouped by category */}
@@ -2846,6 +2874,18 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     paddingHorizontal: 16,
     paddingBottom: 8,
+  },
+  compoundNotesBtn: {
+    backgroundColor: '#2A5C45',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+    marginRight: 8,
+  },
+  compoundNotesBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
   },
   clearChatBtn: {
     backgroundColor: '#D94F4F',
