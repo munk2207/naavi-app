@@ -1988,10 +1988,6 @@ Deno.serve(async (req) => {
     // compound messages (e.g. "Remind me to call Jasmine" triggers SET_REMINDER).
     const _earlyNonEmptyLines = userText.split('\n').filter((l: string) => l.trim().length > 8);
     const _isEarlyCompound = _earlyNonEmptyLines.length >= 4;
-    let augmentedMessages = messages; // hoisted before compound guard
-    let cachedSystem: any;            // hoisted before compound guard
-    // do-while(false) lets compound messages break out before any early return fires.
-    do { if (_isEarlyCompound) break;
 
     // ── Step 1.5 (B6e 2026-05-26): pre-Claude calendar-read bypass ─────────────
     // Haiku at the 111 KB assembled prompt misroutes "what is on my calendar
@@ -3109,7 +3105,7 @@ Deno.serve(async (req) => {
     // and has a calendar-typed PDF harvested, pass that PDF to Claude as a
     // document block so Claude reads the actual calendar grid and answers.
     // Only fires for calendar-shaped queries; otherwise no-op.
-    augmentedMessages = messages;
+    let augmentedMessages = messages;
     if (userId) {
       const supaUrl = Deno.env.get('SUPABASE_URL') ?? '';
 
@@ -3170,6 +3166,7 @@ Deno.serve(async (req) => {
     // the 6K+ token rules, while clock drift and per-query context don't break it.
     const CACHE_BOUNDARY = '\n---CACHE_BOUNDARY---\n';
     const END_STABLE     = '\n---END_STABLE_RULES---\n';
+    let cachedSystem: any;
     if (typeof system === 'string' && system.includes(CACHE_BOUNDARY)) {
       const idx = system.indexOf(CACHE_BOUNDARY);
       const dynamicPart = system.slice(0, idx);
@@ -3202,8 +3199,6 @@ Deno.serve(async (req) => {
         ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
         : system;
     }
-    } while (false); // end compound guard
-
     // V282 — Compound request detection.
     // When the user sends 4+ non-trivial lines in one message, use
     // tool_choice:"none" to force a text-only numbered breakdown.
