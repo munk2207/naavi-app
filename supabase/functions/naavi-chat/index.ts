@@ -1988,6 +1988,7 @@ Deno.serve(async (req) => {
     // compound messages (e.g. "Remind me to call Jasmine" triggers SET_REMINDER).
     const _earlyNonEmptyLines = userText.split('\n').filter((l: string) => l.trim().length > 8);
     const _isEarlyCompound = _earlyNonEmptyLines.length >= 4;
+    let augmentedMessages = messages; // must be declared before the compound guard break
     // do-while(false) lets compound messages break out before any early return fires.
     do { if (_isEarlyCompound) break;
 
@@ -3107,7 +3108,7 @@ Deno.serve(async (req) => {
     // and has a calendar-typed PDF harvested, pass that PDF to Claude as a
     // document block so Claude reads the actual calendar grid and answers.
     // Only fires for calendar-shaped queries; otherwise no-op.
-    let augmentedMessages = messages;
+    augmentedMessages = messages;
     if (userId) {
       const supaUrl = Deno.env.get('SUPABASE_URL') ?? '';
 
