@@ -416,9 +416,9 @@ Every production AAB must pass all applicable gates in this exact order. Each co
 
 **Test account for all four gates:** `mynaavidemo@gmail.com` — no other account.
 
-**All four gates are active as of 2026-06-21 (Wael decision). No gates are suspended.**
+**Gate 3 (Maestro) suspended for V283 AAB (Wael 2026-06-23).** Root cause: the V282 staging APK on the emulator was built before `EXPO_PUBLIC_TEST_LOGIN_ENABLED=true` was added to `eas.json`, so the test-lab sign-in button is absent and Maestro cannot auto-sign-in. V283 was confirmed working on real device by Wael. **⭐⭐⭐ TOP PRIORITY before running Maestro on V284+: build a fresh staging APK (so the test button is baked in), install it on the emulator, and verify `e2e/00-sign-in.yaml` passes before re-enabling this gate.**
 
-**Full pre-build gate sequence (production AAB only): (1) auto-tester green → (2) voice regression green → (3) Maestro green → (4) Firebase Test Lab PASSED → (5) production AAB.**
+**Full pre-build gate sequence (production AAB only): (1) auto-tester green → (2) voice regression green → (3) Maestro green [suspended V283 — see above] → (4) Firebase Test Lab PASSED → (5) production AAB.**
 
 ---
 

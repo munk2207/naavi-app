@@ -203,6 +203,60 @@ export const confirmThenActTests: TestCase[] = [
   // ──────────────────────────────────────────────────────────────────────
   // B4y Phase 2 — SCHEDULE_MEDICATION confirm flow
   // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'b4z.schedule-medication-turn1-no-action',
+    category: 'b4z',
+    description: 'RULE 23: turn 1 of SCHEDULE_MEDICATION must return NO action and must contain "say yes to confirm"',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'Remind me to take amoxicillin 500mg once daily for 10 days starting today' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat turn 1');
+      const rawText = data?.rawText ?? '';
+      ctx.log(`turn1 rawText: ${rawText.slice(0, 300)}…`);
+
+      const medAction = findActionInRawText(rawText, 'SCHEDULE_MEDICATION');
+      if (medAction) {
+        throw new Error(
+          `RULE 23 violation: SCHEDULE_MEDICATION emitted on turn 1 before user confirmed. ` +
+          `B4y Phase 2 gate may be broken. Action: ${JSON.stringify(medAction)}`,
+        );
+      }
+
+      const speech = extractSpeech(rawText);
+      expectTruthy(
+        /say yes to confirm/i.test(speech),
+        `turn 1 must contain "say yes to confirm". Speech: "${speech.slice(0, 200)}"`,
+      );
+    },
+  },
+
+  {
+    id: 'b4z.schedule-medication-turn2-yes-emits',
+    category: 'b4z',
+    description: 'RULE 23: turn 2 "yes" after confirm ask must emit SCHEDULE_MEDICATION',
+    timeoutMs: 60_000,
+    async run(ctx) {
+      const { turn1, turn2 } = await chatWithConfirm(
+        ctx,
+        'Remind me to take amoxicillin 500mg once daily for 10 days starting today',
+      );
+      expect2xx(turn1.status, 'naavi-chat turn 1');
+      expect2xx(turn2.status, 'naavi-chat turn 2');
+      ctx.log(`turn2 rawText: ${turn2.data?.rawText?.slice(0, 300)}…`);
+
+      const action = findActionInRawText(turn2.data?.rawText ?? '', 'SCHEDULE_MEDICATION');
+      if (!action) {
+        throw new Error(
+          `RULE 23: turn 2 "yes" did not emit SCHEDULE_MEDICATION. ` +
+          `B4y Phase 2 confirm-turn gate or classifyIntent may be broken. rawText: ${turn2.data?.rawText?.slice(0, 300)}`,
+        );
+      }
+      ctx.log(`b4z Phase 2: SCHEDULE_MEDICATION confirmed on turn 2: ${JSON.stringify(action).slice(0, 150)}`);
+    },
+  },
 
   // ──────────────────────────────────────────────────────────────────────
   // B4y Phase 2 — DELETE_RULE confirm flow

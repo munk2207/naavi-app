@@ -1,48 +1,19 @@
 appId: ca.naavi.app
-name: 00 — Google OAuth sign-in for mynaavidemo@gmail.com
+name: 00 — sign-in check (session already live on emulator)
 tags:
   - setup
 ---
-# Signs in with mynaavidemo@gmail.com via Google OAuth.
-# The system-level Google account is already on the emulator so Maestro
-# can tap through the account picker automatically. This makes the suite
-# self-contained — no snapshot or manual sign-in required.
+# User has signed in with Google manually on the emulator.
+# This flow just launches the app and confirms the session is live.
+# Do NOT use clearState: true — that would wipe the Google session.
 
 - stopApp
-- launchApp:
-    clearState: true
+- launchApp
 
-# Wait for the sign-in screen
-- extendedWaitUntil:
-    visible:
-      text: "Sign in with Google"
-    timeout: 15000
-
-- tapOn:
-    text: "Sign in with Google"
-
-# Chrome Custom Tab opens — tap the mynaavidemo account in the picker
-- extendedWaitUntil:
-    visible:
-      text: "mynaavidemo@gmail.com"
-    timeout: 20000
-
-- tapOn:
-    text: "mynaavidemo@gmail.com"
-
-# Google may show a consent/continue screen — tap through if present
-- runFlow:
-    when:
-      visible:
-        text: "Continue"
-    commands:
-      - tapOn:
-          text: "Continue"
-
-# Wait for home screen — confirms OAuth completed and session is live
+# Wait for home screen — confirms session is live
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
-    timeout: 45000
+    timeout: 30000
 
 - takeScreenshot: 00-sign-in-complete
