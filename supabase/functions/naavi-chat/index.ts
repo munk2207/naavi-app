@@ -1988,7 +1988,8 @@ Deno.serve(async (req) => {
     // compound messages (e.g. "Remind me to call Jasmine" triggers SET_REMINDER).
     const _earlyNonEmptyLines = userText.split('\n').filter((l: string) => l.trim().length > 8);
     const _isEarlyCompound = _earlyNonEmptyLines.length >= 4;
-    let augmentedMessages = messages; // must be declared before the compound guard break
+    let augmentedMessages = messages; // hoisted before compound guard
+    let cachedSystem: any;            // hoisted before compound guard
     // do-while(false) lets compound messages break out before any early return fires.
     do { if (_isEarlyCompound) break;
 
@@ -3169,7 +3170,6 @@ Deno.serve(async (req) => {
     // the 6K+ token rules, while clock drift and per-query context don't break it.
     const CACHE_BOUNDARY = '\n---CACHE_BOUNDARY---\n';
     const END_STABLE     = '\n---END_STABLE_RULES---\n';
-    let cachedSystem: any;
     if (typeof system === 'string' && system.includes(CACHE_BOUNDARY)) {
       const idx = system.indexOf(CACHE_BOUNDARY);
       const dynamicPart = system.slice(0, idx);
