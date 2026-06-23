@@ -3249,7 +3249,7 @@ Deno.serve(async (req) => {
           '- Do NOT add contact saves, calendar invites, or invitations unless the user asked.',
           '- Do NOT add confirmation steps, internal process steps, or follow-up actions.',
           '- Do NOT duplicate actions (e.g. "create event" and "invite to event" count as one item).',
-          '- NEVER combine two separate user requests into one numbered item, even if they seem related. Each sentence the user wrote that contains a distinct intent is its own line. "Remind me to call X" AND "remind me about Y when I arrive at Z" are ALWAYS two separate lines.',
+          '- NEVER combine two separate user requests into one numbered item, even if they seem related. Each sentence the user wrote that contains a distinct intent is its own line. "Remind me to call X one day before Y" AND "Remind me with Z\'s information when I arrive at their home" are ALWAYS two separate items — never merge or drop either one.',
           '- The count in the header MUST match the number of items in the list.',
           'After the last item, your response MUST end with this exact sentence on its own line:',
           'Say yes to confirm all, or no to cancel.',
