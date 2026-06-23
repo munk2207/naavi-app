@@ -3330,25 +3330,11 @@ Deno.serve(async (req) => {
     // Compound PLANNING turn: build the list server-side and short-circuit —
     // Haiku reliably drops items when restating 8+ requests, so we skip the
     // Claude call entirely and return a deterministic plan.
+    // Filter only obvious non-content lines: all-dots artifacts and bare email addresses.
     if (isCompoundTurn) {
-      const ACTION_VERB_RE_SC = /^(book|schedule|remind|add|attach|text|call|email|save|create|set|list|find|check|send|buy|get|pick|make|cancel|delete|move|update|note|remember|connect|disconnect|tell|ask|message|alert|notify|invite)\b/i;
-      const CONTACT_DETAIL_RE_SC = /^[\w.+-]+@|^\+?\d[\d\s\-().]{6,}$|^(phone|email|contact info):/i;
-      // Join continuation lines (those not starting with an action verb) to the
-      // preceding action line so "Remind me with James... \nwhen I arrive at X"
-      // becomes one complete line.
-      const joined: string[] = [];
-      for (const line of msgNonEmptyLines) {
-        const t = line.trim();
-        if (CONTACT_DETAIL_RE_SC.test(t)) continue; // skip contact detail lines
-        if (ACTION_VERB_RE_SC.test(t)) {
-          joined.push(t);
-        } else if (joined.length > 0) {
-          // Continuation — append to previous action line
-          joined[joined.length - 1] += ' ' + t;
-        }
-      }
-      const planItems = joined.filter((l: string) => l.length > 0);
-      const planList = planItems.map((l: string, i: number) => `${i + 1}. ${l}`).join('\n');
+      const ARTIFACT_RE = /^[.\s*#_-]{3,}$|^[\w.+-]+@[\w.-]+\.[a-z]{2,}/i;
+      const planItems = msgNonEmptyLines.filter((l: string) => !ARTIFACT_RE.test(l.trim()));
+      const planList = planItems.map((l: string, i: number) => `${i + 1}. ${l.trim()}`).join('\n');
       const planSpeech = `Here are your ${planItems.length} actions:\n\n${planList}\n\nSay yes to confirm all, or no to cancel.`;
       console.log(`[compound-plan] short-circuit: ${planItems.length} items`);
       return jsonResponse({ rawText: JSON.stringify({ speech: planSpeech, display: planSpeech, actions: [], pendingThreads: [] }) });
