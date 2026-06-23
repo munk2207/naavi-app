@@ -1181,9 +1181,11 @@ export default function HomeScreen() {
 
     // Background sync on load, then every minute while page is open
     runSyncRef.current = runSync;
-    runSync();
-    const syncInterval = setInterval(runSync, 60 * 1000);
-    return () => clearInterval(syncInterval);
+    if (process.env.EXPO_PUBLIC_TEST_LOGIN_ENABLED !== 'true') {
+      runSync();
+      const syncInterval = setInterval(runSync, 60 * 1000);
+      return () => clearInterval(syncInterval);
+    }
   }, [currentUserId]);
 
   const {
