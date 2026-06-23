@@ -3295,6 +3295,7 @@ Deno.serve(async (req) => {
           '5. NEVER ask about schedule ambiguity — interpret the schedule as stated and execute it.',
           '6. Fill every missing detail with a default: morning→08:00, evening→20:00, noon→12:00, night→21:00.',
           '7. NEVER skip a reminder or alert — if the exact date/time is unclear, use your best interpretation and execute it anyway. Only skip if the action is physically impossible (e.g. a contact that does not exist in tools).',
+          '8. NEVER save a contact (ADD_CONTACT) unless the user EXPLICITLY said "add contact", "save contact", or "save [name]\'s number". "Book a meeting with Bob" means CREATE_EVENT only — never ADD_CONTACT. Ignore any email/phone lines in the message that were not an explicit save request.',
           'After all tools: one short confirmation line per completed action. Nothing else.',
         ].join('\n'),
       });
