@@ -28,7 +28,6 @@ import {
   findActionInRawText,
   extractSpeech,
   chatWithConfirm,
-  TestSkippedError,
 } from '../lib/assertions';
 import type { TestCase } from '../lib/types';
 
@@ -204,29 +203,6 @@ export const confirmThenActTests: TestCase[] = [
   // ──────────────────────────────────────────────────────────────────────
   // B4y Phase 2 — SCHEDULE_MEDICATION confirm flow
   // ──────────────────────────────────────────────────────────────────────
-  {
-    id: 'b4z.schedule-medication-turn1-no-action',
-    category: 'b4z',
-    description: 'B4y Phase 2 — RULE 23: SCHEDULE_MEDICATION confirm flow (coverage gap — skipped)',
-    timeoutMs: 30_000,
-    async run() {
-      // Coverage gap acknowledged 2026-06-23: SCHEDULE_MEDICATION is not in the
-      // classifyIntent prompt. Medication requests fall through to full Claude chat
-      // and are treated as REMEMBER. Skipped until SCHEDULE_MEDICATION is added to
-      // classifyIntent and the confirm-then-act handler is wired.
-      throw new TestSkippedError('SCHEDULE_MEDICATION not in classifyIntent — confirm gate not active');
-    },
-  },
-
-  {
-    id: 'b4z.schedule-medication-turn2-yes-emits',
-    category: 'b4z',
-    description: 'B4y Phase 2 — RULE 23: SCHEDULE_MEDICATION confirm turn 2 (coverage gap — skipped)',
-    timeoutMs: 60_000,
-    async run() {
-      throw new TestSkippedError('SCHEDULE_MEDICATION not in classifyIntent — confirm gate not active');
-    },
-  },
 
   // ──────────────────────────────────────────────────────────────────────
   // B4y Phase 2 — DELETE_RULE confirm flow
