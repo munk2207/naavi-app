@@ -3221,8 +3221,17 @@ Deno.serve(async (req) => {
         break;
       }
     }
-    // Detect compound list in last assistant message: 3+ lines starting with "N."
-    const compoundListLines = lastAssistantText.split('\n').filter((l: string) => /^\d+\./.test(l.trim()));
+    // Detect compound list in recent assistant messages: scan back up to 6 turns
+    // so "Yes" still triggers compound confirm even after Naavi asked clarifying questions.
+    let compoundListLines: string[] = [];
+    for (let mi = allMsgs.length - 1; mi >= Math.max(0, allMsgs.length - 12); mi--) {
+      const mm = allMsgs[mi];
+      if (!mm || (mm as any).role !== 'assistant') continue;
+      const mc = (mm as any).content;
+      const txt = typeof mc === 'string' ? mc : Array.isArray(mc) ? mc.filter((b: any) => b.type === 'text').map((b: any) => b.text || '').join('\n') : '';
+      const lines = txt.split('\n').filter((l: string) => /^\d+\./.test(l.trim()));
+      if (lines.length >= 3) { compoundListLines = lines; break; }
+    }
     const lastAssistantWasCompoundList = compoundListLines.length >= 3;
     const isCompoundConfirmTurn = !isCompoundTurn
       && isAffirmativeConfirmTurn(lastUserMsgText)
