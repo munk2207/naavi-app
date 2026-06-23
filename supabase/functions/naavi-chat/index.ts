@@ -3351,10 +3351,7 @@ Deno.serve(async (req) => {
       const planList = planItems.map((l: string, i: number) => `${i + 1}. ${l}`).join('\n');
       const planSpeech = `Here are your ${planItems.length} actions:\n\n${planList}\n\nSay yes to confirm all, or no to cancel.`;
       console.log(`[compound-plan] short-circuit: ${planItems.length} items`);
-      return new Response(
-        JSON.stringify({ speech: planSpeech, actions: [], isCompoundResult: false }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-      );
+      return jsonResponse({ rawText: JSON.stringify({ speech: planSpeech, display: planSpeech, actions: [], pendingThreads: [] }) });
     }
     // On compound confirmation turns, boost max_tokens to fit 6+ tool calls.
     if (isCompoundConfirmTurn) {
