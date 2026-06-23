@@ -3034,9 +3034,13 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               const phone = contact?.phone ?? (to.replace(/[^+\d]/g, '').startsWith('+') ? to.replace(/[^+\d]/g, '') : null);
               if (phone) {
                 const ep = ch === 'whatsapp' ? 'send-whatsapp' : 'send-sms';
-                await invokeWithTimeout(ep, { body: { to: phone, message: body } }, 15_000);
-                console.log(`[Orchestrator] compound auto-send ${ch} to ${phone}`);
-                turnSentMessages.push({ to, channel: ch, body });
+                const { data: sendData, error: sendErr } = await invokeWithTimeout(ep, { body: { to: phone, body, channel: ch } }, 15_000);
+                if (!sendErr && sendData?.success) {
+                  console.log(`[Orchestrator] compound auto-send ${ch} to ${phone}`);
+                  turnSentMessages.push({ to, channel: ch, body });
+                } else {
+                  console.error(`[Orchestrator] compound auto-send failed for ${phone}:`, sendErr?.message ?? JSON.stringify(sendData));
+                }
               }
             } catch (err) {
               console.error('[Orchestrator] compound auto-send failed:', err);
