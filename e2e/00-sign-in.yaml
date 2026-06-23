@@ -3,10 +3,10 @@ name: 00 — sign-in via Test Lab button
 tags:
   - setup
 ---
-# Uses the "Test Lab Sign In" button baked into staging APKs
-# (EXPO_PUBLIC_TEST_LOGIN_ENABLED=true in eas.json staging profile).
+# Uses the "Test Lab Sign In" button baked into preview APKs
+# (EXPO_PUBLIC_TEST_LOGIN_ENABLED=true in eas.json preview profile).
 # clearState ensures a fresh session on every run — the test button
-# signs in with firebase-testlab@mynaavi.com without Google OAuth.
+# signs in with mynaavidemo@gmail.com without Google OAuth.
 
 - clearState
 - launchApp

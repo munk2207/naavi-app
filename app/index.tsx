@@ -1636,8 +1636,8 @@ export default function HomeScreen() {
                 try {
                   setSigningIn(true);
                   await supabase.auth.signInWithPassword({
-                    email:    'firebase-testlab@mynaavi.com',
-                    password: 'TestLabNaavi2026!#',
+                    email:    'mynaavidemo@gmail.com',
+                    password: 'MaestroTest2026!#',
                   });
                 } catch (e) {
                   console.error('[TestLogin]', e);
