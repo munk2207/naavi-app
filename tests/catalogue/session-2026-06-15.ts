@@ -304,7 +304,7 @@ export const session2026_06_15Tests: TestCase[] = [
     description: 'F5b: migration file creates match_knowledge_for_dedup SQL function',
     tags: ['knowledge', 'dedup', 'f5b', 'migration'],
     run: async () => {
-      const src = readFileSync(join(process.cwd(), 'supabase', 'migrations', '20260615_knowledge_dedup.sql'), 'utf8');
+      const src = readFileSync(join(process.cwd(), 'supabase', 'migrations', '20260615000001_knowledge_dedup.sql'), 'utf8');
       expectTruthy(
         src.includes('CREATE OR REPLACE FUNCTION match_knowledge_for_dedup'),
         'Migration must define match_knowledge_for_dedup function',

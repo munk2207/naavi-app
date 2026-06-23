@@ -3232,11 +3232,17 @@ Deno.serve(async (req) => {
         type: 'text',
         text: [
           '\n\n[COMPOUND REQUEST — planning turn, NO tool calls allowed]',
-          `Start your response with exactly this line: "Here are your ${msgNonEmptyLines.length} actions:"`,
-          'Then output a numbered list of every action you plan to take, one line each.',
+          'Start your response with exactly this line: "Here are your [N] actions:" — replace [N] with the exact count of items in your list below.',
+          'Then output a numbered list — ONE line per action the user EXPLICITLY requested. No more, no less.',
+          'STRICT RULES for the list:',
+          '- Only include actions the user directly asked for in their message.',
+          '- Do NOT add contact saves, calendar invites, or invitations unless the user asked.',
+          '- Do NOT add confirmation steps, internal process steps, or follow-up actions.',
+          '- Do NOT duplicate actions (e.g. "create event" and "invite to event" count as one item).',
+          '- The count in the header MUST match the number of items in the list.',
           'After the last item, your response MUST end with this exact sentence on its own line:',
           'Say yes to confirm all, or no to cancel.',
-          'Do NOT say "I\'m planning" or "Let me set these up" or anything else. Only the header, the list, and that exact closing sentence.',
+          'Do NOT add anything after that sentence.',
         ].join('\n'),
       });
     }

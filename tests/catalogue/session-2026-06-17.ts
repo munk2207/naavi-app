@@ -1,19 +1,21 @@
 /**
- * Session 2026-06-17 — Build 261 + compound queue fix
+ * Session 2026-06-17 — Build 261 + V282 compound detection (tool_choice:none approach)
+ *
+ * Compound tests updated 2026-06-23 to match V282 implementation.
+ * V282 replaced the old pending_actions queue approach with:
+ *   - tool_choice:"none" on the compound breakdown turn (forces text-only numbered list)
+ *   - isCompoundConfirmTurn detection (3+ numbered lines in last assistant msg + affirmative user reply)
+ *   - max_tokens:2048 on the confirmation turn so all 6+ tool calls fit
+ * The old queue tests (Step 1.5, payload column, isClarifyingQuestion) are replaced
+ * with tests that verify the actual V282 implementation.
  *
  * Covers:
- * 1. Compound queue: Phase 1 confirmation speech starts with "I'll take care of"
- *    and ends with "Say yes to go ahead, or no to cancel."
- * 2. Compound queue: pending_actions row stored via type='__COMPOUND__' + payload
- *    (not the missing `actions`/`expires_at` columns — that was the root cause of
- *    the compound queue silently failing on every prior run).
- * 3. Compound queue: Step 1.5 returns ALL sub-task actions at once on a single "yes"
- *    and produces narrated speech (First / Next / And last prefix per sub-task).
- * 4. Past-time rule: prompt contains the PAST-TIME RULE rejection instruction.
- * 5. Calendar 7-day window: voice server allDayUrl uses a 7-day upper bound
- *    (not the old 2-day window that hid June 18 birthday when fetched on June 16).
- * 6. Compound queue: confirmation speech does NOT say "Say yes to confirm all"
- *    (the old wording that confused users about what "yes" would do).
+ * 1. Compound detection: isCompoundTurn flag and tool_choice:none applied in naavi-chat
+ * 2. Compound confirmation: isCompoundConfirmTurn detection present
+ * 3. Compound confirm turn: max_tokens boosted to 2048
+ * 4. Compound instruction: "Say yes to confirm all" closing phrase present
+ * 5. Past-time rule: prompt contains the PAST-TIME RULE rejection instruction.
+ * 6. Calendar 7-day window: voice server allDayUrl uses a 7-day upper bound.
  *
  * Run via `npm run test:auto`.
  */
@@ -33,83 +35,69 @@ const ORCHESTRATOR_PATH      = join(process.cwd(), 'hooks', 'useOrchestrator.ts'
 export const session2026_06_17Tests: TestCase[] = [
   {
     id: 'compound.phase1-speech-wording',
-    description: 'Compound queue: Phase 1 speech says "I\'ll take care of these" and "Say yes to go ahead, or no to cancel."',
-    tags: ['compound', 'queue'],
+    description: 'V282 compound: isCompoundTurn detection present and tool_choice:none applied',
+    tags: ['compound', 'v282'],
     run: async () => {
       const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
       expectTruthy(
-        src.includes("I'll take care of these"),
-        'Phase 1 confirmation speech missing "I\'ll take care of these" — wording regressed',
+        src.includes('isCompoundTurn'),
+        'V282 compound: isCompoundTurn flag not found in naavi-chat',
       );
       expectTruthy(
-        src.includes('Say yes to go ahead, or no to cancel.'),
-        'Phase 1 confirmation speech missing "Say yes to go ahead, or no to cancel." — wording regressed',
+        src.includes("tool_choice = { type: 'none' }") || src.includes('tool_choice: { type: \'none\' }') || src.includes("{ type: 'none' }"),
+        'V282 compound: tool_choice:none not applied on compound turns — Claude will emit tool calls on the breakdown turn',
       );
     },
   },
 
   {
     id: 'compound.no-confirm-all-wording',
-    description: 'Compound queue: old "Say yes to confirm all" wording is gone',
-    tags: ['compound', 'queue'],
+    description: 'V282 compound: "Say yes to confirm all" closing phrase is present in compound instruction',
+    tags: ['compound', 'v282'],
     run: async () => {
       const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
       expectTruthy(
-        !src.includes('Say yes to confirm all'),
-        'Old "Say yes to confirm all" wording still present — Phase 1 speech not updated',
+        src.includes('Say yes to confirm all'),
+        'V282 compound: closing phrase "Say yes to confirm all" not found — user will not know how to confirm',
       );
     },
   },
 
   {
     id: 'compound.storage-uses-payload-column',
-    description: 'Compound queue: pending_actions insert uses type=__COMPOUND__ and payload column (not missing actions/expires_at columns)',
-    tags: ['compound', 'queue'],
+    description: 'V282 compound: isCompoundConfirmTurn detection present in naavi-chat',
+    tags: ['compound', 'v282'],
     run: async () => {
       const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
       expectTruthy(
-        src.includes("type: '__COMPOUND__'") && src.includes("payload: { tasks:"),
-        'Compound queue storage not using payload column with type=__COMPOUND__ — row insert will fail silently',
-      );
-      expectTruthy(
-        !src.includes("onConflict: 'user_id'"),
-        'Compound queue still uses upsert(onConflict:user_id) — pending_actions has no such unique constraint',
+        src.includes('isCompoundConfirmTurn'),
+        'V282 compound: isCompoundConfirmTurn not found — "yes" after compound list will not trigger tool execution',
       );
     },
   },
 
   {
     id: 'compound.step1_5-returns-all-actions',
-    description: 'Compound queue: Step 1.5 flattens all sub-task actions and returns narrated speech on a single yes',
-    tags: ['compound', 'queue'],
+    description: 'V282 compound: max_tokens boosted to 2048 on compound confirmation turn',
+    tags: ['compound', 'v282'],
     run: async () => {
       const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
-      // Narrated speech pattern: First / Next / And last
       expectTruthy(
-        src.includes("'First'") && src.includes("'Next'") && src.includes("'And last'"),
-        'Step 1.5 narrated speech (First/Next/And last) not found — one-at-a-time with separate confirmations may have regressed',
-      );
-      // All actions flattened in one shot
-      expectTruthy(
-        src.includes('flatMap(s => Array.isArray(s.actions)'),
-        'Step 1.5 does not flatMap all sub-task actions — compound queue may not execute all items on a single yes',
+        src.includes('isCompoundConfirmTurn') && src.includes('max_tokens = 2048'),
+        'V282 compound: max_tokens not boosted to 2048 on confirm turn — 6+ tool calls may be cut off',
       );
     },
   },
 
   {
     id: 'compound.step1_5-deletes-row-after-yes',
-    description: 'Compound queue: Step 1.5 deletes the __COMPOUND__ pending_actions row after returning all actions',
-    tags: ['compound', 'queue'],
+    description: 'V282 compound: compound detection threshold is 4+ non-empty lines',
+    tags: ['compound', 'v282'],
     run: async () => {
       const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
-      // The delete is inside the Step 1.5 block, just before the console.log('[Step1.5]').
-      // Slice 2000 chars ending at the [Step1.5] log line to capture it.
-      const logIdx = src.indexOf('[Step1.5]');
-      const step15Block = src.slice(Math.max(0, logIdx - 2000), logIdx + 200);
       expectTruthy(
-        step15Block.includes('.delete()') && step15Block.includes("eq('id', compoundRow.id)"),
-        'Step 1.5 does not delete the compound pending_actions row after execution — row will linger and misfire on next yes',
+        src.includes('msgNonEmptyLines.length >= 4') || src.includes('>= 4'),
+        'V282 compound: 4-line detection threshold not found — compound may not trigger correctly',
       );
     },
   },
@@ -152,13 +140,13 @@ export const session2026_06_17Tests: TestCase[] = [
 
   {
     id: 'compound.turn2-skipped-for-clarifying-question',
-    description: 'Compound queue: Turn 2 fake-yes is skipped when Turn 1 speech is a clarifying question (prevents garbage SET_ACTION_RULE with no coordinates)',
-    tags: ['compound', 'queue'],
+    description: 'V282 compound: isAffirmativeConfirmTurn used to gate compound confirm — only real "yes" triggers execution',
+    tags: ['compound', 'v282'],
     run: async () => {
       const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
       expectTruthy(
-        src.includes('isClarifyingQuestion') && src.includes("!isClarifyingQuestion"),
-        'Compound queue Turn 2 skip guard for clarifying questions not present — unresolved tasks will generate incomplete actions',
+        src.includes('isAffirmativeConfirmTurn') && src.includes('isCompoundConfirmTurn'),
+        'V282 compound: affirmative-confirm guard not wired into isCompoundConfirmTurn — any reply may trigger tool execution',
       );
     },
   },

@@ -120,7 +120,7 @@ export const session2026_06_13Tests: TestCase[] = [
     tags: ['arch1', 'deterministic'],
     run: async () => {
       const src = readFileSync(INDEX_PATH, 'utf8');
-      expectTruthy(src.includes('SET_REMINDER → title'), 'classifyIntent missing SET_REMINDER params');
+      // Note: SET_REMINDER removed from classifier (time reminders use SET_ACTION_RULE trigger_type:time)
       expectTruthy(src.includes('CREATE_EVENT → summary'), 'classifyIntent missing CREATE_EVENT params');
       expectTruthy(src.includes('REMEMBER → text'), 'classifyIntent missing REMEMBER params');
       expectTruthy(src.includes('DELETE_RULE → match'), 'classifyIntent missing DELETE_RULE params');
@@ -150,11 +150,16 @@ export const session2026_06_13Tests: TestCase[] = [
   },
   {
     id: 'arch1.set-reminder-suppress-calendar-notifications',
-    description: 'ARCH-1: handleSetReminderExec passes suppress_reminders:true so Google Calendar does not fire its own notifications',
+    description: 'ARCH-1: handleSetReminderExec writes to action_rules (not calendar events) so Google Calendar notifications never fire',
     tags: ['arch1', 'deterministic'],
     run: async () => {
       const src = readFileSync(HANDLERS_PATH, 'utf8');
-      expectTruthy(src.includes('suppress_reminders: true'), 'handleSetReminderExec must pass suppress_reminders:true to create-calendar-event');
+      // SET_REMINDER now writes a time-based action_rule row (not a calendar event),
+      // so Google Calendar never fires its own notification — suppress_reminders param is no longer needed.
+      expectTruthy(
+        src.includes("trigger_type:   'time'") || src.includes("trigger_type: 'time'"),
+        'handleSetReminderExec must write action_rules with trigger_type:time (not a calendar event)',
+      );
     },
   },
   {
