@@ -210,10 +210,11 @@ async function submitTestMatrix(token, apkGcsPath, roboGcsPath) {
     environmentMatrix: {
       androidDeviceList: {
         androidDevices: [
-          // Pixel 6 — Android 13 — broad baseline
+          // Pixel 6 — Android 13 — canonical gate device
+          // S22 removed 2026-06-24: Samsung Knox MDM + Location Accuracy system dialog
+          // always causes false failures unrelated to app behaviour. Wael tests on
+          // real Samsung daily — S22 in Firebase adds no meaningful coverage.
           { androidModelId: 'oriole', androidVersionId: '33', locale: 'en', orientation: 'portrait' },
-          // Samsung Galaxy S22 — Android 14 — Samsung One UI rendering
-          { androidModelId: 'r0q', androidVersionId: '34', locale: 'en', orientation: 'portrait' },
         ],
       },
     },
@@ -351,7 +352,7 @@ async function pollUntilDone(matrixId, token, tokenMintedAt) {
   console.log(`     ✓ APK ready (${apkSizeMB} MB)`);
 
   // 3. Upload APK to GCS
-  const apkGcsName = `${GCS_FOLDER}/naavi-v283.apk`;
+  const apkGcsName = `${GCS_FOLDER}/naavi-v287.apk`;
   console.log(`\n3/5  Uploading APK to gs://${GCS_BUCKET}/${apkGcsName}…`);
   const apkUpload = await uploadToGCS(token, tmpApk, apkGcsName, 'application/vnd.android.package-archive');
   if (apkUpload.error) throw new Error(`APK upload failed: ${JSON.stringify(apkUpload.error)}`);
