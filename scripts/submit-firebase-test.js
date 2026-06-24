@@ -212,7 +212,7 @@ async function submitTestMatrix(token, apkGcsPath, roboGcsPath) {
           // Dismiss Google's "Location Accuracy" system dialog ("No thanks").
           // Appears on fresh Samsung devices when the app first requests location.
           // android:id/button2 = the negative/dismiss button in standard Android dialogs.
-          { resourceName: 'android:id/button2', inputText: '', actionType: 'SINGLE_CLICK' },
+          { resourceName: 'android:id/button2', actionType: 'SINGLE_CLICK' },
         ],
       },
     },
