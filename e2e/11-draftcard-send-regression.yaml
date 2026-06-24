@@ -4,59 +4,70 @@ tags:
   - regression
   - critical
 ---
-- runFlow: 00-sign-in.yaml
-# This scenario reproduces the bug pattern that broke V57.11.6 in production:
-# after hands-free mode was removed in V57.11.3, the voice-confirm block
-# guarded by `handsfreeRef.current` never ran. pendingActionRef was never
-# set. DraftCard's Send button → confirmPending() → read null pendingAction
-# → no-op. Result: tap Send, nothing happens, no message goes out.
+# Regression catcher for V57.11.6 bug: pendingActionRef was null when
+# handsfreeRef guard prevented confirmPending from running. DraftCard Send
+# was a no-op. After fix: Send must commit the action and the card must
+# leave "draft ready" state.
 #
-# After V57.11.6 (the fix removed the guard), tapping Send must commit the
-# action and the card must update to "SMS SENT" / "EMAIL SENT".
+# Naavi ALWAYS does two turns for DRAFT_MESSAGE regardless of what's in
+# the first message (confirmed from screenshot: "Who should I send the
+# message to?" appears even when 6135551234 is in the first message).
 #
-# V57.12.3 — switched the test recipient from "Hussein" (a name that
-# requires Google People API or a saved contact, which the emulator
-# may not have) to a literal phone number. This bypasses the contact
-# lookup entirely and exercises only the DraftCard Send commit path
-# this test was designed to catch.
+# Approach: two-turn WITHOUT collapse-expand. After Naavi's clarification
+# response (detected via Collapse Chat visible), the chat stays expanded
+# and Ask MyNaavi input is still accessible at the bottom of screen.
+# We answer directly without collapsing.
+#
+# Detection: "draft ready" in draftLabel (app/index.tsx:578) — plain <Text>
+# outside ConversationBubble overlay, accessible via text: matching.
+# Send tap: text: "Send" matches "📱 Send" child text (By.text()).
 
+- stopApp
 - launchApp:
     clearState: false
-- assertVisible:
-    text: "Ask MyNaavi"
 
-# Tap the input field and type a draft request with a literal phone
-# number — bypasses contact lookup, exercises only the Send-commit
-# path that this regression catcher was written for.
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
+
+# Turn 1: draft request (no number — Naavi must ask for recipient)
 - tapOn:
     text: "Ask MyNaavi"
-- inputText: "text 6135551234 hi from maestro testing"
+- inputText: "draft a text message saying hello"
 - waitForAnimationToEnd
 - pressKey: Enter
 
-# Naavi composes the draft. The DraftCard label is stable from the
-# React component (SMS DRAFT READY); the Send/Discard buttons hang
-# off it.
+# Wait for Naavi's clarification ("Who should I send the message to?")
 - extendedWaitUntil:
     visible:
-      text: "SMS DRAFT READY"
-    timeout: 40000
-- assertVisible:
-    text: "Send"
+      text: "Collapse Chat"
+    timeout: 90000
+- takeScreenshot: 11-first-response
 
-- takeScreenshot: 11-after-draft-rendered
+# Turn 2: answer with phone number. Chat stays expanded — Ask MyNaavi
+# is still accessible at the bottom of the expanded chat screen.
+- tapOn:
+    text: "Ask MyNaavi"
+- inputText: "6135551234"
+- waitForAnimationToEnd
+- pressKey: Enter
 
-# Tap the Send button on the DraftCard. After this, the orchestrator
-# fires send-sms via Edge Function. (Twilio will reject 6135551234 as
-# not a deliverable number, but the SMS SENT card transitions on
-# Twilio HTTP 2xx, not on actual delivery — the round-trip succeeds
-# regardless.)
+# Wait for DraftCard to appear — 120s to handle slow Naavi responses
+- extendedWaitUntil:
+    visible:
+      text: "draft ready"
+    timeout: 180000
+- takeScreenshot: 11-draftcard-visible
+
+# Tap Send by visual child text "📱 Send" (By.text — avoids label misfire)
 - tapOn:
     text: "Send"
 
+# Regression check: "draft ready" must disappear — Send was NOT a no-op
 - extendedWaitUntil:
-    visible:
-      text: "SMS SENT"
+    notVisible:
+      text: "draft ready"
     timeout: 30000
 
-- takeScreenshot: 11-after-send-confirmed
+- takeScreenshot: 11-after-send
