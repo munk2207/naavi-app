@@ -416,9 +416,7 @@ Every production AAB must pass all applicable gates in this exact order. Each co
 
 **Test account for all four gates:** `mynaavidemo@gmail.com` — no other account.
 
-**Gate 3 (Maestro) suspended for V283 AAB (Wael 2026-06-23).** Root cause: the V282 staging APK on the emulator was built before `EXPO_PUBLIC_TEST_LOGIN_ENABLED=true` was added to `eas.json`, so the test-lab sign-in button is absent and Maestro cannot auto-sign-in. V283 was confirmed working on real device by Wael. **⭐⭐⭐ TOP PRIORITY before running Maestro on V284+: build a fresh staging APK (so the test button is baked in), install it on the emulator, and verify `e2e/00-sign-in.yaml` passes before re-enabling this gate.**
-
-**Full pre-build gate sequence (production AAB only): (1) auto-tester green → (2) voice regression green → (3) Maestro green [suspended V283 — see above] → (4) Firebase Test Lab PASSED → (5) production AAB.**
+**Full pre-build gate sequence (production AAB only): (1) auto-tester green → (2) voice regression green → (3) Maestro green → (4) Firebase Test Lab PASSED → (5) production AAB.**
 
 ---
 
@@ -444,6 +442,8 @@ Every production AAB must pass all applicable gates in this exact order. Each co
 5. If any device shows ❌ FAILED — investigate and fix before building production
 
 **Before running step 3:** update the GCS filename in `scripts/submit-firebase-test.js` to match the actual build version (currently hardcoded as `naavi-v205.apk`).
+
+**⭐ ROBO SCRIPT RULE — WAITS ONLY, NO VIEW_CLICKED (2026-06-24):** `firebase/robo-script-onboarding.json` must contain ONLY `WAIT` actions. Never add `VIEW_CLICKED` or any element-tap action. Reason: scripted taps break every time the app changes (V290 removed the sign-in button; Samsung One UI uses different accessibility labels than Pixel). The script's only job is to pause long enough for auto sign-in to complete — Robo explores freely after that. If you see a `VIEW_CLICKED` in this file, remove it.
 
 **The full pre-build gate sequence is documented in the "FOUR TEST GATES" section above.** Firebase is gate 4 of 4 — do not skip any gate before it.
 
