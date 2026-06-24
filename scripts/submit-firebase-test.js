@@ -205,16 +205,26 @@ async function submitTestMatrix(token, apkGcsPath, roboGcsPath) {
       androidRoboTest: {
         appApk: { gcsPath: apkGcsPath },
         roboScript: { gcsPath: roboGcsPath },
+        // roboDirectives tell Robo how to handle specific UI elements during
+        // free exploration (after the robo script finishes). These target
+        // stable system dialogs — NOT app UI — so they never break on app changes.
+        roboDirectives: [
+          // Dismiss Google's "Location Accuracy" system dialog ("No thanks").
+          // Appears on fresh Samsung devices when the app first requests location.
+          // android:id/button2 = the negative/dismiss button in standard Android dialogs.
+          { resourceName: 'android:id/button2', inputText: '', actionType: 'SINGLE_CLICK' },
+        ],
       },
     },
     environmentMatrix: {
       androidDeviceList: {
         androidDevices: [
-          // Pixel 6 — Android 13 — canonical gate device
-          // S22 removed 2026-06-24: Samsung Knox MDM + Location Accuracy system dialog
-          // always causes false failures unrelated to app behaviour. Wael tests on
-          // real Samsung daily — S22 in Firebase adds no meaningful coverage.
+          // Pixel 6 — Android 13 — broad baseline
           { androidModelId: 'oriole', androidVersionId: '33', locale: 'en', orientation: 'portrait' },
+          // Samsung Galaxy S22 — Android 14 — Samsung One UI rendering.
+          // roboDirective above dismisses the Location Accuracy dialog that
+          // blocked free exploration on fresh S22 devices.
+          { androidModelId: 'r0q', androidVersionId: '34', locale: 'en', orientation: 'portrait' },
         ],
       },
     },
