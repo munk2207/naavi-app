@@ -1,62 +1,36 @@
 [
   {
-    "_comment": "STEP 1 — App launches. Dwell — V290+ auto-signs in (no button tap needed).",
+    "_comment": "STEP 1 — App launches. V290+ auto-signs in — no button tap needed.",
     "eventType": "WAIT",
     "delayTime": 4000
   },
 
   {
-    "_comment": "STEP 2 — Wait for auto sign-in to complete and home screen to load.",
+    "_comment": "STEP 2 — Wait for auto sign-in to complete.",
+    "eventType": "WAIT",
+    "delayTime": 10000
+  },
+
+  {
+    "_comment": "STEP 3 — Wait for home screen to fully load.",
     "eventType": "WAIT",
     "delayTime": 8000
   },
 
   {
-    "_comment": "Wait for home screen to fully load after sign-in.",
-    "eventType": "WAIT",
-    "delayTime": 7000
-  },
-
-  {
-    "_comment": "Dwell on home screen — shows today's brief + Ask MyNaavi bar.",
+    "_comment": "STEP 4 — Dwell on home screen.",
     "eventType": "WAIT",
     "delayTime": 5000
   },
 
   {
-    "_comment": "STEP 5 — Open 3-dot menu to reach Settings.",
-    "eventType": "VIEW_CLICKED",
-    "elementDescriptors": [{ "contentDescription": "More options" }],
-    "delayTime": 2000
-  },
-
-  {
-    "_comment": "Tap Settings in the dropdown.",
-    "eventType": "VIEW_CLICKED",
-    "elementDescriptors": [{ "text": "Settings" }],
-    "delayTime": 1000
-  },
-
-  {
-    "_comment": "Settings loaded. Dwell — Robo auto-scrolls through the page.",
+    "_comment": "STEP 5 — Dwell. Robo begins free exploration from here.",
     "eventType": "WAIT",
-    "delayTime": 8000
+    "delayTime": 5000
   },
 
   {
-    "_comment": "STEP 8 — Press back to return to home screen.",
-    "eventType": "PRESSED_BACK",
-    "delayTime": 3000
-  },
-
-  {
-    "_comment": "Dwell on home screen — shows the full interface.",
-    "eventType": "WAIT",
-    "delayTime": 4000
-  },
-
-  {
-    "_comment": "STEP 10 — Dwell on home screen before Robo continues exploring.",
+    "_comment": "STEP 6 — Final dwell before Robo takes full control.",
     "eventType": "WAIT",
     "delayTime": 5000
   }
