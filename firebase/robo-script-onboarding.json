@@ -1,15 +1,14 @@
 [
   {
-    "_comment": "STEP 1 — App launches. Dwell on the home screen (unauthenticated).",
+    "_comment": "STEP 1 — App launches. Dwell — V290+ auto-signs in (no button tap needed).",
     "eventType": "WAIT",
     "delayTime": 4000
   },
 
   {
-    "_comment": "STEP 2 — Sign in. Tap the Test Lab bypass button.",
-    "eventType": "VIEW_CLICKED",
-    "elementDescriptors": [{ "text": "Test Lab Sign In" }],
-    "delayTime": 500
+    "_comment": "STEP 2 — Wait for auto sign-in to complete and home screen to load.",
+    "eventType": "WAIT",
+    "delayTime": 8000
   },
 
   {
@@ -25,7 +24,7 @@
   },
 
   {
-    "_comment": "STEPS 5-9 — Open 3-dot menu to reach Settings.",
+    "_comment": "STEP 5 — Open 3-dot menu to reach Settings.",
     "eventType": "VIEW_CLICKED",
     "elementDescriptors": [{ "contentDescription": "More options" }],
     "delayTime": 2000
@@ -45,7 +44,7 @@
   },
 
   {
-    "_comment": "STEP 10 — Press back to return to home screen.",
+    "_comment": "STEP 8 — Press back to return to home screen.",
     "eventType": "PRESSED_BACK",
     "delayTime": 3000
   },
