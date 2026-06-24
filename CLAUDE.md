@@ -16,7 +16,7 @@
 4. Migration push for staging: `npx supabase db push --db-url "postgresql://postgres.xugvnfudofuskxoknhve:NaaviStaging2026@aws-1-us-east-1.pooler.supabase.com:6543/postgres?prefer_simple_protocol=true" --include-all --yes`
 5. Only promote to production after Wael confirms staging works and explicitly says "deploy to production."
 6. Production deploy = standard commands with `--project-ref hhgyppbxgmjrwdpdubcx` and `eas build --profile production`.
-7. **NEVER run `eas build --profile production` or deploy to `hhgyppbxgmjrwdpdubcx` without the exact phrase "deploy to production" from Wael.**
+7. **NEVER run `eas build --profile production` or deploy to `hhgyppbxgmjrwdpdubcx` without clear explicit approval from Wael to deploy to production.**
 
 **Why this rule exists:** 2026-06-20 — a small cosmetic change in a stable product broke major functionality. Full environment isolation ensures production is never touched until staging proves the change is safe. Cost of a staging build is nothing; cost of a broken production build is user trust.
 
