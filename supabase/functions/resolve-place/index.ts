@@ -387,8 +387,12 @@ async function geocodeBestCandidate(
         console.log(`[geocodeBestCandidate] reject (country=${fields.country}, expected=${expectedCountry}): ${fields.formatted}`);
         continue;
       }
-      // Gate 2 — Precision (rejects APPROXIMATE / GEOMETRIC_CENTER and partial matches).
-      if (fields.partialMatch || (fields.locationType !== 'ROOFTOP' && fields.locationType !== 'RANGE_INTERPOLATED')) {
+      // Gate 2 — Precision (rejects APPROXIMATE / GEOMETRIC_CENTER).
+      // partial_match removed: Google sets it when the query text doesn't exactly
+      // match the canonical name (e.g. "Jeanne d'arc blvd" vs "Jeanne-d'Arc Blvd N")
+      // even when the coordinates are precise ROOFTOP/RANGE_INTERPOLATED. Gate 3
+      // (postal completeness) is the real guard against imprecise results.
+      if (fields.locationType !== 'ROOFTOP' && fields.locationType !== 'RANGE_INTERPOLATED') {
         console.log(`[geocodeBestCandidate] reject (precision: loc_type=${fields.locationType} partial=${fields.partialMatch}): ${fields.formatted}`);
         continue;
       }
