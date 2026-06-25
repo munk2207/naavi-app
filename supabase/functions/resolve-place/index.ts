@@ -182,56 +182,10 @@ serve(async (req) => {
       }
     }
 
-    // 2026-05-16 — numbered street addresses → geocode API with 3-check gate
-    // (country, precision, postal completeness). Wael's design principle:
-    // reject ANY geocode result lacking a complete postal code (in Canada,
-    // 6 chars; 3-char FSA-only means "approximate area," not a real address).
-    // No silent fall-through to textsearch — better to ask user to retype
-    // than to register an alert at wrong coords.
-    // Matches CLAUDE.md holding-list item 16.
-    if (/^\s*\d/.test(placeName)) {
-      // Try raw geocode first (cheapest path — single API call when the
-      // user typed the address correctly).
-      let result = await geocodeBestCandidate(placeName, apiKey, homeCountry);
-
-      // 2026-05-16 retry — Google geocode is strict on spelling. Wael's
-      // test "8042 Jean d'Arc Boulevard north" returned no usable
-      // candidate because the street is actually "Jeanne-d'Arc". Re-trying
-      // the SAME query with the user's home city/province appended often
-      // disambiguates without changing the user's typo. Costs +1 geocode
-      // call ($0.005) ONLY when the first call returned no passing candidate.
-      if (!result && homeAddress) {
-        const parts = homeAddress.split(/,\s*/);
-        // Use last 2 parts when available (city + province), otherwise just the city.
-        // "962 Terranova Dr, Ottawa" has 2 parts → slice(-2) = full string (wrong).
-        // "962 Terranova Dr, Ottawa, Ontario" has 3 parts → slice(-2) = "Ottawa, Ontario" (correct).
-        const cityProv = parts.length >= 3 ? parts.slice(-2).join(', ') : parts[parts.length - 1];
-        const enriched = `${placeName}, ${cityProv}`;
-        console.log(`[resolve-place v5] geocode no-pass for "${placeName}", retrying with "${enriched}"`);
-        result = await geocodeBestCandidate(enriched, apiKey, homeCountry);
-      }
-
-      if (result) {
-        console.log(`[resolve-place v5] numeric-address path → geocode (gated): "${placeName}" → ${result.formatted}`);
-        return jsonResponse({
-          status:        'ok',
-          source:        'fresh',
-          place_name:    result.formatted ?? placeName,
-          address:       result.formatted,
-          lat:           result.lat,
-          lng:           result.lng,
-          radius_meters: radiusOverride,
-        });
-      }
-      // 2026-05-16 — gate rejected every candidate (or geocode returned
-      // nothing). Return not_found instead of falling through to textsearch.
-      // textsearch returns business-name matches for numbered queries,
-      // which is wrong (Wael's "8042 Jean d'Arc" test returned "1887 St
-      // Joseph Blvd", "Ottawa," etc. — all the wrong place). The
-      // orchestrator handles not_found by asking the user to retype.
-      console.log(`[resolve-place v5] numeric-address: no candidate passed gate for "${placeName}", returning not_found`);
-      return jsonResponse({ status: 'not_found' });
-    }
+    // 2026-06-25 — numeric addresses: skip the gated geocodeBestCandidate path
+    // (fb29387, broke all numeric resolution). Fall straight through to the
+    // biased Places Text Search below so home coords anchor the search.
+    // No early return — just let execution continue to the textsearch block.
 
     const qs = new URLSearchParams({ query: placeName, key: apiKey });
     if (biasLat !== null && biasLng !== null && Number.isFinite(biasLat) && Number.isFinite(biasLng)) {
@@ -392,20 +346,10 @@ async function geocodeBestCandidate(
         console.log(`[geocodeBestCandidate] reject (country=${fields.country}, expected=${expectedCountry}): ${fields.formatted}`);
         continue;
       }
-      // Gate 2 — Precision (rejects APPROXIMATE / GEOMETRIC_CENTER).
-      // partial_match removed: Google sets it when the query text doesn't exactly
-      // match the canonical name (e.g. "Jeanne d'arc blvd" vs "Jeanne-d'Arc Blvd N")
-      // even when the coordinates are precise ROOFTOP/RANGE_INTERPOLATED. Gate 3
-      // (postal completeness) is the real guard against imprecise results.
-      if (fields.locationType !== 'ROOFTOP' && fields.locationType !== 'RANGE_INTERPOLATED') {
-        console.log(`[geocodeBestCandidate] reject (precision: loc_type=${fields.locationType} partial=${fields.partialMatch}): ${fields.formatted}`);
-        continue;
-      }
-      // Gate 3 — Postal code completeness (catches FSA-only Canadian results like K1C).
-      if (!isPostalCodeComplete(fields.postalCode, fields.country)) {
-        console.log(`[geocodeBestCandidate] reject (postal incomplete: ${fields.postalCode}, country=${fields.country}): ${fields.formatted}`);
-        continue;
-      }
+      // Gate 2 / Gate 3 removed 2026-06-25: precision + postal-completeness checks
+      // caused valid Canadian addresses to return not_found (e.g. "8210 Jeanne d'arc blvd").
+      // The region=ca hint (added 2026-06-24) is the real guard against wrong-country
+      // results. Precision/postal gates added in fb29387 were overly strict.
       console.log(`[geocodeBestCandidate] accept: ${fields.formatted}`);
       return {
         lat: fields.lat,
