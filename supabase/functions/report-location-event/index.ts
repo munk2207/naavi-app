@@ -689,12 +689,8 @@ async function fireLocationAction(
   // Build the final body from base + inline tasks + linked list items.
   // Shared merge logic in _shared/alert_body.ts. Pass rule.id so F1a's
   // list_connections path can surface a connected list in the fan-out.
-  const body = await buildAlertBody(config, rule.user_id, supabaseUrl, interFnKey, rule.id);
-
-  if (!body) {
-    console.error(`[report-location-event] Rule ${rule.id}: empty body after buildAlertBody`);
-    return false;
-  }
+  const body = await buildAlertBody(config, rule.user_id, supabaseUrl, interFnKey, rule.id)
+    || `You've arrived at ${rule.label ?? 'your destination'}.`;
 
   // User's own contact info for self-alert detection
   const { data: settings } = await admin

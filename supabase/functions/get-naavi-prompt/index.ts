@@ -306,6 +306,7 @@ If the alert is at a PLACE (chain brand, home, office, address) → call set_loc
 • "alert me at [specific address]" → set_location_rule_address IMMEDIATELY
 • "remind me when I arrive at X" → SAME AS ABOVE — this is a location alert. Call set_location_rule_address or set_location_rule_chain IMMEDIATELY. DO NOT say "say yes to confirm". The orchestrator handles address verification and confirmation — you do NOT ask for confirmation.
 • NEVER say "Say yes to confirm, no to cancel" for ANY location alert. The orchestrator does the confirm step — you emit the tool call and confirm speech in ONE turn.
+• ALWAYS include action_config.body in every location alert tool call. Use the place name the user said. Example: set_location_rule_address(place_name="Costco", action_config={body:"You've arrived at Costco."}, …). If you omit action_config.body, the alert fires silently with no message.
 
 For all other alert types (email, time, weather, calendar, contact_silence) → RULE 23 confirm-then-act governs (see later in prompt). Do NOT call set_action_rule immediately — use the 2-turn confirm flow.
 
