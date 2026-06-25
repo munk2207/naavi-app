@@ -56,6 +56,8 @@ import { IconButton } from '@/components/IconButton';
 import { LocationRuleCard } from '@/components/LocationRuleCard';
 import { BatteryOptimizationCard } from '@/components/BatteryOptimizationCard';
 import { useBatteryOptPrompt } from '@/hooks/useBatteryOptPrompt';
+import { GeofencePermissionCard } from '@/components/GeofencePermissionCard';
+import { useGeofencePermissions } from '@/hooks/useGeofencePermissions';
 import { getBriefWindow, filterByWindow, pickRandomTip } from '@/lib/brief-logic';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
@@ -842,6 +844,7 @@ export default function HomeScreen() {
   // Optimization opt-out for users with location alerts. Hook checks on
   // mount, sets visible=true only when all three gating conditions pass.
   const batteryOptPrompt = useBatteryOptPrompt(currentUserId);
+  const geofencePerms = useGeofencePermissions();
   const [navAlert, setNavAlert] = useState<{ title: string; location: string; startMs: number } | null>(null);
   const [showIntegrations, setShowIntegrations] = useState(false);
   const [webViewUrl, setWebViewUrl] = useState<string | null>(null);
@@ -1995,6 +1998,15 @@ export default function HomeScreen() {
                 <Text style={styles.chatCollapsedBarText}>＋ {turns.length} message{turns.length === 1 ? '' : 's'} — tap to expand</Text>
               </TouchableOpacity>
             </View>
+          )}
+
+          {/* Geofence permission setup card — shown on every launch until all 4 permissions are granted */}
+          {!!currentUserId && geofencePerms.visible && (
+            <GeofencePermissionCard
+              missing={geofencePerms.missing}
+              onFix={geofencePerms.fix}
+              onDismiss={geofencePerms.dismiss}
+            />
           )}
 
           {/* Morning brief — grouped by category */}

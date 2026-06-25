@@ -2,7 +2,7 @@
   "expo": {
     "name": "MyNaavi",
     "slug": "naavi",
-    "version": "1.0.293",
+    "version": "1.0.294",
     "runtimeVersion": {
       "policy": "appVersion"
     },
@@ -27,7 +27,7 @@
       }
     },
     "android": {
-      "versionCode": 293,
+      "versionCode": 294,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0D0D0D"
@@ -47,7 +47,8 @@
         "FOREGROUND_SERVICE_LOCATION",
         "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
-        "WAKE_LOCK"
+        "WAKE_LOCK",
+        "ACTIVITY_RECOGNITION"
       ]
     },
     "plugins": [
