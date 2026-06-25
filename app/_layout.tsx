@@ -153,8 +153,13 @@ export default function RootLayout() {
     // class: 6 dead FCM tokens accumulated over weeks of installs.
     const maybeAutoRegisterPush = async () => {
       try {
-        const { status } = await Notifications.getPermissionsAsync();
-        if (status === 'undetermined' || status === 'granted') {
+        let { status } = await Notifications.getPermissionsAsync();
+        if (status === 'undetermined') {
+          // Fresh install — request permission now so alerts are never silent.
+          const result = await Notifications.requestPermissionsAsync();
+          status = result.status;
+        }
+        if (status === 'granted') {
           await registerPushNotifications();
         }
       } catch { /* silent */ }

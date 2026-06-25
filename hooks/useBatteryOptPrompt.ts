@@ -69,19 +69,9 @@ export function useBatteryOptPrompt(userId: string | null) {
         if ((settings as any).battery_opt_prompted === true) return;
         if ((settings as any).battery_opt_last_prompted_date === todayDateString()) return;
 
-        // Condition 3 — at least one enabled location rule.
-        const { count, error: cErr } = await queryWithTimeout(
-          supabase
-            .from('action_rules')
-            .select('id', { count: 'exact', head: true })
-            .eq('user_id', userId)
-            .eq('trigger_type', 'location')
-            .eq('enabled', true),
-          10_000,
-          'battery-opt-count-location-rules',
-        );
-        if (cErr || (count ?? 0) === 0) return;
-
+        // Condition 3 removed 2026-06-25: prompt on every launch regardless
+        // of whether location rules exist. Fresh installs need battery set to
+        // Unrestricted before the first alert is created, not after.
         if (!cancelled) setVisible(true);
       } catch (err) {
         // Silent fail — the prompt is non-critical UX; don't break app
