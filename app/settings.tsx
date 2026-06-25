@@ -675,62 +675,78 @@ export default function SettingsScreen() {
     Alert.alert('Connected', 'Notion integration token saved.');
   }
 
-  async function handleSaveHomeAddress() {
-    const addr = homeAddress.trim();
+  async function verifyAndSaveAddress(
+    field: 'home_address' | 'work_address',
+    addr: string,
+    setLoading: (v: boolean) => void,
+    setField: (v: string) => void,
+    emptyMsg: string,
+    savedMsg: string,
+  ) {
     if (!addr) {
-      Alert.alert('Enter an address', 'Type your home address, then Save.');
+      Alert.alert('Enter an address', emptyMsg);
       return;
     }
     if (!supabase) return;
-    setHomeAddressLoading(true);
+    setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setHomeAddressLoading(false); return; }
+      if (!user) { setLoading(false); return; }
+
+      // Verify the address is real before saving
+      const { data: place, error: placeErr } = await supabase.functions.invoke('resolve-place', {
+        body: { user_id: user.id, place_name: addr, use_geocoding: true },
+      });
+      if (placeErr) throw placeErr;
+      if (!place || place.status === 'not_found') {
+        Alert.alert(
+          'Address not found',
+          `"${addr}" couldn't be verified. Check the spelling and include the city (e.g. 962 Terranova Dr, Ottawa, ON).`,
+        );
+        setLoading(false);
+        return;
+      }
+
+      // Save the canonical address Google confirmed
+      const canonical = place.address ?? addr;
       const { error } = await queryWithTimeout(
         supabase.from('user_settings').upsert({
           user_id: user.id,
-          home_address: addr,
+          [field]: canonical,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' }),
         15_000,
-        'upsert-home-address',
+        `upsert-${field}`,
       );
       if (error) throw error;
-      setHomeAddress(addr);
-      Alert.alert('Saved', 'Home address saved. Naavi will use this for "home" alerts.');
+      setField(canonical);
+      Alert.alert('Saved', savedMsg);
     } catch (err) {
-      Alert.alert('Error', 'Could not save home address. Please try again.');
+      Alert.alert('Error', 'Could not save address. Please try again.');
     }
-    setHomeAddressLoading(false);
+    setLoading(false);
+  }
+
+  async function handleSaveHomeAddress() {
+    await verifyAndSaveAddress(
+      'home_address',
+      homeAddress.trim(),
+      setHomeAddressLoading,
+      setHomeAddress,
+      'Type your home address, then Save.',
+      'Home address saved. Naavi will use this for "home" alerts.',
+    );
   }
 
   async function handleSaveWorkAddress() {
-    const addr = workAddress.trim();
-    if (!addr) {
-      Alert.alert('Enter an address', 'Type your work or office address, then Save.');
-      return;
-    }
-    if (!supabase) return;
-    setWorkAddressLoading(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setWorkAddressLoading(false); return; }
-      const { error } = await queryWithTimeout(
-        supabase.from('user_settings').upsert({
-          user_id: user.id,
-          work_address: addr,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' }),
-        15_000,
-        'upsert-work-address',
-      );
-      if (error) throw error;
-      setWorkAddress(addr);
-      Alert.alert('Saved', 'Work address saved. Naavi will use this for "office" alerts.');
-    } catch (err) {
-      Alert.alert('Error', 'Could not save work address. Please try again.');
-    }
-    setWorkAddressLoading(false);
+    await verifyAndSaveAddress(
+      'work_address',
+      workAddress.trim(),
+      setWorkAddressLoading,
+      setWorkAddress,
+      'Type your work or office address, then Save.',
+      'Work address saved. Naavi will use this for "office" alerts.',
+    );
   }
 
   async function handleDisconnectNotion() {
