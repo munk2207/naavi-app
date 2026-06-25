@@ -399,7 +399,7 @@ The gates below apply to Phase 2 ONLY — never to staging APK builds.
 
 ---
 
-### FOUR TEST GATES — MANDATORY BEFORE EVERY PRODUCTION AAB (Wael 2026-06-19, updated 2026-06-21)
+### THREE TEST GATES — MANDATORY BEFORE EVERY PRODUCTION AAB (Wael 2026-06-19, updated 2026-06-25)
 
 Every production AAB must pass all applicable gates in this exact order. Each covers a distinct layer the others cannot reach.
 
@@ -407,16 +407,15 @@ Every production AAB must pass all applicable gates in this exact order. Each co
 |------|----------|---------------|------------|
 | 1 | **Auto-tester** | Business logic, Edge Function behavior, prompt emissions, data integrity | `npm run test:auto` — must be 100% green |
 | 2 | **Voice regression** | Voice server call flows, STT/TTS pipeline, Twilio webhook behavior | Run voice regression suite — all tests must pass |
-| 3 | **Maestro** | Mobile UI flows on emulator (tap targets, screen transitions, accessibility labels) | `.\scripts\run-maestro.ps1` — all flows must pass |
-| 4 | **Firebase Test Lab** | Hardware/OS compatibility on real physical devices (Pixel 6 Android 13, Samsung Galaxy S22 Android 14) | `node scripts/submit-firebase-test.js <apk-url>` — all devices must show ✅ in console |
+| 3 | **Firebase Test Lab** | Hardware/OS compatibility on real physical devices (Pixel 6 Android 13, Samsung Galaxy S22 Android 14) | `node scripts/submit-firebase-test.js <apk-url>` — all devices must show ✅ in console |
 
-**Why this order:** Gates 1 and 2 are server-side and require no build — run them first so a logic or voice error never costs a build. Gate 3 (Maestro) needs a preview APK on the emulator. Gate 4 (Firebase) uses the same APK but runs on cloud devices — most expensive, so last.
+**Maestro (dropped 2026-06-25):** Removed as a mandatory gate. Maintenance cost (emulator instability, YAML churn on every UI change, hours of debugging) exceeded the value. Firebase Test Lab on real hardware covers device compatibility better. e2e YAML files remain in `e2e/` for reference but are not part of the gate sequence.
 
-**Full pre-build gate sequence: (1) auto-tester green → (2) voice regression green → (3) Maestro green → (4) Firebase Test Lab PASSED → (5) production AAB.**
+**Why this order:** Gates 1 and 2 are server-side and require no build — run them first so a logic or voice error never costs a build. Gate 3 (Firebase) uses the preview APK on real cloud devices — most expensive, so last.
 
-**Test account for all four gates:** `mynaavidemo@gmail.com` — no other account.
+**Full pre-build gate sequence: (1) auto-tester green → (2) voice regression green → (3) Firebase Test Lab PASSED → (4) production AAB.**
 
-**Full pre-build gate sequence (production AAB only): (1) auto-tester green → (2) voice regression green → (3) Maestro green → (4) Firebase Test Lab PASSED → (5) production AAB.**
+**Test account for all gates:** `mynaavidemo@gmail.com` — no other account.
 
 ---
 
