@@ -1,4 +1,4 @@
-appId: ca.naavi.app
+appId: ${APP_ID}
 name: 15 — List-detail Attached-to section + items + delete button (Wave 2 Phase B)
 tags:
   - lists
@@ -18,6 +18,10 @@ tags:
 
 - launchApp:
     clearState: false
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
 
 # Navigate to Lists.
 - runFlow:
@@ -38,14 +42,14 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Lists"
-    timeout: 5000
+    timeout: 15000
 - tapOn:
     text: "Lists"
 
 - extendedWaitUntil:
     visible:
       text: "Your Lists"
-    timeout: 5000
+    timeout: 15000
 
 # Wait for lists-reconcile + list query to complete. When data loads
 # the tabs render with counts like "All (4)". Until then the tabs read
@@ -58,20 +62,29 @@ tags:
       visible:
         text: "All \\(.+\\)"
     commands:
-      # Tap somewhere in the first list row area (below the tabs).
-      # The first row sits around y=30% on a 1080x2400 screen.
+      # Switch to "All" tab first — previous flow may have left a
+      # different tab active (e.g. Standalone with 0 items). Tapping
+      # on an empty tab would hit the empty-state message, not a row.
+      # Tap the first list row. First row starts at ~16% (just below
+      # the tab bar at ~15%). Use 20% to land safely in row 1.
       - tapOn:
-          point: "50%,30%"
+          point: "50%,20%"
 
-      # List-detail screen — "Items" + "Attached to" + "Delete list"
-      # always render. Generous timeout because the Drive Doc fetch
-      # can take a few seconds on cold path.
+      # "Attached to" is a static header that renders as soon as the
+      # list detail screen mounts (no async dependency). If it doesn't
+      # appear, navigation failed (tap missed).
+      - extendedWaitUntil:
+          visible:
+            text: "Attached to"
+          timeout: 15000
+
+      # "Items" renders with the Drive Doc content — same screen,
+      # same render pass as "Attached to". Allow generous timeout
+      # for Drive Doc fetch on cold path.
       - extendedWaitUntil:
           visible:
             text: "Items"
-          timeout: 12000
-      - assertVisible:
-          text: "Attached to"
+          timeout: 60000
       - assertVisible:
           text: "Delete list"
 

@@ -1,10 +1,9 @@
-appId: ca.naavi.app
+appId: ${APP_ID}
 name: 04 — voice record → stop → transcribe (V57.9.5 voice path)
 tags:
   - voice
   - feature
 ---
-- runFlow: 00-sign-in.yaml
 # Verifies the voice memo path:
 #   - Tap mic → recording state
 #   - Tap stop → transcribing state
@@ -22,8 +21,10 @@ tags:
     clearState: false
 
 # Wait for status to settle.
-- assertVisible:
-    text: "Ask MyNaavi"
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
 
 # Tap the green mic button. The mic id might be 'mic-button' or a text
 # fallback; both attempted.

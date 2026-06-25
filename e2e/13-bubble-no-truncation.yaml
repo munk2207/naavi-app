@@ -1,4 +1,4 @@
-appId: ca.naavi.app
+appId: ${APP_ID}
 name: 13 — Chat bubble shows full user message (no Yoga truncation)
 tags:
   - regression

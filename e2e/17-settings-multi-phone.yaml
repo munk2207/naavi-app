@@ -1,4 +1,4 @@
-appId: ca.naavi.app
+appId: ${APP_ID}
 name: 17 — Settings multi-phone primary + backup list (Wave 2 Phase E)
 tags:
   - settings
@@ -20,6 +20,10 @@ tags:
 
 - launchApp:
     clearState: false
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
 
 # Open the 3-dot menu, tap Settings.
 - runFlow:
@@ -40,7 +44,7 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Settings"
-    timeout: 5000
+    timeout: 15000
 - tapOn:
     text: "Settings"
 
@@ -50,7 +54,7 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Your Name"
-    timeout: 8000
+    timeout: 30000
 
 # Scroll until the Phone Numbers section is on-screen. Settings is a
 # long ScrollView; counted scrolls overshoot the section. scrollUntilVisible

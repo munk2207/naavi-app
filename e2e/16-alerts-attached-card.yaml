@@ -1,4 +1,4 @@
-appId: ca.naavi.app
+appId: ${APP_ID}
 name: 16 — Alerts screen attached-list card in expanded row (Wave 2 Phase C)
 tags:
   - alerts
@@ -17,17 +17,25 @@ tags:
 # (mutating state in an e2e is fragile). The detach round-trip is
 # covered by the auto-tester's list-connections.disconnect-* cases.
 
+- stopApp
 - launchApp:
     clearState: false
 
-# Navigate to Alerts.
+# Wait for home screen to be ready — previous flow may have left the
+# app on a different screen; stopApp+launchApp resets navigation state.
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 30000
+
+# Navigate to Alerts via the 3-dot menu.
 - tapOn:
-    label: "Open menu"
+    point: "95%,9%"
 
 - extendedWaitUntil:
     visible:
       text: "Alerts"
-    timeout: 5000
+    timeout: 10000
 - tapOn:
     text: "Alerts"
 
@@ -52,7 +60,7 @@ tags:
       - extendedWaitUntil:
           visible:
             text: "When"
-          timeout: 5000
+          timeout: 10000
       - assertVisible:
           text: "What happens"
 

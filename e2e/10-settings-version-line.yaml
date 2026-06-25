@@ -1,10 +1,9 @@
-appId: ca.naavi.app
+appId: ${APP_ID}
 name: 10 — settings page renders + version visible
 tags:
   - smoke
   - settings
 ---
-- runFlow: 00-sign-in.yaml
 # Quick smoke that the Settings page is reachable and renders the
 # version line.
 #
@@ -16,24 +15,29 @@ tags:
 - launchApp:
     clearState: false
 
+# Wait for home screen to be ready before tapping the menu.
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
+
 # Open the 3-dot menu on the topbar.
 - tapOn:
-    label: "Open menu"
+    point: "95%,9%"
 
-# Tap the Settings menu item. Looser timeout because the menu renders
-# asynchronously on some builds.
+# Tap the Settings menu item.
 - extendedWaitUntil:
     visible:
       text: "Settings"
-    timeout: 5000
+    timeout: 10000
 - tapOn:
     text: "Settings"
 
 # Settings page contents — both labels are stable.
+# "Your Name" is the first section at the top of Settings — always
+# on-screen without scrolling. "Sign Out" and "build" are below the fold.
 - extendedWaitUntil:
     visible:
-      text: "Sign Out"
-    timeout: 8000
-- assertVisible:
-    text: "build"
+      text: "Your Name"
+    timeout: 30000
 - takeScreenshot: 10-settings

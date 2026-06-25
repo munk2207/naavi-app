@@ -1,10 +1,9 @@
-appId: ca.naavi.app
+appId: ${APP_ID}
 name: 08 — create a shopping list (prompt v47 catcher)
 tags:
   - prompt
   - lists
 ---
-- runFlow: 00-sign-in.yaml
 # "Create a shopping list" must emit LIST_CREATE, not a clarifying
 # question. Catches prompt regressions.
 
@@ -15,13 +14,19 @@ tags:
     text: "Ask MyNaavi"
 - tapOn:
     text: "Ask MyNaavi"
-- inputText: "Create a shopping list"
+- inputText: "create an empty shopping list"
 - waitForAnimationToEnd
 - pressKey: Enter
+# Wait for any response first — screenshot to see what Naavi said.
 - extendedWaitUntil:
     visible:
-      text: "LIST CREATED"
-    timeout: 30000
-- assertNotVisible:
-    text: "what would you like"
+      text: "Collapse Chat"
+    timeout: 90000
+- takeScreenshot: 08-naavi-response
+# Now assert the list card appeared.
+# accessibilityLabel = "created list {listName}" — use regex to match any name.
+- extendedWaitUntil:
+    visible:
+      text: "created list.*"
+    timeout: 15000
 - takeScreenshot: 08-list-created

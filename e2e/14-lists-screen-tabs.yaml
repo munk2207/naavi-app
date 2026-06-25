@@ -1,4 +1,4 @@
-appId: ca.naavi.app
+appId: ${APP_ID}
 name: 14 — Lists screen + All/Attached/Standalone tabs (Wave 2 Phase B)
 tags:
   - lists
@@ -18,6 +18,10 @@ tags:
 
 - launchApp:
     clearState: false
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
 
 # Open the 3-dot menu — same dual-strategy as flow 10.
 - runFlow:
@@ -39,7 +43,7 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Lists"
-    timeout: 5000
+    timeout: 15000
 - tapOn:
     text: "Lists"
 
@@ -47,7 +51,7 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Your Lists"
-    timeout: 5000
+    timeout: 15000
 
 # Three tabs, in the order defined in app/lists.tsx::TABS. V57.15.5
 # added testIDs (lists-tab-all / -attached / -standalone) on each
@@ -57,7 +61,7 @@ tags:
 - extendedWaitUntil:
     visible:
       id: "lists-tab-all"
-    timeout: 5000
+    timeout: 15000
 - assertVisible:
     id: "lists-tab-attached"
 - assertVisible:

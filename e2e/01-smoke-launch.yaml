@@ -1,4 +1,4 @@
-appId: ca.naavi.app
+appId: ${APP_ID}
 name: 01 — smoke launch (home brief renders)
 tags:
   - smoke
@@ -6,12 +6,19 @@ tags:
 - stopApp
 - launchApp:
     clearState: false
+# Wait for home screen to fully render before asserting.
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 30000
 - assertVisible:
     text: "MyNaavi"
 - assertVisible:
     text: "TODAY'S BRIEF"
-- assertVisible:
-    text: "WEATHER"
+- extendedWaitUntil:
+    visible:
+      text: "WEATHER"
+    timeout: 30000
 - assertVisible:
     text: "Ask MyNaavi"
 - takeScreenshot: 01-smoke-launch

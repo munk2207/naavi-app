@@ -1,19 +1,20 @@
-appId: ca.naavi.app
+appId: ${APP_ID}
 name: 05 — force-close survives auth (V57.9.7 SecureStore catcher)
 tags:
   - regression
   - critical
   - auth
 ---
-- runFlow: 00-sign-in.yaml
 # Reproduces the V57.9.7 fix: force-killing and reopening the app
 # should NOT log the user out or show "Sign-in expired" banner.
 
 - stopApp
 - launchApp:
     clearState: false
-- assertVisible:
-    text: "Ask MyNaavi"
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
 
 # Confirm session is alive at start.
 - tapOn:
@@ -30,8 +31,10 @@ tags:
 - stopApp
 - launchApp:
     clearState: false
-- assertVisible:
-    text: "Ask MyNaavi"
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
 
 # CRITICAL — stale-auth banner must NOT appear.
 - assertNotVisible:

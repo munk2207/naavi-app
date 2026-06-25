@@ -1,4 +1,4 @@
-appId: ca.naavi.app
+appId: ${APP_ID}
 name: 00 — sign-in via Test Lab button
 tags:
   - setup
@@ -13,6 +13,6 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
-    timeout: 35000
+    timeout: 70000
 
 - takeScreenshot: 00-sign-in-complete

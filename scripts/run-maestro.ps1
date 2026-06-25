@@ -10,7 +10,8 @@
 #   .\scripts\run-maestro.ps1 e2e/07-collapse-expand-toggle.yaml  # one flow
 
 param(
-    [string]$Flow = "e2e/"
+    [string]$Flow = "e2e/",
+    [string]$AppId = "ca.naavi.app"
 )
 
 $device = "emulator-5554"
@@ -26,5 +27,5 @@ Start-Sleep -Milliseconds 800   # let the OS release the port
 Write-Host "Re-forwarding adb port 7001..." -ForegroundColor Cyan
 adb -s $device forward tcp:7001 tcp:7001 | Out-Null
 
-Write-Host "Running Maestro: $Flow" -ForegroundColor Cyan
-maestro test $Flow
+Write-Host "Running Maestro: $Flow (appId=$AppId)" -ForegroundColor Cyan
+maestro test -e APP_ID=$AppId $Flow

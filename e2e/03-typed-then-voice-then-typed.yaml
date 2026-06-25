@@ -1,17 +1,18 @@
-appId: ca.naavi.app
+appId: ${APP_ID}
 name: 03 — typed → voice → typed (mode-switch state)
 tags:
   - mode-switch
 ---
-- runFlow: 00-sign-in.yaml
 # Verifies the orchestrator transitions correctly between text and voice
 # input modes without leaking state.
 
 - stopApp
 - launchApp:
     clearState: false
-- assertVisible:
-    text: "Ask MyNaavi"
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 15000
 
 # 1. Typed send
 - tapOn:

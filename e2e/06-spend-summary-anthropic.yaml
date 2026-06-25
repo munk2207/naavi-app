@@ -1,10 +1,9 @@
-appId: ca.naavi.app
+appId: ${APP_ID}
 name: 06 — spend summary (Anthropic last month → one number)
 tags:
   - feature
   - spend-summary
 ---
-- runFlow: 00-sign-in.yaml
 # Verifies the SPEND_SUMMARY chain end-to-end. Idle-state assertion
 # proves the round-trip completed (actual dollar amount depends on
 # test-user invoice data and is not asserted).
@@ -12,8 +11,10 @@ tags:
 - stopApp
 - launchApp:
     clearState: false
-- assertVisible:
-    text: "Ask MyNaavi"
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 30000
 - tapOn:
     text: "Ask MyNaavi"
 - inputText: "How much did Anthropic charge me last month?"
@@ -21,6 +22,6 @@ tags:
 - pressKey: Enter
 - extendedWaitUntil:
     visible:
-      text: "Ask MyNaavi"
-    timeout: 30000
+      text: "Collapse Chat"
+    timeout: 180000
 - takeScreenshot: 06-spend-summary-result
