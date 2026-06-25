@@ -202,12 +202,13 @@ serve(async (req) => {
       // call ($0.005) ONLY when the first call returned no passing candidate.
       if (!result && homeAddress) {
         const parts = homeAddress.split(/,\s*/);
-        if (parts.length >= 2) {
-          const cityProv = parts.slice(-2).join(', ');  // "Ottawa, Ontario"
-          const enriched = `${placeName}, ${cityProv}`;
-          console.log(`[resolve-place v5] geocode no-pass for "${placeName}", retrying with "${enriched}"`);
-          result = await geocodeBestCandidate(enriched, apiKey, homeCountry);
-        }
+        // Use last 2 parts when available (city + province), otherwise just the city.
+        // "962 Terranova Dr, Ottawa" has 2 parts → slice(-2) = full string (wrong).
+        // "962 Terranova Dr, Ottawa, Ontario" has 3 parts → slice(-2) = "Ottawa, Ontario" (correct).
+        const cityProv = parts.length >= 3 ? parts.slice(-2).join(', ') : parts[parts.length - 1];
+        const enriched = `${placeName}, ${cityProv}`;
+        console.log(`[resolve-place v5] geocode no-pass for "${placeName}", retrying with "${enriched}"`);
+        result = await geocodeBestCandidate(enriched, apiKey, homeCountry);
       }
 
       if (result) {
@@ -374,6 +375,10 @@ async function geocodeBestCandidate(
 ): Promise<{ lat: number; lng: number; formatted: string | null; country: string | null; postalCode: string | null } | null> {
   try {
     const qs = new URLSearchParams({ address, key: apiKey });
+    // Pass region hint so Google biases results to the right country.
+    // Without this, "8210 Jeanne d'arc blvd" can return APPROXIMATE results
+    // from France/Belgium instead of a precise Canadian ROOFTOP result.
+    if (expectedCountry) qs.set('region', expectedCountry.toLowerCase());
     const res = await fetch(`${PLACES_GEOCODE}?${qs.toString()}`);
     if (!res.ok) return null;
     const data = await res.json();
