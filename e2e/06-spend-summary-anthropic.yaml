@@ -23,5 +23,5 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Collapse Chat"
-    timeout: 180000
+    timeout: 90000
 - takeScreenshot: 06-spend-summary-result

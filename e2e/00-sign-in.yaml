@@ -3,16 +3,34 @@ name: 00 — sign-in via Test Lab button
 tags:
   - setup
 ---
-# Auto sign-in: when EXPO_PUBLIC_TEST_LOGIN_ENABLED=true the app signs in
-# automatically on startup (no button tap needed). Avoids React Native
-# accessibility-tree issues where TouchableOpacity text is invisible to Maestro.
+# Two-path sign-in for reliability:
+#   Path A (fast): auto sign-in useEffect fires on mount and succeeds → home screen in <5s
+#   Path B (fallback): auto sign-in failed silently → tap the Test Lab button explicitly
+# testID="test-lab-sign-in" is always rendered when EXPO_PUBLIC_TEST_LOGIN_ENABLED=true.
 
 - clearState
 - launchApp
 
+# Give auto sign-in 15s to complete (Path A).
 - extendedWaitUntil:
     visible:
       text: "Ask MyNaavi"
-    timeout: 70000
+    timeout: 15000
+    optional: true
+
+# Path B: if still on sign-in screen, tap the Test Lab button.
+- runFlow:
+    when:
+      visible:
+        id: "test-lab-sign-in"
+    commands:
+      - tapOn:
+          id: "test-lab-sign-in"
+
+# Wait for home screen either way (A or B).
+- extendedWaitUntil:
+    visible:
+      text: "Ask MyNaavi"
+    timeout: 60000
 
 - takeScreenshot: 00-sign-in-complete

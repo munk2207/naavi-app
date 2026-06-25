@@ -45,6 +45,6 @@ tags:
 - extendedWaitUntil:
     visible:
       text: "Collapse Chat"
-    timeout: 120000
+    timeout: 60000
 
 - takeScreenshot: 13-bubble-full-text-visible
