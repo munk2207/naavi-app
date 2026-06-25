@@ -17,7 +17,6 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
   Linking,
@@ -31,8 +30,8 @@ import { supabase } from '@/lib/supabase';
 import { queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 import { suggestFaq, faqUrl, type FaqEntry } from '@/lib/faq';
 
-const SUPABASE_URL  = 'https://hhgyppbxgmjrwdpdubcx.supabase.co';
-const SUPABASE_ANON = 'sb_publishable_Aq3x_es0Eh3WJcLJOV9l9g_gt0G0gUQ';
+const SUPABASE_URL  = process.env.EXPO_PUBLIC_SUPABASE_URL  ?? '';
+const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 export default function ContactScreen() {
   const router = useRouter();
@@ -135,14 +134,11 @@ export default function ContactScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
         >
           <Text style={styles.intro}>
             Questions, feedback, or anything else — drop us a note.
@@ -224,7 +220,6 @@ export default function ContactScreen() {
             Messages go to the MyNaavi team. Reply within a few days.
           </Text>
         </ScrollView>
-      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
