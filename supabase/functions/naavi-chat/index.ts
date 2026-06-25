@@ -1309,38 +1309,51 @@ async function assembleSystemPromptServerSide(
     console.warn('[assembleSystemPrompt] user_settings lookup failed:', (err as Error)?.message);
   }
 
-  // 2. get-naavi-prompt → base canonical prompt (channel-tailored).
-  //    fetchBasePrompt caches the result for 5 min — saves ~150-250ms on
-  //    every warm request (most requests in a session).
-  const base = await fetchBasePrompt(
-    opts.channel === 'voice' ? 'voice' : 'app',
-    userName,
-    userPhone,
-    opts.clientTimezone,
-    opts.clientTime,
-  );
+  // 2–5. Run fetchBasePrompt, calendar fetch, lists query, and alerts query
+  //      in parallel — none depend on each other, only on userId/userName which
+  //      are resolved above. Saves ~150-200ms vs the prior sequential chain.
+  const needsLiveCalendar = LIVE_CALENDAR_RE.test(opts.userText ?? '');
+
+  const [base, listRows, alertRows, liveCalendar] = await Promise.all([
+    // 2. get-naavi-prompt → base canonical prompt (5-min module-level cache).
+    fetchBasePrompt(
+      opts.channel === 'voice' ? 'voice' : 'app',
+      userName,
+      userPhone,
+      opts.clientTimezone,
+      opts.clientTime,
+    ),
+    // 3. User's list names (injected so Claude doesn't hallucinate missing lists).
+    supabase
+      .from('lists')
+      .select('name, category')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(50)
+      .then(r => r.data ?? [])
+      .catch(() => []),
+    // 4. Active alerts (injected so Claude can match "the X alert" by name).
+    supabase
+      .from('action_rules')
+      .select('label, trigger_type, trigger_config, enabled')
+      .eq('user_id', userId)
+      .eq('enabled', true)
+      .order('created_at', { ascending: false })
+      .limit(100)
+      .then(r => r.data ?? [])
+      .catch(() => []),
+    // 5. Live calendar — only fetched when query is calendar-shaped (saves 2-4s otherwise).
+    needsLiveCalendar
+      ? fetchLiveCalendarEvents(supabase, userId)
+      : Promise.resolve((opts.briefItems ?? []).filter(item => item.category === 'calendar')),
+  ]);
 
   if (!base) return null;
 
-  // 3. Append mobile-supplied per-query context (brief / health / knowledge).
-  //    Layout mirrors the previous mobile-side assembly so the prompt-cache
-  //    3-block split downstream still finds the END_STABLE marker (it's
-  //    embedded in the base) and partitions correctly.
   const languageNote = opts.language === 'fr'
     ? `\n${userName} speaks French. Respond in Canadian French.`
     : '';
 
-  // V57.11.2 — replace mobile's calendar items with live Google Calendar
-  // fetch so Claude never sees a stale schedule. Non-calendar items (emails,
-  // birthdays, weather) still come from mobile (they don't have the same
-  // staleness problem).
-  // Latency gate (2026-06-16): only hit the Google Calendar API when the query
-  // is calendar-shaped. Non-calendar queries use the mobile brief directly,
-  // saving 2-4s per turn for "what time is it", list/reminder questions, etc.
-  const needsLiveCalendar = LIVE_CALENDAR_RE.test(opts.userText ?? '');
-  const liveCalendar = needsLiveCalendar
-    ? await fetchLiveCalendarEvents(supabase, userId)
-    : (opts.briefItems ?? []).filter(item => item.category === 'calendar');
   const nonCalendarMobile = (opts.briefItems ?? []).filter(item => item.category !== 'calendar');
   const mergedBrief: MobileBriefItem[] = [...liveCalendar, ...nonCalendarMobile];
 
@@ -1351,8 +1364,6 @@ async function assembleSystemPromptServerSide(
         .join('\n')
     : `\n\n## ${userName}'s upcoming schedule (next 7 days)\n- No events found for the next 7 days.`;
 
-  // V57.11.2 — User reference section. Authoritative facts that Claude
-  // should answer directly when asked, no search needed.
   const userRefParts: string[] = [];
   if (userHomeAddress) userRefParts.push(`- Home address: ${userHomeAddress}`);
   if (userWorkAddress) userRefParts.push(`- Work / office address: ${userWorkAddress}`);
@@ -1363,75 +1374,36 @@ async function assembleSystemPromptServerSide(
   const healthSuffix    = opts.healthContext    ? `\n\n${opts.healthContext}`    : '';
   const knowledgeSuffix = opts.knowledgeContext ? `\n\n${opts.knowledgeContext}` : '';
 
-  // 2026-05-23 (Wael) — inject the user's lists by name. Without this,
-  // Claude saw the assembled prompt (home/work address + brief items
-  // + health + knowledge) and concluded "no shopping list is mentioned
-  // in this user's profile" — then HALLUCINATED "I don't have a shopping
-  // list" without calling list_read at all (verified live for Wael's
-  // user_id 788fe85c on V57.22.1 build 197). Adding the actual list names
-  // gives Claude direct evidence so it either correctly calls list_read
-  // OR honestly reports it has no list of that name.
   let listsContext = '';
-  try {
-    const { data: listRows } = await supabase
-      .from('lists')
-      .select('name, category')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(50);
-    if (Array.isArray(listRows) && listRows.length > 0) {
-      const listLines = listRows.map((r: any) =>
-        `- ${r.name}${r.category ? ` (${r.category})` : ''}`
-      );
-      listsContext =
-        `\n\n## ${userName}'s lists (when asked to read/add to/remove from a list, call the matching list_* tool — do NOT answer from this section alone, the items are in Drive)\n` +
-        listLines.join('\n');
-    }
-  } catch (err) {
-    console.warn('[assembleSystemPrompt] lists lookup failed:', (err as Error)?.message);
+  if (Array.isArray(listRows) && listRows.length > 0) {
+    const listLines = (listRows as any[]).map((r: any) =>
+      `- ${r.name}${r.category ? ` (${r.category})` : ''}`
+    );
+    listsContext =
+      `\n\n## ${userName}'s lists (when asked to read/add to/remove from a list, call the matching list_* tool — do NOT answer from this section alone, the items are in Drive)\n` +
+      listLines.join('\n');
   }
 
-  // 2026-05-24 (Wael) — B4x. Inject BOTH active and disabled alerts.
-  // The prior version (2026-05-23) showed only enabled=true rows; this
-  // hid disabled alerts from Claude entirely and caused a Rule 18
-  // violation: a user with a disabled "McDonald's" alert visible on
-  // their Alerts screen (greyed-out / Expired per F2e closure 2026-05-23)
-  // asked to attach a list, and Naavi replied "I don't have a McDonald's
-  // alert" — false from the user's perspective. With both lists in
-  // context, Naavi can offer reactivation when the only match is in
-  // the disabled list. RLS lockdown: action_rules is service-role-only
-  // for writes; this is a service-role SELECT so it's allowed.
   let alertsContext = '';
-  try {
-    const { data: alertRows } = await supabase
-      .from('action_rules')
-      .select('label, trigger_type, trigger_config, enabled')
-      .eq('user_id', userId)
-      .eq('enabled', true)
-      .order('created_at', { ascending: false })
-      .limit(100);
-    if (Array.isArray(alertRows) && alertRows.length > 0) {
-      const formatRow = (r: any) => {
-        const label = r.label || `${r.trigger_type} alert`;
-        const place = r.trigger_config?.place_name || '';
-        return place && !label.includes(place)
-          ? `- ${label} (at ${place})`
-          : `- ${label}`;
-      };
-      const enabledRows = alertRows as any[];
-      if (enabledRows.length > 0) {
-        const sections = `\nACTIVE:\n` + enabledRows.map(formatRow).join('\n');
-        alertsContext =
-          `\n\n## ${userName}'s active alerts\n` +
-          `When ${userName} references "the X alert", match against the list below.\n` +
-          `- Match found → proceed as normal.\n` +
-          `- No match → say plainly "I don't have a [name] alert" and offer to create one.\n` +
-          `NEVER agree to attach/disconnect/change an alert that isn't in this list.\n` +
-          sections;
-      }
+  if (Array.isArray(alertRows) && alertRows.length > 0) {
+    const formatRow = (r: any) => {
+      const label = r.label || `${r.trigger_type} alert`;
+      const place = r.trigger_config?.place_name || '';
+      return place && !label.includes(place)
+        ? `- ${label} (at ${place})`
+        : `- ${label}`;
+    };
+    const enabledRows = alertRows as any[];
+    if (enabledRows.length > 0) {
+      const sections = `\nACTIVE:\n` + enabledRows.map(formatRow).join('\n');
+      alertsContext =
+        `\n\n## ${userName}'s active alerts\n` +
+        `When ${userName} references "the X alert", match against the list below.\n` +
+        `- Match found → proceed as normal.\n` +
+        `- No match → say plainly "I don't have a [name] alert" and offer to create one.\n` +
+        `NEVER agree to attach/disconnect/change an alert that isn't in this list.\n` +
+        sections;
     }
-  } catch (err) {
-    console.warn('[assembleSystemPrompt] alerts lookup failed:', (err as Error)?.message);
   }
 
   // V282 — Demo Mode suffix. Appended to the no-cache tail so it never
