@@ -541,6 +541,16 @@ export async function handleGeofenceEvent(event: GeofenceEvent): Promise<void> {
 // drive). Single-flight makes subsequent calls a no-op while one is running.
 let _syncInProgress = false;
 
+// 2026-06-25 — minimum interval between foreground-triggered syncs.
+// Every re-sync calls stopAllGeofences + addGeofences, which resets the
+// phantom-suppression timer to "now". With syncs firing every 1-2 seconds
+// on app open, every real ENTER event was being suppressed as a phantom.
+// Fix: only allow a foreground-triggered sync if it has been at least
+// MIN_SYNC_INTERVAL_MS since the last completed sync. Explicit syncs
+// (after a rule is created/deleted) always run regardless of this timer.
+const MIN_SYNC_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+let _lastSyncCompletedAt = 0;
+
 // 2026-05-22 — B4m. Mutex around the SDK's startGeofences() call. The
 // existing `_syncInProgress` guards against concurrent `syncGeofencesForUser`
 // calls but does NOT prevent the SDK's INTERNAL "Waiting for previous start
@@ -594,12 +604,10 @@ function updateLastSyncStatus(next: Partial<LastSyncStatus>): void {
   }
 }
 
-export async function syncGeofencesForUser(userId: string): Promise<number> {
+export async function syncGeofencesForUser(userId: string, opts: { force?: boolean } = {}): Promise<number> {
   if (!userId || !supabase) return 0;
 
-  // V57.18 — drop if a sync is already in flight. The in-flight call will
-  // produce the up-to-date state when it finishes; queuing another behind
-  // it just creates a race.
+  // V57.18 — drop if a sync is already in flight.
   if (_syncInProgress) {
     remoteLog(getLifecycleSession(), 'syncGeofences-skip', {
       reason: 'already-in-flight',
@@ -607,6 +615,21 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
     });
     return 0;
   }
+
+  // 2026-06-25 — rate-limit foreground syncs. Only force=true calls
+  // (e.g. after a rule is created) bypass this check.
+  if (!opts.force) {
+    const msSinceLast = Date.now() - _lastSyncCompletedAt;
+    if (_lastSyncCompletedAt > 0 && msSinceLast < MIN_SYNC_INTERVAL_MS) {
+      remoteLog(getLifecycleSession(), 'syncGeofences-skip', {
+        reason: 'too-soon',
+        ms_since_last: msSinceLast,
+        min_interval_ms: MIN_SYNC_INTERVAL_MS,
+      });
+      return 0;
+    }
+  }
+
   _syncInProgress = true;
 
   try {
@@ -809,6 +832,7 @@ export async function syncGeofencesForUser(userId: string): Promise<number> {
       registered: regions.length,
       reason: 'ok',
     });
+    _lastSyncCompletedAt = Date.now();
     return regions.length;
   } catch (err) {
     console.error('[geofence-sync] failed:', err);
@@ -951,7 +975,7 @@ export function useGeofencing(userId: string | null | undefined) {
   // a newly-created rule without waiting for the next foreground event.
   const syncRules = async () => {
     if (!userId) return 0;
-    return syncGeofencesForUser(userId);
+    return syncGeofencesForUser(userId, { force: true });
   };
 
   return { syncRules };
