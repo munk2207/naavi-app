@@ -235,12 +235,98 @@ serve(async (req) => {
       return jsonResponse({ status: 'not_found' });
     }
 
+    // Directional-ambiguity check: if the resolved address contains a cardinal
+    // suffix (N/S/E/W) that the user didn't type, search for the complementary
+    // variants. If any exist at a different location, show a picker rather than
+    // silently committing to whichever Google returned first.
+    // Example: user says "8040 Jeanne d'arc blvd" → Google returns "…blvd N" →
+    // we search "8040 Jeanne d'arc blvd S" → both exist → picker.
+    const resolvedAddr = first.formatted_address as string ?? '';
+    if (apiKey) {
+      const DIRECTIONAL_PAIRS: [RegExp, string[]][] = [
+        [/\bN\b/i,     ['S', 'E', 'W']],
+        [/\bS\b/i,     ['N', 'E', 'W']],
+        [/\bE\b/i,     ['N', 'S', 'W']],
+        [/\bW\b/i,     ['N', 'S', 'E']],
+        [/\bNorth\b/i, ['South', 'East', 'West']],
+        [/\bSouth\b/i, ['North', 'East', 'West']],
+        [/\bEast\b/i,  ['North', 'South', 'West']],
+        [/\bWest\b/i,  ['North', 'South', 'East']],
+      ];
+
+      // Extract the street-number portion (first token) to anchor the match check
+      const streetNum = placeName.match(/^\d+/)?.[0] ?? '';
+      const userInputNorm = normalize(placeName);
+
+      for (const [dirPattern, complements] of DIRECTIONAL_PAIRS) {
+        // The resolved address must contain this directional…
+        if (!dirPattern.test(resolvedAddr)) continue;
+        // …but the user's original input must NOT (otherwise they were explicit)
+        if (dirPattern.test(userInputNorm)) continue;
+
+        // Build complementary search queries and run them in parallel
+        const complementQueries = complements.map(c =>
+          streetNum
+            ? placeName.replace(/^(\d+\s+)/, `$1${c} `).trim()  // try inserting after street number
+            : `${placeName} ${c}`
+        );
+
+        const complementSearches = await Promise.all(
+          complementQueries.map(async q => {
+            const cqs = new URLSearchParams({ query: q, key: apiKey });
+            if (biasLat !== null && biasLng !== null) {
+              cqs.set('location', `${biasLat},${biasLng}`);
+              cqs.set('radius', '50000');
+            }
+            try {
+              const cr = await fetch(`${PLACES_TEXT_SEARCH}?${cqs.toString()}`);
+              if (!cr.ok) return [];
+              const cd = await cr.json();
+              return (Array.isArray(cd.results) ? cd.results : []).filter(isSpecificResult);
+            } catch { return []; }
+          })
+        );
+
+        // Collect candidates: original result + any complement that resolves to a
+        // different coordinate (dedupe by rounded coords as usual)
+        const seen = new Set<string>();
+        const candidates: any[] = [];
+
+        const addCandidate = (r: any, nameOverride?: string) => {
+          const key = `${Math.round(r.geometry.location.lat * 10000)},${Math.round(r.geometry.location.lng * 10000)}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          const canonicalName = nameOverride
+            ?? (typeof r.name === 'string' && r.name.trim() ? r.name.trim() : r.formatted_address);
+          candidates.push({
+            place_name:     placeName,
+            canonical_name: canonicalName,
+            address:        r.formatted_address,
+            lat:            r.geometry.location.lat,
+            lng:            r.geometry.location.lng,
+            radius_meters:  radiusOverride,
+          });
+        };
+
+        addCandidate(first);
+        for (const results of complementSearches) {
+          if (results[0]) addCandidate(results[0]);
+        }
+
+        if (candidates.length >= 2) {
+          console.log(`[resolve-place v5] directional ambiguity detected — showing picker with ${candidates.length} candidates`);
+          return jsonResponse({ status: 'multiple', source: 'fresh', candidates: candidates.slice(0, 5) });
+        }
+        // Only one candidate survived — no ambiguity, fall through to single result
+        break;
+      }
+    }
+
     const lat = first.geometry.location.lat;
     const lng = first.geometry.location.lng;
     const resolvedName = (typeof first.name === 'string' && first.name.trim())
       ? first.name.trim()
       : first.formatted_address;
-    const resolvedAddr = first.formatted_address;
 
     return jsonResponse({
       status: 'ok',
