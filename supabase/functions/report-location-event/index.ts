@@ -337,6 +337,22 @@ serve(async (req) => {
                 threshold_m: MOVEMENT_THRESHOLD_M,
                 prior_age_minutes: Math.round(priorAgeMs / 60000),
               });
+              // Advance the anchor to the most recent reported coords so GPS
+              // drift cannot accumulate against a frozen prior position over
+              // hours. Without this, consecutive rejected fires keep comparing
+              // against an increasingly stale anchor until drift crosses 50m
+              // and a phantom slips through as a false arrival.
+              admin
+                .from('action_rules')
+                .update({
+                  last_event_lat: reportedLat,
+                  last_event_lng: reportedLng,
+                  last_event_at: new Date().toISOString(),
+                })
+                .eq('id', rule_id)
+                .then(({ error: updErr }: any) => {
+                  if (updErr) console.error('[report-location-event] anchor-advance update failed:', updErr.message);
+                });
               return json({
                 ok: true,
                 skipped: 'phantom — phone has not moved since last event for this rule',
