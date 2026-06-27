@@ -104,7 +104,7 @@ serve(async (req) => {
     // (V57.16: headless-task path may have no live session).
     const { data: rule, error: ruleErr } = await admin
       .from('action_rules')
-      .select('id, user_id, trigger_type, trigger_config, action_type, action_config, label, one_shot, enabled, last_event_lat, last_event_lng, last_event_at')
+      .select('id, user_id, trigger_type, trigger_config, action_type, action_config, label, one_shot, enabled, last_event_lat, last_event_lng, last_event_at, last_entered_at, last_exited_at')
       .eq('id', rule_id)
       .maybeSingle();
 
@@ -315,6 +315,25 @@ serve(async (req) => {
               });
             }
           } else {
+            // CASE B — movement check vs prior event.
+            // Skip entirely if the server has recorded an EXIT since the last
+            // entry — user demonstrably left and is returning via the same
+            // route. Entry/exit boundary points for a 300m geofence are
+            // typically <50m apart on the same road, so the movement check
+            // would incorrectly block a real re-arrival. The state machine
+            // (try_enter_geofence) already handles the "already inside"
+            // dedup, so skipping here is safe: phantoms from a stationary
+            // phone will never have last_exited_at > last_entered_at.
+            const lastExitedAt   = rule.last_exited_at   as string | null;
+            const lastEnteredAt  = rule.last_entered_at  as string | null;
+            const hasExitedSinceEntry =
+              typeof lastExitedAt === 'string' &&
+              (lastEnteredAt === null ||
+               new Date(lastExitedAt) > new Date(lastEnteredAt));
+            if (hasExitedSinceEntry) {
+              // User left and is returning — movement check does not apply.
+              // Fall through to state machine.
+            } else {
             // CASE B — movement check vs prior event
             const MOVEMENT_THRESHOLD_M = 50;
             const PRIOR_TTL_MS = 24 * 60 * 60 * 1000;
@@ -360,10 +379,11 @@ serve(async (req) => {
                 threshold_m: MOVEMENT_THRESHOLD_M,
               });
             }
-          }
-        }
-      }
-    }
+            } // closes inner else (movement check — hasExitedSinceEntry was false)
+          }   // closes outer CASE B else (priorEventExists)
+        }     // closes if (event === 'enter')
+      }       // closes if (reportedLat !== null ...)
+    }         // closes if (!fromPendingDwell)
 
     // 2026-05-19 — Update last_event_* on the rule for the next movement
     // check. Run this for non-rejected events of ANY type (enter / exit /
