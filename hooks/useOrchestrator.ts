@@ -677,7 +677,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
   // chat turn.
   const syncGeofencesAfterDelete = (userId: string) => {
     import('@/hooks/useGeofencing')
-      .then(({ syncGeofencesForUser }) => syncGeofencesForUser(userId))
+      .then(({ syncGeofencesForUser }) => syncGeofencesForUser(userId, { force: true }))
       .catch(err => console.error('[Orchestrator] sync after delete failed:', err));
   };
 
@@ -907,7 +907,7 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
               if (!(inserted as any)?.id) return { ok: false, speech: SPEECH.GENERIC_ERROR };
               if (listRef) ensureListAttachedToRule(String((inserted as any).id), listRef).catch(() => {});
               import('@/hooks/useGeofencing')
-                .then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id))
+                .then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id, { force: true }))
                 .catch(() => {});
               return { ok: true, speech: 'Done.' };
             } catch { return { ok: false, speech: SPEECH.GENERIC_ERROR }; }
@@ -1496,7 +1496,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         // wiring runs in the background; the rule is already in the DB by
         // the time we get here.
         import('@/hooks/useGeofencing')
-          .then(({ syncGeofencesForUser }) => syncGeofencesForUser(sessionUserId))
+          .then(({ syncGeofencesForUser }) => syncGeofencesForUser(sessionUserId, { force: true }))
           .catch((err) => console.error('[Orchestrator] geofence sync after confirmed location rule:', err));
         // V57.9.7 — first-time battery-exemption nudge so Robert's
         // arrival alerts actually fire on time (Wael 2026-05-01: 28-min
@@ -3443,7 +3443,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                         turnSpeechOverride = armResult.speech;
                         if (armResult.success) {
                           import('@/hooks/useGeofencing')
-                            .then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id))
+                            .then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id, { force: true }))
                             .catch(err => console.error('[Orchestrator] geofence sync after re-arm failed:', err));
                         }
                         console.log(`[orch:loc:memory-hit] name-match for "${placeName}" -> rule ${match.id} re-armed (success=${armResult.success})`);
@@ -3601,7 +3601,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                           turnSpeechOverride = armResult.speech;
                           if (armResult.success) {
                             import('@/hooks/useGeofencing')
-                              .then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id))
+                              .then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id, { force: true }))
                               .catch(err => console.error('[Orchestrator] geofence sync after re-arm failed:', err));
                           }
                         }
@@ -3661,7 +3661,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       // don't wait 7-8s on geofence registration before the
                       // chat turn renders.
                       import('@/hooks/useGeofencing')
-                        .then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id))
+                        .then(({ syncGeofencesForUser }) => syncGeofencesForUser(session.user.id, { force: true }))
                         .catch((err) => console.error('[Orchestrator] geofence sync after memory-hit insert:', err));
                       // V57.9.7 — first-time battery-exemption nudge.
                       maybePromptBatteryExemption().catch(() => {});

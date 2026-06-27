@@ -51,6 +51,12 @@ import { getLifecycleSession } from '@/lib/appLifecycle';
 // suppression for the first event after restart.
 const REGISTRY_KEY = 'naavi.geofence.lastReg.v1';
 
+// 2026-06-27 — persist last-sync timestamp across JS context reloads.
+// The module-level _lastSyncCompletedAt was initialized to 0 on every app
+// restart / headless-mode JS context spawn, so the 5-min throttle never
+// kicked in (condition `_lastSyncCompletedAt > 0` was always false).
+const LAST_SYNC_KEY = 'naavi.geofence.lastSync.v1';
+
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
@@ -104,6 +110,27 @@ async function clearLastRegistered(): Promise<void> {
     await AsyncStorage.removeItem(REGISTRY_KEY);
   } catch (err) {
     console.error('[geofence-registry] clear failed:', err);
+  }
+}
+
+// ── Persisted last-sync timestamp helpers ────────────────────────────────────
+
+async function readPersistedLastSyncAt(): Promise<number> {
+  try {
+    const raw = await AsyncStorage.getItem(LAST_SYNC_KEY);
+    if (raw) {
+      const v = parseInt(raw, 10);
+      if (!isNaN(v) && v > 0) return v;
+    }
+  } catch {}
+  return 0;
+}
+
+async function writePersistedLastSyncAt(ts: number): Promise<void> {
+  try {
+    await AsyncStorage.setItem(LAST_SYNC_KEY, String(ts));
+  } catch (err) {
+    console.error('[geofence-sync] failed to persist lastSyncAt:', err);
   }
 }
 
@@ -618,9 +645,15 @@ export async function syncGeofencesForUser(userId: string, opts: { force?: boole
 
   // 2026-06-25 — rate-limit foreground syncs. Only force=true calls
   // (e.g. after a rule is created) bypass this check.
+  // 2026-06-27 — read from AsyncStorage when in-memory value is 0 so the
+  // throttle survives JS context reloads (app kill/restart, headless wake).
   if (!opts.force) {
-    const msSinceLast = Date.now() - _lastSyncCompletedAt;
-    if (_lastSyncCompletedAt > 0 && msSinceLast < MIN_SYNC_INTERVAL_MS) {
+    const lastAt = _lastSyncCompletedAt > 0
+      ? _lastSyncCompletedAt
+      : await readPersistedLastSyncAt();
+    if (lastAt > 0) _lastSyncCompletedAt = lastAt; // warm the in-memory cache
+    const msSinceLast = Date.now() - lastAt;
+    if (lastAt > 0 && msSinceLast < MIN_SYNC_INTERVAL_MS) {
       remoteLog(getLifecycleSession(), 'syncGeofences-skip', {
         reason: 'too-soon',
         ms_since_last: msSinceLast,
@@ -833,6 +866,7 @@ export async function syncGeofencesForUser(userId: string, opts: { force?: boole
       reason: 'ok',
     });
     _lastSyncCompletedAt = Date.now();
+    writePersistedLastSyncAt(_lastSyncCompletedAt).catch(() => {}); // fire-and-forget
     return regions.length;
   } catch (err) {
     console.error('[geofence-sync] failed:', err);

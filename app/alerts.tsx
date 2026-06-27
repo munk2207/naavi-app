@@ -364,7 +364,7 @@ export default function AlertsScreen() {
           .then(session => {
             if (!session?.user?.id) return;
             return import('@/hooks/useGeofencing').then(({ syncGeofencesForUser }) =>
-              syncGeofencesForUser(session.user.id),
+              syncGeofencesForUser(session.user.id, { force: true }),
             );
           })
           .catch(err => console.error('[alerts] sync after reactivate failed:', err));
@@ -388,7 +388,7 @@ export default function AlertsScreen() {
           const session = await getSessionWithTimeout();
           if (session?.user?.id) {
             const { syncGeofencesForUser } = await import('@/hooks/useGeofencing');
-            syncGeofencesForUser(session.user.id).catch(() => {});
+            syncGeofencesForUser(session.user.id, { force: true }).catch(() => {});
           }
           return;
         }
@@ -615,7 +615,7 @@ export default function AlertsScreen() {
           .then(session => {
             if (!session?.user?.id) return;
             return import('@/hooks/useGeofencing').then(({ syncGeofencesForUser }) =>
-              syncGeofencesForUser(session.user.id),
+              syncGeofencesForUser(session.user.id, { force: true }),
             );
           })
           .catch(err => console.error('[alerts] sync after disable failed:', err));
