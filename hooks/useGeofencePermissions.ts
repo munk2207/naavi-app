@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, AppStateStatus, Linking, PermissionsAndroid, Platform } from 'react-native';
+import Constants from 'expo-constants';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
@@ -53,7 +54,25 @@ export const PERM_META: Record<GeofencePermKey, GeofencePermItem> = {
   },
 };
 
-const ANDROID_PACKAGE = 'ca.naavi.app';
+// Resolved at runtime so staging (ca.naavi.app.staging) and production
+// (ca.naavi.app) both get the correct package for Settings intents.
+function getPackageId(): string {
+  return (Constants.expoConfig?.android?.package as string | undefined)
+    ?? 'ca.naavi.app';
+}
+
+// Opens Android Settings reliably using IntentLauncher. Fallback to
+// Linking.openSettings() if the intent throws (e.g. older Android).
+async function openAppSettings(): Promise<void> {
+  try {
+    await IntentLauncher.startActivityAsync(
+      'android.settings.APPLICATION_DETAILS_SETTINGS',
+      { data: `package:${getPackageId()}` },
+    );
+  } catch {
+    await Linking.openSettings();
+  }
+}
 
 async function checkMissing(): Promise<GeofencePermKey[]> {
   if (Platform.OS !== 'android') return [];
@@ -89,43 +108,53 @@ async function checkMissing(): Promise<GeofencePermKey[]> {
 }
 
 async function fixPermission(key: GeofencePermKey): Promise<void> {
-  switch (key) {
-    case 'notifications': {
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') await Linking.openSettings();
-      break;
+  try {
+    switch (key) {
+      case 'notifications': {
+        const { status } = await Notifications.requestPermissionsAsync();
+        if (status !== 'granted') await openAppSettings();
+        break;
+      }
+      case 'location': {
+        // Must request foreground first, then background
+        const { status: fg } = await Location.requestForegroundPermissionsAsync();
+        if (fg !== 'granted') { await openAppSettings(); break; }
+        const { status: bg } = await Location.requestBackgroundPermissionsAsync();
+        if (bg !== 'granted') await openAppSettings();
+        break;
+      }
+      case 'activity': {
+        const result = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION,
+          {
+            title: 'Physical Activity',
+            message:
+              'Naavi uses motion detection to wake up when you start moving, ' +
+              'so location alerts fire at the right moment without draining your battery.',
+            buttonPositive: 'Allow',
+            buttonNegative: 'Not now',
+          },
+        );
+        if (result !== PermissionsAndroid.RESULTS.GRANTED) await openAppSettings();
+        break;
+      }
+      case 'battery': {
+        try {
+          await IntentLauncher.startActivityAsync(
+            'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+            { data: `package:${getPackageId()}` },
+          );
+        } catch {
+          // Fallback: open app details where user can find battery settings
+          await openAppSettings();
+        }
+        break;
+      }
     }
-    case 'location': {
-      // Must request foreground first, then background
-      const { status: fg } = await Location.requestForegroundPermissionsAsync();
-      if (fg !== 'granted') { await Linking.openSettings(); break; }
-      const { status: bg } = await Location.requestBackgroundPermissionsAsync();
-      if (bg !== 'granted') await Linking.openSettings();
-      break;
-    }
-    case 'activity': {
-      const result = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION,
-        {
-          title: 'Physical Activity',
-          message:
-            'Naavi uses motion detection to wake up when you start moving, ' +
-            'so location alerts fire at the right moment without draining your battery.',
-          buttonPositive: 'Allow',
-          buttonNegative: 'Not now',
-        },
-      );
-      if (result !== PermissionsAndroid.RESULTS.GRANTED) await Linking.openSettings();
-      break;
-    }
-    case 'battery': {
-      // Open Android's specific battery optimization dialog for this app
-      await IntentLauncher.startActivityAsync(
-        'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
-        { data: `package:${ANDROID_PACKAGE}` },
-      );
-      break;
-    }
+  } catch (err) {
+    console.error('[useGeofencePermissions] fixPermission error:', key, err);
+    // Last-resort fallback — always opens something rather than silently failing
+    try { await openAppSettings(); } catch { /* ignore */ }
   }
 }
 
