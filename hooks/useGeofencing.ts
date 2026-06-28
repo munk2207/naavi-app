@@ -695,7 +695,12 @@ export async function syncGeofencesForUser(userId: string, opts: { force?: boole
         prior: fgStatus,
       });
       try {
-        const requested = await Location.requestForegroundPermissionsAsync();
+        const requested = await Promise.race([
+          Location.requestForegroundPermissionsAsync(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('fg-permission-timeout')), 15_000),
+          ),
+        ]);
         fgStatus = requested.status;
         remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-fg-result', {
           status: fgStatus,
@@ -730,7 +735,12 @@ export async function syncGeofencesForUser(userId: string, opts: { force?: boole
         prior: bgStatus,
       });
       try {
-        const requested = await Location.requestBackgroundPermissionsAsync();
+        const requested = await Promise.race([
+          Location.requestBackgroundPermissionsAsync(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('bg-permission-timeout')), 15_000),
+          ),
+        ]);
         bgStatus = requested.status;
         remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-bg-result', {
           status: bgStatus,
