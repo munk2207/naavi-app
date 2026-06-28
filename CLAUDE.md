@@ -1,5 +1,11 @@
 # CLAUDE.md — MyNaavi Project Instructions
 
+## ⭐⭐⭐⭐⭐ ENGINEERING PROCESS
+
+All development work must comply with `docs/AI_DEVELOPMENT_GOVERNANCE.md`.
+
+---
+
 ## ⭐⭐⭐⭐ STAGING-FIRST — ALL DEV WORK GOES TO STAGING, NEVER PRODUCTION (Wael 2026-06-20)
 
 **Two Supabase projects exist. Default is ALWAYS staging. Production is read-only unless Wael explicitly says "deploy to production."**
