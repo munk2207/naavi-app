@@ -747,7 +747,12 @@ export async function syncGeofencesForUser(userId: string, opts: { force?: boole
     // the nearby instance instead of whatever Google picks globally.
     let referenceCoords: { lat: number; lng: number } | null = null;
     try {
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const pos = await Promise.race([
+        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('gps-timeout')), 10_000),
+        ),
+      ]);
       referenceCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
     } catch (err) {
       console.log('[geofence-sync] no GPS available — resolve-place will fall back to home_address');
