@@ -11,7 +11,7 @@
  * over talking.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -35,7 +35,7 @@ import { disconnectEntityById } from '@/lib/list_connections';
 // 2026-05-22 — B4n. Subscribe to geofencing sync status so a red banner
 // renders when registered=0 (permission revoked, SDK threw, etc.).
 import { getLastSyncStatus, subscribeLastSyncStatus, type LastSyncStatus } from '@/hooks/useGeofencing';
-import { Linking } from 'react-native';
+import { Linking, AppState } from 'react-native';
 import * as Location from 'expo-location';
 
 // V57.10.2 — Wael 2026-05-01 saw "[object Object]" in the orange error
@@ -341,6 +341,8 @@ export default function AlertsScreen() {
   useEffect(() => {
     return subscribeLastSyncStatus(setSyncStatus);
   }, []);
+  // Guard: prevents launching a second permission flow if one is already in flight.
+  const isRequestingPermission = useRef(false);
   // 2026-05-22 — F2e. Per-row pending reactivate flag for spinner state.
   const [reactivatingId, setReactivatingId] = useState<string | null>(null);
 
@@ -379,24 +381,72 @@ export default function AlertsScreen() {
   // 2026-05-22 — B4n banner action. If the OS permission is recoverable,
   // surface the prompt; if denied permanently, deep-link to app settings.
   const onBannerTap = async () => {
+    // Guard: ignore repeated taps while a permission flow is already in flight.
+    if (isRequestingPermission.current) return;
+    isRequestingPermission.current = true;
     try {
-      const fg = await Location.requestForegroundPermissionsAsync();
-      if (fg.status === 'granted') {
-        const bg = await Location.requestBackgroundPermissionsAsync();
-        if (bg.status === 'granted') {
-          // Both granted — trigger a sync.
-          const session = await getSessionWithTimeout();
-          if (session?.user?.id) {
-            const { syncGeofencesForUser } = await import('@/hooks/useGeofencing');
-            syncGeofencesForUser(session.user.id, { force: true }).catch(() => {});
-          }
-          return;
+      let fgGranted = false;
+      let bgGranted = false;
+
+      // Foreground permission — 15s timeout as fallback only.
+      try {
+        const fg = await Promise.race([
+          Location.requestForegroundPermissionsAsync(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('fg-permission-timeout')), 15_000),
+          ),
+        ]);
+        fgGranted = fg.status === 'granted';
+      } catch {
+        // Timeout or error — re-check actual status rather than assuming denied.
+        const fg = await Location.getForegroundPermissionsAsync();
+        fgGranted = fg.status === 'granted';
+      }
+
+      // Background permission (Android 11+ opens Settings, not a dialog).
+      if (fgGranted) {
+        try {
+          const bg = await Promise.race([
+            Location.requestBackgroundPermissionsAsync(),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('bg-permission-timeout')), 15_000),
+            ),
+          ]);
+          bgGranted = bg.status === 'granted';
+        } catch {
+          const bg = await Location.getBackgroundPermissionsAsync();
+          bgGranted = bg.status === 'granted';
         }
       }
-      // Permission still missing — open OS settings so user can flip it manually.
-      Linking.openSettings();
+
+      // Re-check actual status after all flows complete.
+      const fgFinal = await Location.getForegroundPermissionsAsync();
+      const bgFinal = await Location.getBackgroundPermissionsAsync().catch(() => ({ status: 'unknown' }));
+
+      if (fgFinal.status === 'granted' && bgFinal.status === 'granted') {
+        // Both granted — clear any fallback message and trigger a sync.
+        setError(null);
+        const session = await getSessionWithTimeout();
+        if (session?.user?.id) {
+          const { syncGeofencesForUser } = await import('@/hooks/useGeofencing');
+          syncGeofencesForUser(session.user.id, { force: true }).catch(() => {});
+        }
+        return;
+      }
+
+      // Permission still missing — open Settings only if app is in foreground
+      // to avoid navigation conflict with an OS flow still in progress.
+      if (AppState.currentState === 'active') {
+        setError('If the permission screen did not appear, please open Settings manually.');
+        Linking.openSettings();
+      }
     } catch {
-      Linking.openSettings();
+      if (AppState.currentState === 'active') {
+        setError('If the permission screen did not appear, please open Settings manually.');
+        Linking.openSettings();
+      }
+    } finally {
+      isRequestingPermission.current = false;
     }
   };
 
