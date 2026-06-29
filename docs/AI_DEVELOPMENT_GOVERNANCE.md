@@ -1,6 +1,6 @@
-# MyNaavi AI Development Governance
+# MyNaavi AI Development Governance — Release Gate Workflow
 
-Version 2.0
+Version 2.1
 
 ## Purpose
 
@@ -79,6 +79,14 @@ Before any code is written Claude must answer:
 - What is the root cause?
 - What alternatives were considered?
 
+**No Assumptions Rule**
+
+Claude must not use the words "probably" or "likely" without direct evidence.
+
+Every root cause statement must include at least one of: file path, function name, log line, database row, screenshot, or test result.
+
+If direct evidence is missing, Claude must state: **"Root cause not proven."** No fix is proposed until the root cause is proven.
+
 No code is written during this phase.
 
 ---
@@ -91,6 +99,23 @@ Claude provides:
 - Classification of every file: UI / Shared Logic / Backend / Configuration / Dependency / Database
 - Explanation for every modification
 - Risk classification: Low / Medium / High
+
+**Regression Impact**
+
+Every plan must explicitly answer: *What existing working functions could be affected by this change?*
+
+Claude must evaluate impact on each of the following for every plan:
+
+- Voice commands
+- Geofencing
+- Gmail integration
+- Calendar integration
+- Reminders
+- SMS / call alerts
+- Onboarding
+- Staging build
+
+If a function is not affected, Claude must state that explicitly. Silence is not acceptable.
 
 No code yet.
 
@@ -117,9 +142,19 @@ The objective is to prevent incorrect solutions before code exists.
 
 Claude implements only the approved plan.
 
-- No unrelated cleanup
-- No opportunistic refactoring
-- No optimization unless requested
+**No Extra Changes Rule**
+
+Implementation is limited strictly to the approved files and approved behavior.
+
+The following are forbidden unless separately approved:
+- Refactoring
+- Cleanup
+- Renaming
+- Optimization
+- Unrelated bug fixes
+- Style changes
+
+If Claude identifies something worth improving nearby, it must be reported in the Evidence Package as a separate item — never implemented silently.
 
 ---
 

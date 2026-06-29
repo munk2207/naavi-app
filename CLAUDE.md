@@ -2,7 +2,7 @@
 
 ## ⭐⭐⭐⭐⭐ ENGINEERING PROCESS
 
-All development work must comply with `docs/AI_DEVELOPMENT_GOVERNANCE.md`.
+All development work must comply with `docs/AI_DEVELOPMENT_GOVERNANCE.md` (Release Gate Workflow v2.1).
 
 ---
 
