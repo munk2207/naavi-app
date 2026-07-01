@@ -1,0 +1,76 @@
+{
+  "captured_at": "2026-07-01T15:44:44.523Z",
+  "note": "Pre-fix snapshot of staging cron.job — every command below points at production (hhgyppbxgmjrwdpdubcx) in error. Captured per ChatGPT Phase 3 review requirement before correcting these rows to point at staging (xugvnfudofuskxoknhve). See docs/STAGING_CRON_MISPOINT_PHASE2_2026-07-01.md.",
+  "jobs": [
+    {
+      "jobid": "2",
+      "jobname": "check-reminders-every-minute",
+      "schedule": "* * * * *",
+      "command": "\n    SELECT net.http_post(\n      url     := 'https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/check-reminders',\n      headers := '{\"Content-Type\": \"application/json\", \"Authorization\": \"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhoZ3lwcGJ4Z21qcndkcGR1YmN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NTc3MDYsImV4cCI6MjA4OTMzMzcwNn0.I4w141wZlfxOCxDEcsNcgsatHcsXtPOvGV-X5oM3VuQ\"}'::jsonb,\n      body    := '{}'::jsonb\n    );\n  ",
+      "active": true
+    },
+    {
+      "jobid": "3",
+      "jobname": "evaluate-rules-every-minute",
+      "schedule": "* * * * *",
+      "command": "\n    SELECT net.http_post(\n      url     := 'https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/evaluate-rules',\n      headers := '{\"Content-Type\": \"application/json\", \"Authorization\": \"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhoZ3lwcGJ4Z21qcndkcGR1YmN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NTc3MDYsImV4cCI6MjA4OTMzMzcwNn0.I4w141wZlfxOCxDEcsNcgsatHcsXtPOvGV-X5oM3VuQ\"}'::jsonb,\n      body    := '{}'::jsonb\n    );\n  ",
+      "active": true
+    },
+    {
+      "jobid": "4",
+      "jobname": "trigger-morning-call-every-minute",
+      "schedule": "* * * * *",
+      "command": "\n    SELECT net.http_post(\n      url     := 'https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/trigger-morning-call',\n      headers := '{\"Content-Type\": \"application/json\", \"Authorization\": \"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhoZ3lwcGJ4Z21qcndkcGR1YmN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NTc3MDYsImV4cCI6MjA4OTMzMzcwNn0.I4w141wZlfxOCxDEcsNcgsatHcsXtPOvGV-X5oM3VuQ\"}'::jsonb,\n      body    := '{}'::jsonb\n    );\n  ",
+      "active": true
+    },
+    {
+      "jobid": "6",
+      "jobname": "sync-gmail-every-30-minutes",
+      "schedule": "*/30 * * * *",
+      "command": "\n    SELECT net.http_post(\n      url     := 'https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/sync-gmail',\n      headers := '{\"Content-Type\": \"application/json\"}'::jsonb,\n      body    := '{}'::jsonb\n    );\n  ",
+      "active": true
+    },
+    {
+      "jobid": "7",
+      "jobname": "sync-gmail-every-60-minutes",
+      "schedule": "0 * * * *",
+      "command": "\n    SELECT net.http_post(\n      url     := 'https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/sync-gmail',\n      headers := '{\"Content-Type\": \"application/json\"}'::jsonb,\n      body    := '{}'::jsonb\n    );\n  ",
+      "active": true
+    },
+    {
+      "jobid": "8",
+      "jobname": "fire-pending-dwells-every-minute",
+      "schedule": "* * * * *",
+      "command": "\n    SELECT net.http_post(\n      url     := 'https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/fire-pending-dwells',\n      headers := '{\"Content-Type\": \"application/json\"}'::jsonb,\n      body    := '{}'::jsonb\n    );\n  ",
+      "active": true
+    },
+    {
+      "jobid": "9",
+      "jobname": "analyze-new-tickets-every-minute",
+      "schedule": "* * * * *",
+      "command": "\n    SELECT net.http_post(\n      url     := 'https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/dispatch-ticket-analysis',\n      headers := '{\"Content-Type\": \"application/json\", \"Authorization\": \"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhoZ3lwcGJ4Z21qcndkcGR1YmN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NTc3MDYsImV4cCI6MjA4OTMzMzcwNn0.I4w141wZlfxOCxDEcsNcgsatHcsXtPOvGV-X5oM3VuQ\"}'::jsonb,\n      body    := '{}'::jsonb\n    );\n  ",
+      "active": true
+    },
+    {
+      "jobid": "10",
+      "jobname": "reanalyze-on-reply-every-minute",
+      "schedule": "* * * * *",
+      "command": "\n    SELECT net.http_post(\n      url     := 'https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/dispatch-reanalyze-on-reply',\n      headers := '{\"Content-Type\": \"application/json\", \"Authorization\": \"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhoZ3lwcGJ4Z21qcndkcGR1YmN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NTc3MDYsImV4cCI6MjA4OTMzMzcwNn0.I4w141wZlfxOCxDEcsNcgsatHcsXtPOvGV-X5oM3VuQ\"}'::jsonb,\n      body    := '{}'::jsonb\n    );\n  ",
+      "active": true
+    },
+    {
+      "jobid": "11",
+      "jobname": "geofence-health-check-daily",
+      "schedule": "0 12 * * *",
+      "command": "\n    SELECT net.http_post(\n      url     := 'https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/geofence-health-check',\n      headers := '{\"Content-Type\": \"application/json\", \"Authorization\": \"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhoZ3lwcGJ4Z21qcndkcGR1YmN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NTc3MDYsImV4cCI6MjA4OTMzMzcwNn0.I4w141wZlfxOCxDEcsNcgsatHcsXtPOvGV-X5oM3VuQ\"}'::jsonb,\n      body    := '{}'::jsonb\n    );\n  ",
+      "active": true
+    },
+    {
+      "jobid": "12",
+      "jobname": "check-ticket-replies-every-minute",
+      "schedule": "* * * * *",
+      "command": "\n    SELECT net.http_post(\n      url     := 'https://hhgyppbxgmjrwdpdubcx.supabase.co/functions/v1/check-ticket-replies',\n      headers := '{\"Content-Type\": \"application/json\", \"Authorization\": \"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhoZ3lwcGJ4Z21qcndkcGR1YmN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3NTc3MDYsImV4cCI6MjA4OTMzMzcwNn0.I4w141wZlfxOCxDEcsNcgsatHcsXtPOvGV-X5oM3VuQ\"}'::jsonb,\n      body    := '{}'::jsonb\n    );\n  ",
+      "active": true
+    }
+  ]
+}
