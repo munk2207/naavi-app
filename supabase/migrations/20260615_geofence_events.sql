@@ -3,6 +3,12 @@
 -- tester-reported arrival time for accuracy auditing.
 --
 -- Written by report-location-event after a successful fireLocationAction().
+--
+-- NOTE: `supabase db push` on staging may report this version as a mismatch
+-- ("Remote migration versions not found in local migrations directory").
+-- This is a verified CLI diff false-positive, not real drift — do NOT run
+-- `supabase migration repair --status reverted`. See
+-- docs/STAGING_MIGRATION_TRACKING_QUIRK_2026-07-01.md before touching this.
 -- Read by Wael / staff via service role only (no user-facing read path yet).
 
 CREATE TABLE IF NOT EXISTS geofence_events (
