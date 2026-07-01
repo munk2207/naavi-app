@@ -20,7 +20,6 @@
  * One-shot rules auto-disable after first fire.
  */
 
-import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { buildAlertBody } from '../_shared/alert_body.ts';
 
@@ -50,7 +49,7 @@ interface GmailMessage {
   received_at: string;
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   const adminClient = createClient(
