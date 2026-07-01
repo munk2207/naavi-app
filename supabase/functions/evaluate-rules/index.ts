@@ -659,6 +659,35 @@ async function fireAction(
   const subject = String(config.subject ?? rule.label ?? 'Message from MyNaavi');
   const toName  = String(config.to_name ?? '');
 
+  // F2b — demo-line reminders re-check the TCPA opt-out list immediately
+  // before sending, closing the window where a caller texts STOP after
+  // create-demo-reminder's creation-time check but before this cron fires.
+  // A remaining theoretical race (STOP arrives mid-send) is accepted —
+  // see docs/F2B_PHASE2_CHANGE_PLAN_2026-07-01.md §2, "accepted operational
+  // limitation". Real-user rules never have action_config.source set, so
+  // this branch never runs for them.
+  if (config.source === 'demo_line' && toPhone) {
+    const { data: optOut, error: optErr } = await adminClient
+      .from('demo_optouts')
+      .select('phone')
+      .eq('phone', toPhone)
+      .maybeSingle();
+    if (optErr) {
+      console.error(`[evaluate-rules] Rule ${rule.id}: demo opt-out check failed, skipping send to be safe:`, optErr.message);
+      return false;
+    }
+    if (optOut) {
+      // Return true (not false) — this rule has been fully evaluated and
+      // its correct outcome is "don't send". Returning false would mark it
+      // a transient failure and the cron would retry every minute forever
+      // for a number that will never be un-opted-out. True lets the normal
+      // success path write the dedup log entry and disable the one-shot
+      // rule, exactly as if it had sent.
+      console.log(`[evaluate-rules] Rule ${rule.id}: skipping send — ${toPhone} opted out of demo SMS`);
+      return true;
+    }
+  }
+
   // Build the final body from base + inline tasks + linked list items.
   // See _shared/alert_body.ts for the merge rules. Pass rule.id so F1a's
   // list_connections path can surface a connected list in the fan-out.
@@ -848,9 +877,17 @@ async function fireAction(
       sends.push(callVoice(userPhone));
     }
   } else if (toPhone) {
-    // Third-party phone — SMS + WhatsApp fan-out to the specified number.
+    // Third-party phone — SMS + WhatsApp fan-out to the specified number,
+    // unless action_config.channels explicitly restricts it (F2b — demo
+    // reminders set channels: ['sms'] so a stranger who called the demo
+    // line never gets an unsolicited WhatsApp message they never opted
+    // into). Absent the flag, behavior is unchanged for every existing
+    // real-user third-party alert.
+    const allowedChannels: string[] | null = Array.isArray(config.channels) ? config.channels : null;
     sends.push(callSMS('sms', toPhone));
-    sends.push(callSMS('whatsapp', toPhone));
+    if (!allowedChannels || allowedChannels.includes('whatsapp')) {
+      sends.push(callSMS('whatsapp', toPhone));
+    }
   } else if (toEmail) {
     // Third-party email — single email via user's Gmail.
     sends.push(callEmail(toEmail));
