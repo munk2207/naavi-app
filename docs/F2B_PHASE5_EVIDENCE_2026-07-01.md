@@ -6,6 +6,8 @@ Code has NOT been deployed anywhere. Nothing has been pushed, migrated, or built
 
 **Phase 6 status: APPROVED — "Ready for staging: Yes."** ChatGPT's review confirmed the diff matches the approved plan, all deviations are documented and justified, and the regression/testing/rollback strategy is strong. Two follow-up items from that review are addressed below (§9).
 
+**Post-deploy finding (2026-07-01, during Phase 7 live testing): `evaluate-rules` was never actually deployed to staging.** Editing and committing a function's source does not deploy it — that requires a separate `supabase functions deploy` call, which was run for every other new F2b function that evening but missed for `evaluate-rules` itself (the SMS-only channel gate + demo opt-out recheck). Discovered when a live-fired test reminder sent both SMS **and** WhatsApp despite `action_config.channels: ['sms']` — the deployed function was still running the pre-fix code. Deploying the already-reviewed fix then failed 3 times with an identical error (bundling timeout fetching a pre-existing external `deno.land` import, unrelated to the reviewed diff). Resolved by replacing that import with the native `Deno.serve()` pattern already used successfully in `create-demo-reminder`/`receive-demo-sms-reply` — deployed cleanly on the next attempt. **Verified**: a fresh live-fired test reminder afterward sent only SMS, no WhatsApp. Fix committed as `e558df6` in the main repo.
+
 ---
 
 ## 1. Summary
