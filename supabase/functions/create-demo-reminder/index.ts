@@ -84,7 +84,16 @@ Deno.serve(async (req) => {
       return json({ error: 'opted_out' }, 403);
     }
 
-    const label = name ? `Demo reminder for ${name}` : 'Demo reminder';
+    // Bug found via production verification (2026-07-02): all demo callers
+    // share one demoUserId (accepted design — see F2b plan). action_rules
+    // has a partial UNIQUE index on (user_id, label) — with a bare "Demo
+    // reminder for {name}" label, two different anonymous callers who
+    // happen to share a first name collide, and the second one's reminder
+    // silently fails to create (surfaced to the caller as a generic
+    // "Sorry, I couldn't set that up"). Phone number is what actually
+    // distinguishes demo callers (per the plan's own "distinguished by
+    // phone number" resolution) — include it in the label so it does.
+    const label = name ? `Demo reminder for ${name} (${phone})` : `Demo reminder (${phone})`;
     const body = String(message ?? '').trim();
     if (!body) {
       return json({ error: 'Missing message body' }, 400);
