@@ -1,0 +1,2030 @@
+diff --git a/src/index.js b/src/index.js
+index 9c38f14..c3ced9d 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -14,6 +14,20 @@ const crypto = require('crypto');
+ const azureSpeaker = require('./azure-speaker.js');
+ const { NAAVI_TOOLS, convertToolUseToAction } = require('./anthropic_tools.js');
+ const listGate = require('./list_confirm_gate.js');
++const { parseTimezone, DEFAULT_TIMEZONE, getZoneLabel } = require('./voice/parseTimezone.js');
++const { parseReminderTime, formatSpokenDateTime } = require('./voice/parseReminderTime.js');
++const { getDemoEnvironment, getDemoEnvironmentByName } = require('./voice/getDemoEnvironment.js');
++const {
++  DEMO_SCENARIO_ORDER,
++  DEMO_WALKTHROUGH_SCENARIOS,
++  wantsToMoveToReminder,
++  getConsentDisclosureLine,
++  getWalkthroughBridgeLine,
++  getDeclineLine,
++  getCloserLine,
++  getCapReachedLine,
++} = require('./voice/scenarioWalkthrough.js');
++const { SCENARIO_RECAP_LINES, buildRecapSmsBody } = require('./voice/recapSms.js');
+ 
+ // Diagnostic mirror for the DELETE_RULE confirmation-gate flow (Wael
+ // 2026-05-13). Fire-and-forget POST to client_diagnostics, step
+@@ -113,6 +127,15 @@ const DEMO_USER_ID       = process.env.DEMO_USER_ID || '';
+ console.log(`[Boot] DEMO_TWILIO_NUMBER="${DEMO_TWILIO_NUMBER}" (len=${DEMO_TWILIO_NUMBER.length})`);
+ console.log(`[Boot] DEMO_USER_ID="${DEMO_USER_ID}" (len=${DEMO_USER_ID.length})`);
+ 
++// F2b — staging demo line. Same Railway service, conditional routing: a
++// second Twilio number whose calls are handled identically to the
++// production demo line but write to staging Supabase instead. See
++// docs/F2B_PHASE2_CHANGE_PLAN_2026-07-01.md decision #1. Missing either
++// var = staging demo line disabled (falls through to normal "not a demo
++// number" handling for that Twilio number).
++const STAGING_DEMO_TWILIO_NUMBER = process.env.STAGING_DEMO_TWILIO_NUMBER || '';
++console.log(`[Boot] STAGING_DEMO_TWILIO_NUMBER="${STAGING_DEMO_TWILIO_NUMBER}" (len=${STAGING_DEMO_TWILIO_NUMBER.length})`);
++
+ function isDemoUser(userId) {
+   return Boolean(DEMO_USER_ID && userId && userId === DEMO_USER_ID);
+ }
+@@ -6339,15 +6362,20 @@ app.post('/voice', rejectIfShuttingDown, express.urlencoded({ extended: false })
+   // public number can dial in; outbound sends are blocked downstream so
+   // demo callers can experience the conversation without sending real
+   // messages on our Twilio bill.
+-  const isDemoCall = Boolean(DEMO_TWILIO_NUMBER && calledNumber === DEMO_TWILIO_NUMBER);
+-  console.log(`[Voice] Incoming call from "${callerPhone}" to "${calledNumber}" demo="${DEMO_TWILIO_NUMBER}" match=${isDemoCall} — CallSid: ${inboundCallSid}`);
++  // F2b — getDemoEnvironment() is the single environment-selection point
++  // (docs/F2B_PHASE2_CHANGE_PLAN_2026-07-01.md decision #5 / Phase 3
++  // "should-improve" item). Matches either the production or staging demo
++  // number; returns null for every other number (real users unaffected).
++  const demoEnv = getDemoEnvironment(calledNumber);
++  const isDemoCall = Boolean(demoEnv);
++  console.log(`[Voice] Incoming call from "${callerPhone}" to "${calledNumber}" demo="${DEMO_TWILIO_NUMBER}" staging_demo="${STAGING_DEMO_TWILIO_NUMBER}" match=${isDemoCall} env=${demoEnv?.environment ?? '-'} — CallSid: ${inboundCallSid}`);
+ 
+   // V57.11.0 — Demo line greeting flow: capture the caller's first name
+   // interactively, confirm, and thread it through the call as userName.
+   // /voice/demo/connect returns the greeting + media-stream TwiML the
+   // original handler used to send, with the captured name attached.
+   if (isDemoCall) {
+-    res.type('text/xml').send(buildDemoAskNameTwiml(req.headers.host, 1));
++    res.type('text/xml').send(buildDemoAskNameTwiml(req.headers.host, 1, demoEnv.environment));
+     return;
+   }
+ 
+@@ -6730,9 +6758,9 @@ function sanitizeDemoName(raw) {
+   return first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+ }
+ 
+-function buildDemoAskNameTwiml(host, attempt) {
++function buildDemoAskNameTwiml(host, attempt, environment) {
+   const httpProtocol = host?.includes('localhost') ? 'http' : 'https';
+-  const action = `${httpProtocol}://${host}/voice/demo/name?attempt=${attempt}`;
++  const action = `${httpProtocol}://${host}/voice/demo/name?attempt=${attempt}&env=${encodeURIComponent(environment || 'production')}`.replace(/&/g, '&amp;');
+   const prompt = attempt === 1
+     ? 'Hi! This is Naavi. Who do I have the pleasure of speaking with?'
+     : "Sorry, I didn't catch that. Could you say your name again?";
+@@ -6874,13 +6902,9 @@ const DEMO_DIGIT_MAP = {
+ // One-line recap of each scenario. Used in the post-call SMS so the
+ // caller has a refresher of what they heard. The set of lines included
+ // is whatever they actually played during the call (state.playedScenarios).
+-const SCENARIO_RECAP_LINES = {
+-  today:    'Today: your day in one breath.',
+-  bills:    'Bills: PDFs read straight from your inbox.',
+-  history:  'History: when you last did anything.',
+-  location: 'Location: an alert when you arrive somewhere.',
+-  capture:  'Capture: anything you want me to remember.',
+-};
++// F2b Phase 4 (2026-07-01) — moved to voice/recapSms.js so there is exactly
++// one definition, shared by this (now dead-path) CTA flow and the new
++// Recap SMS. `SCENARIO_RECAP_LINES` is imported at the top of this file.
+ 
+ // Per-call state for the canned demo. Cleaned up when the call's CTA
+ // completes OR the watchdog at /voice/demo/connect (no longer used by
+@@ -7110,6 +7134,62 @@ async function sendDemoCtaSms(toPhone, callerName, playedScenarios) {
+   }
+ }
+ 
++// F2b Phase 4 — Recap SMS. Sent automatically (no permission ask, per
++// docs/F2B_SCENARIO_WALKTHROUGH_SCRIPT_2026-07-01.md §5) the moment the
++// scenario walkthrough hands off into the reminder flow. Fully independent
++// of the Reminder SMS (buildDemoReminderSmsBody below) — different
++// trigger, different timing, different template. Fire-and-forget: a
++// failure here must never block or delay the reminder flow.
++async function sendRecapSms(toPhone, callerName, playedScenarios, environment) {
++  const accountSid = process.env.TWILIO_ACCOUNT_SID;
++  const authToken = process.env.TWILIO_AUTH_TOKEN;
++  if (!accountSid || !authToken || !toPhone) {
++    console.error('[Voice/Demo/F2b] Recap SMS missing creds or phone');
++    return false;
++  }
++  if (!playedScenarios || (playedScenarios.size ?? playedScenarios.length) === 0) {
++    // Nothing was demoed (caller declined every scenario) — no recap to send.
++    return false;
++  }
++  // F2b (2026-07-01) — "From" number is environment-aware: staging calls
++  // send from the staging line's own number (+18734462284, confirmed clear
++  // of any Twilio messaging restriction), production calls send from
++  // DEMO_SMS_FROM (+14313006228, the production 888 number's TFV
++  // workaround). Never falls back to the production voice server's number
++  // (+12495235394) — that stays reserved for real registered users.
++  const demoEnv = getDemoEnvironmentByName(environment);
++  const fromNumber = demoEnv?.demoSmsFrom || DEMO_SMS_FROM;
++  if (!demoEnv?.demoSmsFrom) {
++    console.error(`[Voice/Demo/F2b] Recap SMS: no demoSmsFrom for environment="${environment}", falling back to production DEMO_SMS_FROM`);
++  }
++  const credentials = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
++  const params = new URLSearchParams({
++    To: toPhone,
++    From: fromNumber,
++    Body: buildRecapSmsBody(callerName, playedScenarios),
++  });
++  try {
++    const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
++      method: 'POST',
++      headers: {
++        'Authorization': `Basic ${credentials}`,
++        'Content-Type': 'application/x-www-form-urlencoded',
++      },
++      body: params,
++    });
++    if (!r.ok) {
++      const err = await r.text();
++      console.error(`[Voice/Demo/F2b] Recap SMS failed ${r.status}: ${err.slice(0, 200)}`);
++      return false;
++    }
++    console.log(`[Voice/Demo/F2b] Recap SMS sent to ${toPhone}`);
++    return true;
++  } catch (err) {
++    console.error('[Voice/Demo/F2b] Recap SMS exception:', err && err.message);
++    return false;
++  }
++}
++
+ app.post('/voice/demo/menu', rejectIfShuttingDown, express.urlencoded({ extended: false }), async (req, res) => {
+   const host = req.headers.host;
+   const callSid = String(req.query.callSid || req.body.CallSid || '');
+@@ -7224,28 +7304,31 @@ app.post('/voice/demo/name', rejectIfShuttingDown, express.urlencoded({ extended
+   const host = req.headers.host;
+   const httpProtocol = host?.includes('localhost') ? 'http' : 'https';
+   const attempt = parseInt(req.query.attempt || '1', 10);
++  const environment = req.query.env === 'staging' ? 'staging' : 'production';
+   const speechResult = req.body.SpeechResult || '';
+   const name = sanitizeDemoName(speechResult);
+-  console.log(`[Voice/Demo] name attempt=${attempt} speech="${speechResult}" parsed="${name}"`);
++  console.log(`[Voice/Demo] name attempt=${attempt} env=${environment} speech="${speechResult}" parsed="${name}"`);
+ 
+   if (!name) {
+     if (attempt >= DEMO_NAME_MAX_ATTEMPTS) {
+-      // 2026-05-18 — was redirecting to /voice/demo/connect which is the
+-      // legacy live-orchestrator demo (media-stream + LLM, replaced by the
+-      // canned 5-scenario tour in V57.12.5). The name-fail branch missed
+-      // the migration. Send the caller to the canned menu instead so the
+-      // experience matches what callers who successfully gave a name get.
+-      console.log(`[Voice/Demo] giving up on name after ${attempt} attempts — proceeding anonymously to canned menu`);
++      // F2b (2026-07-01) — was redirecting to the canned 5-scenario menu.
++      // Per docs/F2B_PHASE2_CHANGE_PLAN_2026-07-01.md, F2b's reminder flow
++      // replaces the menu as the live demo experience; the menu code is
++      // kept in the file but no longer reached from this path.
++      // Phase 4 (2026-07-01) — now proceeds anonymously (no name) into the
++      // new scenario walkthrough (docs/F2B_SCENARIO_WALKTHROUGH_SCRIPT_2026-07-01.md),
++      // which itself hands off into the context + timezone ask once done.
++      console.log(`[Voice/Demo] giving up on name after ${attempt} attempts — proceeding anonymously to scenario walkthrough`);
+       const callSid = req.body.CallSid || '';
+       const callerPhone = req.body.From || '';
+-      res.type('text/xml').send(buildDemoMenuTwiml(host, callSid, callerPhone, '', false));
++      res.type('text/xml').send(buildDemoWalkthroughGateTwiml(host, 0, 0, [], callSid, callerPhone, '', environment, 1));
+       return;
+     }
+-    res.type('text/xml').send(buildDemoAskNameTwiml(host, attempt + 1));
++    res.type('text/xml').send(buildDemoAskNameTwiml(host, attempt + 1, environment));
+     return;
+   }
+ 
+-  const action = `${httpProtocol}://${host}/voice/demo/confirm?name=${encodeURIComponent(name)}`;
++  const action = `${httpProtocol}://${host}/voice/demo/confirm?name=${encodeURIComponent(name)}&env=${encodeURIComponent(environment)}`.replace(/&/g, '&amp;');
+   res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+ <Response>
+   <Gather input="speech" action="${action}" speechTimeout="1" speechModel="phone_call" language="en-US">
+@@ -7259,29 +7342,30 @@ app.post('/voice/demo/confirm', rejectIfShuttingDown, express.urlencoded({ exten
+   const host = req.headers.host;
+   const httpProtocol = host?.includes('localhost') ? 'http' : 'https';
+   const name = sanitizeDemoName(req.query.name || '');
++  const environment = req.query.env === 'staging' ? 'staging' : 'production';
+   const speechResult = String(req.body.SpeechResult || '').toLowerCase();
+   const yes = /\b(yes|yeah|yep|correct|right|sure)\b/.test(speechResult);
+   const no = /\b(no|nope|wrong|incorrect)\b/.test(speechResult);
+-  console.log(`[Voice/Demo] confirm name="${name}" speech="${speechResult}" yes=${yes} no=${no}`);
++  console.log(`[Voice/Demo] confirm name="${name}" env=${environment} speech="${speechResult}" yes=${yes} no=${no}`);
+ 
+   if (yes) {
+-    // V57.12.5 — demo line now uses the canned interactive demo
+-    // instead of the live media-stream orchestrator. Redirect to the
+-    // new menu TwiML. buildDemoConnectTwiml is retained as dead code
+-    // for now (could remove in a follow-up cleanup).
++    // F2b (2026-07-01) — replaces the canned 5-scenario menu redirect.
++    // See note on the name-fail branch above.
++    // Phase 4 (2026-07-01) — routes into the scenario walkthrough first;
++    // the walkthrough hands off into the reminder flow once done.
+     const callerPhone = req.body.From || '';
+     const inboundCallSid = req.body.CallSid || '';
+-    console.log(`[Voice/Demo] confirm yes — routing to canned demo menu (CallSid=${inboundCallSid} caller=${callerPhone} name=${name})`);
+-    res.type('text/xml').send(buildDemoMenuTwiml(host, inboundCallSid, callerPhone, name, false));
++    console.log(`[Voice/Demo] confirm yes — routing to scenario walkthrough (CallSid=${inboundCallSid} caller=${callerPhone} name=${name} env=${environment})`);
++    res.type('text/xml').send(buildDemoWalkthroughGateTwiml(host, 0, 0, [], inboundCallSid, callerPhone, name, environment, 1));
+     return;
+   }
+ 
+   if (no) {
+-    res.type('text/xml').send(buildDemoAskNameTwiml(host, 2));
++    res.type('text/xml').send(buildDemoAskNameTwiml(host, 2, environment));
+     return;
+   }
+ 
+-  const action = `${httpProtocol}://${host}/voice/demo/confirm?name=${encodeURIComponent(name)}`;
++  const action = `${httpProtocol}://${host}/voice/demo/confirm?name=${encodeURIComponent(name)}&env=${encodeURIComponent(environment)}`.replace(/&/g, '&amp;');
+   res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+ <Response>
+   <Gather input="speech" action="${action}" speechTimeout="1" speechModel="phone_call" language="en-US">
+@@ -7291,6 +7375,714 @@ app.post('/voice/demo/confirm', rejectIfShuttingDown, express.urlencoded({ exten
+ </Response>`);
+ });
+ 
++// ─── F2b — zero-friction demo line reminder (2026-07-01) ──────────────────
++// Replaces the canned 5-scenario menu as the live post-name-confirm demo
++// experience (Wael decision, this session): context line → confirm caller
++// timezone → capture + confirm reminder time → optional message → create
++// the reminder (via create-demo-reminder Edge Function, reusing
++// action_rules) → post-action readback → hang up. The SMS fires later via
++// the existing evaluate-rules cron. See
++// docs/F2B_PHASE2_CHANGE_PLAN_2026-07-01.md for the full design and the
++// Parser Contract governing parseTimezone.js / parseReminderTime.js.
++//
++// State (callSid, callerPhone, callerName, env, tz, iso, attempt) is
++// threaded entirely through Twilio action-URL query params, matching the
++// existing name-capture flow's convention — no server-side session map
++// needed. buildDemoActionUrl() centralizes the &-escaping requirement so
++// every multi-param action URL here is valid XML (a bare & inside an XML
++// attribute makes Twilio reject the TwiML outright — see the escape note
++// near /voice/enroll/start above).
++
++const DEMO_TIMEZONE_MAX_ATTEMPTS = 3;
++const DEMO_REMINDER_TIME_MAX_ATTEMPTS = 3;
++const DEMO_REFUSAL_RE = /\b(no thanks|not right now|i'?m good|no reminder|don'?t need|do not need|skip it|not now|maybe later)\b/i;
++
++// Live-call feedback (2026-07-02): "I said stop but it did not catch
++// that." The consent disclosure says "Reply STOP to opt out" — but that
++// only ever meant texting STOP back after receiving a message
++// (receive-demo-sms-reply already handles that). Nothing recognized the
++// caller saying "stop" out loud during the call itself. This checks for
++// it wherever the walkthrough listens for speech; conservative keyword
++// set (not the fuller SMS list — "cancel"/"end"/"quit" are too likely to
++// appear in unrelated natural speech when spoken, unlike typed).
++const DEMO_STOP_RE = /\b(stop|stopall|unsubscribe)\b/i;
++
++// Reuses receive-demo-sms-reply's existing opt-out logic (writes to
++// demo_optouts) instead of duplicating it — synthesizes the same
++// From/Body shape that function expects from a real inbound SMS. Ends
++// the call gracefully. Fire-and-forget on the opt-out write itself (same
++// pattern as the Recap SMS) so a transient failure never blocks the
++// caller from hanging up.
++async function handleDemoStopRequest(host, callerPhone, callerName, environment) {
++  const demoEnv = getDemoEnvironmentByName(environment);
++  if (demoEnv?.supabaseUrl && callerPhone) {
++    const params = new URLSearchParams({ From: callerPhone, Body: 'STOP', MessageSid: '' });
++    fetch(`${demoEnv.supabaseUrl}/functions/v1/receive-demo-sms-reply`, {
++      method: 'POST',
++      headers: {
++        'Content-Type': 'application/x-www-form-urlencoded',
++        Authorization: `Bearer ${demoEnv.supabaseServiceRoleKey}`,
++      },
++      body: params,
++    }).catch((err) => {
++      console.error('[Voice/Demo/F2b] verbal STOP -> demo_optouts write failed:', err && err.message);
++    });
++    console.log(`[Voice/Demo/F2b] verbal STOP from ${callerPhone} — recording opt-out`);
++  }
++  const namePart = callerName ? `, ${callerName}` : '';
++  return `<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Say voice="Polly.Joanna">Got it${namePart} — you won't hear from us again. Take care.</Say>
++  <Hangup/>
++</Response>`;
++}
++
++function buildDemoActionUrl(host, path, params) {
++  const httpProtocol = host?.includes('localhost') ? 'http' : 'https';
++  const qs = new URLSearchParams(params).toString();
++  return `${httpProtocol}://${host}${path}${qs ? '?' + qs : ''}`.replace(/&/g, '&amp;');
++}
++
++// SMS — three variants per spec: caller specified "now" (isImmediate),
++// caller gave a specific message, or neither (standard "remind you now"
++// framing — the spec's own wording for the no-message delayed case).
++function buildDemoReminderSmsBody(callerName, message, isImmediate) {
++  const namePart = callerName ? ` ${callerName}` : '';
++  let opener;
++  if (isImmediate) {
++    opener = `Hi${namePart}, it's Naavi — just like you asked.`;
++  } else if (message) {
++    opener = `Hi${namePart}, it's Naavi. You asked me to remind you: ${message}.`;
++  } else {
++    opener = `Hi${namePart}, it's Naavi. You asked me to remind you now.`;
++  }
++  return `${opener} Want me to help with more than reminders? I can organize your calendar, `
++    + `remember things you tell me, and help you stay on top of life — all by voice. `
++    + `Connect your account here: https://mynaavi.com/start Reply STOP to opt out.`;
++}
++
++// ─── F2b Phase 4 — Scenario walkthrough ──────────────────────────────────
++//
++// Plays up to DEMO_MAX_SCENARIOS of the 5 DEMO_SCENARIO_ORDER scenarios as
++// a yes/no-gated conversation, then hands off into the reminder flow
++// below. Confirmed line-by-line in
++// docs/F2B_SCENARIO_WALKTHROUGH_SCRIPT_2026-07-01.md. Fully stateless —
++// idx/played/playedNames travel through Twilio action-URL query params
++// for the call only, same pattern as the reminder flow itself. No
++// database, no in-memory Map (unlike the old, no-longer-routed-to
++// DEMO_SCENARIOS menu above, which used demoCallState).
++const DEMO_WALKTHROUGH_MAX_ATTEMPTS = 2;
++
++function parsePlayedNames(raw) {
++  return String(raw || '').split(',').map((s) => s.trim()).filter(Boolean);
++}
++
++// Single choke point for every exit out of the walkthrough (cap reached,
++// caller asked to move to the reminder, scenarios exhausted). Does NOT
++// send the Recap SMS here — live-call feedback (2026-07-01) caught that
++// sending "thanks for trying Naavi" while the caller is still mid-call
++// (about to set up the reminder) reads as illogical: it summarizes the
++// call before the call is over. `playedNames` is instead threaded through
++// every step of the reminder flow below and the Recap SMS fires at
++// whichever point the call actually ends (success, decline, or error).
++function transitionFromWalkthroughToReminder(host, callSid, callerPhone, callerName, environment, playedNames, prefix = '') {
++  return buildDemoContextAndTimezoneTwiml(host, callSid, callerPhone, callerName, environment, 1, prefix, playedNames);
++}
++
++function buildDemoWalkthroughGateTwiml(host, idx, played, playedNames, callSid, callerPhone, callerName, environment, attempt) {
++  const scenarioName = DEMO_SCENARIO_ORDER[idx];
++  const scenario = DEMO_WALKTHROUGH_SCENARIOS[scenarioName];
++  const action = buildDemoActionUrl(host, '/voice/demo/walkthrough/gate', {
++    callSid: callSid || '', callerPhone: callerPhone || '', callerName: callerName || '',
++    env: environment, idx: String(idx), played: String(played), playedNames: playedNames.join(','),
++    attempt: String(attempt),
++  });
++  let prompt;
++  if (attempt > 1) {
++    prompt = `Sorry, I didn't catch that. ${scenario.gate}`;
++  } else if (idx === 0 && played === 0) {
++    // First scenario of the call — prepend the SMS consent disclosure
++    // (2026-07-02, required for 888 toll-free number TFV registration —
++    // see F2i) then the confirmed bridge line (states the reason: not
++    // connected to real calendar/emails yet). Consent line said exactly
++    // once per call, before either the Recap or Reminder SMS could ever
++    // fire, regardless of whether the caller's name was captured.
++    prompt = `${getConsentDisclosureLine()}${getWalkthroughBridgeLine(callerName)}${scenario.gate}`;
++  } else {
++    prompt = scenario.gate;
++  }
++  return `<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Gather input="speech" action="${action}" speechTimeout="2" speechModel="phone_call" language="en-US">
++    <Say voice="Polly.Joanna">${prompt}</Say>
++  </Gather>
++  <Redirect method="POST">${action}</Redirect>
++</Response>`;
++}
++
++app.post('/voice/demo/walkthrough/gate', rejectIfShuttingDown, express.urlencoded({ extended: false }), async (req, res) => {
++  const host = req.headers.host;
++  const callSid = req.query.callSid || req.body.CallSid || '';
++  const callerPhone = req.query.callerPhone || req.body.From || '';
++  const callerName = req.query.callerName || '';
++  const environment = req.query.env === 'staging' ? 'staging' : 'production';
++  const idx = parseInt(req.query.idx || '0', 10);
++  const played = parseInt(req.query.played || '0', 10);
++  const playedNames = parsePlayedNames(req.query.playedNames);
++  const attempt = parseInt(req.query.attempt || '1', 10);
++  const speechResult = String(req.body.SpeechResult || '').toLowerCase();
++  const yes = /\b(yes|yeah|yep|yup|sure|correct|right|okay|ok)\b/.test(speechResult);
++  const no = /\b(no|nope|not really|skip|pass)\b/.test(speechResult);
++  const scenarioName = DEMO_SCENARIO_ORDER[idx];
++  console.log(`[Voice/Demo/F2b/walkthrough] gate idx=${idx}(${scenarioName}) played=${played} attempt=${attempt} speech="${speechResult}" yes=${yes} no=${no}`);
++
++  if (DEMO_STOP_RE.test(speechResult)) {
++    res.type('text/xml').send(await handleDemoStopRequest(host, callerPhone, callerName, environment));
++    return;
++  }
++
++  if (!scenarioName) {
++    // Defensive — idx somehow out of range. Hand off to the reminder flow
++    // rather than error out.
++    res.type('text/xml').send(transitionFromWalkthroughToReminder(host, callSid, callerPhone, callerName, environment, playedNames));
++    return;
++  }
++
++  if (yes) {
++    const scenario = DEMO_WALKTHROUGH_SCENARIOS[scenarioName];
++    const newPlayed = played + 1;
++    const newPlayedNames = [...playedNames, scenarioName];
++    const atCap = newPlayed >= DEMO_MAX_SCENARIOS;
++    const noneLeft = idx + 1 >= DEMO_SCENARIO_ORDER.length;
++
++    if (atCap || noneLeft) {
++      // Cap reached (or all 5 offered) — the cap-reached line always fires
++      // regardless of what the caller says next (plan §8 test 8), so this
++      // is a statement, not a question. Hands straight into the reminder
++      // flow's existing prompt as one combined Say.
++      res.type('text/xml').send(transitionFromWalkthroughToReminder(
++        host, callSid, callerPhone, callerName, environment, newPlayedNames,
++        `${scenario.body} <break time="800ms"/> ${getCapReachedLine()} <break time="500ms"/> `,
++      ));
++      return;
++    }
++
++    const closerAction = buildDemoActionUrl(host, '/voice/demo/walkthrough/closer', {
++      callSid: callSid || '', callerPhone: callerPhone || '', callerName: callerName || '',
++      env: environment, idx: String(idx), played: String(newPlayed), playedNames: newPlayedNames.join(','),
++    });
++    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Gather input="speech" action="${closerAction}" speechTimeout="3" speechModel="phone_call" language="en-US">
++    <Say voice="Polly.Joanna">${scenario.body} <break time="800ms"/> ${getCloserLine()}</Say>
++  </Gather>
++  <Redirect method="POST">${closerAction}</Redirect>
++</Response>`);
++    return;
++  }
++
++  if (no || attempt >= DEMO_WALKTHROUGH_MAX_ATTEMPTS) {
++    const noneLeft = idx + 1 >= DEMO_SCENARIO_ORDER.length;
++    if (noneLeft) {
++      // Declined the last scenario — nothing left to offer. Hand off
++      // straight into the reminder flow, no cap-reached framing (nothing
++      // was necessarily demoed to summarize).
++      res.type('text/xml').send(transitionFromWalkthroughToReminder(host, callSid, callerPhone, callerName, environment, playedNames));
++      return;
++    }
++    // Live-call regression (2026-07-02): this used to <Say> the decline
++    // line then <Redirect> straight to the next gate's own route with no
++    // <Gather> in between. A Redirect always POSTs with empty SpeechResult
++    // (no caller input happened yet), which the gate handler couldn't
++    // distinguish from "caller's answer to attempt 1 was unclear" — so it
++    // silently rendered attempt 2 ("Sorry, I didn't catch that...") as the
++    // FIRST thing the caller heard for the new scenario, before ever
++    // asking attempt 1. Fix: combine the decline line + next gate's
++    // question into one <Say>, inside a real <Gather> — same pattern
++    // already used correctly by the closer's "advance to next scenario"
++    // branch and by buildDemoWalkthroughGateTwiml itself. The <Redirect>
++    // below now only fires on a genuine Gather timeout (real silence
++    // after the question was actually asked), which correctly earns
++    // attempt 2.
++    const nextScenarioName = DEMO_SCENARIO_ORDER[idx + 1];
++    const nextScenario = DEMO_WALKTHROUGH_SCENARIOS[nextScenarioName];
++    const nextAction = buildDemoActionUrl(host, '/voice/demo/walkthrough/gate', {
++      callSid: callSid || '', callerPhone: callerPhone || '', callerName: callerName || '',
++      env: environment, idx: String(idx + 1), played: String(played), playedNames: playedNames.join(','), attempt: '1',
++    });
++    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Gather input="speech" action="${nextAction}" speechTimeout="2" speechModel="phone_call" language="en-US">
++    <Say voice="Polly.Joanna">${getDeclineLine()} ${nextScenario.gate}</Say>
++  </Gather>
++  <Redirect method="POST">${nextAction}</Redirect>
++</Response>`);
++    return;
++  }
++
++  res.type('text/xml').send(buildDemoWalkthroughGateTwiml(host, idx, played, playedNames, callSid, callerPhone, callerName, environment, attempt + 1));
++});
++
++app.post('/voice/demo/walkthrough/closer', rejectIfShuttingDown, express.urlencoded({ extended: false }), async (req, res) => {
++  const host = req.headers.host;
++  const callSid = req.query.callSid || req.body.CallSid || '';
++  const callerPhone = req.query.callerPhone || req.body.From || '';
++  const callerName = req.query.callerName || '';
++  const environment = req.query.env === 'staging' ? 'staging' : 'production';
++  const idx = parseInt(req.query.idx || '0', 10);
++  const played = parseInt(req.query.played || '0', 10);
++  const playedNames = parsePlayedNames(req.query.playedNames);
++  const speechResult = String(req.body.SpeechResult || '').toLowerCase();
++  const explicitNo = /\b(no|nope|not now)\b/.test(speechResult);
++  const moveToReminder = explicitNo || wantsToMoveToReminder(speechResult);
++  console.log(`[Voice/Demo/F2b/walkthrough] closer idx=${idx} played=${played} speech="${speechResult}" moveToReminder=${moveToReminder}`);
++
++  if (DEMO_STOP_RE.test(speechResult)) {
++    res.type('text/xml').send(await handleDemoStopRequest(host, callerPhone, callerName, environment));
++    return;
++  }
++
++  if (moveToReminder) {
++    res.type('text/xml').send(transitionFromWalkthroughToReminder(host, callSid, callerPhone, callerName, environment, playedNames));
++    return;
++  }
++
++  // Per the approved plan (docs/F2B_SCENARIO_WALKTHROUGH_PHASE2_2026-07-01.md
++  // §2/§7): a literal "yes" or any unrecognized answer both advance to the
++  // next scenario — the caller is staying in the loop either way.
++  const noneLeft = idx + 1 >= DEMO_SCENARIO_ORDER.length;
++  if (noneLeft) {
++    res.type('text/xml').send(transitionFromWalkthroughToReminder(
++      host, callSid, callerPhone, callerName, environment, playedNames,
++      `${getCapReachedLine()} <break time="500ms"/> `,
++    ));
++    return;
++  }
++  res.type('text/xml').send(buildDemoWalkthroughGateTwiml(host, idx + 1, played, playedNames, callSid, callerPhone, callerName, environment, 1));
++});
++
++function buildDemoContextAndTimezoneTwiml(host, callSid, callerPhone, callerName, environment, attempt, prefix = '', playedNames = []) {
++  const action = buildDemoActionUrl(host, '/voice/demo/timezone', {
++    callSid: callSid || '', callerPhone: callerPhone || '', callerName: callerName || '',
++    env: environment, attempt: String(attempt), playedNames: playedNames.join(','),
++  });
++  // F2b Phase 4 — `prefix` lets the scenario walkthrough hand off into this
++  // existing prompt with one extra sentence prepended (the scenario body +
++  // closing line), instead of a separate TwiML round trip. Only used on
++  // attempt 1, straight from the walkthrough's transition point; every
++  // other caller of this function omits it (defaults to '').
++  // Trimmed per live-call feedback (2026-07-01) — the original line
++  // ("People use me to remember things, manage their calendars...") was
++  // pure repetition by the time it's reached: the caller just heard 1-3
++  // live examples of exactly those capabilities in the walkthrough. 30
++  // words -> 12. Skipped entirely when a prefix is present (the
++  // cap-reached path) — that prefix already ends with its own "let's set
++  // up a real one for you now," so adding this sentence too would repeat
++  // the same phrase twice in a row (caught in local smoke test).
++  const transitionLine = prefix ? '' : "Let's set up a real one for you. ";
++  const prompt = attempt === 1
++    ? `${prefix}${transitionLine}<break time="400ms"/> What city or time zone are you in?`
++    : `Sorry, I didn't catch that. What city or time zone are you in?`;
++  return `<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Gather input="speech" action="${action}" speechTimeout="2" speechModel="phone_call" language="en-US">
++    <Say voice="Polly.Joanna">${prompt}</Say>
++  </Gather>
++  <Redirect method="POST">${action}</Redirect>
++</Response>`;
++}
++
++function buildDemoTimezoneConfirmTwiml(host, callSid, callerPhone, callerName, environment, timezone, attempt, playedNames = []) {
++  const action = buildDemoActionUrl(host, '/voice/demo/timezone-confirm', {
++    callSid: callSid || '', callerPhone: callerPhone || '', callerName: callerName || '',
++    env: environment, tz: timezone, attempt: String(attempt), playedNames: playedNames.join(','),
++  });
++  const label = getZoneLabel(timezone);
++  return `<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Gather input="speech" action="${action}" speechTimeout="1" speechModel="phone_call" language="en-US">
++    <Say voice="Polly.Joanna">Got it — ${label} time. Is that right?</Say>
++  </Gather>
++  <Redirect method="POST">${action}</Redirect>
++</Response>`;
++}
++
++function buildDemoReminderTimeTwiml(host, callSid, callerPhone, callerName, environment, timezone, attempt, tzWasDefaulted, playedNames = []) {
++  const action = buildDemoActionUrl(host, '/voice/demo/reminder-time', {
++    callSid: callSid || '', callerPhone: callerPhone || '', callerName: callerName || '',
++    env: environment, tz: timezone, attempt: String(attempt), playedNames: playedNames.join(','),
++  });
++  const namePart = callerName ? `, ${callerName}` : '';
++  let prompt;
++  if (attempt === 1) {
++    // Trimmed per live-call feedback (2026-07-01) — "Pick any time —
++    // today, tomorrow, next week. I'll text you exactly then." was
++    // explaining something the caller already knows (they're setting a
++    // reminder time). ~15 words cut; the actual reminder confirmation
++    // right after this still states the resolved time back to them.
++    //
++    // Live-call regression (2026-07-02) — that trim went too far on this
++    // one word. "When should I remind you?" was ambiguous enough that a
++    // real caller answered "Say hi to my wife" three times in a row,
++    // thinking the question asked WHAT to be reminded of, not WHEN. "What
++    // time" removes the ambiguity while staying just as short.
++    const defaultNote = tzWasDefaulted ? `I'll go with ${getZoneLabel(timezone)} time. <break time="300ms"/> ` : '';
++    prompt = `${defaultNote}What time should I remind you${namePart}?`;
++  } else {
++    prompt = `Sorry, I didn't catch that. What time should I remind you${namePart}?`;
++  }
++  // Say sits OUTSIDE Gather on purpose (2026-07-01, after a live test call
++  // dropped the leading word "tomorrow" from "tomorrow morning" — the
++  // Gather+nested-Say pattern lets barge-in start capturing speech before
++  // the prompt finishes, which can clip whatever the caller says first if
++  // they start answering right as Naavi is still talking). Matches the
++  // established fix for the same class of issue in the PIN-gather flow
++  // (see comment near /voice/pin-result): nesting Play/Say inside Gather
++  // caused silence/clipping in testing; top-level Say is the reliable
++  // pattern elsewhere in this file. Trade-off: caller can no longer
++  // interrupt this specific prompt mid-sentence — acceptable here since
++  // getting the reminder time right matters more than shaving a second.
++  return `<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Say voice="Polly.Joanna">${prompt}</Say>
++  <Gather input="speech" action="${action}" speechTimeout="2" speechModel="phone_call" language="en-US" />
++  <Redirect method="POST">${action}</Redirect>
++</Response>`;
++}
++
++function buildDemoReminderConfirmTwiml(host, callSid, callerPhone, callerName, environment, timezone, iso, isImmediate, attempt, playedNames = []) {
++  const action = buildDemoActionUrl(host, '/voice/demo/reminder-confirm', {
++    callSid: callSid || '', callerPhone: callerPhone || '', callerName: callerName || '',
++    env: environment, tz: timezone, iso, immediate: isImmediate ? '1' : '0', attempt: String(attempt),
++    playedNames: playedNames.join(','),
++  });
++  const namePart = callerName ? `, ${callerName}` : '';
++  const spokenTime = formatSpokenDateTime(iso, timezone);
++  return `<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Gather input="speech" action="${action}" speechTimeout="1" speechModel="phone_call" language="en-US">
++    <Say voice="Polly.Joanna">Got it. I'll text you ${spokenTime}${namePart}. Is that right?</Say>
++  </Gather>
++  <Redirect method="POST">${action}</Redirect>
++</Response>`;
++}
++
++// F2b Phase 4 — call actually ends here (declined reminder). Fires the
++// Recap SMS at this true end-of-call point rather than earlier at the
++// walkthrough hand-off (see note on transitionFromWalkthroughToReminder).
++function buildDemoDeclineTwiml(callerName, callerPhone = '', playedNames = [], environment = 'production') {
++  if (callerPhone && playedNames.length > 0) {
++    sendRecapSms(callerPhone, callerName, playedNames, environment).catch((err) => {
++      console.error('[Voice/Demo/F2b] Recap SMS fire-and-forget error:', err && err.message);
++    });
++  }
++  const namePart = callerName ? `, ${callerName}` : '';
++  return `<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Say voice="Polly.Joanna">No problem. Visit my naavi dot com to see what else I can do. Have a great day${namePart}.</Say>
++  <Hangup/>
++</Response>`;
++}
++
++app.post('/voice/demo/timezone', rejectIfShuttingDown, express.urlencoded({ extended: false }), async (req, res) => {
++  const host = req.headers.host;
++  const callSid = req.query.callSid || req.body.CallSid || '';
++  const callerPhone = req.query.callerPhone || req.body.From || '';
++  const callerName = req.query.callerName || '';
++  const environment = req.query.env === 'staging' ? 'staging' : 'production';
++  const attempt = parseInt(req.query.attempt || '1', 10);
++  const playedNames = parsePlayedNames(req.query.playedNames);
++  const speechResult = req.body.SpeechResult || '';
++  const tz = parseTimezone(speechResult);
++  console.log(`[Voice/Demo/F2b] timezone attempt=${attempt} env=${environment} speech="${speechResult}" parsed="${tz}"`);
++
++  if (!tz) {
++    if (attempt >= DEMO_TIMEZONE_MAX_ATTEMPTS) {
++      // Disclosed default per plan §2b — never a silent guess; the caller
++      // hears the default named in the next line (reminder-time prompt).
++      console.log(`[Voice/Demo/F2b] timezone unresolved after ${attempt} attempts — defaulting to ${DEFAULT_TIMEZONE}`);
++      res.type('text/xml').send(buildDemoReminderTimeTwiml(host, callSid, callerPhone, callerName, environment, DEFAULT_TIMEZONE, 1, true, playedNames));
++      return;
++    }
++    res.type('text/xml').send(buildDemoContextAndTimezoneTwiml(host, callSid, callerPhone, callerName, environment, attempt + 1, '', playedNames));
++    return;
++  }
++
++  res.type('text/xml').send(buildDemoTimezoneConfirmTwiml(host, callSid, callerPhone, callerName, environment, tz, attempt, playedNames));
++});
++
++app.post('/voice/demo/timezone-confirm', rejectIfShuttingDown, express.urlencoded({ extended: false }), async (req, res) => {
++  const host = req.headers.host;
++  const callSid = req.query.callSid || req.body.CallSid || '';
++  const callerPhone = req.query.callerPhone || req.body.From || '';
++  const callerName = req.query.callerName || '';
++  const environment = req.query.env === 'staging' ? 'staging' : 'production';
++  const timezone = req.query.tz || DEFAULT_TIMEZONE;
++  const attempt = parseInt(req.query.attempt || '1', 10);
++  const playedNames = parsePlayedNames(req.query.playedNames);
++  const speechResult = String(req.body.SpeechResult || '').toLowerCase();
++  const yes = /\b(yes|yeah|yep|correct|right|sure)\b/.test(speechResult);
++  const no = /\b(no|nope|wrong|incorrect)\b/.test(speechResult);
++  console.log(`[Voice/Demo/F2b] timezone-confirm tz=${timezone} speech="${speechResult}" yes=${yes} no=${no}`);
++
++  if (yes) {
++    res.type('text/xml').send(buildDemoReminderTimeTwiml(host, callSid, callerPhone, callerName, environment, timezone, 1, false, playedNames));
++    return;
++  }
++
++  if (no) {
++    if (attempt >= DEMO_TIMEZONE_MAX_ATTEMPTS) {
++      console.log(`[Voice/Demo/F2b] timezone rejected ${attempt} times — defaulting to ${DEFAULT_TIMEZONE}`);
++      res.type('text/xml').send(buildDemoReminderTimeTwiml(host, callSid, callerPhone, callerName, environment, DEFAULT_TIMEZONE, 1, true, playedNames));
++      return;
++    }
++    res.type('text/xml').send(buildDemoContextAndTimezoneTwiml(host, callSid, callerPhone, callerName, environment, attempt + 1, '', playedNames));
++    return;
++  }
++
++  const action = buildDemoActionUrl(host, '/voice/demo/timezone-confirm', {
++    callSid, callerPhone, callerName, env: environment, tz: timezone, attempt: String(attempt), playedNames: playedNames.join(','),
++  });
++  res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Gather input="speech" action="${action}" speechTimeout="1" speechModel="phone_call" language="en-US">
++    <Say voice="Polly.Joanna">Sorry, please say yes or no.</Say>
++  </Gather>
++  <Redirect method="POST">${action}</Redirect>
++</Response>`);
++});
++
++app.post('/voice/demo/reminder-time', rejectIfShuttingDown, express.urlencoded({ extended: false }), async (req, res) => {
++  const host = req.headers.host;
++  const callSid = req.query.callSid || req.body.CallSid || '';
++  const callerPhone = req.query.callerPhone || req.body.From || '';
++  const callerName = req.query.callerName || '';
++  const environment = req.query.env === 'staging' ? 'staging' : 'production';
++  const timezone = req.query.tz || DEFAULT_TIMEZONE;
++  const attempt = parseInt(req.query.attempt || '1', 10);
++  const playedNames = parsePlayedNames(req.query.playedNames);
++  const speechResult = req.body.SpeechResult || '';
++  const namePart = callerName ? `, ${callerName}` : '';
++  console.log(`[Voice/Demo/F2b] reminder-time attempt=${attempt} tz=${timezone} speech="${speechResult}"`);
++
++  if (DEMO_REFUSAL_RE.test(speechResult.toLowerCase())) {
++    console.log(`[Voice/Demo/F2b] caller declined a reminder — ending gracefully, no SMS`);
++    res.type('text/xml').send(buildDemoDeclineTwiml(callerName, callerPhone, playedNames, environment));
++    return;
++  }
++
++  const parsed = parseReminderTime(speechResult, timezone);
++
++  if (parsed.needsTimeOfDay) {
++    // Spec's "vague time" edge case — day given, no time. Ask specifically
++    // for a time-of-day rather than a generic re-ask.
++    const action = buildDemoActionUrl(host, '/voice/demo/reminder-time', {
++      callSid, callerPhone, callerName, env: environment, tz: timezone, attempt: String(attempt), playedNames: playedNames.join(','),
++    });
++    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Gather input="speech" action="${action}" speechTimeout="2" speechModel="phone_call" language="en-US">
++    <Say voice="Polly.Joanna">Morning, afternoon, or evening?</Say>
++  </Gather>
++  <Redirect method="POST">${action}</Redirect>
++</Response>`);
++    return;
++  }
++
++  if (!parsed.iso) {
++    if (attempt >= DEMO_REMINDER_TIME_MAX_ATTEMPTS) {
++      console.log(`[Voice/Demo/F2b] reminder time unresolved after ${attempt} attempts — ending gracefully, no SMS`);
++      // F2b Phase 4 — call actually ends here; fire the Recap SMS at this
++      // true end-of-call point (see transitionFromWalkthroughToReminder note).
++      if (callerPhone && playedNames.length > 0) {
++        sendRecapSms(callerPhone, callerName, playedNames, environment).catch((err) => {
++          console.error('[Voice/Demo/F2b] Recap SMS fire-and-forget error:', err && err.message);
++        });
++      }
++      res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Say voice="Polly.Joanna">I'm having trouble catching that${namePart}. Visit my naavi dot com to see what else I can do. Have a great day.</Say>
++  <Hangup/>
++</Response>`);
++      return;
++    }
++    res.type('text/xml').send(buildDemoReminderTimeTwiml(host, callSid, callerPhone, callerName, environment, timezone, attempt + 1, false, playedNames));
++    return;
++  }
++
++  // Past-time edge case — the caller asked for a time that's already gone by.
++  if (new Date(parsed.iso).getTime() <= Date.now()) {
++    console.log(`[Voice/Demo/F2b] resolved time ${parsed.iso} is in the past — re-asking`);
++    const action = buildDemoActionUrl(host, '/voice/demo/reminder-time', {
++      callSid, callerPhone, callerName, env: environment, tz: timezone, attempt: String(attempt), playedNames: playedNames.join(','),
++    });
++    // States what was actually heard/resolved (2026-07-01) — previously
++    // this rejection was silent about the misunderstood time, which made
++    // an AM/PM mis-parse (a real bug found via live call, fixed the same
++    // day) impossible for the caller to catch and self-correct in the
++    // moment. Disclosing it also makes the failure mode obvious in
++    // Railway logs without needing to reproduce the call.
++    const misheardTime = formatSpokenDateTime(parsed.iso, timezone);
++    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Gather input="speech" action="${action}" speechTimeout="2" speechModel="phone_call" language="en-US">
++    <Say voice="Polly.Joanna">I heard ${misheardTime}, but that's already passed${namePart}. Pick any time from now forward.</Say>
++  </Gather>
++  <Redirect method="POST">${action}</Redirect>
++</Response>`);
++    return;
++  }
++
++  res.type('text/xml').send(buildDemoReminderConfirmTwiml(host, callSid, callerPhone, callerName, environment, timezone, parsed.iso, parsed.isImmediate, attempt, playedNames));
++});
++
++app.post('/voice/demo/reminder-confirm', rejectIfShuttingDown, express.urlencoded({ extended: false }), async (req, res) => {
++  const host = req.headers.host;
++  const callSid = req.query.callSid || req.body.CallSid || '';
++  const callerPhone = req.query.callerPhone || req.body.From || '';
++  const callerName = req.query.callerName || '';
++  const environment = req.query.env === 'staging' ? 'staging' : 'production';
++  const timezone = req.query.tz || DEFAULT_TIMEZONE;
++  const iso = req.query.iso || '';
++  const isImmediate = req.query.immediate === '1';
++  const attempt = parseInt(req.query.attempt || '1', 10);
++  const playedNames = parsePlayedNames(req.query.playedNames);
++  const speechResult = String(req.body.SpeechResult || '').toLowerCase();
++  const yes = /\b(yes|yeah|yep|correct|right|sure)\b/.test(speechResult);
++  const no = /\b(no|nope|wrong|incorrect)\b/.test(speechResult);
++  console.log(`[Voice/Demo/F2b] reminder-confirm iso=${iso} speech="${speechResult}" yes=${yes} no=${no}`);
++
++  if (yes && iso) {
++    const action = buildDemoActionUrl(host, '/voice/demo/reminder-message', {
++      callSid, callerPhone, callerName, env: environment, tz: timezone, iso, immediate: isImmediate ? '1' : '0',
++      playedNames: playedNames.join(','),
++    });
++    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Gather input="speech" action="${action}" speechTimeout="2" speechModel="phone_call" language="en-US">
++    <Say voice="Polly.Joanna">Anything specific to include?</Say>
++  </Gather>
++  <Redirect method="POST">${action}</Redirect>
++</Response>`);
++    return;
++  }
++
++  if (no) {
++    if (attempt >= DEMO_REMINDER_TIME_MAX_ATTEMPTS) {
++      res.type('text/xml').send(buildDemoDeclineTwiml(callerName, callerPhone, playedNames, environment));
++      return;
++    }
++    res.type('text/xml').send(buildDemoReminderTimeTwiml(host, callSid, callerPhone, callerName, environment, timezone, attempt + 1, false, playedNames));
++    return;
++  }
++
++  const action = buildDemoActionUrl(host, '/voice/demo/reminder-confirm', {
++    callSid, callerPhone, callerName, env: environment, tz: timezone, iso, immediate: isImmediate ? '1' : '0', attempt: String(attempt),
++    playedNames: playedNames.join(','),
++  });
++  res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Gather input="speech" action="${action}" speechTimeout="1" speechModel="phone_call" language="en-US">
++    <Say voice="Polly.Joanna">Sorry, please say yes or no.</Say>
++  </Gather>
++  <Redirect method="POST">${action}</Redirect>
++</Response>`);
++});
++
++app.post('/voice/demo/reminder-message', rejectIfShuttingDown, express.urlencoded({ extended: false }), async (req, res) => {
++  const callSid = req.query.callSid || req.body.CallSid || '';
++  const callerPhone = req.query.callerPhone || req.body.From || '';
++  const callerName = req.query.callerName || '';
++  const environment = req.query.env === 'staging' ? 'staging' : 'production';
++  const timezone = req.query.tz || DEFAULT_TIMEZONE;
++  const iso = req.query.iso || '';
++  const isImmediate = req.query.immediate === '1';
++  const playedNames = parsePlayedNames(req.query.playedNames);
++  const speechResult = String(req.body.SpeechResult || '').trim();
++  const namePart = callerName ? `, ${callerName}` : '';
++  console.log(`[Voice/Demo/F2b] reminder-message iso=${iso} tz=${timezone} immediate=${isImmediate} message="${speechResult}"`);
++
++  // F2b Phase 4 — every branch below is a true end-of-call point, so each
++  // fires the Recap SMS (fire-and-forget) if any scenarios were played,
++  // right before its own Say/Hangup. See transitionFromWalkthroughToReminder
++  // note for why this moved here instead of firing earlier.
++  const fireRecap = () => {
++    if (callerPhone && playedNames.length > 0) {
++      sendRecapSms(callerPhone, callerName, playedNames, environment).catch((err) => {
++        console.error('[Voice/Demo/F2b] Recap SMS fire-and-forget error:', err && err.message);
++      });
++    }
++  };
++
++  const declinesMessage = /^(no|nope|nothing|that's it|thats it|no thanks)\b/i.test(speechResult);
++  const message = declinesMessage ? '' : speechResult;
++
++  const demoEnv = getDemoEnvironmentByName(environment);
++  if (!demoEnv || !demoEnv.supabaseUrl || !iso || !callerPhone) {
++    console.error(`[Voice/Demo/F2b] cannot create reminder — missing config/iso/phone (env=${environment} iso=${iso} phone=${callerPhone})`);
++    fireRecap();
++    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Say voice="Polly.Joanna">Sorry, something went wrong on my end${namePart}. Please try calling again. Goodbye.</Say>
++  <Hangup/>
++</Response>`);
++    return;
++  }
++
++  const smsBody = buildDemoReminderSmsBody(callerName, message, isImmediate);
++  const spokenTime = formatSpokenDateTime(iso, timezone);
++
++  try {
++    const createRes = await fetch(`${demoEnv.supabaseUrl}/functions/v1/create-demo-reminder`, {
++      method: 'POST',
++      headers: {
++        'Content-Type': 'application/json',
++        Authorization: `Bearer ${demoEnv.supabaseServiceRoleKey}`,
++      },
++      body: JSON.stringify({
++        phone: callerPhone,
++        name: callerName || undefined,
++        fire_at: iso,
++        message: smsBody,
++      }),
++    });
++
++    if (!createRes.ok) {
++      const errText = await createRes.text().catch(() => '');
++      console.error(`[Voice/Demo/F2b] create-demo-reminder failed status=${createRes.status}: ${errText.slice(0, 300)}`);
++      fireRecap();
++      res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Say voice="Polly.Joanna">Sorry, I couldn't set that up${namePart}. Please try calling again. Goodbye.</Say>
++  <Hangup/>
++</Response>`);
++      return;
++    }
++
++    console.log(`[Voice/Demo/F2b] reminder created for ${callerPhone} firing at ${iso} (env=${environment})`);
++  } catch (err) {
++    console.error('[Voice/Demo/F2b] create-demo-reminder exception:', err && err.message);
++    fireRecap();
++    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Say voice="Polly.Joanna">Sorry, I couldn't set that up${namePart}. Please try calling again. Goodbye.</Say>
++  <Hangup/>
++</Response>`);
++    return;
++  }
++
++  fireRecap();
++
++  // Post-action readback per CLAUDE.md Rule #12 — repeats the exact
++  // commitment that was just written (time + zone), doubling as the
++  // spec's own closing line.
++  res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Say voice="Polly.Joanna">Got it${namePart}. I'll text you ${spokenTime}. Take care.</Say>
++  <Hangup/>
++</Response>`);
++});
++
+ // ─── Voice biometric enrollment (V57.11.0) ────────────────────────────────
+ // Triggered mid-call by "set up my voice" / "enroll my voice" / "re-enroll
+ // my voice" — we redirect the live call to /voice/enroll/start, run three
+diff --git a/src/voice/getDemoEnvironment.js b/src/voice/getDemoEnvironment.js
+new file mode 100644
+index 0000000..82d2669
+--- /dev/null
++++ b/src/voice/getDemoEnvironment.js
+@@ -0,0 +1,68 @@
++/**
++ * Single point of environment selection for the demo line (F2b).
++ *
++ * The voice server never uses a Supabase client library — every call site
++ * in index.js calls Edge Functions directly via fetch() with
++ * `${SUPABASE_URL}/functions/v1/<fn>` + a service-role bearer token (see
++ * e.g. callResolvePlace in index.js:215-224). This helper follows that same
++ * shape rather than inventing a client-object abstraction that doesn't
++ * exist elsewhere in this codebase.
++ *
++ * Replaces scattered `if (To === DEMO_TWILIO_NUMBER)` /
++ * `if (To === STAGING_DEMO_TWILIO_NUMBER)` checks with one call site.
++ */
++
++// F2b (2026-07-01) — outbound SMS "From" number per environment. Production
++// uses +14313006228 (provisioned to route around the 888 number's Toll-Free
++// Verification block — see DEMO_SMS_FROM history in index.js). Staging uses
++// its own number, +18734462284, directly — confirmed via Twilio Console
++// Traffic Status (Messaging enabled, no restriction) that it needs no
++// separate workaround, unlike the 888 number. Neither environment's demo
++// traffic should ever send from +12495235394 (the production voice server's
++// number, reserved for real registered users' own alerts).
++function configFor(environment, env) {
++  if (environment === 'production') {
++    return {
++      environment: 'production',
++      supabaseUrl: env.SUPABASE_URL,
++      supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
++      demoUserId: env.DEMO_USER_ID || '',
++      demoSmsFrom: '+14313006228',
++    };
++  }
++  if (environment === 'staging') {
++    return {
++      environment: 'staging',
++      supabaseUrl: env.STAGING_SUPABASE_URL,
++      supabaseServiceRoleKey: env.STAGING_SUPABASE_SERVICE_ROLE_KEY,
++      demoUserId: env.STAGING_DEMO_USER_ID || '',
++      demoSmsFrom: env.STAGING_DEMO_TWILIO_NUMBER || '',
++    };
++  }
++  return null;
++}
++
++/**
++ * Called once, at the /voice entry point, with the Twilio `To` number.
++ */
++function getDemoEnvironment(toNumber, env = process.env) {
++  const productionNumber = env.DEMO_TWILIO_NUMBER || '';
++  const stagingNumber = env.STAGING_DEMO_TWILIO_NUMBER || '';
++
++  if (productionNumber && toNumber === productionNumber) return configFor('production', env);
++  if (stagingNumber && toNumber === stagingNumber) return configFor('staging', env);
++  return null;
++}
++
++/**
++ * Called by every downstream TwiML handler in the multi-step demo flow,
++ * which only carries an `env=staging|production` tag through the Twilio
++ * action URL — never the actual Supabase URL or service-role key, which
++ * must never appear in a URL (Twilio/Railway access logs would leak it).
++ * Re-derives the full config server-side from the tag.
++ */
++function getDemoEnvironmentByName(environment, env = process.env) {
++  return configFor(environment, env);
++}
++
++module.exports = { getDemoEnvironment, getDemoEnvironmentByName };
+diff --git a/src/voice/parseReminderTime.js b/src/voice/parseReminderTime.js
+new file mode 100644
+index 0000000..42c28ff
+--- /dev/null
++++ b/src/voice/parseReminderTime.js
+@@ -0,0 +1,217 @@
++/**
++ * Deterministic reminder-time parser for the demo line (F2b). No LLM.
++ *
++ * Recognizes an exact, enumerated vocabulary — see
++ * docs/F2B_PHASE2_CHANGE_PLAN_2026-07-01.md §2a ("Parser Contract" in §8a:
++ * any vocabulary change here requires a new Phase 2 plan + tests + review,
++ * not a casual edit).
++ *
++ * No external timezone library — the offset for a given IANA zone at a
++ * given instant is computed with the Intl.DateTimeFormat trick below
++ * (format the instant in the target zone, re-parse those digits as if they
++ * were UTC, diff against the real instant). This intentionally ignores the
++ * rare DST-transition-hour edge case, which is an acceptable trade for a
++ * marketing demo line.
++ */
++
++const { getZoneLabel } = require('./parseTimezone.js');
++
++const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
++const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
++
++function getZonedParts(timeZone, date) {
++  const dtf = new Intl.DateTimeFormat('en-US', {
++    timeZone,
++    hourCycle: 'h23',
++    year: 'numeric', month: '2-digit', day: '2-digit',
++    hour: '2-digit', minute: '2-digit', second: '2-digit',
++  });
++  return dtf.formatToParts(date).reduce((acc, p) => {
++    if (p.type !== 'literal') acc[p.type] = Number(p.value);
++    return acc;
++  }, {});
++}
++
++function getOffsetMinutes(timeZone, date) {
++  const p = getZonedParts(timeZone, date);
++  const asUTC = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
++  return (asUTC - date.getTime()) / 60000;
++}
++
++function zonedWallClockToUtc(year, month, day, hour, minute, timeZone) {
++  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, 0);
++  const offsetMinutes = getOffsetMinutes(timeZone, new Date(utcGuess));
++  return new Date(utcGuess - offsetMinutes * 60000);
++}
++
++function formatIsoWithOffset(utcDate, timeZone) {
++  const offsetMinutes = getOffsetMinutes(timeZone, utcDate);
++  const sign = offsetMinutes <= 0 ? '-' : '+';
++  const abs = Math.abs(offsetMinutes);
++  const oh = String(Math.floor(abs / 60)).padStart(2, '0');
++  const om = String(abs % 60).padStart(2, '0');
++  const p = getZonedParts(timeZone, utcDate);
++  const pad = (n) => String(n).padStart(2, '0');
++  return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}:${pad(p.second)}${sign}${oh}:${om}`;
++}
++
++function weekdayIndexOf(year, month, day) {
++  return new Date(Date.UTC(year, month - 1, day)).getUTCDay();
++}
++
++function addDays(year, month, day, n) {
++  const d = new Date(Date.UTC(year, month - 1, day));
++  d.setUTCDate(d.getUTCDate() + n);
++  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
++}
++
++function normalize(raw) {
++  // Colons are meaningful here (clock times like "3:30") — only strip
++  // sentence punctuation, not ':'.
++  //
++  // Twilio's speech-to-text commonly transcribes "pm"/"am" as "p.m."/"a.m."
++  // (with periods). Collapse those into a single "pm"/"am" token BEFORE the
++  // generic period-to-space strip below — otherwise "p.m." becomes "p m"
++  // (two separate words with a space between them), which no longer
++  // matches the ampmMatch regex's \b(am|pm)\b. The parser then silently
++  // fell through to the bare 24-hour clock regex, misreading "1:00 p.m."
++  // as "1:00" (1 AM) instead of 13:00 (1 PM) — a real bug found via a live
++  // call's logs (2026-07-01): speech="today at 1:00 p.m." resolved to
++  // 01:00 and got rejected as already past. Confirmed via direct test,
++  // not a speech-recognition issue — Twilio heard "p.m." correctly.
++  return String(raw || '')
++    .toLowerCase()
++    .replace(/\b([ap])\.\s*m\.?/g, '$1m')
++    .replace(/[.,!?;]+/g, ' ')
++    .replace(/\s+/g, ' ')
++    .trim();
++}
++
++function detectDay(text, todayParts) {
++  if (/\bnext week\b/.test(text)) {
++    return addDays(todayParts.year, todayParts.month, todayParts.day, 7);
++  }
++  if (/\btomorrow\b/.test(text)) {
++    return addDays(todayParts.year, todayParts.month, todayParts.day, 1);
++  }
++  if (/\b(today|tonight)\b/.test(text)) {
++    return { year: todayParts.year, month: todayParts.month, day: todayParts.day };
++  }
++  const weekdayMatch = WEEKDAYS.find((w) => new RegExp(`\\b${w}\\b`).test(text));
++  if (weekdayMatch) {
++    const todayIdx = weekdayIndexOf(todayParts.year, todayParts.month, todayParts.day);
++    const targetIdx = WEEKDAYS.indexOf(weekdayMatch);
++    const delta = (targetIdx - todayIdx + 7) % 7;
++    return addDays(todayParts.year, todayParts.month, todayParts.day, delta);
++  }
++  return null;
++}
++
++function detectTime(text) {
++  if (/\bnoon\b/.test(text)) return { hour: 12, minute: 0 };
++  if (/\bmidnight\b/.test(text)) return { hour: 0, minute: 0 };
++  if (/\bmorning\b/.test(text)) return { hour: 9, minute: 0 };
++  if (/\bafternoon\b/.test(text)) return { hour: 14, minute: 0 };
++  if (/\b(evening|tonight)\b/.test(text)) return { hour: 18, minute: 0 };
++
++  // Explicit 12-hour clock: "3 pm", "3:30 pm", "3pm"
++  const ampmMatch = text.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/);
++  if (ampmMatch) {
++    let hour = Number(ampmMatch[1]) % 12;
++    const minute = ampmMatch[2] ? Number(ampmMatch[2]) : 0;
++    if (ampmMatch[3] === 'pm') hour += 12;
++    return { hour, minute };
++  }
++
++  // Explicit 24-hour or bare "H:MM" clock (e.g. "15:00", "3:30"). A bare
++  // H:MM with no am/pm is deliberately read as literal 24-hour time rather
++  // than guessed — the caller hears it back on the confirm step and can
++  // correct it if that's not what they meant.
++  const clockMatch = text.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
++  if (clockMatch) {
++    return { hour: Number(clockMatch[1]), minute: Number(clockMatch[2]) };
++  }
++
++  return null;
++}
++
++/**
++ * @param {string} utterance - caller's spoken answer (already STT-transcribed)
++ * @param {string} timeZone - IANA timezone confirmed earlier in the call
++ * @param {Date} [nowUtc] - injectable for tests; defaults to current time
++ * @returns {{iso: string|null, needsTimeOfDay: boolean, isImmediate: boolean}}
++ *   iso: resolved ISO8601 timestamp with correct UTC offset, or null
++ *   needsTimeOfDay: true when a day was recognized but no time was given
++ *   (the spec's "vague time" edge case — caller flow should ask
++ *   morning/afternoon/evening rather than guess)
++ *   isImmediate: true only when the caller said "now" — the SMS body uses
++ *   different wording for this case per the F2b spec ("just like you
++ *   asked" vs the standard "you asked me to remind you now" opener)
++ */
++function parseReminderTime(utterance, timeZone, nowUtc = new Date()) {
++  const text = normalize(utterance);
++  if (!text) return { iso: null, needsTimeOfDay: false, isImmediate: false };
++
++  if (/\bnow\b/.test(text)) {
++    const fireAt = new Date(nowUtc.getTime() + 60000);
++    return { iso: formatIsoWithOffset(fireAt, timeZone), needsTimeOfDay: false, isImmediate: true };
++  }
++
++  const todayParts = getZonedParts(timeZone, nowUtc);
++  const dayParts = detectDay(text, todayParts);
++  const timeParts = detectTime(text);
++
++  if (!dayParts && !timeParts) {
++    return { iso: null, needsTimeOfDay: false, isImmediate: false };
++  }
++
++  if (dayParts && !timeParts) {
++    return { iso: null, needsTimeOfDay: true, isImmediate: false };
++  }
++
++  const finalDay = dayParts || { year: todayParts.year, month: todayParts.month, day: todayParts.day };
++  const utc = zonedWallClockToUtc(finalDay.year, finalDay.month, finalDay.day, timeParts.hour, timeParts.minute, timeZone);
++  return { iso: formatIsoWithOffset(utc, timeZone), needsTimeOfDay: false, isImmediate: false };
++}
++
++/**
++ * Spoken confirmation phrase for a resolved reminder, e.g.
++ * "tomorrow at 3 PM Pacific". Always states a day qualifier, not just the
++ * clock time — a confirmation that only reads back "3 PM Pacific" would
++ * hide a day-parsing bug from the caller (they'd confirm the time without
++ * ever hearing which day Naavi resolved). Added per Phase 6 (ChatGPT)
++ * review of docs/F2B_PHASE2_CHANGE_PLAN_2026-07-01.md.
++ *
++ * @param {string} iso - resolved ISO8601 timestamp (from parseReminderTime)
++ * @param {string} timeZone - IANA timezone
++ * @param {Date} [nowUtc] - injectable for tests; defaults to current time
++ */
++function formatSpokenDateTime(iso, timeZone, nowUtc = new Date()) {
++  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):\d{2}/);
++  if (!m) return 'at the requested time';
++  const year = Number(m[1]);
++  const month = Number(m[2]);
++  const day = Number(m[3]);
++  let hour = Number(m[4]);
++  const minute = m[5];
++  const ampm = hour >= 12 ? 'PM' : 'AM';
++  hour = hour % 12;
++  if (hour === 0) hour = 12;
++  const minutePart = minute === '00' ? '' : `:${minute}`;
++  const timeLabel = `${hour}${minutePart} ${ampm}`;
++
++  const today = getZonedParts(timeZone, nowUtc);
++  const targetUtcDay = Date.UTC(year, month - 1, day);
++  const todayUtcDay = Date.UTC(today.year, today.month - 1, today.day);
++  const deltaDays = Math.round((targetUtcDay - todayUtcDay) / 86400000);
++
++  let dayLabel;
++  if (deltaDays === 0) dayLabel = 'today';
++  else if (deltaDays === 1) dayLabel = 'tomorrow';
++  else if (deltaDays > 1 && deltaDays < 7) dayLabel = WEEKDAY_NAMES[weekdayIndexOf(year, month, day)];
++  else dayLabel = `on ${month}/${day}`; // beyond the spec's "next week" vocabulary scope
++
++  return `${dayLabel} at ${timeLabel} ${getZoneLabel(timeZone)}`;
++}
++
++module.exports = { parseReminderTime, formatIsoWithOffset, zonedWallClockToUtc, getOffsetMinutes, formatSpokenDateTime };
+diff --git a/src/voice/parseTimezone.js b/src/voice/parseTimezone.js
+new file mode 100644
+index 0000000..ab7aa7e
+--- /dev/null
++++ b/src/voice/parseTimezone.js
+@@ -0,0 +1,93 @@
++/**
++ * Deterministic timezone parser for the demo line (F2b). No LLM.
++ *
++ * Recognizes an exact, enumerated vocabulary — see
++ * docs/F2B_PHASE2_CHANGE_PLAN_2026-07-01.md §2b ("Parser Contract" in §8a:
++ * any vocabulary change here requires a new Phase 2 plan + tests + review,
++ * not a casual edit).
++ *
++ * Returns an IANA timezone string, or null if the caller's answer isn't
++ * recognized. Never guesses a partial match.
++ */
++
++const ZONE_WORDS = {
++  pacific: 'America/Los_Angeles',
++  mountain: 'America/Denver',
++  central: 'America/Chicago',
++  eastern: 'America/Toronto',
++  atlantic: 'America/Halifax',
++  utc: 'UTC',
++  gmt: 'UTC',
++};
++
++// Multi-word cities must be listed before any single-word city that could
++// be a substring of them, though none currently collide — kept as an array
++// so longest-name-first ordering is explicit and easy to extend safely.
++const CITY_WORDS = [
++  ['vancouver', 'America/Vancouver'],
++  ['calgary', 'America/Edmonton'],
++  ['edmonton', 'America/Edmonton'],
++  ['winnipeg', 'America/Winnipeg'],
++  ['toronto', 'America/Toronto'],
++  ['ottawa', 'America/Toronto'],
++  ['montreal', 'America/Montreal'],
++  ['halifax', 'America/Halifax'],
++  ['seattle', 'America/Los_Angeles'],
++  ['los angeles', 'America/Los_Angeles'],
++  ['denver', 'America/Denver'],
++  ['chicago', 'America/Chicago'],
++  ['new york', 'America/New_York'],
++].sort((a, b) => b[0].length - a[0].length);
++
++const DEFAULT_TIMEZONE = 'America/Toronto';
++
++function normalize(raw) {
++  return String(raw || '')
++    .toLowerCase()
++    .replace(/[.,!?;:]+/g, ' ')
++    .replace(/\s+/g, ' ')
++    .trim();
++}
++
++/**
++ * @param {string} utterance - caller's spoken answer (already STT-transcribed)
++ * @returns {string|null} IANA timezone, or null if unrecognized
++ */
++function parseTimezone(utterance) {
++  const text = normalize(utterance);
++  if (!text) return null;
++
++  for (const [name, tz] of CITY_WORDS) {
++    if (text.includes(name)) return tz;
++  }
++
++  for (const [word, tz] of Object.entries(ZONE_WORDS)) {
++    const re = new RegExp(`\\b${word}\\b`);
++    if (re.test(text)) return tz;
++  }
++
++  return null;
++}
++
++// Reverse map — IANA zone -> spoken label, for confirmation readbacks
++// ("I'll text you 3 PM Pacific"). Every IANA value used above must have an
++// entry here.
++const ZONE_LABELS = {
++  'America/Los_Angeles': 'Pacific',
++  'America/Vancouver': 'Pacific',
++  'America/Denver': 'Mountain',
++  'America/Edmonton': 'Mountain',
++  'America/Chicago': 'Central',
++  'America/Winnipeg': 'Central',
++  'America/Toronto': 'Eastern',
++  'America/Montreal': 'Eastern',
++  'America/New_York': 'Eastern',
++  'America/Halifax': 'Atlantic',
++  UTC: 'UTC',
++};
++
++function getZoneLabel(ianaZone) {
++  return ZONE_LABELS[ianaZone] || ianaZone;
++}
++
++module.exports = { parseTimezone, DEFAULT_TIMEZONE, ZONE_WORDS, CITY_WORDS, getZoneLabel };
+diff --git a/src/voice/recapSms.js b/src/voice/recapSms.js
+new file mode 100644
+index 0000000..e6af401
+--- /dev/null
++++ b/src/voice/recapSms.js
+@@ -0,0 +1,47 @@
++/**
++ * F2b Phase 4 — Recap SMS (deterministic, no LLM).
++ *
++ * Confirmed in docs/F2B_SCENARIO_WALKTHROUGH_SCRIPT_2026-07-01.md §5:
++ * a short SMS recapping which scenarios the caller heard, sent
++ * automatically (no permission ask) right after the walkthrough ends —
++ * independent of the Reminder SMS (buildDemoReminderSmsBody in index.js),
++ * which fires later, only if a reminder was actually set, at the
++ * scheduled reminder time. The two must never be merged or substituted
++ * for one another.
++ *
++ * Canonical source for SCENARIO_RECAP_LINES — also used by the older,
++ * still-present (but no longer routed-to) CTA flow in index.js so there
++ * is exactly one place these lines are defined.
++ */
++
++const SCENARIO_RECAP_LINES = {
++  today: 'Today: your day in one breath.',
++  bills: 'Bills: PDFs read straight from your inbox.',
++  history: 'History: when you last did anything.',
++  location: 'Location: an alert when you arrive somewhere.',
++  capture: 'Capture: anything you want me to remember.',
++};
++
++/**
++ * @param {string} callerName - sanitized caller name, may be empty
++ * @param {string[]|Set<string>} playedScenarios - scenario keys actually heard, in order
++ * @returns {string} SMS body
++ */
++function buildRecapSmsBody(callerName, playedScenarios) {
++  const greeting = callerName ? `Hi ${callerName}, thanks for trying Naavi.` : 'Hi, thanks for trying Naavi.';
++  const names = [];
++  if (playedScenarios && typeof playedScenarios.forEach === 'function') {
++    playedScenarios.forEach((name) => {
++      if (SCENARIO_RECAP_LINES[name]) names.push(name);
++    });
++  }
++  const lines = names.map((name) => `- ${SCENARIO_RECAP_LINES[name]}`).join('\n');
++  const heardBlock = lines ? `\n\nHere's what you heard:\n${lines}` : '';
++  return (
++    `${greeting}${heardBlock}\n\n` +
++    'Set up your own MyNaavi:\nhttps://mynaavi.com/start\n\n' +
++    'Reply STOP to opt out.'
++  );
++}
++
++module.exports = { SCENARIO_RECAP_LINES, buildRecapSmsBody };
+diff --git a/src/voice/scenarioWalkthrough.js b/src/voice/scenarioWalkthrough.js
+new file mode 100644
+index 0000000..1976a96
+--- /dev/null
++++ b/src/voice/scenarioWalkthrough.js
+@@ -0,0 +1,148 @@
++/**
++ * F2b Phase 4 — Scenario walkthrough content + routing helpers (no LLM).
++ *
++ * Script fully reviewed and confirmed line-by-line in
++ * docs/F2B_SCENARIO_WALKTHROUGH_SCRIPT_2026-07-01.md. Any wording change
++ * here should update that doc too.
++ *
++ * Same 5 topics/facts as the original menu (DEMO_SCENARIOS in index.js,
++ * untouched) — rewritten as a yes/no gate + spoken answer instead of an
++ * open-ended "try asking X" prompt, per the confirmed script.
++ */
++
++const DEMO_SCENARIO_ORDER = ['today', 'bills', 'history', 'location', 'capture'];
++
++// Gate questions trimmed per live-call feedback (2026-07-01) — "zero
++// friction call, real message is in SMS" philosophy. Each dropped the
++// "Want to..." lead-in; still yes/no-answerable, just shorter.
++const DEMO_WALKTHROUGH_SCENARIOS = {
++  today: {
++    gate: "Hear what's on your day?",
++    body:
++      'You\'ve got three. <break time="300ms"/> Nine — team standup. <break time="300ms"/> ' +
++      'Noon — lunch with David, he just confirmed. <break time="300ms"/> Four — Sam\'s recital. ' +
++      '<break time="500ms"/> Quick heads-up — rain\'s rolling in around three, give yourself a few extra minutes.',
++  },
++  bills: {
++    gate: 'Hear about your bills and emails?',
++    // Trimmed per live-call feedback (2026-07-01) — dropped "I tagged it
++    // for expenses" and "All three are filed in your Drive under Bills":
++    // true but not the point of the demo, ~14 words of pure chattiness.
++    body:
++      'Three this week. Hydro — eighty-two dollars, due Friday. Bell — ninety-six, on autopay. ' +
++      '<break time="300ms"/> Hilton from your Toronto trip — three hundred forty-five came in this morning.',
++  },
++  history: {
++    gate: 'Know when you last got your brakes done?',
++    body:
++      'Brakes were done last September twelfth at Henderson\'s — eight hundred forty dollars. ' +
++      '<break time="300ms"/> You also asked me to flag after fifty thousand kilometers — you\'re at ' +
++      'forty-six now. <break time="500ms"/> Plenty of road left.',
++  },
++  location: {
++    gate: 'Hear how I can text someone when you arrive somewhere?',
++    body:
++      "Say you told me: text Sarah the moment I land at the airport. <break time=\"500ms\"/> " +
++      "From then on, every time you land, I'll text her — even if your phone's on silent, you'll know it sent.",
++  },
++  capture: {
++    gate: 'Hear how I can remember something for you?',
++    body:
++      'Say you told me: remember I parked in row B5. <break time="500ms"/> From then on, whenever ' +
++      "you ask me where you parked, I'll have it for you — row B5.",
++  },
++};
++
++// Matched only at the "want to hear another, or should we set up a
++// reminder for you?" closer — catches intent phrases beyond a literal
++// "no". Deliberately a regex, not an LLM call — see
++// docs/F2B_SCENARIO_WALKTHROUGH_PHASE2_2026-07-01.md §7 for why an LLM
++// was explicitly ruled out for this decision point.
++//
++// Live-call regression (2026-07-02): caller answered the closer with a
++// bare "A reminder" — the single most natural way to answer "...or
++// should we set up a reminder for you?" — and the old phrase list
++// (only multi-word patterns like "let's do the reminder") didn't match
++// it, so Naavi advanced to the next scenario instead. `\bremind\w*\b`
++// now catches any mention of "remind"/"reminder"/"reminders" at this
++// step, since the only two things on offer here are "another example"
++// or "a reminder" — any remind-word is unambiguous.
++const DEMO_MOVE_TO_REMINDER_RE =
++  /\b(remind\w*|let'?s set (one|it) up|that'?s enough|that'?ll do|ok(ay)? let'?s continue|let'?s continue|move on|no more( scenarios)?)\b/i;
++
++function wantsToMoveToReminder(utterance) {
++  return DEMO_MOVE_TO_REMINDER_RE.test(String(utterance || '').toLowerCase());
++}
++
++// SMS consent disclosure (2026-07-02) — required so the 888 toll-free
++// number's Twilio Verification (TFV) registration has a true, describable
++// opt-in mechanism (previously failed twice: "Opt-in - Consent for
++// messaging is a requirement for service" — see F2i,
++// docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md). Said once, at the very
++// start of the call, before anything else — every caller (named or
++// anonymous) hears it before either the Recap or Reminder SMS could ever
++// be sent to them.
++//
++// Live-call feedback (2026-07-02, round 1): the consent mechanism is
++// "staying on the line" — but the original 400ms break gave no real time
++// to act on that before the bridge line and first question started
++// talking over it. Bumped to 2000ms so a caller who doesn't want to
++// consent has an actual window to hang up before anything else is said.
++//
++// Live-call feedback (2026-07-02, round 2): "couldn't catch the last
++// part" — the three sentences ran together with no pacing between them,
++// so "Reply STOP to opt out" got rushed. Added breaks between each
++// clause, matching the pacing pattern used everywhere else in this file.
++function getConsentDisclosureLine() {
++  return (
++    'By staying on the line, you agree to receive a text from Naavi, including a recap of ' +
++    'this call and any reminder you request. <break time="400ms"/> Message and data rates ' +
++    'may apply. <break time="300ms"/> Reply STOP to opt out. <break time="2000ms"/> '
++  );
++}
++
++// Bridge line, §2 of the script doc — states the reason the examples
++// that follow aren't the caller's real data (Naavi isn't connected to
++// his accounts yet during this demo call). Trimmed per live-call
++// feedback (2026-07-01), 30 words -> 18, reason kept.
++function getWalkthroughBridgeLine(callerName) {
++  const namePart = callerName ? `Thanks ${callerName}. ` : '';
++  return (
++    `${namePart}I'm not connected to your calendar or emails yet, so here's a quick example. ` +
++    'First up: '
++  );
++}
++
++// Confirmed §3 decline line — used at any scenario's yes/no gate when the
++// caller says no. Advances to the next scenario in DEMO_SCENARIO_ORDER;
++// does not count toward DEMO_MAX_SCENARIOS (only heard scenarios do).
++function getDeclineLine() {
++  return "No problem — let's try a different one.";
++}
++
++// §3 closer — asked after a scenario is actually played, as long as the
++// 3-scenario cap hasn't been reached yet. Revised per live-call feedback
++// (2026-07-01): "Want to hear another?" left "another" dangling with no
++// object — now names what's on offer.
++function getCloserLine() {
++  return 'Want to hear another example, or should we set up a reminder for you?';
++}
++
++// Confirmed §3 cap-reached line — replaces the closer once
++// DEMO_MAX_SCENARIOS have been heard, or all 5 have been offered.
++// Always fires regardless of what the caller says after the last one.
++function getCapReachedLine() {
++  return "That's a quick look at what I can do. Let's set up a real one for you now.";
++}
++
++module.exports = {
++  DEMO_SCENARIO_ORDER,
++  DEMO_WALKTHROUGH_SCENARIOS,
++  DEMO_MOVE_TO_REMINDER_RE,
++  wantsToMoveToReminder,
++  getConsentDisclosureLine,
++  getWalkthroughBridgeLine,
++  getDeclineLine,
++  getCloserLine,
++  getCapReachedLine,
++};
+diff --git a/test/demoConfirmationSentence.test.js b/test/demoConfirmationSentence.test.js
+new file mode 100644
+index 0000000..59e4f31
+--- /dev/null
++++ b/test/demoConfirmationSentence.test.js
+@@ -0,0 +1,56 @@
++/**
++ * Snapshot tests for the full demo-line confirmation chain:
++ *   caller utterance -> parseTimezone -> parseReminderTime -> formatSpokenDateTime
++ *   -> the exact sentence Naavi speaks back for confirmation.
++ *
++ * Added per Phase 6 (ChatGPT) review of
++ * docs/F2B_PHASE2_CHANGE_PLAN_2026-07-01.md: the existing parser tests only
++ * verify input -> ISO. These verify ISO -> spoken confirmation sentence,
++ * protecting the spoken UX (not just the parser) — specifically that the
++ * confirmation always states a day, not just a clock time, so a
++ * day-parsing bug would be audible to the caller instead of silently
++ * confirmed.
++ *
++ * Same fixed NOW reference as parseReminderTime.test.js for determinism:
++ * 2026-07-01T16:00:00Z (Wed Jul 1 2026, noon Toronto / 9 AM Vancouver).
++ */
++
++const { test } = require('node:test');
++const assert = require('node:assert/strict');
++
++const { parseTimezone } = require('../src/voice/parseTimezone');
++const { parseReminderTime, formatSpokenDateTime } = require('../src/voice/parseReminderTime');
++
++const NOW = new Date('2026-07-01T16:00:00Z');
++
++function confirmationSentence(timezoneUtterance, timeUtterance) {
++  const tz = parseTimezone(timezoneUtterance);
++  assert.ok(tz, `expected a recognized timezone for "${timezoneUtterance}"`);
++  const parsed = parseReminderTime(timeUtterance, tz, NOW);
++  assert.ok(parsed.iso, `expected a resolved time for "${timeUtterance}"`);
++  return formatSpokenDateTime(parsed.iso, tz, NOW);
++}
++
++test('ChatGPT Phase 6 example — "Vancouver" + "tomorrow 3 pm" -> "tomorrow at 3 PM Pacific"', () => {
++  assert.equal(confirmationSentence('Vancouver', 'tomorrow 3 pm'), 'tomorrow at 3 PM Pacific');
++});
++
++test('"Toronto" + "today morning" -> "today at 9 AM Eastern"', () => {
++  assert.equal(confirmationSentence('Toronto', 'today morning'), 'today at 9 AM Eastern');
++});
++
++test('"Chicago" + "Friday afternoon" -> "Friday at 2 PM Central"', () => {
++  assert.equal(confirmationSentence('Chicago', 'Friday afternoon'), 'Friday at 2 PM Central');
++});
++
++test('"Halifax" + "15:00" -> "today at 3 PM Atlantic"', () => {
++  assert.equal(confirmationSentence('Halifax', '15:00'), 'today at 3 PM Atlantic');
++});
++
++test('day qualifier changes even when clock time is identical — catches day-parsing bugs at confirm time', () => {
++  const todaySentence = confirmationSentence('Eastern', 'today at 3 pm');
++  const tomorrowSentence = confirmationSentence('Eastern', 'tomorrow at 3 pm');
++  assert.equal(todaySentence, 'today at 3 PM Eastern');
++  assert.equal(tomorrowSentence, 'tomorrow at 3 PM Eastern');
++  assert.notEqual(todaySentence, tomorrowSentence);
++});
+diff --git a/test/getDemoEnvironment.test.js b/test/getDemoEnvironment.test.js
+new file mode 100644
+index 0000000..d868ccd
+--- /dev/null
++++ b/test/getDemoEnvironment.test.js
+@@ -0,0 +1,42 @@
++/**
++ * Unit tests for getDemoEnvironment.js — specifically the environment-aware
++ * outbound "From" number (demoSmsFrom), added 2026-07-01 after live-call
++ * feedback caught demo-line SMS sending from production-tied numbers
++ * regardless of which line the caller actually dialed.
++ *
++ * Run: npm test (from naavi-voice-server/).
++ */
++
++const { test } = require('node:test');
++const assert = require('node:assert/strict');
++
++const { getDemoEnvironmentByName } = require('../src/voice/getDemoEnvironment');
++
++test('production demoSmsFrom is the 431 number (888 number\'s TFV workaround)', () => {
++  const config = getDemoEnvironmentByName('production', { SUPABASE_URL: 'x', SUPABASE_SERVICE_ROLE_KEY: 'x' });
++  assert.equal(config.demoSmsFrom, '+14313006228');
++});
++
++test('staging demoSmsFrom reads STAGING_DEMO_TWILIO_NUMBER from env — the staging line\'s own number, confirmed clear of any messaging restriction', () => {
++  const config = getDemoEnvironmentByName('staging', {
++    STAGING_SUPABASE_URL: 'x',
++    STAGING_SUPABASE_SERVICE_ROLE_KEY: 'x',
++    STAGING_DEMO_TWILIO_NUMBER: '+18734462284',
++  });
++  assert.equal(config.demoSmsFrom, '+18734462284');
++});
++
++test('staging demoSmsFrom is empty (not defaulted to a production number) when the env var is missing', () => {
++  const config = getDemoEnvironmentByName('staging', {
++    STAGING_SUPABASE_URL: 'x',
++    STAGING_SUPABASE_SERVICE_ROLE_KEY: 'x',
++  });
++  assert.equal(config.demoSmsFrom, '');
++});
++
++test('neither environment ever resolves demoSmsFrom to the production voice server number (+12495235394) — reserved for real registered users', () => {
++  const prod = getDemoEnvironmentByName('production', {});
++  const staging = getDemoEnvironmentByName('staging', { STAGING_DEMO_TWILIO_NUMBER: '+18734462284' });
++  assert.notEqual(prod.demoSmsFrom, '+12495235394');
++  assert.notEqual(staging.demoSmsFrom, '+12495235394');
++});
+diff --git a/test/parseReminderTime.test.js b/test/parseReminderTime.test.js
+new file mode 100644
+index 0000000..06327ed
+--- /dev/null
++++ b/test/parseReminderTime.test.js
+@@ -0,0 +1,103 @@
++/**
++ * Unit tests for parseReminderTime.js — the demo line's deterministic
++ * reminder-time parser (F2b, no LLM).
++ *
++ * Run: npm test (from naavi-voice-server/).
++ *
++ * A fixed `nowUtc` reference is injected into every call so results don't
++ * depend on when the test suite runs (and to avoid landing on a DST
++ * transition day by accident): 2026-07-01T16:00:00Z, which is noon on
++ * Wednesday July 1 2026 in America/Toronto (EDT, UTC-4).
++ *
++ * Cases below are exactly the set specified in the Phase 3 (ChatGPT)
++ * review of docs/F2B_PHASE2_CHANGE_PLAN_2026-07-01.md: tomorrow 3pm, today
++ * morning, next week, now, 3:30, 15:00, Friday afternoon — plus one
++ * unrecognized-phrase fallback case per the "never partially interpret"
++ * requirement.
++ */
++
++const { test } = require('node:test');
++const assert = require('node:assert/strict');
++
++const { parseReminderTime } = require('../src/voice/parseReminderTime');
++
++const NOW = new Date('2026-07-01T16:00:00Z'); // Wed Jul 1 2026, noon Toronto
++const TZ = 'America/Toronto';
++
++test('"tomorrow 3 pm" resolves to the next calendar day at 15:00 local', () => {
++  const result = parseReminderTime('tomorrow 3 pm', TZ, NOW);
++  assert.equal(result.iso, '2026-07-02T15:00:00-04:00');
++  assert.equal(result.needsTimeOfDay, false);
++});
++
++test('"today morning" resolves to today at 09:00 local', () => {
++  const result = parseReminderTime('today morning', TZ, NOW);
++  assert.equal(result.iso, '2026-07-01T09:00:00-04:00');
++  assert.equal(result.needsTimeOfDay, false);
++});
++
++test('"next week" alone — day recognized but no time — needsTimeOfDay signal, not a guess', () => {
++  const result = parseReminderTime('next week', TZ, NOW);
++  assert.equal(result.iso, null);
++  assert.equal(result.needsTimeOfDay, true);
++});
++
++test('"now" fires 60 seconds after the reference instant and sets isImmediate', () => {
++  const result = parseReminderTime('now', TZ, NOW);
++  assert.equal(result.iso, '2026-07-01T12:01:00-04:00');
++  assert.equal(result.needsTimeOfDay, false);
++  assert.equal(result.isImmediate, true);
++});
++
++test('non-"now" results always have isImmediate: false', () => {
++  assert.equal(parseReminderTime('tomorrow 3 pm', TZ, NOW).isImmediate, false);
++  assert.equal(parseReminderTime('next week', TZ, NOW).isImmediate, false);
++});
++
++test('"3:30" (no am/pm, no day) — literal 24-hour clock, defaults to today', () => {
++  const result = parseReminderTime('3:30', TZ, NOW);
++  assert.equal(result.iso, '2026-07-01T03:30:00-04:00');
++  assert.equal(result.needsTimeOfDay, false);
++});
++
++test('"15:00" (24-hour, no day) — defaults to today', () => {
++  const result = parseReminderTime('15:00', TZ, NOW);
++  assert.equal(result.iso, '2026-07-01T15:00:00-04:00');
++  assert.equal(result.needsTimeOfDay, false);
++});
++
++test('"Friday afternoon" resolves to the next Friday at 14:00 local', () => {
++  const result = parseReminderTime('Friday afternoon', TZ, NOW);
++  assert.equal(result.iso, '2026-07-03T14:00:00-04:00');
++  assert.equal(result.needsTimeOfDay, false);
++});
++
++test('unrecognized phrase returns null with no clarification signal (generic fallback, never a guess)', () => {
++  const result = parseReminderTime('sometime next month maybe', TZ, NOW);
++  assert.equal(result.iso, null);
++  assert.equal(result.needsTimeOfDay, false);
++});
++
++test('regression (2026-07-01 live call bug): "p.m."/"a.m." with periods must not be misread as a bare 24-hour clock', () => {
++  // Twilio transcribed "today at 1:00 p.m." literally with periods. The
++  // normalize() step used to strip periods into spaces, turning "p.m."
++  // into "p m" (two words) — the ampmMatch regex no longer matched, and
++  // the parser silently fell through to reading "1:00" as 24-hour time
++  // (1 AM), which then got rejected as already past. Verified against the
++  // exact logged speech string.
++  assert.equal(parseReminderTime('today at 1:00 p.m.', TZ, NOW).iso, '2026-07-01T13:00:00-04:00');
++  assert.equal(parseReminderTime('uh, today at 1:00 p.m.', TZ, NOW).iso, '2026-07-01T13:00:00-04:00');
++  assert.equal(parseReminderTime('today at 1 p.m.', TZ, NOW).iso, '2026-07-01T13:00:00-04:00');
++  assert.equal(parseReminderTime('today at 1 a.m.', TZ, NOW).iso, '2026-07-01T01:00:00-04:00');
++  assert.equal(parseReminderTime('today at 1:00 p.m', TZ, NOW).iso, '2026-07-01T13:00:00-04:00');
++});
++
++test('empty/null input returns null cleanly', () => {
++  assert.equal(parseReminderTime('', TZ, NOW).iso, null);
++  assert.equal(parseReminderTime(null, TZ, NOW).iso, null);
++});
++
++test('noon and midnight resolve as explicit clock words', () => {
++  assert.equal(parseReminderTime('today at noon', TZ, NOW).iso, '2026-07-01T12:00:00-04:00');
++  assert.equal(parseReminderTime('today at midnight', TZ, NOW).iso, '2026-07-01T00:00:00-04:00');
++});
+diff --git a/test/parseTimezone.test.js b/test/parseTimezone.test.js
+new file mode 100644
+index 0000000..40d269e
+--- /dev/null
++++ b/test/parseTimezone.test.js
+@@ -0,0 +1,85 @@
++/**
++ * Unit tests for parseTimezone.js — the demo line's deterministic caller
++ * timezone parser (F2b, no LLM).
++ *
++ * Run: npm test (from naavi-voice-server/).
++ *
++ * Note: the "ask again, then default to America/Toronto after retries are
++ * exhausted" behavior lives in the TwiML route handler in index.js (same
++ * retry-cap pattern as DEMO_NAME_MAX_ATTEMPTS for name capture), not in
++ * this pure function. This file tests only that: (a) every vocabulary word
++ * in docs/F2B_PHASE2_CHANGE_PLAN_2026-07-01.md §2b resolves correctly, (b)
++ * unrecognized input returns null rather than a guess, and (c) the
++ * DEFAULT_TIMEZONE constant the route handler falls back to is exported
++ * and correct.
++ */
++
++const { test } = require('node:test');
++const assert = require('node:assert/strict');
++
++const { parseTimezone, DEFAULT_TIMEZONE, getZoneLabel } = require('../src/voice/parseTimezone');
++
++test('DEFAULT_TIMEZONE is America/Toronto', () => {
++  assert.equal(DEFAULT_TIMEZONE, 'America/Toronto');
++});
++
++test('zone words resolve to the correct IANA timezone', () => {
++  assert.equal(parseTimezone('Pacific'), 'America/Los_Angeles');
++  assert.equal(parseTimezone('I am in the Mountain time zone'), 'America/Denver');
++  assert.equal(parseTimezone('Central'), 'America/Chicago');
++  assert.equal(parseTimezone('Eastern time'), 'America/Toronto');
++  assert.equal(parseTimezone('Atlantic'), 'America/Halifax');
++  assert.equal(parseTimezone('UTC'), 'UTC');
++  assert.equal(parseTimezone('GMT'), 'UTC');
++});
++
++test('Canadian cities resolve to the correct IANA timezone', () => {
++  assert.equal(parseTimezone('Vancouver'), 'America/Vancouver');
++  assert.equal(parseTimezone('Calgary'), 'America/Edmonton');
++  assert.equal(parseTimezone('Edmonton'), 'America/Edmonton');
++  assert.equal(parseTimezone('Winnipeg'), 'America/Winnipeg');
++  assert.equal(parseTimezone('Toronto'), 'America/Toronto');
++  assert.equal(parseTimezone('Ottawa'), 'America/Toronto');
++  assert.equal(parseTimezone('Montreal'), 'America/Montreal');
++  assert.equal(parseTimezone('Halifax'), 'America/Halifax');
++});
++
++test('US cities resolve to the correct IANA timezone', () => {
++  assert.equal(parseTimezone('Seattle'), 'America/Los_Angeles');
++  assert.equal(parseTimezone('Los Angeles'), 'America/Los_Angeles');
++  assert.equal(parseTimezone('Denver'), 'America/Denver');
++  assert.equal(parseTimezone('Chicago'), 'America/Chicago');
++  assert.equal(parseTimezone('New York'), 'America/New_York');
++  assert.equal(parseTimezone("I'm calling from New York City"), 'America/New_York');
++});
++
++test('unrecognized input returns null, never a guess', () => {
++  assert.equal(parseTimezone('somewhere sunny'), null);
++  assert.equal(parseTimezone('I dunno'), null);
++  assert.equal(parseTimezone(''), null);
++  assert.equal(parseTimezone(null), null);
++});
++
++test('highest-risk edge case (Phase 6 review) — nonsense/unreachable places never resolve, letting the caller flow retry-then-default to America/Toronto', () => {
++  // These prove parseTimezone() itself never guesses on an unrecognized
++  // place. The retry-3-times-then-default-to-Eastern behavior lives in
++  // naavi-voice-server/src/index.js's /voice/demo/timezone(-confirm)
++  // handlers (DEMO_TIMEZONE_MAX_ATTEMPTS) — that multi-turn behavior is a
++  // Phase 7 manual call test, not unit-testable in isolation here.
++  assert.equal(parseTimezone('Mars'), null);
++  assert.equal(parseTimezone('some unknown place'), null);
++});
++
++test('city match takes priority even when a substring could look like a zone word', () => {
++  // "New York" contains no zone word, but confirms multi-word city matching
++  // works before falling through to the single-word zone-word pass.
++  assert.equal(parseTimezone('New York please'), 'America/New_York');
++});
++
++test('getZoneLabel produces the spoken label used in confirmation readbacks', () => {
++  assert.equal(getZoneLabel('America/Los_Angeles'), 'Pacific');
++  assert.equal(getZoneLabel('America/Toronto'), 'Eastern');
++  assert.equal(getZoneLabel('America/New_York'), 'Eastern');
++  assert.equal(getZoneLabel('America/Halifax'), 'Atlantic');
++  assert.equal(getZoneLabel('UTC'), 'UTC');
++});
+diff --git a/test/recapSms.test.js b/test/recapSms.test.js
+new file mode 100644
+index 0000000..3f9a930
+--- /dev/null
++++ b/test/recapSms.test.js
+@@ -0,0 +1,59 @@
++/**
++ * Unit tests for recapSms.js — F2b Phase 4 Recap SMS, sent automatically
++ * right after the scenario walkthrough (no permission ask), independent
++ * of the Reminder SMS.
++ *
++ * Run: npm test (from naavi-voice-server/).
++ */
++
++const { test } = require('node:test');
++const assert = require('node:assert/strict');
++
++const { SCENARIO_RECAP_LINES, buildRecapSmsBody } = require('../src/voice/recapSms');
++
++test('SCENARIO_RECAP_LINES has one line per scenario', () => {
++  assert.equal(Object.keys(SCENARIO_RECAP_LINES).length, 5);
++  for (const key of ['today', 'bills', 'history', 'location', 'capture']) {
++    assert.ok(SCENARIO_RECAP_LINES[key], `missing recap line for "${key}"`);
++  }
++});
++
++test('recap body includes only the scenarios actually played, in order', () => {
++  const body = buildRecapSmsBody('Robert', ['today', 'capture']);
++  assert.match(body, /Today: your day in one breath\./);
++  assert.match(body, /Capture: anything you want me to remember\./);
++  assert.doesNotMatch(body, /Bills:/);
++  assert.doesNotMatch(body, /History:/);
++  assert.doesNotMatch(body, /Location:/);
++  // order preserved
++  assert.ok(body.indexOf('Today:') < body.indexOf('Capture:'));
++});
++
++test('recap body greets by name when given, and works anonymously', () => {
++  assert.match(buildRecapSmsBody('Robert', ['today']), /^Hi Robert, thanks for trying Naavi\./);
++  assert.match(buildRecapSmsBody('', ['today']), /^Hi, thanks for trying Naavi\./);
++});
++
++test('recap body includes signup link and STOP opt-out', () => {
++  const body = buildRecapSmsBody('Robert', ['today']);
++  assert.match(body, /https:\/\/mynaavi\.com\/start/);
++  assert.match(body, /Reply STOP to opt out\./);
++});
++
++test('recap body never mentions reminder content — stays fully separate from the Reminder SMS', () => {
++  const body = buildRecapSmsBody('Robert', ['today', 'bills', 'location']);
++  assert.doesNotMatch(body, /remind/i);
++});
++
++test('no scenarios played still produces a valid body with no "heard" section', () => {
++  const body = buildRecapSmsBody('Robert', []);
++  assert.doesNotMatch(body, /Here's what you heard/);
++  assert.match(body, /https:\/\/mynaavi\.com\/start/);
++});
++
++test('accepts a Set as well as an array (matches how index.js tracks played scenarios)', () => {
++  const played = new Set(['today', 'history']);
++  const body = buildRecapSmsBody('Robert', played);
++  assert.match(body, /Today:/);
++  assert.match(body, /History:/);
++});
+diff --git a/test/scenarioWalkthrough.test.js b/test/scenarioWalkthrough.test.js
+new file mode 100644
+index 0000000..5011e29
+--- /dev/null
++++ b/test/scenarioWalkthrough.test.js
+@@ -0,0 +1,92 @@
++/**
++ * Unit tests for scenarioWalkthrough.js — F2b Phase 4 scenario walkthrough
++ * content + the deterministic "move to reminder" intent matcher.
++ *
++ * Run: npm test (from naavi-voice-server/).
++ */
++
++const { test } = require('node:test');
++const assert = require('node:assert/strict');
++
++const {
++  DEMO_SCENARIO_ORDER,
++  DEMO_WALKTHROUGH_SCENARIOS,
++  wantsToMoveToReminder,
++  getConsentDisclosureLine,
++  getWalkthroughBridgeLine,
++  getDeclineLine,
++  getCloserLine,
++  getCapReachedLine,
++} = require('../src/voice/scenarioWalkthrough');
++
++test('DEMO_SCENARIO_ORDER has all 5 scenarios, matching original menu order', () => {
++  assert.deepEqual(DEMO_SCENARIO_ORDER, ['today', 'bills', 'history', 'location', 'capture']);
++});
++
++test('every scenario in the order has a gate question and a body', () => {
++  for (const name of DEMO_SCENARIO_ORDER) {
++    const scenario = DEMO_WALKTHROUGH_SCENARIOS[name];
++    assert.ok(scenario, `missing scenario data for "${name}"`);
++    assert.ok(scenario.gate && scenario.gate.length > 0, `missing gate question for "${name}"`);
++    assert.ok(scenario.body && scenario.body.length > 0, `missing body for "${name}"`);
++  }
++});
++
++test('location and capture scenarios frame the specific example as a hypothetical, not an asserted fact', () => {
++  // Regression guard for the "where does it know Row B5?" gap caught in
++  // review — the body must voice the example itself ("say you told
++  // me..."), never assert the caller already said it.
++  assert.match(DEMO_WALKTHROUGH_SCENARIOS.location.body, /say you told me/i);
++  assert.match(DEMO_WALKTHROUGH_SCENARIOS.capture.body, /say you told me/i);
++  assert.doesNotMatch(DEMO_WALKTHROUGH_SCENARIOS.location.gate, /sarah|airport/i);
++  assert.doesNotMatch(DEMO_WALKTHROUGH_SCENARIOS.capture.gate, /row b5/i);
++});
++
++test('wantsToMoveToReminder matches the confirmed intent phrases', () => {
++  assert.equal(wantsToMoveToReminder("let's do the reminder"), true);
++  assert.equal(wantsToMoveToReminder('remind me instead'), true);
++  assert.equal(wantsToMoveToReminder("that's enough"), true);
++  assert.equal(wantsToMoveToReminder("ok let's continue"), true);
++  assert.equal(wantsToMoveToReminder('set up a reminder'), true);
++  assert.equal(wantsToMoveToReminder("let's set one up"), true);
++});
++
++test('regression (2026-07-02 live call): bare "a reminder" / "reminder" is recognized — the most natural answer to the closer, previously missed', () => {
++  assert.equal(wantsToMoveToReminder('a reminder'), true);
++  assert.equal(wantsToMoveToReminder('reminder'), true);
++  assert.equal(wantsToMoveToReminder('reminder please'), true);
++  assert.equal(wantsToMoveToReminder('reminders'), true);
++});
++
++test('wantsToMoveToReminder does not fire on a plain yes or an unrelated answer', () => {
++  assert.equal(wantsToMoveToReminder('yes'), false);
++  assert.equal(wantsToMoveToReminder('yeah sure'), false);
++  assert.equal(wantsToMoveToReminder('tell me about bills'), false);
++  assert.equal(wantsToMoveToReminder(''), false);
++  assert.equal(wantsToMoveToReminder(null), false);
++});
++
++test('bridge line states the reason (not connected to real calendar/email yet) and includes the name when given', () => {
++  const withName = getWalkthroughBridgeLine('Robert');
++  assert.match(withName, /^Thanks Robert\./);
++  assert.match(withName, /not connected to your calendar or emails yet/i);
++
++  const noName = getWalkthroughBridgeLine('');
++  assert.equal(/^Thanks/.test(noName), false);
++  assert.match(noName, /not connected to your calendar or emails yet/i);
++});
++
++test('decline, closer, and cap-reached lines match the confirmed script text exactly', () => {
++  assert.equal(getDeclineLine(), "No problem — let's try a different one.");
++  assert.equal(getCloserLine(), 'Want to hear another example, or should we set up a reminder for you?');
++  assert.equal(getCapReachedLine(), "That's a quick look at what I can do. Let's set up a real one for you now.");
++});
++
++test('consent disclosure line (F2i, 2026-07-02) covers messaging consent, rate disclosure, and STOP opt-out — the exact text described in the TFV registration form', () => {
++  const line = getConsentDisclosureLine();
++  assert.match(line, /agree to receive a text from Naavi/i);
++  assert.match(line, /recap of this call/i);
++  assert.match(line, /any reminder you request/i);
++  assert.match(line, /message and data rates may apply/i);
++  assert.match(line, /reply stop to opt out/i);
++});
