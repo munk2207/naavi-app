@@ -26,6 +26,11 @@ Caller confirms "yes" →
 
 ## 2. NEW — bridge line into the scenario walkthrough — CONFIRMED (with-name variant)
 
+**ADDED 2026-07-02 — SMS consent disclosure, said first, once per call (F2i):** required so the 888 toll-free number's TFV registration has a true, describable opt-in mechanism (failed twice on "Opt-in - Consent for messaging is a requirement for service" — nothing in the script disclosed a text would be sent). Deliberate partial reversal of the "zero friction" trims — confirmed worth the trade-off.
+> "By staying on the line, you agree to receive a text from Naavi, including a recap of this call and any reminder you request. Message and data rates may apply. Reply STOP to opt out."
+
+Immediately followed by the bridge line below, in the same combined `<Say>`:
+
 **[NEW] — confirmed:**
 > "Thanks {name}. I'm not connected to your calendar or emails yet, so here's a quick example. First up:"
 
