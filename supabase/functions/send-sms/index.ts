@@ -12,7 +12,12 @@
  *
  * Request body:
  *   { to: "+1234567890", body: "message text", channel?: "sms" | "whatsapp",
- *     recipient_name?: "Wael", sender_name?: "Naavi" }
+ *     recipient_name?: "Wael", sender_name?: "Naavi", from?: "+14313006228" }
+ *
+ * `from` (SMS only, optional) overrides TWILIO_FROM_NUMBER for this one
+ * send. Added 2026-07-01 for demo-line reminders — see
+ * docs/F2B_SCENARIO_WALKTHROUGH_PHASE5_EVIDENCE_2026-07-01.md. Every
+ * existing caller omits it, so behavior is unchanged for real users.
  *
  * For WhatsApp: uses the naavi_message_from_sender template with ContentVariables.
  *   - {{1}} = recipient_name (defaults to "there")
@@ -58,7 +63,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const { to, body, channel = 'sms', recipient_name, sender_name, user_id: bodyUserId, source } =
+    const { to, body, channel = 'sms', recipient_name, sender_name, user_id: bodyUserId, source, from } =
       await req.json() as {
         to: string;
         body: string;
@@ -67,6 +72,7 @@ serve(async (req) => {
         sender_name?: string;
         user_id?: string;
         source?: string;
+        from?: string;
       };
 
     const authHeader = req.headers.get('Authorization') ?? '';
@@ -84,7 +90,9 @@ serve(async (req) => {
 
     const isWhatsApp = channel === 'whatsapp';
     const whatsAppFrom = Deno.env.get('TWILIO_WHATSAPP_FROM') ?? '+14155238886';
-    const fromNumber = Deno.env.get('TWILIO_FROM_NUMBER')!;
+    // `from` override only ever applies to SMS (see docstring above) — the
+    // WhatsApp path always uses TWILIO_WHATSAPP_FROM, untouched.
+    const fromNumber = from || Deno.env.get('TWILIO_FROM_NUMBER')!;
     const twilioTo   = isWhatsApp ? `whatsapp:${to}` : to;
     const twilioFrom = isWhatsApp ? `whatsapp:${whatsAppFrom}` : fromNumber;
 

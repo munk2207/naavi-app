@@ -746,6 +746,16 @@ async function fireAction(
   const isSelfAlert   = Boolean(isSelfByPhone || isSelfByEmail || noRecipient);
 
   // Channel call helpers
+  //
+  // F2b (2026-07-01) — `config.from_number`, when the rule's action_config
+  // sets it, overrides send-sms's default TWILIO_FROM_NUMBER. Currently
+  // only set by create-demo-reminder for demo-line reminders (so they send
+  // from the demo line's own number, not the production voice server's
+  // number shared with real registered users' alerts — see
+  // docs/F2B_SCENARIO_WALKTHROUGH_PHASE5_EVIDENCE_2026-07-01.md). Every
+  // real-user rule's action_config never sets this field, so `from` is
+  // `undefined` and send-sms behaves exactly as before — zero behavior
+  // change for real alerts.
   const callSMS = (channel: 'sms' | 'whatsapp', to: string) =>
     fetch(`${supabaseUrl}/functions/v1/send-sms`, {
       method: 'POST',
@@ -756,6 +766,7 @@ async function fireAction(
         recipient_name: toName || userName || undefined,
         sender_name: 'Naavi',
         source: 'alert',
+        from: config.from_number || undefined,
       }),
     }).then(res => ({ channel, ok: res.ok }))
       .catch(() => ({ channel, ok: false }));

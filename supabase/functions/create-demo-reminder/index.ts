@@ -18,6 +18,13 @@
  * before sending, to close the gap where STOP arrives after creation but
  * before the reminder fires — see plan §2, accepted operational
  * limitation for the remaining race.)
+ *
+ * F2b (2026-07-01) — action_config.from_number is read from the
+ * DEMO_SMS_FROM_NUMBER secret (also per-project: staging +18734462284,
+ * production +14313006228) and forwarded through evaluate-rules to
+ * send-sms, so the reminder SMS sends from the correct environment's own
+ * number instead of the shared TWILIO_FROM_NUMBER (the production voice
+ * server's number). See docs/F2B_SCENARIO_WALKTHROUGH_PHASE5_EVIDENCE_2026-07-01.md.
  */
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -40,6 +47,15 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const demoUserId  = Deno.env.get('DEMO_USER_ID') ?? '';
+  // F2b (2026-07-01) — the number this reminder's SMS sends from. Set as a
+  // per-project secret (staging: +18734462284, production: +14313006228)
+  // since this function is deployed separately to each project. Forwarded
+  // through action_config -> evaluate-rules -> send-sms's `from` override,
+  // so demo-line reminders send from the right environment's own number
+  // instead of the shared TWILIO_FROM_NUMBER (the production voice
+  // server's number, reserved for real registered users' alerts). See
+  // docs/F2B_SCENARIO_WALKTHROUGH_PHASE5_EVIDENCE_2026-07-01.md.
+  const demoSmsFromNumber = Deno.env.get('DEMO_SMS_FROM_NUMBER') ?? '';
   const admin       = createClient(supabaseUrl, serviceKey);
 
   try {
@@ -87,6 +103,7 @@ Deno.serve(async (req) => {
           body,
           channels: ['sms'],
           source: 'demo_line',
+          from_number: demoSmsFromNumber || undefined,
         },
         label,
         one_shot: true,
