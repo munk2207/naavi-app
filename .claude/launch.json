@@ -4,7 +4,7 @@
     {
       "name": "mynaavi-website",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "mynaavi-website", "--port", "3001", "--no-clipboard"],
+      "runtimeArgs": ["serve", "mynaavi-website", "-l", "3001", "--no-clipboard"],
       "port": 3001
     },
     {
