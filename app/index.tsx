@@ -2100,22 +2100,26 @@ export default function HomeScreen() {
             );
           })()}
 
-          {/* F10a — home-screen feedback invitation, dismissible once */}
+          {/* F10a — home-screen feedback invitation, dismissible once.
+              Dismiss X sits on its own top-right row; the invitation text
+              is bold teal on its own line below (Wael 2026-07-03 — same
+              weight/color as the WEATHER label, but sentence case since a
+              full sentence in all-caps reads worse than a single word). */}
           {showFeedbackBanner && (
             <View style={styles.feedbackBanner}>
               <TouchableOpacity
-                style={styles.feedbackBannerTextWrap}
-                onPress={() => router.push('/help')}
-                accessibilityLabel="Give feedback — opens Help"
-              >
-                <Text style={styles.feedbackBannerText}>Got feedback? Tell the team →</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
                 onPress={dismissFeedbackBanner}
+                style={styles.feedbackBannerDismiss}
                 hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
                 accessibilityLabel="Dismiss feedback invitation"
               >
                 <Ionicons name="close" size={16} color={Colors.textMuted} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => router.push('/help')}
+                accessibilityLabel="Give feedback — opens Help"
+              >
+                <Text style={styles.feedbackBannerText}>Got feedback? Tell the team</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -3982,9 +3986,6 @@ const styles = StyleSheet.create({
   },
   // F10a — home-screen feedback invitation banner.
   feedbackBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     backgroundColor: 'rgba(93,202,165,0.08)',
     borderWidth: 1,
     borderColor: 'rgba(93,202,165,0.25)',
@@ -3994,11 +3995,14 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 4,
   },
-  feedbackBannerTextWrap: { flex: 1 },
+  feedbackBannerDismiss: {
+    alignSelf: 'flex-end',
+    marginBottom: 2,
+  },
   feedbackBannerText: {
     color: Colors.accent,
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
   },
   // Screen-wide caption bar for bottom-icon hover / long-press. Positioned
   // above the input area via absolute bottom offset so it stays visible
