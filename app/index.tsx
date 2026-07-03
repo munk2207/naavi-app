@@ -2119,7 +2119,7 @@ export default function HomeScreen() {
                 onPress={() => router.push('/help')}
                 accessibilityLabel="Give feedback — opens Help"
               >
-                <Text style={styles.feedbackBannerText}>Got feedback? Tell the team</Text>
+                <Text style={styles.feedbackBannerText}>Got feedback? Click here to tell the team</Text>
               </TouchableOpacity>
             </View>
           )}

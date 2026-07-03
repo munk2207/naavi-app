@@ -80,7 +80,7 @@ export const session2026_07_03_f10aTests: TestCase[] = [
         'index.tsx must persist the dismiss choice so the banner does not reappear',
       );
       expectTruthy(
-        src.includes("Got feedback? Tell the team"),
+        src.includes("Got feedback? Click here to tell the team"),
         'index.tsx must render the feedback invitation copy',
       );
     },
