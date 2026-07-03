@@ -68,16 +68,12 @@ export const session2026_07_03_f10aTests: TestCase[] = [
   {
     id: 'f10a.home-screen-has-feedback-banner',
     category: 'smoke',
-    description: 'app/index.tsx has a dismissible feedback banner routing to /help',
+    description: 'app/index.tsx has an always-visible feedback banner routing to /help (not a one-time dismissible tooltip)',
     async run() {
       const src = readFileSync(INDEX_PATH, 'utf8');
       expectTruthy(
-        src.includes('showFeedbackBanner'),
-        'index.tsx must have the feedback banner visibility state',
-      );
-      expectTruthy(
-        src.includes('naavi_feedback_banner_dismissed'),
-        'index.tsx must persist the dismiss choice so the banner does not reappear',
+        !src.includes('naavi_feedback_banner_dismissed'),
+        'index.tsx must NOT persist a dismiss choice — the banner is a recurring reminder like Today\'s Brief, not a one-time tooltip (Wael 2026-07-03)',
       );
       expectTruthy(
         src.includes("Got feedback? Click here to tell the team"),

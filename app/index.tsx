@@ -38,7 +38,6 @@ import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { WebView } from 'react-native-webview';
 import * as Speech from 'expo-speech';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SPEECH } from '@/lib/voice-confirm';
 
 import { getUserName } from '@/lib/naavi-client';
@@ -930,19 +929,6 @@ export default function HomeScreen() {
   // restored). Banner offers one-tap re-sign-in.
   const [staleAuth, setStaleAuth] = useState(false);
   const [showScopePrompt, setShowScopePrompt] = useState(false);
-
-  // F10a — home-screen feedback invitation, dismissible once (persisted so it
-  // doesn't reappear after being closed).
-  const [showFeedbackBanner, setShowFeedbackBanner] = useState(false);
-  useEffect(() => {
-    AsyncStorage.getItem('naavi_feedback_banner_dismissed').then(v => {
-      if (v !== 'true') setShowFeedbackBanner(true);
-    });
-  }, []);
-  const dismissFeedbackBanner = () => {
-    setShowFeedbackBanner(false);
-    AsyncStorage.setItem('naavi_feedback_banner_dismissed', 'true').catch(() => {});
-  };
 
   // Auto sign-in for Maestro / Firebase Test Lab runs — no button tap needed
   useEffect(() => {
@@ -2100,29 +2086,21 @@ export default function HomeScreen() {
             );
           })()}
 
-          {/* F10a — home-screen feedback invitation, dismissible once.
-              Dismiss X sits on its own top-right row; the invitation text
-              is bold teal on its own line below (Wael 2026-07-03 — same
-              weight/color as the WEATHER label, but sentence case since a
-              full sentence in all-caps reads worse than a single word). */}
-          {showFeedbackBanner && (
-            <View style={styles.feedbackBanner}>
-              <TouchableOpacity
-                onPress={dismissFeedbackBanner}
-                style={styles.feedbackBannerDismiss}
-                hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
-                accessibilityLabel="Dismiss feedback invitation"
-              >
-                <Ionicons name="close" size={16} color={Colors.textMuted} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => router.push('/help')}
-                accessibilityLabel="Give feedback — opens Help"
-              >
-                <Text style={styles.feedbackBannerText}>Got feedback? Click here to tell the team</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+          {/* F10a — home-screen feedback invitation. Always visible, same
+              recurring-reminder pattern as the Today's Brief section above
+              it (Wael 2026-07-03 — not a one-time dismissible tooltip; the
+              user should be reminded feedback is welcome every time). Bold
+              teal text, same weight/color as the WEATHER label, sentence
+              case since a full sentence in all-caps reads worse than a
+              single word. */}
+          <View style={styles.feedbackBanner}>
+            <TouchableOpacity
+              onPress={() => router.push('/help')}
+              accessibilityLabel="Give feedback — opens Help"
+            >
+              <Text style={styles.feedbackBannerText}>Got feedback? Click here to tell the team</Text>
+            </TouchableOpacity>
+          </View>
 
           {/* Compound question focused header — pinned above turns */}
           {!chatCollapsed && compoundProgress && (
@@ -3994,10 +3972,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     marginTop: 12,
     marginBottom: 4,
-  },
-  feedbackBannerDismiss: {
-    alignSelf: 'flex-end',
-    marginBottom: 2,
   },
   feedbackBannerText: {
     color: Colors.accent,
