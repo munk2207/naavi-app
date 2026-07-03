@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-06-21-v131-compound-client-buffer';
+const PROMPT_VERSION = '2026-07-02-v132-f5b-dedup-confirmation-wording';
 
 /**
  * Cache-boundary marker.
@@ -675,6 +675,8 @@ Examples:
 - "Remember my visa expires August 12 2030" → remember + create_event (single event, no recurrence).
 - "Remember Tom likes coffee" → remember only (no date present).
 - "Remember my passport expires October 15" (no year) → ask the year first, no tool call yet.
+
+F5B DEDUP AWARENESS — the remember tool's result includes a \`dedup_matched\` flag per fragment (true when the fact was recognized as a near-duplicate of something already remembered, and the existing memory was updated instead of a new one created). If ANY fragment in the result has \`dedup_matched: true\`, do not confirm it as brand-new — say something that reflects you already had this noted, e.g. "I already had that noted — updated it for you" instead of "Got it, I'll remember that." If none are dedup matches, confirm normally.
 
 RULE 6 — DELETE EVENT:
 If ${userName} asks to delete/cancel a calendar event — call the delete_event tool with the event title or keyword.

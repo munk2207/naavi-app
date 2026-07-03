@@ -196,6 +196,7 @@ serve(async (req) => {
       // instead of inserting a duplicate. Catches STT variants like
       // "Houssain" / "Hussein" / "Hoosein" that pgvector maps close together.
       let existingId: string | null = null;
+      let matchDistance: number | null = null;
       if (embedding) {
         const { data: matches, error: dedupErr } = await adminClient.rpc(
           'match_knowledge_for_dedup',
@@ -205,6 +206,7 @@ serve(async (req) => {
           console.warn('[ingest-note] Dedup check failed:', dedupErr.message);
         } else if (matches?.[0]?.distance < 0.10) {
           existingId = matches[0].id;
+          matchDistance = matches[0].distance;
           console.log(`[ingest-note] F5b dedup: distance=${matches[0].distance.toFixed(4)} — updating existing fragment ${existingId}`);
         }
       }
@@ -238,7 +240,17 @@ serve(async (req) => {
       if (error) {
         console.error('[ingest-note] Write failed:', error.message);
       } else {
-        stored.push(data);
+        // F5b follow-up (2026-07-02): surface the dedup outcome on each
+        // fragment instead of only logging it server-side. Lets the caller
+        // (get-naavi-prompt's REMEMBER phrasing) tell the user "I already
+        // had that" instead of always saying "got it, new memory saved" —
+        // and gives observability into how well the 0.10 threshold is
+        // working without needing to read Edge Function logs.
+        stored.push({
+          ...data,
+          dedup_matched: existingId !== null,
+          dedup_distance: existingId !== null ? matchDistance : null,
+        });
       }
     }
 
