@@ -72,6 +72,7 @@ import { voiceRegressionTests } from './catalogue/voice-regression';
 import { session2026_06_19Tests } from './catalogue/session-2026-06-19';
 import { session2026_07_02Tests } from './catalogue/session-2026-07-02';
 import { session2026_07_03_f10aTests } from './catalogue/session-2026-07-03-f10a';
+import { session2026_07_03_f2bReminderLabelTests } from './catalogue/session-2026-07-03-f2b-reminder-label';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -179,6 +180,7 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_06_19Tests,
   ...session2026_07_02Tests,
   ...session2026_07_03_f10aTests,
+  ...session2026_07_03_f2bReminderLabelTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────

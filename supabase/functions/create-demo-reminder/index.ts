@@ -93,7 +93,20 @@ Deno.serve(async (req) => {
     // "Sorry, I couldn't set that up"). Phone number is what actually
     // distinguishes demo callers (per the plan's own "distinguished by
     // phone number" resolution) — include it in the label so it does.
-    const label = name ? `Demo reminder for ${name} (${phone})` : `Demo reminder (${phone})`;
+    //
+    // Second bug found via live testing (2026-07-03): the phone-number fix
+    // above only solves collisions between DIFFERENT callers sharing a
+    // name. It does not stop the SAME caller's second reminder attempt
+    // from colliding with their first — same name + same phone still
+    // produces the exact same label, hitting the same unique-index
+    // rejection and generic failure message. Any real caller who phones
+    // the demo line more than once to set a second reminder would hit
+    // this. Fix: include the reminder's scheduled date + time (fire_at)
+    // in the label too, so two reminders only collide if they share
+    // name, phone, AND the exact same fire_at — a genuine duplicate.
+    const label = name
+      ? `Demo reminder for ${name} (${phone}) @ ${fire_at}`
+      : `Demo reminder (${phone}) @ ${fire_at}`;
     const body = String(message ?? '').trim();
     if (!body) {
       return json({ error: 'Missing message body' }, 400);
