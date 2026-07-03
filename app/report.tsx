@@ -1,12 +1,12 @@
 /**
  * Report-a-problem screen
  *
- * Self-contained bug-report form that POSTs to Formspree
- * (https://formspree.io/f/mpqkkdep). Reports land in the MyNaavi team's
- * inbox with device + user context auto-attached so we don't have to ask
- * the user for it.
+ * Bug-report form that POSTs to `ingest-ticket` (source_channel:
+ * 'mobile-report'), same pipeline as Contact support. Reports land in the
+ * MyNaavi team's ticket queue with device + user context auto-attached so
+ * we don't have to ask the user for it.
  *
- * Accessed from the 3-dot menu → "Report a problem" on the home screen.
+ * Accessed from Help → "Report a problem".
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -31,7 +31,8 @@ import { supabase } from '@/lib/supabase';
 import { queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 import { suggestFaq, faqUrl, type FaqEntry } from '@/lib/faq';
 
-const FORMSPREE_URL = 'https://formspree.io/f/mpqkkdep';
+const SUPABASE_URL  = process.env.EXPO_PUBLIC_SUPABASE_URL  ?? '';
+const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 type Severity = 'urgent' | 'important' | 'annoying' | 'suggestion';
 
@@ -102,27 +103,30 @@ export default function ReportScreen() {
     try {
       const appVersion = `${Constants.expoConfig?.version ?? '?'} (build ${Constants.expoConfig?.android?.versionCode ?? '?'})`;
       const platform   = `${Platform.OS} ${Platform.Version}`;
+      const session    = await getSessionWithTimeout();
+      const authToken  = session?.access_token ?? SUPABASE_ANON;
 
-      const body = new URLSearchParams();
-      body.append('description',   desc);
-      body.append('context',       context.trim());
-      body.append('severity',      severity);
-      body.append('email',         email.trim());
-      body.append('app_version',   appVersion);
-      body.append('platform',      platform);
-      body.append('user_id',       userId);
-      body.append('user_name',     userName);
-      body.append('submitted_at',  new Date().toISOString());
-      body.append('_subject',      `[${severity.toUpperCase()}] MyNaavi bug report — ${appVersion}`);
-
-      const res = await fetch(FORMSPREE_URL, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/ingest-ticket`, {
         method: 'POST',
-        headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body.toString(),
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON,
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          source_channel:  'mobile-report',
+          subject:         `[${severity.toUpperCase()}] ${desc.slice(0, 60)}`,
+          body:            desc,
+          severity,
+          reporter_email:  email.trim(),
+          reporter_name:   userName || undefined,
+          user_id:         userId   || undefined,
+          context:         `${context.trim() ? context.trim() + ' | ' : ''}app_version=${appVersion} platform=${platform}`,
+        }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || `Formspree returned ${res.status}`);
+        throw new Error(data?.error || `Submit failed ${res.status}`);
       }
       setSuccess(true);
     } catch (err) {

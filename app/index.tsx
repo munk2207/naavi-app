@@ -38,6 +38,7 @@ import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { WebView } from 'react-native-webview';
 import * as Speech from 'expo-speech';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SPEECH } from '@/lib/voice-confirm';
 
 import { getUserName } from '@/lib/naavi-client';
@@ -929,6 +930,19 @@ export default function HomeScreen() {
   // restored). Banner offers one-tap re-sign-in.
   const [staleAuth, setStaleAuth] = useState(false);
   const [showScopePrompt, setShowScopePrompt] = useState(false);
+
+  // F10a — home-screen feedback invitation, dismissible once (persisted so it
+  // doesn't reappear after being closed).
+  const [showFeedbackBanner, setShowFeedbackBanner] = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem('naavi_feedback_banner_dismissed').then(v => {
+      if (v !== 'true') setShowFeedbackBanner(true);
+    });
+  }, []);
+  const dismissFeedbackBanner = () => {
+    setShowFeedbackBanner(false);
+    AsyncStorage.setItem('naavi_feedback_banner_dismissed', 'true').catch(() => {});
+  };
 
   // Auto sign-in for Maestro / Firebase Test Lab runs — no button tap needed
   useEffect(() => {
@@ -2086,6 +2100,25 @@ export default function HomeScreen() {
             );
           })()}
 
+          {/* F10a — home-screen feedback invitation, dismissible once */}
+          {showFeedbackBanner && (
+            <View style={styles.feedbackBanner}>
+              <TouchableOpacity
+                style={styles.feedbackBannerTextWrap}
+                onPress={() => router.push('/help')}
+                accessibilityLabel="Give feedback — opens Help"
+              >
+                <Text style={styles.feedbackBannerText}>Got feedback? Tell the team →</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={dismissFeedbackBanner}
+                hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                accessibilityLabel="Dismiss feedback invitation"
+              >
+                <Ionicons name="close" size={16} color={Colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Compound question focused header — pinned above turns */}
           {!chatCollapsed && compoundProgress && (
@@ -3946,6 +3979,26 @@ const styles = StyleSheet.create({
     paddingVertical: 28,
     paddingHorizontal: 8,
     alignItems: 'center',
+  },
+  // F10a — home-screen feedback invitation banner.
+  feedbackBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(93,202,165,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(93,202,165,0.25)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  feedbackBannerTextWrap: { flex: 1 },
+  feedbackBannerText: {
+    color: Colors.accent,
+    fontSize: 14,
+    fontWeight: '600',
   },
   // Screen-wide caption bar for bottom-icon hover / long-press. Positioned
   // above the input area via absolute bottom offset so it stays visible

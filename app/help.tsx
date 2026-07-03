@@ -56,6 +56,12 @@ export default function HelpScreen() {
       onPress: () => router.push('/contact'),
     },
     {
+      icon: 'flag',
+      label: 'Report a problem',
+      sub: 'Something broken or not working right',
+      onPress: () => router.push('/report'),
+    },
+    {
       icon: 'information-circle',
       label: 'Terms & Legal',
       sub: 'Version, privacy, terms',
