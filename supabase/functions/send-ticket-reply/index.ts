@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
     // ── Load ticket ──────────────────────────────────────────────────
     const { data: ticket, error: tErr } = await admin
       .from('tickets')
-      .select('id, ticket_number, subject, reporter_email, reporter_name, reporter_phone, source_channel, status, replies, audit_trail')
+      .select('id, ticket_number, subject, reporter_email, reporter_name, reporter_phone, source_channel, created_by, status, replies, audit_trail')
       .eq('id', ticket_id)
       .maybeSingle();
     if (tErr || !ticket) return json({ error: 'ticket_not_found' }, 404);
@@ -109,8 +109,13 @@ Deno.serve(async (req) => {
 
     // ── SMS for voice-call tickets ───────────────────────────────────
     // Voice callers may not check email — send the full reply via SMS too.
+    // B8b (2026-07-03) — email always sends above regardless; this SMS is
+    // a supplementary send, not a replacement. Only fires for a REAL
+    // live-call ticket the automated voice system created (no created_by)
+    // — a staffer manually logging a ticket after receiving a call has no
+    // live-call urgency, and email is already guaranteed, so no extra SMS.
     let smsSent = false;
-    if ((ticket.source_channel === 'voice-call' || ticket.source_channel === 'internal-relay') && ticket.reporter_phone) {
+    if (!ticket.created_by && (ticket.source_channel === 'voice-call' || ticket.source_channel === 'internal-relay') && ticket.reporter_phone) {
       try {
         const smsText = `MyNaavi support (ticket #${ticket.ticket_number}):\n${cleanBody}`;
         await fetch(`${supabaseUrl}/functions/v1/send-sms`, {

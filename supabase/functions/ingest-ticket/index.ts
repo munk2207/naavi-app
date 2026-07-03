@@ -177,10 +177,22 @@ serve(async (req) => {
       if (settings?.user_id) userId = String(settings.user_id);
     }
 
+    // ── B8b (2026-07-03) — track who actually created the ticket ────────
+    // Separate from source_channel (how the customer originally reached
+    // support). The staff portal already sends created_by on every
+    // channel, not just "Other" (internal-relay) — previously this was
+    // only read for internal-relay and silently discarded otherwise, so
+    // a staffer picking "Phone call" produced a ticket indistinguishable
+    // from one the real live voice-call system created automatically.
+    // Now persisted as its own column regardless of channel; NULL means
+    // system-created. send-ticket-reply uses this to always reply by
+    // email for staff-created tickets, regardless of source_channel.
+    const createdBy = String(payload.created_by ?? '').trim();
+
     // ── Insert ticket row ────────────────────────────────────────────
     const auditEntry = {
       at:          new Date().toISOString(),
-      actor:       channel === 'internal-relay' ? String(payload.created_by ?? 'staff') : 'system',
+      actor:       createdBy || 'system',
       from_status: null,
       to_status:   'new',
       note:        `Ingested via ${channel}` + (userId ? ` — resolved to user ${userId.slice(0, 8)}` : ' — anonymous'),
@@ -190,6 +202,7 @@ serve(async (req) => {
       .from('tickets')
       .insert({
         source_channel:    channel,
+        created_by:        createdBy || null,
         user_id:           userId,
         reporter_email:    reporterEmail || null,
         reporter_phone:    reporterPhone || null,
@@ -278,7 +291,11 @@ serve(async (req) => {
     // voice-call and internal-relay originate from phone interactions —
     // the reporter may not have email open. Send an SMS with the ticket
     // number as a safety net so they have immediate confirmation.
-    if ((channel === 'voice-call' || channel === 'internal-relay') && reporterPhone && !isTestTicket) {
+    // B8b (2026-07-03) — only for a REAL live-call ticket the automated
+    // voice system created (no created_by). A staffer manually logging a
+    // ticket after the fact has no live-call urgency; the acknowledgment
+    // email above already covers it.
+    if (!createdBy && (channel === 'voice-call' || channel === 'internal-relay') && reporterPhone && !isTestTicket) {
       try {
         const smsBody = `MyNaavi support ticket #${ticket.ticket_number} received. We'll follow up by email within 2 business days.`;
         await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
