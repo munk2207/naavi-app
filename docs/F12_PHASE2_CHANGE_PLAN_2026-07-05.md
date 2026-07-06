@@ -101,6 +101,6 @@ This plan satisfies governance (Protected Core changes get full review before co
 - 7 new regression tests (`tests/catalogue/session-2026-07-06-f12-high-risk-wiring.ts`); 1 pre-existing test (`note-update.enabled-branch-offers-update`) updated after a source-text-only break (runtime behavior unchanged, confirmed before editing).
 - **Full regression suite run: 377 passed, 0 failed, 0 errored, 2 skipped (pre-existing, unrelated OAuth token gaps).**
 
-Production untouched throughout — nothing deployed anywhere yet for this tier.
+**Committed and deployed to staging (2026-07-06):** main repo `b034e10` (`origin/main`); `naavi-voice-server` `5ada02b` (`origin/staging`); `evaluate-rules` deployed to staging Supabase project (`xugvnfudofuskxoknhve`). Production untouched throughout — no production deploy for any F12 tier.
 
-**Awaiting Wael's explicit approval before commit + staging deploy**, per the established pattern for the earlier two tiers.
+**All three tiers of this Change Plan are now implemented, tested, committed, and deployed to staging.** Manual staging validation (3 scenarios in `docs/F12_PHASE4_EVIDENCE_2026-07-06.md`) and production promotion remain — production promotion requires Wael's separate explicit approval per CLAUDE.md's staging-first rule, not implied by this deploy.

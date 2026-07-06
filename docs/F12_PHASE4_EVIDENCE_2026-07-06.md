@@ -1,12 +1,12 @@
-# F12 — Phase 4 Evidence Package (all three tiers implemented)
+# F12 — Phase 4 Evidence Package (all three tiers implemented, committed, deployed to staging)
 
-Per `docs/AI_DEVELOPMENT_GOVERNANCE.md` Phase 5 ("Evidence Package... If this package is missing, the task is incomplete"). Covers all three tiers of `docs/F12_PHASE2_CHANGE_PLAN_2026-07-05.md`: the Low-risk Defect B fix, the standalone `resolve-recipient`/`lookup-contact` piece (Wael's explicit "zero-risk" instruction), and the Medium/High-risk caller-wiring + `evaluate-rules` tier, added 2026-07-06.
+Per `docs/AI_DEVELOPMENT_GOVERNANCE.md` Phase 5 ("Evidence Package... If this package is missing, the task is incomplete"). Covers all three tiers of `docs/F12_PHASE2_CHANGE_PLAN_2026-07-05.md`: the Low-risk Defect B fix, the standalone `resolve-recipient`/`lookup-contact` piece (Wael's explicit "zero-risk" instruction), and the Medium/High-risk caller-wiring + `evaluate-rules` tier.
 
 ---
 
 ## Summary
 
-Three pieces of the approved Phase 2 plan, all complete, all tested. **Tiers 1 and 2 are committed and deployed to staging. Tier 3 (this update) is implemented and tested, NOT yet committed or deployed.**
+Three pieces of the approved Phase 2 plan, all complete, all tested, **all committed and deployed to staging as of 2026-07-06.**
 
 1. **Defect B fix** — the location-alert memory-hit ("you already have one") path now detects a changed recipient as content worth merging, on both mobile and voice, and the write path that actually performs the merge (`manage-rules`) now applies recipient fields instead of silently ignoring them.
 2. **`resolve-recipient` + `lookup-contact` extension** — the Recipient Resolver Edge Function, tested in isolation, then in tier 3 wired to every producer.
@@ -16,7 +16,8 @@ Three pieces of the approved Phase 2 plan, all complete, all tested. **Tiers 1 a
    - `supabase/functions/evaluate-rules/index.ts` (**Protected Core**) — `fireAction()` now re-resolves a `contact_id`-based recipient fresh at fire time (`resolve-recipient`, fire mode), per Wael's explicit live-reference lifecycle decision. A distinct failure path self-notifies honestly on `not_found`/`ambiguous` instead of falling into the `noRecipient` self-alert branch — verified by test to be checked and returned *before* that branch is reached.
 
 **Tier 1/2 commits:** main repo `201914f` (`origin/main`); `naavi-voice-server` `8167d78` (`origin/staging`). Deployed to staging: `resolve-recipient`, `lookup-contact`, `manage-rules`.
-**Tier 3:** no commits, no deploys yet. Working-tree changes only.
+**Tier 3 commits:** main repo `b034e10` (`origin/main`); `naavi-voice-server` `5ada02b` (`origin/staging`). Deployed to staging: `evaluate-rules`.
+**Production: untouched by any tier.**
 
 **Scope note, reported per governance rather than silently absorbed:** the approved plan described reusing "the existing DRAFT_MESSAGE picker UI pattern" for ambiguous contacts at create time. No such interactive picker was found wired into either `useOrchestrator.ts` or the voice server for `SET_ACTION_RULE` (`DraftCard` is a send/discard UI for an already-resolved draft, not a disambiguation UI). Both surfaces instead **fail closed**: block the rule, tell the user to say a full name or a literal address, and let them retry. A real interactive picker remains future work if ambiguity turns out to be common in practice.
 
@@ -92,7 +93,8 @@ Once tier 3 is committed and deployed to staging:
 ## Rollback instructions
 
 **Tier 3 (this update):** nothing committed — `git checkout -- hooks/useOrchestrator.ts supabase/functions/evaluate-rules/index.ts tests/...` (main repo) and `git -C naavi-voice-server checkout -- src/index.js` discard it entirely with no history to unwind.
-**Tiers 1/2 (already committed/deployed):** `git revert 201914f` (main, `origin/main`) and `git -C naavi-voice-server revert 8167d78` (`origin/staging`), then redeploy `resolve-recipient`/`lookup-contact`/`manage-rules` from the reverted state.
+**Tiers 1/2:** `git revert 201914f` (main, `origin/main`) and `git -C naavi-voice-server revert 8167d78` (`origin/staging`), then redeploy `resolve-recipient`/`lookup-contact`/`manage-rules` from the reverted state.
+**Tier 3:** `git revert b034e10` (main) and `git -C naavi-voice-server revert 5ada02b` (staging), then redeploy `evaluate-rules` from the reverted state.
 Production (`hhgyppbxgmjrwdpdubcx`) was never touched by any tier — no production rollback is ever needed for this work.
 
 ## Known risks
@@ -100,16 +102,16 @@ Production (`hhgyppbxgmjrwdpdubcx`) was never touched by any tier — no product
 - **`evaluate-rules` fire-time resolution (Protected Core, High risk):** adds a network call (`resolve-recipient`) inside the single dispatcher shared by every trigger type. A `resolve-recipient` outage would affect only contact-based rules (those with `contact_id` set) — rules with a literal `to_email`/`to_phone` already snapshotted never reach this code path. Failure mode is fail-closed (self-notify), not misdirection or silent drop.
 - **`manage-rules` merge_tasks change (Defect B):** overwrites destination fields wholesale on merge — unchanged assessment from tier 1.
 - **No interactive ambiguous-contact picker** (scope note above) — if ambiguity turns out to be common, users hit a "say the full name" retry loop rather than a tap-to-pick UI. Not blocking for this fix; worth revisiting if reported as friction.
-- **Live production risk from Phase 1 is now closed by this tier** (pending deploy): once tier 3 ships, new location alerts with literal/named third-party recipients will resolve correctly at both creation and fire time.
+- **Live production risk from Phase 1 is now closed on staging.** New location alerts with literal/named third-party recipients now resolve correctly at both creation and fire time — on staging. Production still runs the pre-fix code until a separate, explicitly-approved production promotion.
 
 ## Outstanding
 
-- ☑ Mobile wiring — done, tier 3
-- ☑ Voice wiring — done, tier 3
-- ☑ `evaluate-rules` Protected Core change — done, tier 3
-- ☐ Commit tier 3 (main repo + voice-server)
-- ☐ Deploy tier 3 to staging (`resolve-recipient` already deployed from tier 2; `evaluate-rules`, `lookup-contact` primary-preference change if bundled, and the two callers need building/deploying)
-- ☐ Manual staging validation (3 scenarios above)
-- ☐ Production promotion (only after staging validation and Wael's explicit approval, per CLAUDE.md staging-first rule)
+- ☑ Mobile wiring — done, tier 3, deployed to staging
+- ☑ Voice wiring — done, tier 3, deployed to staging
+- ☑ `evaluate-rules` Protected Core change — done, tier 3, deployed to staging
+- ☑ Commit tier 3 (main repo `b034e10`, voice-server `5ada02b`)
+- ☑ Deploy tier 3 to staging (`evaluate-rules` deployed 2026-07-06; `resolve-recipient`/`lookup-contact`/`manage-rules` already live from tier 2)
+- ☐ Manual staging validation (3 scenarios above) — not yet performed
+- ☐ Production promotion — requires Wael's separate explicit approval per CLAUDE.md staging-first rule; not implied by the staging deploy above
 
 **Awaiting Wael's explicit sign-off before committing/deploying tier 3**, consistent with the pattern for tiers 1/2.
