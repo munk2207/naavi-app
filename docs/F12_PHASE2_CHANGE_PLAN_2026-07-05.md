@@ -90,8 +90,17 @@ This plan satisfies governance (Protected Core changes get full review before co
 
 ## 9. Phase 4 progress (updated 2026-07-06)
 
-**Done, tested, uncommitted:**
-- Defect B fix (Low risk) — `useOrchestrator.ts`, `naavi-voice-server/src/index.js`, `manage-rules/index.ts`. 5 regression tests passing (`tests/catalogue/session-2026-07-05-f12-defect-b.ts`).
-- `resolve-recipient` + `lookup-contact` `contact_id` support (Medium risk component, built standalone per Wael's explicit "zero-risk" instruction — **not wired to any caller yet**, guarded by its own test asserting that). 6 regression tests passing (`tests/catalogue/session-2026-07-05-f12-resolve-recipient.ts`).
+**Done, tested, committed, deployed to staging:**
+- Defect B fix (Low risk) — `useOrchestrator.ts`, `naavi-voice-server/src/index.js`, `manage-rules/index.ts`. 5 regression tests passing. Main repo commit `201914f` (`origin/main`); voice-server commit `8167d78` (`origin/staging`); `manage-rules` deployed to staging Supabase project (`xugvnfudofuskxoknhve`).
+- `resolve-recipient` + `lookup-contact` `contact_id` support (Medium risk component, built standalone per Wael's explicit "zero-risk" instruction — **not wired to any caller yet**, guarded by its own test asserting that). 6 regression tests passing. Both deployed to staging; smoke-tested post-deploy (see `docs/F12_PHASE4_EVIDENCE_2026-07-06.md`).
 
-**Not started:** replacing `useOrchestrator.ts`/voice's resolution calls with `resolve-recipient`, and the `evaluate-rules` Protected Core change (High risk). Per governance, Claude implements only the approved files/behavior in §5 — no extra refactoring, cleanup, or unrelated fixes without separate approval. Awaiting Wael's explicit go-ahead before continuing.
+**Done, tested, NOT yet committed or deployed (2026-07-06):**
+- Mobile wiring — `useOrchestrator.ts`'s `SET_ACTION_RULE` resolution now calls `resolve-recipient` (create mode) instead of the ad hoc `lookupContact`. Ambiguous/not_found fail closed (block the rule, ask user to clarify) rather than the interactive picker the plan originally described — no such picker was found wired into this function; see the Evidence Package's scope note.
+- Voice wiring — both the main (non-location) handler and the location branch now call `resolve-recipient` (create mode). Voice previously had zero destination resolution (Phase 1, Evidence A3) — this is the larger of the two surface changes.
+- `evaluate-rules` (High risk, Protected Core) — `fireAction()` now re-resolves a `contact_id`-based recipient fresh at fire time (`resolve-recipient`, fire mode), per Wael's live-reference lifecycle decision. A distinct `recipientUnresolvable` failure path self-notifies honestly and returns `true` (fully evaluated) — verified by test to be checked and to return *before* the `noRecipient` self-alert branch, so it can never fall through to it.
+- 7 new regression tests (`tests/catalogue/session-2026-07-06-f12-high-risk-wiring.ts`); 1 pre-existing test (`note-update.enabled-branch-offers-update`) updated after a source-text-only break (runtime behavior unchanged, confirmed before editing).
+- **Full regression suite run: 377 passed, 0 failed, 0 errored, 2 skipped (pre-existing, unrelated OAuth token gaps).**
+
+Production untouched throughout — nothing deployed anywhere yet for this tier.
+
+**Awaiting Wael's explicit approval before commit + staging deploy**, per the established pattern for the earlier two tiers.

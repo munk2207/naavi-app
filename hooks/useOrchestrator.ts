@@ -3231,17 +3231,72 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               const toName = String(actionConfig.to ?? '');
               const actionType = String(action.action_type ?? 'sms');
 
+              // F12 Phase 4 (2026-07-06) — resolve via the shared Recipient
+              // Resolver instead of the ad hoc lookupContact call it replaces.
+              // Handles literal email/phone addresses (Defect A) in addition
+              // to named contacts, which lookupContact alone never did.
+              // See docs/F12_PHASE2_CHANGE_PLAN_2026-07-05.md §1.
+              //
+              // Scope note: the approved plan said "reusing the existing
+              // DRAFT_MESSAGE picker UI pattern" for the ambiguous case — no
+              // such interactive picker was found wired into this function
+              // for SET_ACTION_RULE (DraftCard is a send/discard UI for an
+              // already-resolved draft, not a disambiguation UI). Rather than
+              // build a new multi-turn picker flow here, ambiguous/not_found
+              // block the rule and ask the user to say the full name or a
+              // literal address instead — deterministic, no guessing, and
+              // consistent with the existing possessive-contact-resolution
+              // "I don't have a contact named X" wording used elsewhere in
+              // this file. A real interactive picker remains future work if
+              // this turns out to be a common case in practice.
+              let recipientBlocked = false;
               if (toName && !actionConfig.to_phone && !actionConfig.to_email) {
-                const contact = await lookupContact(toName);
-                if (contact) {
-                  if ((actionType === 'sms' || actionType === 'whatsapp') && contact.phone) {
-                    actionConfig.to_phone = contact.phone;
-                    actionConfig.to_name = toName;
-                  } else if (actionType === 'email' && contact.email) {
-                    actionConfig.to_email = contact.email;
-                    actionConfig.to_name = toName;
+                try {
+                  const { data: resolved } = await invokeWithTimeout<any>(
+                    'resolve-recipient',
+                    { body: { mode: 'create', to: toName, user_id: session.user.id } },
+                    15_000,
+                  );
+                  switch (resolved?.kind) {
+                    case 'literal_email':
+                      actionConfig.to_email = resolved.value;
+                      break;
+                    case 'literal_phone':
+                      actionConfig.to_phone = resolved.value;
+                      break;
+                    case 'resolved_contact':
+                      if ((actionType === 'sms' || actionType === 'whatsapp') && resolved.phone) {
+                        actionConfig.to_phone = resolved.phone;
+                      } else if (actionType === 'email' && resolved.email) {
+                        actionConfig.to_email = resolved.email;
+                      }
+                      actionConfig.to_name = resolved.name ?? toName;
+                      if (resolved.contact_id) actionConfig.contact_id = resolved.contact_id;
+                      break;
+                    case 'ambiguous':
+                      recipientBlocked = true;
+                      turnSpeechOverride = `You have more than one contact named ${toName} — say their full name and I'll try again.`;
+                      break;
+                    case 'not_found':
+                    case 'invalid':
+                    default:
+                      recipientBlocked = true;
+                      turnSpeechOverride = `I don't have a contact named ${toName}. Tell me their email or phone number directly, or save them to your contacts first.`;
+                      break;
                   }
+                } catch (err) {
+                  console.error('[Orchestrator] resolve-recipient call failed:', err instanceof Error ? err.message : err);
+                  // Fail closed, not open — silently creating a rule with an
+                  // unresolved destination is exactly the F12 bug class this
+                  // replaces. Block and let the user retry.
+                  recipientBlocked = true;
+                  turnSpeechOverride = `I couldn't verify that contact right now — please try again.`;
                 }
+              }
+
+              if (recipientBlocked) {
+                console.log(`[Orchestrator] SET_ACTION_RULE blocked — recipient "${toName}" did not resolve cleanly`);
+                continue;
               }
 
               const triggerType = String(action.trigger_type ?? 'email');

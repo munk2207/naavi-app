@@ -154,9 +154,19 @@ export const session2026_06_11Tests: TestCase[] = [
         src.includes('newBody && newBody.toLowerCase() !=='),
         'enabled memory-hit branch must compare newBody vs existingBody',
       );
+      // F12 Phase 4 (2026-07-06) — the literal phrase moved from one inline
+      // template into a separate `updateDesc` variable when the branch was
+      // extended to also offer updating a changed recipient (Defect B fix).
+      // Runtime output for the body-only case is unchanged: "Want me to
+      // update the message to "..."?" — checking both halves confirms that
+      // rather than relying on one contiguous source string.
       expectTruthy(
-        src.includes('Want me to update the message to'),
-        'enabled memory-hit branch must offer to update message when body differs',
+        src.includes('update the message to "${newBody}"'),
+        'enabled memory-hit branch must build an update-the-message offer when body differs',
+      );
+      expectTruthy(
+        src.includes('Want me to ${updateDesc}?'),
+        'enabled memory-hit branch must speak the update offer to the user',
       );
     },
   },

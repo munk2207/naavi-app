@@ -1,112 +1,115 @@
-# F12 — Phase 4 Evidence Package (partial — two tiers complete)
+# F12 — Phase 4 Evidence Package (all three tiers implemented)
 
-Per `docs/AI_DEVELOPMENT_GOVERNANCE.md` Phase 5 ("Evidence Package... If this package is missing, the task is incomplete"). Covers the two tiers of `docs/F12_PHASE2_CHANGE_PLAN_2026-07-05.md` completed so far: the Low-risk Defect B fix, and the standalone `resolve-recipient`/`lookup-contact` piece (Wael's explicit "zero-risk" instruction, 2026-07-05/06). The Medium/High-risk tier (caller wiring, `evaluate-rules`) is **not** covered here because it has not been implemented.
+Per `docs/AI_DEVELOPMENT_GOVERNANCE.md` Phase 5 ("Evidence Package... If this package is missing, the task is incomplete"). Covers all three tiers of `docs/F12_PHASE2_CHANGE_PLAN_2026-07-05.md`: the Low-risk Defect B fix, the standalone `resolve-recipient`/`lookup-contact` piece (Wael's explicit "zero-risk" instruction), and the Medium/High-risk caller-wiring + `evaluate-rules` tier, added 2026-07-06.
 
 ---
 
 ## Summary
 
-Two independent pieces of the approved Phase 2 plan, both complete, both tested, **neither committed nor deployed**:
+Three pieces of the approved Phase 2 plan, all complete, all tested. **Tiers 1 and 2 are committed and deployed to staging. Tier 3 (this update) is implemented and tested, NOT yet committed or deployed.**
 
 1. **Defect B fix** — the location-alert memory-hit ("you already have one") path now detects a changed recipient as content worth merging, on both mobile and voice, and the write path that actually performs the merge (`manage-rules`) now applies recipient fields instead of silently ignoring them.
-2. **`resolve-recipient` + `lookup-contact` extension** — the new Recipient Resolver Edge Function exists and is tested in isolation. `lookup-contact` gained `contact_id` support (both returning it and accepting it for ID-based re-lookup). **Deliberately not wired to any caller** — mobile, voice, and `evaluate-rules` are unchanged in their actual resolution behavior.
+2. **`resolve-recipient` + `lookup-contact` extension** — the Recipient Resolver Edge Function, tested in isolation, then in tier 3 wired to every producer.
+3. **Caller wiring + `evaluate-rules` (this update, 2026-07-06):**
+   - `hooks/useOrchestrator.ts` — `SET_ACTION_RULE` resolution now calls `resolve-recipient` (create mode) instead of the ad hoc `lookupContact`, fixing Defect A on mobile.
+   - `naavi-voice-server/src/index.js` — both the main (non-location) handler and the location branch now call `resolve-recipient` (create mode). Voice previously had **zero** destination resolution (Phase 1, Evidence A3) — this is the larger of the two surface fixes.
+   - `supabase/functions/evaluate-rules/index.ts` (**Protected Core**) — `fireAction()` now re-resolves a `contact_id`-based recipient fresh at fire time (`resolve-recipient`, fire mode), per Wael's explicit live-reference lifecycle decision. A distinct failure path self-notifies honestly on `not_found`/`ambiguous` instead of falling into the `noRecipient` self-alert branch — verified by test to be checked and returned *before* that branch is reached.
 
-## Files changed
+**Tier 1/2 commits:** main repo `201914f` (`origin/main`); `naavi-voice-server` `8167d78` (`origin/staging`). Deployed to staging: `resolve-recipient`, `lookup-contact`, `manage-rules`.
+**Tier 3:** no commits, no deploys yet. Working-tree changes only.
+
+**Scope note, reported per governance rather than silently absorbed:** the approved plan described reusing "the existing DRAFT_MESSAGE picker UI pattern" for ambiguous contacts at create time. No such interactive picker was found wired into either `useOrchestrator.ts` or the voice server for `SET_ACTION_RULE` (`DraftCard` is a send/discard UI for an already-resolved draft, not a disambiguation UI). Both surfaces instead **fail closed**: block the rule, tell the user to say a full name or a literal address, and let them retry. A real interactive picker remains future work if ambiguity turns out to be common in practice.
+
+## Files changed (all three tiers)
 
 | File | Repo | Change | In approved Phase 2 §5? |
 |---|---|---|---|
-| `hooks/useOrchestrator.ts` | main | Defect B: `hasNewContent` now detects `recipientChanged`; fixed missing 3rd arg to `reArmLocationRule` | Yes |
-| `naavi-voice-server/src/index.js` | naavi-voice-server | Defect B: enabled-branch check now detects `recipientChanged`; `pendingNoteUpdate` consumption applies the new recipient fields | Yes |
-| `supabase/functions/manage-rules/index.ts` | main | `merge_tasks` op accepts and overwrites `to`/`to_name`/`to_email`/`to_phone` wholesale | **Added to §5 during this pass — flagged explicitly, see Phase 2 §7** |
-| `supabase/functions/resolve-recipient/index.ts` | main | **New file.** Recipient Resolver — literal email/phone detection, `create`/`fire` mode contract, six output kinds | Yes |
-| `supabase/functions/lookup-contact/index.ts` | main | Added `contact_id` to returned shape; accepts `contact_id` as an alternative to `name` for direct ID-based fetch | Yes |
-| `supabase/config.toml` | main | Registered `resolve-recipient` (`verify_jwt = false`, matching `lookup-contact`) | Implied by the new-file row |
-| `tests/catalogue/session-2026-07-05-f12-defect-b.ts` | main | New — 5 tests | Yes (§6) |
-| `tests/catalogue/session-2026-07-05-f12-resolve-recipient.ts` | main | New — 6 tests, including a guard that fails if `resolve-recipient` gets wired to a caller without updating this test | Yes (§6) |
-| `tests/runner.ts` | main | Registered both new test files | Implied |
+| `hooks/useOrchestrator.ts` | main | Defect B merge-check fix + **(tier 3)** `SET_ACTION_RULE` resolution now calls `resolve-recipient`, fails closed on ambiguous/not_found | Yes |
+| `naavi-voice-server/src/index.js` | naavi-voice-server | Defect B merge-check fix + **(tier 3)** `resolve-recipient` wired into both the main handler and location branch, fails closed | Yes |
+| `supabase/functions/manage-rules/index.ts` | main | `merge_tasks` op accepts and overwrites recipient fields wholesale | Added to §5 during tier 1 — flagged explicitly, see Phase 2 §7 |
+| `supabase/functions/resolve-recipient/index.ts` | main | Recipient Resolver — literal email/phone detection, `create`/`fire` mode contract, six output kinds | Yes |
+| `supabase/functions/lookup-contact/index.ts` | main | `contact_id` support (return + accept for ID-based fetch) | Yes |
+| `supabase/functions/evaluate-rules/index.ts` | main | **(tier 3, Protected Core)** Fire-time re-resolution via `resolve-recipient` (fire mode) + distinct `recipientUnresolvable` self-notify path | Yes |
+| `supabase/config.toml` | main | Registered `resolve-recipient` | Implied |
+| `tests/catalogue/session-2026-07-05-f12-defect-b.ts` | main | 5 tests | Yes (§6) |
+| `tests/catalogue/session-2026-07-05-f12-resolve-recipient.ts` | main | 6 tests — the "not wired" guard test replaced with `f12.resolve-recipient-wired-to-all-three-callers` in tier 3, per its own comment ("updated, not deleted, when wiring happens") | Yes (§6) |
+| `tests/catalogue/session-2026-07-06-f12-high-risk-wiring.ts` | main | **New, tier 3.** 7 tests covering all three wiring points | Yes (§6) |
+| `tests/catalogue/session-2026-06-11.ts` | main | **Pre-existing test updated, tier 3** — `note-update.enabled-branch-offers-update`'s source-text assertion no longer matched after the Defect B refactor moved a literal phrase into a variable; runtime behavior confirmed unchanged before editing the assertion | Not part of F12 scope — a compatibility fix for an unrelated pre-existing test, reported here rather than silently touched |
+| `tests/runner.ts` | main | Registered all 3 new test files | Implied |
 
-**Not touched:** `supabase/functions/evaluate-rules/index.ts` (High risk, not started), any file outside the above.
+**Not touched:** any file outside the above, in any tier.
 
 ## Traceability matrix
-
-Every approved Phase 2 requirement covered by this evidence package, mapped to its implementation and its verification — so each item's status is auditable in one place rather than reconstructed from prose.
 
 | Phase 2 requirement | Files | Test(s) |
 |---|---|---|
 | Defect B — recipient change detected as mergeable content (mobile) | `hooks/useOrchestrator.ts` | `f12.mobile-memory-hit-detects-recipient-change`, `f12.mobile-rearm-passes-action-config` |
 | Defect B — recipient change detected as mergeable content (voice) | `naavi-voice-server/src/index.js` | `f12.voice-memory-hit-detects-recipient-change`, `f12.voice-pending-note-update-applies-recipient` |
-| Defect B — write path applies the merged recipient (added to §5 this pass) | `supabase/functions/manage-rules/index.ts` | `f12.manage-rules-merge-tasks-accepts-recipient` |
+| Defect B — write path applies the merged recipient | `supabase/functions/manage-rules/index.ts` | `f12.manage-rules-merge-tasks-accepts-recipient` |
 | Recipient Resolver — six-output-kind contract, `create`/`fire` mode split | `supabase/functions/resolve-recipient/index.ts` | `f12.resolve-recipient-all-six-output-kinds`, `f12.resolve-recipient-mode-specific-input` |
-| Recipient Resolver — deliberately unwired (zero-risk instruction) | *(guard, no production file)* | `f12.resolve-recipient-not-wired-to-any-caller` |
-| Identity hierarchy — `contact_id` support added to the People API adapter | `supabase/functions/lookup-contact/index.ts` | `f12.lookup-contact-contact-id-support`, `f12.lookup-contact-name-still-optional-input-unchanged` |
+| Identity hierarchy — `contact_id` support on the People API adapter | `supabase/functions/lookup-contact/index.ts` | `f12.lookup-contact-contact-id-support`, `f12.lookup-contact-name-still-optional-input-unchanged` |
 | Deployment registration | `supabase/config.toml` | `f12.resolve-recipient-registered-in-config-toml` |
-| **Not yet implemented** | `supabase/functions/evaluate-rules/index.ts`, caller wiring in `useOrchestrator.ts`/`naavi-voice-server` | *(none — no code exists yet)* |
+| **Mobile wiring** — `SET_ACTION_RULE` resolution uses `resolve-recipient`, fails closed | `hooks/useOrchestrator.ts` | `f12.mobile-set-action-rule-uses-resolve-recipient-create-mode`, `f12.mobile-set-action-rule-blocks-on-unresolvable-recipient` |
+| **Voice wiring** — both call sites use `resolve-recipient`, fail closed | `naavi-voice-server/src/index.js` | `f12.voice-set-action-rule-uses-resolve-recipient-both-paths`, `f12.voice-main-handler-fails-closed-on-unresolvable-recipient`, `f12.voice-location-branch-blocks-on-unresolvable-recipient` |
+| **`evaluate-rules` fire-time re-resolution** (Protected Core) | `supabase/functions/evaluate-rules/index.ts` | `f12.evaluate-rules-fire-mode-live-reresolution` |
+| **`evaluate-rules` distinct failure path**, never falls into `noRecipient` | `supabase/functions/evaluate-rules/index.ts` | `f12.evaluate-rules-distinct-failure-not-self-alert` |
+| All three callers now use `resolve-recipient` (successor to the zero-risk guard) | all three | `f12.resolve-recipient-wired-to-all-three-callers` |
 
-## Git diff (stat)
-
-```
-main repo:
- hooks/useOrchestrator.ts                    | 54 +++++++++++++++++++++++-------
- supabase/config.toml                        |  3 ++
- supabase/functions/lookup-contact/index.ts  | 54 +++++++++++++++++++++++++++---
- supabase/functions/manage-rules/index.ts    | 16 ++++++++-
- 4 files changed, 109 insertions(+), 18 deletions(-)
- (plus 2 new test files + resolve-recipient/index.ts, new/untracked)
-
-naavi-voice-server repo:
- src/index.js | 51 +++++++++++++++++++++++++++++++++++++++++++++------
- 1 file changed, 45 insertions(+), 6 deletions(-)
-```
-
-Full diffs available via `git diff` in each repo — nothing has been committed, so this is the complete working-tree change.
+**Every row has a test. No approved Phase 2 requirement is implemented without one.**
 
 ## Tests executed
 
 ```
 npm run test:auto -- --grep f12
-11 tests, 11 passed, 0 failed, 0 errored
+18 tests, 18 passed, 0 failed, 0 errored
+
+npm run test:auto   (full regression suite, all categories)
+379 tests, 377 passed, 0 failed, 0 errored, 2 skipped
 ```
 
-Explicitly including `manage-rules` per this evidence package's requirement:
-- `f12.manage-rules-merge-tasks-accepts-recipient` — **PASS** (`session-2026-07-05-f12-defect-b.ts`) — confirms the `MergeTasksRequest` interface declares the recipient fields and the handler overwrites them wholesale when `to` is provided.
+The 2 skips are pre-existing and unrelated to F12 (Google OAuth tokens not connected for the test user — `contacts.no-match-returns-empty`, `calendar.create-event`).
 
-Full list (all passing):
-- `f12.mobile-memory-hit-detects-recipient-change`
-- `f12.mobile-rearm-passes-action-config`
-- `f12.voice-memory-hit-detects-recipient-change`
-- `f12.voice-pending-note-update-applies-recipient`
-- `f12.manage-rules-merge-tasks-accepts-recipient`
-- `f12.resolve-recipient-all-six-output-kinds`
-- `f12.resolve-recipient-mode-specific-input`
-- `f12.resolve-recipient-not-wired-to-any-caller`
-- `f12.lookup-contact-contact-id-support`
-- `f12.lookup-contact-name-still-optional-input-unchanged`
-- `f12.resolve-recipient-registered-in-config-toml`
+**One pre-existing test broke and was fixed, not ignored:** `note-update.enabled-branch-offers-update` (`session-2026-06-11.ts`) did a literal source-text search for `'Want me to update the message to'`. The Defect B refactor (tier 1) moved that phrase into a separate `updateDesc` variable so the branch could also offer to update a changed recipient — runtime output for the body-only case is byte-identical, but the phrase no longer appears as one contiguous string in the source. Confirmed the runtime behavior was unchanged by reading the actual code before editing the test to check both halves (`'update the message to "${newBody}"'` and `'Want me to ${updateDesc}?'`) instead of the single stale string.
 
-Type/syntax checks: `tsc --noEmit` clean on `useOrchestrator.ts` (project tsconfig); `node --check` clean on `naavi-voice-server/src/index.js`; `deno check` clean on `manage-rules/index.ts`, `lookup-contact/index.ts`, `resolve-recipient/index.ts`.
+New tests, tier 3 (`session-2026-07-06-f12-high-risk-wiring.ts`):
+- `f12.mobile-set-action-rule-uses-resolve-recipient-create-mode`
+- `f12.mobile-set-action-rule-blocks-on-unresolvable-recipient`
+- `f12.voice-set-action-rule-uses-resolve-recipient-both-paths`
+- `f12.voice-main-handler-fails-closed-on-unresolvable-recipient`
+- `f12.voice-location-branch-blocks-on-unresolvable-recipient`
+- `f12.evaluate-rules-fire-mode-live-reresolution`
+- `f12.evaluate-rules-distinct-failure-not-self-alert`
+
+Type/syntax checks: `tsc --noEmit` clean on `useOrchestrator.ts` (project tsconfig, zero F12-related errors). `node --check` clean on `naavi-voice-server/src/index.js`. `deno check` on `evaluate-rules/index.ts` surfaces one pre-existing error (`'preToken' is possibly 'null'`, `callVoice` function) — confirmed via `git stash` to exist identically before this session's changes, at a shifted line number only. Not touched, per governance's "No Extra Changes Rule" — out of scope for this fix, flagged rather than silently left unmentioned.
 
 ## Manual tests required
 
-None yet — nothing is deployed or wired to a live caller. Once committed and deployed to staging:
-- Defect B: repeat the "email me at X when I arrive at Y" twice at the same coordinates test (the exact repro from the live production call this session) and confirm the second attempt's destination actually lands in `action_config`, on both mobile and voice.
-- `resolve-recipient`: no manual test needed yet — it's unreachable by any real user flow until wired.
+Once tier 3 is committed and deployed to staging:
+- Repeat the exact live-production repro from this session ("email me at X when I arrive at Bob's home," twice, same coordinates) on **staging** and confirm the second attempt's destination actually lands in `action_config.to_email`/`contact_id`, on both mobile and voice.
+- Create a location alert with a named contact as recipient, then edit that contact's email in Google Contacts, then trigger the alert — confirm it sends to the *new* email (proves live re-resolution, not a stale snapshot).
+- Delete a contact referenced by an existing alert's `contact_id`, then trigger the alert — confirm the self-notify failure message arrives, not a misdirected send and not silence.
 
 ## Rollback instructions
 
-Nothing is committed, so rollback is trivial: `git checkout -- <file>` (main repo) / `git -C naavi-voice-server checkout -- src/index.js` discards all of the above with no history to unwind. Once committed: each tier is an independent, revertable commit (Defect B fix; `resolve-recipient` addition) — the latter is inert (unwired) so reverting it has zero behavioral impact; the former touches live merge logic and should be reverted with a new commit, not a force-push, if ever needed.
+**Tier 3 (this update):** nothing committed — `git checkout -- hooks/useOrchestrator.ts supabase/functions/evaluate-rules/index.ts tests/...` (main repo) and `git -C naavi-voice-server checkout -- src/index.js` discard it entirely with no history to unwind.
+**Tiers 1/2 (already committed/deployed):** `git revert 201914f` (main, `origin/main`) and `git -C naavi-voice-server revert 8167d78` (`origin/staging`), then redeploy `resolve-recipient`/`lookup-contact`/`manage-rules` from the reverted state.
+Production (`hhgyppbxgmjrwdpdubcx`) was never touched by any tier — no production rollback is ever needed for this work.
 
 ## Known risks
 
-- **`manage-rules` merge_tasks change (Defect B):** overwrites destination fields wholesale on merge. If a future caller ever wanted additive (not replacing) recipient behavior, this would need revisiting — not anticipated by any current use case.
-- **`resolve-recipient`/`lookup-contact`:** zero risk as shipped — unreachable by any existing flow. Risk is deferred to the (not-yet-done) wiring step.
-- **Outstanding from Phase 1:** the live "Arrive at Parliament Street" production rule was disabled this session but the underlying bug it demonstrated (Defect A) is not yet fixed — `evaluate-rules` still has no fire-time resolution step. Any new location alert with a literal/named third-party recipient created between now and the completion of the High-risk tier will have the same live misdirection risk.
+- **`evaluate-rules` fire-time resolution (Protected Core, High risk):** adds a network call (`resolve-recipient`) inside the single dispatcher shared by every trigger type. A `resolve-recipient` outage would affect only contact-based rules (those with `contact_id` set) — rules with a literal `to_email`/`to_phone` already snapshotted never reach this code path. Failure mode is fail-closed (self-notify), not misdirection or silent drop.
+- **`manage-rules` merge_tasks change (Defect B):** overwrites destination fields wholesale on merge — unchanged assessment from tier 1.
+- **No interactive ambiguous-contact picker** (scope note above) — if ambiguity turns out to be common, users hit a "say the full name" retry loop rather than a tap-to-pick UI. Not blocking for this fix; worth revisiting if reported as friction.
+- **Live production risk from Phase 1 is now closed by this tier** (pending deploy): once tier 3 ships, new location alerts with literal/named third-party recipients will resolve correctly at both creation and fire time.
 
-## Outstanding (not implemented — not a checklist of this package's claims, a map of what's left)
+## Outstanding
 
-- ☐ Mobile wiring — replace `useOrchestrator.ts`'s inline `lookupContact` call with `resolve-recipient`
-- ☐ Voice wiring — replace the absent resolution step in `naavi-voice-server`'s `SET_ACTION_RULE` handling with `resolve-recipient`
-- ☐ `evaluate-rules` Protected Core change — fire-time re-resolution, `not_found`/`ambiguous` failure path
-- ☐ Manual staging validation (once the above are committed and deployed)
-- ☐ Production promotion (only after staging validation and explicit approval, per CLAUDE.md staging-first rule)
+- ☑ Mobile wiring — done, tier 3
+- ☑ Voice wiring — done, tier 3
+- ☑ `evaluate-rules` Protected Core change — done, tier 3
+- ☐ Commit tier 3 (main repo + voice-server)
+- ☐ Deploy tier 3 to staging (`resolve-recipient` already deployed from tier 2; `evaluate-rules`, `lookup-contact` primary-preference change if bundled, and the two callers need building/deploying)
+- ☐ Manual staging validation (3 scenarios above)
+- ☐ Production promotion (only after staging validation and Wael's explicit approval, per CLAUDE.md staging-first rule)
 
-This section exists so anyone reading this package can tell "implemented" from "still outstanding" at a glance, without inferring it from the rest of the document.
+**Awaiting Wael's explicit sign-off before committing/deploying tier 3**, consistent with the pattern for tiers 1/2.

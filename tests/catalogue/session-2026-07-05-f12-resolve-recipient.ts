@@ -60,16 +60,16 @@ export const session2026_07_05_f12ResolveRecipientTests: TestCase[] = [
     },
   },
   {
-    id: 'f12.resolve-recipient-not-wired-to-any-caller',
+    id: 'f12.resolve-recipient-wired-to-all-three-callers',
     category: 'contacts',
-    description: 'guard: resolve-recipient is not yet called from useOrchestrator.ts, the voice server, or evaluate-rules (zero-risk increment — this must stay true until a deliberate wiring step)',
+    description: 'successor to the zero-risk guard test: resolve-recipient is now called from useOrchestrator.ts (create mode), the voice server (create mode, 2 call sites), and evaluate-rules (fire mode) — updated 2026-07-06 when the High-risk wiring tier shipped',
     async run() {
       const orchestratorSrc = readFileSync(join(process.cwd(), 'hooks', 'useOrchestrator.ts'), 'utf8');
       const voiceSrc        = readFileSync(join(process.cwd(), 'naavi-voice-server', 'src', 'index.js'), 'utf8');
       const evaluateSrc     = readFileSync(join(process.cwd(), 'supabase', 'functions', 'evaluate-rules', 'index.ts'), 'utf8');
-      expectTruthy(!orchestratorSrc.includes('resolve-recipient'), 'useOrchestrator.ts must not call resolve-recipient yet — this test should be updated (not deleted) when wiring happens');
-      expectTruthy(!voiceSrc.includes('resolve-recipient'), 'naavi-voice-server must not call resolve-recipient yet');
-      expectTruthy(!evaluateSrc.includes('resolve-recipient'), 'evaluate-rules must not call resolve-recipient yet');
+      expectTruthy(orchestratorSrc.includes("'resolve-recipient',"), 'useOrchestrator.ts must call resolve-recipient');
+      expectTruthy((voiceSrc.match(/functions\/v1\/resolve-recipient/g) ?? []).length >= 2, 'voice server must call resolve-recipient from both the main handler and the location branch');
+      expectTruthy(evaluateSrc.includes('functions/v1/resolve-recipient'), 'evaluate-rules must call resolve-recipient in fire mode');
     },
   },
   {

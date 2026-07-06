@@ -653,10 +653,45 @@ async function fireAction(
   interFnKey: string,
 ): Promise<boolean> {
   const config = rule.action_config;
-  const toPhone = String(config.to_phone ?? '');
-  const toEmail = String(config.to_email ?? '');
+  let toPhone = String(config.to_phone ?? '');
+  let toEmail = String(config.to_email ?? '');
   const subject = String(config.subject ?? rule.label ?? 'Message from MyNaavi');
-  const toName  = String(config.to_name ?? '');
+  let toName  = String(config.to_name ?? '');
+
+  // F12 Phase 4 (2026-07-06) — live re-resolution for contact-based recipients.
+  // Wael's explicit lifecycle decision: a persisted recipient is a LIVE
+  // reference (contact_id), not a snapshot — re-resolved fresh on every fire,
+  // not frozen at creation time (docs/F12_PHASE2_CHANGE_PLAN_2026-07-05.md,
+  // "Governing decision"). This is what makes a changed or deleted contact
+  // behave correctly instead of silently sending to stale/absent data.
+  // `recipientUnresolvable` is handled below, after `settings` is loaded —
+  // it must NOT collapse into the `noRecipient` self-alert branch further
+  // down: that branch means "no recipient was ever specified", a different
+  // event from "a recipient was specified and became unresolvable" (§3).
+  let recipientUnresolvable = false;
+  let recipientUnresolvableReason = '';
+  if (config.contact_id) {
+    try {
+      const resolveRes = await fetch(`${supabaseUrl}/functions/v1/resolve-recipient`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${interFnKey}` },
+        body: JSON.stringify({ mode: 'fire', contact_id: config.contact_id, user_id: rule.user_id, to_name: toName || undefined }),
+      });
+      const resolved = await resolveRes.json();
+      if (resolved?.kind === 'resolved_contact') {
+        if (resolved.phone) toPhone = resolved.phone;
+        if (resolved.email) toEmail = resolved.email;
+        if (resolved.name)  toName  = resolved.name;
+      } else {
+        recipientUnresolvable = true;
+        recipientUnresolvableReason = resolved?.kind === 'ambiguous' ? 'ambiguous' : 'not_found';
+      }
+    } catch (err) {
+      console.error(`[evaluate-rules] Rule ${rule.id}: resolve-recipient call failed:`, err instanceof Error ? err.message : String(err));
+      recipientUnresolvable = true;
+      recipientUnresolvableReason = 'resolve_failed';
+    }
+  }
 
   // F2b — demo-line reminders re-check the TCPA opt-out list immediately
   // before sending, closing the window where a caller texts STOP after
@@ -734,6 +769,42 @@ async function fireAction(
 
   const { data: authData } = await adminClient.auth.admin.getUserById(rule.user_id);
   const userEmail = authData?.user?.email ?? null;
+
+  // F12 Phase 4 — distinct failure path for an unresolvable contact_id.
+  // Never falls through to the noRecipient→self-alert branch below (which
+  // would silently misdirect the message to the user with no explanation —
+  // the exact bug class this investigation started from). Self-notifies
+  // honestly instead, per CLAUDE.md's no-silent-failures / no-false-claims
+  // rules, then returns true — this rule has been fully evaluated; the
+  // correct outcome is "notify of the failure", not an infinite retry every
+  // minute for a contact_id that will never resolve again.
+  if (recipientUnresolvable) {
+    const failureBody = recipientUnresolvableReason === 'ambiguous'
+      ? `Naavi couldn't send your alert "${rule.label}" — that contact is now ambiguous (multiple matches). Please update the alert with a more specific contact.`
+      : `Naavi couldn't send your alert "${rule.label}" — that contact could not be found. They may have been renamed or removed. Please update or recreate the alert.`;
+    console.error(`[evaluate-rules] Rule ${rule.id}: recipient unresolvable (${recipientUnresolvableReason}) — self-notifying instead of misdirecting or failing silently`);
+    const failureSends: Promise<unknown>[] = [];
+    if (userPhone && channelEnabled('sms')) {
+      failureSends.push(
+        fetch(`${supabaseUrl}/functions/v1/send-sms`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${interFnKey}` },
+          body: JSON.stringify({ to: userPhone, body: failureBody, channel: 'sms', user_id: rule.user_id, sender_name: 'Naavi', source: 'alert_failure' }),
+        }).catch(() => null),
+      );
+    }
+    if (userEmail && channelEnabled('email')) {
+      failureSends.push(
+        fetch(`${supabaseUrl}/functions/v1/send-user-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${interFnKey}` },
+          body: JSON.stringify({ user_id: rule.user_id, subject: 'Naavi: alert delivery issue', body: failureBody, to: userEmail }),
+        }).catch(() => null),
+      );
+    }
+    await Promise.allSettled(failureSends);
+    return true;
+  }
 
   const isSelfByPhone = toPhone && userPhone && toPhone === userPhone;
   const isSelfByEmail = toEmail && userEmail && toEmail.toLowerCase() === userEmail.toLowerCase();
