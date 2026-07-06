@@ -45,10 +45,15 @@ serve(async (req) => {
   }
 
   const body = await req.json();
-  const { name, user_id: bodyUserId } = body;
+  // F12 (2026-07-05) — contact_id (Google People API resourceName) added as
+  // an alternative to name, for callers that already have a stable ID to
+  // re-resolve against (resolve-recipient's fire-mode, per
+  // docs/F12_PHASE2_CHANGE_PLAN_2026-07-05.md §1). Purely additive — existing
+  // callers only ever send `name` and are unaffected.
+  const { name, contact_id: bodyContactId, user_id: bodyUserId } = body;
 
-  if (!name?.trim()) {
-    return new Response(JSON.stringify({ error: 'Missing name' }), {
+  if (!name?.trim() && !bodyContactId?.trim()) {
+    return new Response(JSON.stringify({ error: 'Missing name or contact_id' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
@@ -101,6 +106,42 @@ serve(async (req) => {
 
   try {
     const accessToken = await getNewAccessToken(tokenRow.refresh_token);
+
+    // F12 (2026-07-05) — contact_id direct-fetch path. Skips the name search
+    // entirely; used by resolve-recipient's fire-mode re-resolution so a
+    // rename doesn't break the lookup (a rename would look identical to
+    // "not found" from a name-only search). A 404/empty result here means
+    // the contact was deleted (or the resourceName is otherwise invalid) —
+    // the caller (resolve-recipient) surfaces that as 'not_found', never a
+    // silent fallback.
+    if (bodyContactId?.trim()) {
+      const getUrl = new URL(`https://people.googleapis.com/v1/${bodyContactId.trim()}`);
+      getUrl.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers,addresses,memberships');
+      const getRes = await fetch(getUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!getRes.ok) {
+        console.log(`[lookup-contact] contact_id fetch failed (status=${getRes.status}) for "${bodyContactId}" — treating as not found`);
+        return new Response(JSON.stringify({ contact: null, contacts: [] }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const person = await getRes.json();
+      const addrs = Array.isArray(person.addresses) ? person.addresses : [];
+      const singleContact = {
+        name:              person.names?.[0]?.displayName ?? name ?? null,
+        email:             person.emailAddresses?.[0]?.value ?? null,
+        phone:             person.phoneNumbers?.[0]?.value ?? null,
+        contact_id:        person.resourceName ?? bodyContactId.trim(),
+        mynaavi_community: false,
+        addresses: addrs.map((a: any) => ({
+          type: String(a?.type || a?.formattedType || 'other').toLowerCase(),
+          formatted: String(a?.formattedValue || '').trim(),
+        })).filter((a: any) => a.formatted.length > 0),
+      };
+      console.log(`[lookup-contact] contact_id fetch ok: "${singleContact.name}" — ${singleContact.email ?? 'no email'}`);
+      return new Response(JSON.stringify({ contact: singleContact, contacts: [singleContact] }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // Fetch MyNaavi contact group resource name so we can prioritize those contacts.
     let myNaaviGroupResource: string | null = null;
@@ -253,6 +294,11 @@ serve(async (req) => {
         name:             person.names?.[0]?.displayName ?? name,
         email:            person.emailAddresses?.[0]?.value ?? null,
         phone:            person.phoneNumbers?.[0]?.value ?? null,
+        // F12 (2026-07-05) — stable Google People API ID, so a live-referenced
+        // recipient survives a rename (see resolve-recipient's fire mode).
+        // Additive field — existing callers reading name/email/phone only
+        // are unaffected.
+        contact_id:       resourceName ?? null,
         mynaavi_community: isMyNaavi,
         addresses: addrs.map((a: any) => ({
           type: String(a?.type || a?.formattedType || 'other').toLowerCase(),

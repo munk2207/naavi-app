@@ -31,6 +31,9 @@ verify_jwt = false
 [functions.lookup-contact]
 verify_jwt = false
 
+[functions.resolve-recipient]
+verify_jwt = false
+
 [functions.get-travel-time]
 verify_jwt = false
 

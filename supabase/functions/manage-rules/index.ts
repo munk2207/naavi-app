@@ -35,7 +35,7 @@ interface ListRequest        { op: 'list';        user_id?: string; }
 interface DeleteRequest      { op: 'delete';      user_id?: string; rule_id: string; }
 interface DeactivateRequest  { op: 'deactivate';  user_id?: string; rule_id: string; }
 interface ReactivateRequest  { op: 'reactivate';  user_id?: string; rule_id: string; }
-interface MergeTasksRequest   { op: 'merge_tasks';   user_id?: string; rule_id: string; tasks?: string[]; list_name?: string; }
+interface MergeTasksRequest   { op: 'merge_tasks';   user_id?: string; rule_id: string; tasks?: string[]; list_name?: string; to?: string; to_name?: string; to_email?: string; to_phone?: string; }
 interface ReplaceTasksRequest { op: 'replace_tasks'; user_id?: string; rule_id: string; tasks: string[]; }
 interface CreateRuleRequest   { op: 'create'; user_id?: string; trigger_type: string; trigger_config: Record<string, unknown>; action_type: string; action_config: Record<string, unknown>; label: string; one_shot: boolean; }
 type RulesRequest = ListRequest | DeleteRequest | DeactivateRequest | ReactivateRequest | MergeTasksRequest | ReplaceTasksRequest | CreateRuleRequest;
@@ -242,6 +242,20 @@ serve(async (req) => {
         mergedConfig.tasks = deduped;
       }
       if (body.list_name) mergedConfig.list_name = body.list_name;
+      // F12 Defect B fix (2026-07-05) — a changed recipient is a semantic
+      // modification, not "no new content." Overwrite the destination
+      // fields wholesale when a new `to` is provided rather than trying to
+      // merge them field-by-field (unlike tasks, a recipient isn't additive
+      // — "email Alice" replaces "email Bob", it doesn't add to it).
+      if (typeof body.to === 'string' && body.to.trim()) {
+        mergedConfig.to = body.to.trim();
+        delete mergedConfig.to_name;
+        delete mergedConfig.to_email;
+        delete mergedConfig.to_phone;
+        if (typeof body.to_name === 'string' && body.to_name.trim()) mergedConfig.to_name = body.to_name.trim();
+        if (typeof body.to_email === 'string' && body.to_email.trim()) mergedConfig.to_email = body.to_email.trim();
+        if (typeof body.to_phone === 'string' && body.to_phone.trim()) mergedConfig.to_phone = body.to_phone.trim();
+      }
       const { error: updErr } = await admin
         .from('action_rules')
         .update({ action_config: mergedConfig })

@@ -3400,25 +3400,47 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       const enabled = match.enabled !== false;
                       locationIntercepted = true;
                       if (enabled) {
-                        // Check if the new action adds tasks, list_name, or body to existing alert.
-                        // If so — merge into the existing rule instead of blocking.
+                        // Check if the new action adds tasks, list_name, body, or a
+                        // changed recipient to the existing alert. If so — merge into
+                        // the existing rule instead of blocking.
                         const newTasks    = Array.isArray(action.action_config?.tasks) ? action.action_config.tasks : [];
                         const newListName = String(action.action_config?.list_name ?? '').trim();
                         const newBody     = String(action.action_config?.body ?? '').trim();
-                        const hasNewContent = newTasks.length > 0 || newListName || newBody;
+                        // F12 Defect B fix (2026-07-05) — a changed recipient is a
+                        // semantic modification (see docs/F12_PHASE2_CHANGE_PLAN_2026-07-05.md
+                        // §5), not "no new content." Compare against whatever destination
+                        // fields the existing rule already has.
+                        const newTo = String((action.action_config as any)?.to ?? '').trim();
+                        const existingAc = (match.action_config ?? {}) as Record<string, any>;
+                        const existingToKey = String(existingAc.to ?? existingAc.to_name ?? existingAc.to_email ?? existingAc.to_phone ?? '').trim().toLowerCase();
+                        const recipientChanged = newTo.length > 0 && newTo.toLowerCase() !== existingToKey;
+                        const hasNewContent = newTasks.length > 0 || newListName || newBody || recipientChanged;
 
                         if (hasNewContent) {
                           // Merge via manage-rules Edge Function (service_role) — direct client update
                           // silently fails due to RLS on some setups.
                           const { data: mergeData, error: mergeErr } = await invokeWithTimeout<any>(
                             'manage-rules',
-                            { body: { op: 'merge_tasks', rule_id: match.id, tasks: newTasks.length > 0 ? newTasks : undefined, list_name: newListName || undefined } },
+                            {
+                              body: {
+                                op: 'merge_tasks',
+                                rule_id: match.id,
+                                tasks: newTasks.length > 0 ? newTasks : undefined,
+                                list_name: newListName || undefined,
+                                to: recipientChanged ? newTo : undefined,
+                                to_name: recipientChanged ? (action.action_config as any)?.to_name : undefined,
+                                to_email: recipientChanged ? (action.action_config as any)?.to_email : undefined,
+                                to_phone: recipientChanged ? (action.action_config as any)?.to_phone : undefined,
+                              },
+                            },
                             10_000,
                           );
                           if (!mergeErr && mergeData?.ok) {
-                            const addedDesc = newListName ? `your ${newListName} list` : newTasks.join(', ') || 'reminder';
-                            turnSpeechOverride = `Got it — I've added ${addedDesc} to your existing alert for ${match.trigger_config?.place_name || placeName}.`;
-                            console.log(`[orch:loc:memory-hit] merged new content into rule ${match.id}`);
+                            const addedDesc = recipientChanged
+                              ? `updated the destination to ${newTo}`
+                              : (newListName ? `added your ${newListName} list` : `added ${newTasks.join(', ') || 'a reminder'}`);
+                            turnSpeechOverride = `Got it — I've ${addedDesc} on your existing alert for ${match.trigger_config?.place_name || placeName}.`;
+                            console.log(`[orch:loc:memory-hit] merged new content into rule ${match.id} (recipientChanged=${recipientChanged})`);
                           } else {
                             console.error('[orch:loc:memory-hit] merge update failed:', mergeErr?.message);
                             turnSpeechOverride = `You already have an alert for ${match.trigger_config?.place_name || placeName}. Tap Alerts to update it.`;
@@ -3434,12 +3456,18 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                         turnSpeechOverride = `You already have a ${mode} alert for ${match.trigger_config?.place_name || placeName}${addrSuffix}. Tap Alerts to change or remove it.`;
                         console.log(`[orch:loc:memory-hit] name-match for "${placeName}" -> rule ${match.id} already enabled (mode=${mode})`);
                       } else {
-                        // 2026-05-26 (Wael, B6a) — REPLACED bail-to-UI with
-                        // in-chat re-arm. Existing expired rule is updated
-                        // in place (enabled=true, last_fired_at=null);
-                        // existing action_config preserved so recipient
-                        // doesn't silently change.
-                        const armResult = await reArmLocationRule(supabase!, match);
+                        // 2026-05-26 (Wael, B6a) — in-chat re-arm. Existing
+                        // expired rule is updated in place (enabled=true,
+                        // last_fired_at=null).
+                        // F12 Defect B fix (2026-07-05) — this call previously
+                        // passed no 3rd argument at all, so action_config could
+                        // never be updated on this branch even when the user
+                        // supplied a new recipient. Now passes action.action_config
+                        // through — reArmLocationRule merges it over the existing
+                        // config (existing fields preserved unless overwritten).
+                        const armResult = await reArmLocationRule(supabase!, match, {
+                          action_config: action.action_config as Record<string, any> | undefined,
+                        });
                         turnSpeechOverride = armResult.speech;
                         if (armResult.success) {
                           import('@/hooks/useGeofencing')
