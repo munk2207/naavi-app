@@ -114,4 +114,4 @@ Production (`hhgyppbxgmjrwdpdubcx`) was never touched by any tier — no product
 - ☐ Manual staging validation (3 scenarios above) — not yet performed
 - ☐ Production promotion — requires Wael's separate explicit approval per CLAUDE.md staging-first rule; not implied by the staging deploy above
 
-**Awaiting Wael's explicit sign-off before committing/deploying tier 3**, consistent with the pattern for tiers 1/2.
+**Awaiting Wael's explicit sign-off before manual staging validation and any production promotion**, consistent with the project's staging-first governance process.
