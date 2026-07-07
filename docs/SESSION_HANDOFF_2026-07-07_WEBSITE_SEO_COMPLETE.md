@@ -1,13 +1,25 @@
 # Session Handoff — 2026-07-07
-## Website SEO Overhaul Complete (mynaavi-website) · Next Session: APK V302 Review
+## Website SEO Overhaul Complete (mynaavi-website) · Next Session: Precompile Demo Animations (F14), then APK V302 Review
 
 ---
 
-## NEXT SESSION — FIRST TASK (DO THIS BEFORE ANYTHING ELSE)
+## NEXT SESSION — DO THESE IN ORDER
 
-**Review F12 manual staging validation results.** Wael has been testing staging APK build 302 (3 scenarios) outside this session. See `docs/SESSION_HANDOFF_2026-07-06_F12_COMPLETE_STAGING_APK302.md` for the exact test scenarios and what to check in the DB.
+**1. Precompile the mynaavi-website demo storyboard animations — F14, approved top priority.** Homepage Performance score is 62 ("needs improvement") per PageSpeed Insights, caused by 5 demo-storyboard iframes on the homepage each loading React/ReactDOM/Babel from a CDN and compiling JSX live in the browser (Total Blocking Time 6,300ms, 8.3s main-thread work). Full root cause, governance read (zero Protected Core overlap, but not a pure "cosmetic change" either — needs real build tooling added to a repo that currently has none), and complicating factors (Web Audio API sound synthesis inside these pages, homepage is the highest-traffic page) are all documented in the **F14 entry** in `docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md`. Also found in the same PageSpeed run, not yet fixed: an accessibility contrast issue (Accessibility score 91). Nothing was implemented this session — scoping and governance-check only.
 
-This session (2026-07-07) did **not** touch F12/APK 302 at all — it was 100% website/SEO work in the `mynaavi-website` repo (a completely separate topic Wael introduced fresh this session). F12's status is unchanged from the prior handoff: all 3 fix tiers implemented, tested (18/18 F12 tests, 377/377 full suite green), committed and deployed to staging. Production untouched. Manual staging validation is the only remaining gate before Wael can approve production promotion.
+**2. Review F12 manual staging validation results.** Wael has been testing staging APK build 302 (3 scenarios) outside this session. See `docs/SESSION_HANDOFF_2026-07-06_F12_COMPLETE_STAGING_APK302.md` for the exact test scenarios and what to check in the DB. This session (2026-07-07) did **not** touch F12/APK 302 at all — it was 100% website/SEO work in the `mynaavi-website` repo. F12's status is unchanged from the prior handoff: all 3 fix tiers implemented, tested (18/18 F12 tests, 377/377 full suite green), committed and deployed to staging. Production untouched. Manual staging validation is the only remaining gate before Wael can approve production promotion.
+
+---
+
+## Late-session addendum: Google Search Console + PageSpeed follow-up (2026-07-07, after initial handoff draft)
+
+After the SEO work below was believed complete, Wael independently checked Google Search Console and found follow-up items, worked through in the same session:
+
+- **Page indexing report**: only 5 of the site's pages were indexed at check time; 11 not indexed across 3 reasons. "Page with redirect" (5 URLs: www/http variants, `/how-to-use`, `/guide`) confirmed correct/expected — Google properly declining to index redirect sources. "Discovered - currently not indexed" (5 URLs) — 2 were stale GSC records for the already-fixed dead blog posts (will self-resolve), but `/contact`, `/faq`, `/privacy` had sat completely uncrawled since first detected 4/14/26 (~3 months). "Crawled - currently not indexed" (1 URL) — `blog/orchestration-not-automation`, crawled once (May 14) and not indexed; all technical signals (crawl allowed, indexing allowed, canonical match) were clean, meaning it was Google's own content-quality judgment, not a technical blocker.
+- **Action taken:** submitted `/contact`, `/privacy`, and `blog/orchestration-not-automation` via URL Inspection → Request Indexing. `/faq` checked separately and was already indexed (the overview report was stale/cached relative to a live inspection).
+- **Manual Actions**: No issues detected. **Security Issues**: No issues detected. Both confirmed clean.
+- **Core Web Vitals**: "Not enough usage data" for both mobile and desktop — expected given low current traffic (private preview), not a quality problem.
+- **PageSpeed Insights (mobile, mynaavi.com/)**: Performance 62, Accessibility 91, Best Practices 96, SEO 100, Agentic Browsing 2/2. This is what surfaced F14 (see above) and the unaddressed accessibility contrast issue.
 
 ---
 
