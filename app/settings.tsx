@@ -1325,7 +1325,7 @@ export default function SettingsScreen() {
         )}
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V57.77.0 (build 304)</Text>
+        <Text style={styles.version}>MyNaavi — V57.78.0 (build 305)</Text>
 
       </ScrollView>
       </KeyboardAvoidingView>
