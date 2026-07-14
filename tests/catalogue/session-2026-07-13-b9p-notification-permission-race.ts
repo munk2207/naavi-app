@@ -81,8 +81,12 @@ export const session2026_07_13_b9pNotificationPermissionRaceTests: TestCase[] = 
       const notifCaseBody = src.slice(notifCaseIdx, notifCaseEnd);
 
       expectTruthy(
-        notifCaseBody.includes('openNotificationSettings()'),
-        'B9p fix: the notifications case must call openNotificationSettings(), not the generic openAppSettings(), when the permission request doesn\'t result in granted',
+        notifCaseBody.includes('openNotificationSettings('),
+        'B9p fix: the notifications case must call openNotificationSettings(...), not the generic openAppSettings(...), when the permission request doesn\'t result in granted',
+      );
+      expectTruthy(
+        !notifCaseBody.includes('await openAppSettings(diag)') && !/await openAppSettings\(\);/.test(notifCaseBody.split('openNotificationSettings(')[0]),
+        'B9p fix: the notifications case must not fall back to the generic openAppSettings before trying openNotificationSettings',
       );
     },
   },

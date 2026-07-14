@@ -22,6 +22,7 @@ import * as IntentLauncher from 'expo-intent-launcher';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import BackgroundGeolocation from 'react-native-background-geolocation';
+import { newDiagSession, remoteLog, endDiagSession } from '@/lib/remoteLog';
 
 export type GeofencePermKey = 'notifications' | 'location' | 'activity' | 'battery';
 
@@ -63,14 +64,18 @@ function getPackageId(): string {
 
 // Opens Android Settings reliably using IntentLauncher. Fallback to
 // Linking.openSettings() if the intent throws (e.g. older Android).
-async function openAppSettings(): Promise<void> {
+async function openAppSettings(diag?: string): Promise<void> {
+  if (diag) remoteLog(diag, 'openAppSettings-start');
   try {
     await IntentLauncher.startActivityAsync(
       'android.settings.APPLICATION_DETAILS_SETTINGS',
       { data: `package:${getPackageId()}` },
     );
-  } catch {
+    if (diag) remoteLog(diag, 'openAppSettings-intent-resolved');
+  } catch (err) {
+    if (diag) remoteLog(diag, 'openAppSettings-intent-threw', { error: String(err) });
     await Linking.openSettings();
+    if (diag) remoteLog(diag, 'openAppSettings-linking-fallback-resolved');
   }
 }
 
@@ -82,14 +87,22 @@ async function openAppSettings(): Promise<void> {
 // user, so it should land them exactly on the toggle they need. Falls back
 // to the generic app-info page on Android versions that don't support this
 // intent (added API 26 / Android 8.0).
-async function openNotificationSettings(): Promise<void> {
+//
+// B9v diagnostic (2026-07-14) — Wael reported the Fix button producing NO
+// visible reaction at all (3rd report of this symptom). Everything reads
+// correctly against Android's documented API, so instead of guessing again,
+// instrument every step to see exactly where it actually stops on his device.
+async function openNotificationSettings(diag?: string): Promise<void> {
+  if (diag) remoteLog(diag, 'openNotificationSettings-start', { packageId: getPackageId() });
   try {
-    await IntentLauncher.startActivityAsync(
+    const result = await IntentLauncher.startActivityAsync(
       'android.settings.APP_NOTIFICATION_SETTINGS',
       { extra: { 'android.provider.extra.APP_PACKAGE': getPackageId() } },
     );
-  } catch {
-    await openAppSettings();
+    if (diag) remoteLog(diag, 'openNotificationSettings-intent-resolved', { resultCode: result?.resultCode });
+  } catch (err) {
+    if (diag) remoteLog(diag, 'openNotificationSettings-intent-threw', { error: String(err) });
+    await openAppSettings(diag);
   }
 }
 
@@ -127,17 +140,29 @@ async function checkMissing(): Promise<GeofencePermKey[]> {
 }
 
 async function fixPermission(key: GeofencePermKey): Promise<void> {
+  // B9v diagnostic (2026-07-14) — see openNotificationSettings' comment.
+  // Only instrumenting the 'notifications' case; the other three aren't
+  // reported as broken.
+  const diag = key === 'notifications' ? newDiagSession() : undefined;
+  if (diag) remoteLog(diag, 'fixPermission-notifications-entry');
   try {
     switch (key) {
       case 'notifications': {
+        if (diag) remoteLog(diag, 'requestPermissionsAsync-start');
         const { status } = await Notifications.requestPermissionsAsync();
+        if (diag) remoteLog(diag, 'requestPermissionsAsync-resolved', { status });
         // B9p fix (2026-07-13) — was openAppSettings() (generic app-info
         // page). Once app/_layout.tsx's auto-register has already used up
         // Android's one-time permission dialog, requestPermissionsAsync
         // here silently returns the prior status with no dialog shown, so
         // this fallback is the only thing the user actually sees — send
         // them straight to the notification toggle, not the app-info page.
-        if (status !== 'granted') await openNotificationSettings();
+        if (status !== 'granted') {
+          await openNotificationSettings(diag);
+        } else if (diag) {
+          remoteLog(diag, 'already-granted-no-action-taken');
+        }
+        if (diag) { remoteLog(diag, 'fixPermission-notifications-done'); endDiagSession(diag); }
         break;
       }
       case 'location': {
@@ -178,8 +203,9 @@ async function fixPermission(key: GeofencePermKey): Promise<void> {
     }
   } catch (err) {
     console.error('[useGeofencePermissions] fixPermission error:', key, err);
+    if (diag) { remoteLog(diag, 'fixPermission-outer-catch', { error: String(err) }); endDiagSession(diag); }
     // Last-resort fallback — always opens something rather than silently failing
-    try { await openAppSettings(); } catch { /* ignore */ }
+    try { await openAppSettings(diag); } catch { /* ignore */ }
   }
 }
 
