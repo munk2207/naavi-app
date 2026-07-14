@@ -77,7 +77,12 @@ export const session2026_07_10_b9iSelfOverrideTimeTests: TestCase[] = [
       const branchStart = src.indexOf('if (!_ftToName && _ftHasSelfOverride) {', loopIdx);
       expectTruthy(branchStart !== -1, 'B9i self-override branch (if (!_ftToName && _ftHasSelfOverride)) not found');
 
-      const branchEnd = src.indexOf('\n                }', branchStart);
+      // B9i-followup (2026-07-14) refactored the "all fields present" case into a
+      // shared helper (buildSelfOverrideTimeConfirm) so it also embeds a marker on
+      // the missing-body follow-up (see session-2026-07-14-b9i-followup-body-marker.ts).
+      // Widen the window past the branch's nearest closing brace (which now belongs
+      // to the inner "missing datetime" sub-block) out to the branch's own end.
+      const branchEnd = src.indexOf('\n                }', src.indexOf("if (!_ftBody) {", branchStart));
       const branch = src.slice(branchStart, branchEnd);
 
       expectTruthy(
@@ -85,12 +90,8 @@ export const session2026_07_10_b9iSelfOverrideTimeTests: TestCase[] = [
         'B9i self-override branch must embed a PENDING_INTENT marker so Step 1.4 can execute the alert on the "yes" turn — this is the exact gap that caused the silent creation failure',
       );
       expectTruthy(
-        branch.includes("intent: 'SET_ACTION_RULE'"),
-        'B9i self-override branch marker must declare intent: SET_ACTION_RULE so Step 1.4 (naavi-chat/index.ts:2235) routes it to the correct handler',
-      );
-      expectTruthy(
-        branch.includes('action_config: { body: _ftBody, ..._ftSelfOverrides }'),
-        'B9i self-override branch must forward the self_override_* fields into action_config — Step 1.4 passes action_config through untouched when to_name/to_email are empty, so this is what actually reaches manage-rules',
+        branch.includes('buildSelfOverrideTimeConfirm('),
+        'B9i self-override branch must build its confirm turn via buildSelfOverrideTimeConfirm, which embeds intent: SET_ACTION_RULE and forwards action_config: { body, ...selfOverrides } — Step 1.4 (naavi-chat/index.ts:2235) needs both to route the "yes" turn to the correct handler and reach manage-rules with the self_override_* fields intact',
       );
       expectTruthy(
         !branch.includes('lookup-contact'),

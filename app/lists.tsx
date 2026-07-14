@@ -13,7 +13,7 @@
  * "Attached to:" header.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -25,6 +25,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
@@ -136,7 +137,9 @@ export default function ListsScreen() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Refetch every time the screen gains focus (not just on mount) so a
+  // disable/reactivate done elsewhere (chat/voice) is never shown stale — B9c.
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const onRefresh = useCallback(() => { setRefreshing(true); load(); }, [load]);
 

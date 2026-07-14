@@ -474,6 +474,8 @@ Every production AAB must pass all applicable gates in this exact order. Each co
 
 **Prompt-regression:** `tests/catalogue/prompt-regression.ts` locks in known-good Claude action emissions. Future prompt edits MUST keep this suite green. Never add a prompt rule without a corresponding regression test.
 
+**⭐ `naavi-chat` has TWO separate action-generation systems — read this before debugging any action/recipient bug.** `docs/ARCHITECTURE_NAAVI_CHAT_ACTION_SYSTEMS.md` maps Layer 2 (deterministic, stateless classifier) vs Path B (Claude tool-use, full history) — which message shapes route to which, the shared PENDING_INTENT executor both rely on, and why recipient resolution is unified for location alerts (`resolve-recipient`) but NOT for time-trigger third-party alerts (3 separate `lookup-contact` call sites). F15 burned significant diagnostic time in 2026-07-09 rediscovering this split from scratch — check this doc first.
+
 **Geofence is production-ready.** `android.permission.ACTIVITY_RECOGNITION` (Motion API) is required and confirmed working — Google's Health apps declaration was submitted and accepted 2026-05-26. Drive-tested daily by Wael with no issues. Promote to testers freely.
 
 Memory folder: `C:\Users\waela\.claude\projects\C--Users-waela-OneDrive-Desktop-Naavi\memory\`

@@ -86,6 +86,9 @@ import { session2026_07_13_b9oScrollToTopCollisionTests } from './catalogue/sess
 import { session2026_07_13_b9pNotificationPermissionRaceTests } from './catalogue/session-2026-07-13-b9p-notification-permission-race';
 import { session2026_07_13_b9qTtsScrollSyncTests } from './catalogue/session-2026-07-13-b9q-tts-scroll-sync';
 import { session2026_07_14_b9rContactLookupRetryTests } from './catalogue/session-2026-07-14-b9r-contact-lookup-retry';
+import { session2026_07_14_b9cListsFocusRefetchTests } from './catalogue/session-2026-07-14-b9c-lists-focus-refetch';
+import { session2026_07_14_b9iFollowupBodyMarkerTests } from './catalogue/session-2026-07-14-b9i-followup-body-marker';
+import { session2026_07_14_b9fEvaluateRulesVoiceLoggingTests } from './catalogue/session-2026-07-14-b9f-evaluate-rules-voice-logging';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -207,6 +210,9 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_07_13_b9pNotificationPermissionRaceTests,
   ...session2026_07_13_b9qTtsScrollSyncTests,
   ...session2026_07_14_b9rContactLookupRetryTests,
+  ...session2026_07_14_b9cListsFocusRefetchTests,
+  ...session2026_07_14_b9iFollowupBodyMarkerTests,
+  ...session2026_07_14_b9fEvaluateRulesVoiceLoggingTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────

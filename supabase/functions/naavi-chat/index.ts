@@ -1732,6 +1732,46 @@ function fmtDtLocal(iso: string, tz?: string): string {
   } catch { return iso; }
 }
 
+// B9i-followup fix (2026-07-14) — shared by the time-trigger self-override
+// branch (below) and Step 1.4's awaitingField resolver, so both places build
+// the exact same confirm speech + PENDING_INTENT shape. Previously this logic
+// only lived inline in the "all fields already present" branch; Step 1.4 had
+// no way to produce an equivalent confirm turn after a user answered a
+// missing-field question, so that answer had to be re-classified from scratch
+// by Haiku on every turn — unreliable in a long conversation (confirmed live:
+// reproduced a silent "Done." with zero action_rules row written, reliably
+// reproducible only once the conversation had several prior turns of history).
+function buildSelfOverrideTimeConfirm(
+  datetime: string,
+  body: string,
+  selfOverrides: Record<string, string>,
+  actionType: string,
+  clientTimezone?: string,
+): { speech: string; display: string; pendingIntentJson: string } {
+  const dtLabel = fmtDtLocal(datetime, clientTimezone);
+  const channel = selfOverrides.self_override_whatsapp ? 'WhatsApp'
+    : selfOverrides.self_override_voice ? 'call'
+    : selfOverrides.self_override_email ? 'email'
+    : 'text';
+  const dest = selfOverrides.self_override_whatsapp
+    ?? selfOverrides.self_override_voice
+    ?? selfOverrides.self_override_sms
+    ?? selfOverrides.self_override_email
+    ?? '';
+  const params: Record<string, any> = {
+    trigger_type: 'time',
+    trigger_config: { datetime },
+    action_type: actionType,
+    action_config: { body, ...selfOverrides },
+    label: `Self ${channel} at ${dtLabel}`,
+  };
+  const speech = channel === 'call'
+    ? `I'll call you at ${dest} at ${dtLabel} and say "${body.slice(0, 60)}". Say yes to confirm, no to cancel.`
+    : `I'll ${channel === 'email' ? 'email' : channel === 'WhatsApp' ? 'send you a WhatsApp message' : 'text you'} at ${dest} at ${dtLabel} saying "${body.slice(0, 60)}". Say yes to confirm, no to cancel.`;
+  const pendingIntentJson = JSON.stringify({ intent: 'SET_ACTION_RULE', level: 'action', confidence: 'high', params });
+  return { speech, display: `${speech}\n<!--PENDING_INTENT:${pendingIntentJson}-->`, pendingIntentJson };
+}
+
 function buildActionConfirm(
   intent: string,
   params: Record<string, string>,
@@ -2076,17 +2116,21 @@ Deno.serve(async (req) => {
       const pendingHasDisambig = markerMatch14
         ? (() => { try { return !!(JSON.parse(markerMatch14[1]) as any).awaitingDisambig; } catch { return false; } })()
         : false;
+      // B9i-followup fix (2026-07-14) — see buildSelfOverrideTimeConfirm's comment.
+      const pendingAwaitingField = markerMatch14
+        ? (() => { try { return (JSON.parse(markerMatch14[1]) as any).awaitingField ?? null; } catch { return null; } })()
+        : null;
       const isPickReply   = PICK_RE.test(userText.trim());
       const isBareDigit   = /^\d+\s*$/.test(userText.trim());
 
-      if (YES_RE.test(userText) || NO_RE.test(userText) || (isPickReply && pendingHasDisambig) || (isBareDigit && pendingHasDisambig)) {
+      if (YES_RE.test(userText) || NO_RE.test(userText) || (isPickReply && pendingHasDisambig) || (isBareDigit && pendingHasDisambig) || pendingAwaitingField) {
         const lastAssistant = lastAssistant14;
         const lastDisplay   = lastDisplay14;
 
         // Try to extract PENDING_INTENT from the display field
         const markerMatch = markerMatch14;
         if (markerMatch) {
-          if (NO_RE.test(userText)) {
+          if (NO_RE.test(userText) && !pendingAwaitingField) {
             const msg = `No problem — just let me know what you need.`;
             console.log(`[timing] ${elapsed()} | Step1.4 — low-confidence intent cancelled`);
             return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
@@ -2095,6 +2139,28 @@ Deno.serve(async (req) => {
           try {
             const pending: IntentClassification = JSON.parse(markerMatch[1]);
             console.log(`[timing] ${elapsed()} | Step1.4 — executing confirmed intent: ${pending.intent}`);
+
+            // B9i-followup fix (2026-07-14) — deterministically capture the answer to
+            // a missing-field question (currently only self-override "body") instead
+            // of falling through to Claude/Haiku re-classification of the whole
+            // request, which proved unreliable once a conversation had real history.
+            if (pendingAwaitingField === 'body' && pending.intent === 'SET_ACTION_RULE') {
+              const awaitingParams = (pending as any).awaitingParams as {
+                datetime: string; actionType: string; selfOverrides: Record<string, string>;
+              };
+              const newBody = userText.trim();
+              if (!newBody) {
+                const msg = `What should the message say?`;
+                const pi = JSON.stringify({ intent: 'SET_ACTION_RULE', level: 'action', confidence: 'high', awaitingField: 'body', awaitingParams });
+                return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: `${msg}\n<!--PENDING_INTENT:${pi}-->`, actions: [], pendingThreads: [] }) });
+              }
+              const confirm = buildSelfOverrideTimeConfirm(
+                awaitingParams.datetime, newBody, awaitingParams.selfOverrides, awaitingParams.actionType,
+                typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined,
+              );
+              console.log(`[timing] ${elapsed()} | Step1.4 — self-override body captured deterministically`);
+              return jsonResponse({ rawText: JSON.stringify({ speech: confirm.speech, display: confirm.display, actions: [], pendingThreads: [] }) });
+            }
 
             if (pending.intent === 'LIST_RULES') {
               const result = await handleListRules(supabase, userId);
@@ -2876,36 +2942,29 @@ Deno.serve(async (req) => {
 
                 if (!_ftToName && _ftHasSelfOverride) {
                   if (!_ftDatetime) {
+                    // Datetime needs natural-language parsing ("3pm", "tomorrow morning")
+                    // that only the classifier does — can't be captured as literal text
+                    // the way body can, so this case is left as a plain question, same
+                    // as before, and re-classified fresh on the next turn.
                     const msg = `What time should I send it?`;
                     return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
                   }
+                  // B9i-followup fix (2026-07-14) — a missing body is free-text the user
+                  // types verbatim, so it's safe to capture directly. Embed a
+                  // PENDING_INTENT with awaitingField so Step 1.4 deterministically
+                  // treats the next reply as the message body, instead of leaving no
+                  // marker and forcing Haiku to re-classify the whole request from
+                  // scratch — unreliable once the conversation has real history (see
+                  // buildSelfOverrideTimeConfirm's comment for the reproduction).
                   if (!_ftBody) {
                     const msg = `What should the message say?`;
-                    return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                    const awaitingParams = { datetime: _ftDatetime, actionType: _ftActionType, selfOverrides: _ftSelfOverrides };
+                    const pi = JSON.stringify({ intent: 'SET_ACTION_RULE', level: 'action', confidence: 'high', awaitingField: 'body', awaitingParams });
+                    return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: `${msg}\n<!--PENDING_INTENT:${pi}-->`, actions: [], pendingThreads: [] }) });
                   }
-                  const _ftDtLabel = fmtDtLocal(_ftDatetime, typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined);
-                  const _ftSelfChannel = _ftSelfOverrides.self_override_whatsapp ? 'WhatsApp'
-                    : _ftSelfOverrides.self_override_voice ? 'call'
-                    : _ftSelfOverrides.self_override_email ? 'email'
-                    : 'text';
-                  const _ftSelfDest = _ftSelfOverrides.self_override_whatsapp
-                    ?? _ftSelfOverrides.self_override_voice
-                    ?? _ftSelfOverrides.self_override_sms
-                    ?? _ftSelfOverrides.self_override_email
-                    ?? '';
-                  const _ftSelfParams: Record<string, any> = {
-                    trigger_type: 'time',
-                    trigger_config: { datetime: _ftDatetime },
-                    action_type: _ftActionType,
-                    action_config: { body: _ftBody, ..._ftSelfOverrides },
-                    label: `Self ${_ftSelfChannel} at ${_ftDtLabel}`,
-                  };
-                  const _ftSelfSpeech = _ftSelfChannel === 'call'
-                    ? `I'll call you at ${_ftSelfDest} at ${_ftDtLabel} and say "${_ftBody.slice(0, 60)}". Say yes to confirm, no to cancel.`
-                    : `I'll ${_ftSelfChannel === 'email' ? 'email' : _ftSelfChannel === 'WhatsApp' ? 'send you a WhatsApp message' : 'text you'} at ${_ftSelfDest} at ${_ftDtLabel} saying "${_ftBody.slice(0, 60)}". Say yes to confirm, no to cancel.`;
-                  const _ftSelfPi = JSON.stringify({ intent: 'SET_ACTION_RULE', level: 'action', confidence: 'high', params: _ftSelfParams });
-                  console.log(`[timing] ${elapsed()} | time-trigger self-override (${_ftSelfChannel}) — awaiting confirm`);
-                  return jsonResponse({ rawText: JSON.stringify({ speech: _ftSelfSpeech, display: `${_ftSelfSpeech}\n<!--PENDING_INTENT:${_ftSelfPi}-->`, actions: [], pendingThreads: [] }) });
+                  const _ftConfirm = buildSelfOverrideTimeConfirm(_ftDatetime, _ftBody, _ftSelfOverrides, _ftActionType, typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined);
+                  console.log(`[timing] ${elapsed()} | time-trigger self-override — awaiting confirm`);
+                  return jsonResponse({ rawText: JSON.stringify({ speech: _ftConfirm.speech, display: _ftConfirm.display, actions: [], pendingThreads: [] }) });
                 }
 
                 if (!_ftToName) {

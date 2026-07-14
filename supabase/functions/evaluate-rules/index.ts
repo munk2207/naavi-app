@@ -951,6 +951,37 @@ async function fireAction(
         },
         body: form,
       });
+      // B9f fix (2026-07-14) — track voice calls in sent_messages so the DB
+      // has an internal record, matching SMS/WhatsApp/email rows for the same
+      // fire and report-location-event's callVoice (which already does this).
+      // Without this, a real voice call had no audit trail — delivery was
+      // real, just not database-observable. Fire-and-forget; never blocks.
+      let providerSid: string | null = null;
+      let errorMetadata: Record<string, unknown> | null = null;
+      try {
+        const json = await res.clone().json();
+        providerSid = typeof json?.sid === 'string' ? json.sid : null;
+        if (!res.ok) {
+          errorMetadata = {
+            twilio_status: res.status,
+            twilio_code: json?.code ?? null,
+            twilio_message: typeof json?.message === 'string' ? json.message.slice(0, 500) : null,
+            twilio_more_info: json?.more_info ?? null,
+          };
+        }
+      } catch {
+        if (!res.ok) errorMetadata = { twilio_status: res.status, parse_error: 'response body not JSON' };
+      }
+      adminClient.from('sent_messages').insert({
+        user_id:         rule.user_id,
+        channel:         'voice',
+        to_phone:        toNumber,
+        body,
+        delivery_status: res.ok ? 'sent' : 'failed',
+        provider_sid:    providerSid,
+        source:          'alert',
+        metadata:        errorMetadata,
+      }).then(() => {}).catch(() => {});
       return { channel: 'voice-call', ok: res.ok };
     } catch (err) {
       console.error('[evaluate-rules] callVoice error:', err);
