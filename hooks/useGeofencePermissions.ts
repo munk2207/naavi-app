@@ -74,6 +74,25 @@ async function openAppSettings(): Promise<void> {
   }
 }
 
+// B9p fix (2026-07-13) — the generic app-info page (openAppSettings above)
+// doesn't show the notification toggle directly; the user has to know to
+// tap "Notifications" from there themselves. Once Android has already used
+// up its one-time permission-dialog budget (see maybeAutoRegisterPush in
+// app/_layout.tsx), this Settings fallback is the ONLY path left for the
+// user, so it should land them exactly on the toggle they need. Falls back
+// to the generic app-info page on Android versions that don't support this
+// intent (added API 26 / Android 8.0).
+async function openNotificationSettings(): Promise<void> {
+  try {
+    await IntentLauncher.startActivityAsync(
+      'android.settings.APP_NOTIFICATION_SETTINGS',
+      { extra: { 'android.provider.extra.APP_PACKAGE': getPackageId() } },
+    );
+  } catch {
+    await openAppSettings();
+  }
+}
+
 async function checkMissing(): Promise<GeofencePermKey[]> {
   if (Platform.OS !== 'android') return [];
   const missing: GeofencePermKey[] = [];
@@ -112,7 +131,13 @@ async function fixPermission(key: GeofencePermKey): Promise<void> {
     switch (key) {
       case 'notifications': {
         const { status } = await Notifications.requestPermissionsAsync();
-        if (status !== 'granted') await openAppSettings();
+        // B9p fix (2026-07-13) — was openAppSettings() (generic app-info
+        // page). Once app/_layout.tsx's auto-register has already used up
+        // Android's one-time permission dialog, requestPermissionsAsync
+        // here silently returns the prior status with no dialog shown, so
+        // this fallback is the only thing the user actually sees — send
+        // them straight to the notification toggle, not the app-info page.
+        if (status !== 'granted') await openNotificationSettings();
         break;
       }
       case 'location': {

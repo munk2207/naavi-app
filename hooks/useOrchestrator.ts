@@ -3329,11 +3329,30 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               let recipientBlocked = false;
               if (!hasSelfOverride && toName && !actionConfig.to_phone && !actionConfig.to_email) {
                 try {
-                  const { data: resolved } = await invokeWithTimeout<any>(
+                  let { data: resolved } = await invokeWithTimeout<any>(
                     'resolve-recipient',
                     { body: { mode: 'create', to: toName, user_id: session.user.id } },
                     15_000,
                   );
+                  // B9m mitigation (2026-07-13) — Google People API's search
+                  // doesn't reliably return the same result on every call for
+                  // the same query (confirmed live twice this session: a
+                  // real, existing contact came back "not_found" once, then
+                  // resolved cleanly on an identical retry minutes later).
+                  // On a not_found (specifically — not ambiguous or invalid,
+                  // which a retry wouldn't fix), silently retry once after a
+                  // short delay before telling the user anything. In the
+                  // common case (retry succeeds) the user never sees an
+                  // error at all — only a slightly longer "thinking" pause.
+                  if (resolved?.kind === 'not_found') {
+                    await new Promise(r => setTimeout(r, 2500));
+                    const retryRes = await invokeWithTimeout<any>(
+                      'resolve-recipient',
+                      { body: { mode: 'create', to: toName, user_id: session.user.id } },
+                      15_000,
+                    );
+                    resolved = retryRes.data;
+                  }
                   switch (resolved?.kind) {
                     case 'literal_email':
                       actionConfig.to_email = resolved.value;
@@ -3355,6 +3374,14 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       turnSpeechOverride = `You have more than one contact named ${toName} — say their full name and I'll try again.`;
                       break;
                     case 'not_found':
+                      // Reached only after the retry above also came back
+                      // empty — honest about the uncertainty (we don't know
+                      // whether the contact truly doesn't exist or Google's
+                      // search was just inconsistent again) rather than a
+                      // flat "I don't have a contact" that may not be true.
+                      recipientBlocked = true;
+                      turnSpeechOverride = `I'm having a technical hiccup finding ${toName} — try again in a moment, or tell me their email or phone number directly.`;
+                      break;
                     case 'invalid':
                     default:
                       recipientBlocked = true;

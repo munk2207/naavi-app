@@ -83,6 +83,9 @@ import { session2026_07_13_b9kSelfAlertWhatsappWordingTests } from './catalogue/
 import { session2026_07_13_b9lPhoneShapedToNameTests } from './catalogue/session-2026-07-13-b9l-phone-shaped-to-name';
 import { session2026_07_13_b9nSelfOverridePriorityTests } from './catalogue/session-2026-07-13-b9n-self-override-priority';
 import { session2026_07_13_b9oScrollToTopCollisionTests } from './catalogue/session-2026-07-13-b9o-scroll-to-top-collision';
+import { session2026_07_13_b9pNotificationPermissionRaceTests } from './catalogue/session-2026-07-13-b9p-notification-permission-race';
+import { session2026_07_13_b9qTtsScrollSyncTests } from './catalogue/session-2026-07-13-b9q-tts-scroll-sync';
+import { session2026_07_14_b9rContactLookupRetryTests } from './catalogue/session-2026-07-14-b9r-contact-lookup-retry';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -201,6 +204,9 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_07_13_b9lPhoneShapedToNameTests,
   ...session2026_07_13_b9nSelfOverridePriorityTests,
   ...session2026_07_13_b9oScrollToTopCollisionTests,
+  ...session2026_07_13_b9pNotificationPermissionRaceTests,
+  ...session2026_07_13_b9qTtsScrollSyncTests,
+  ...session2026_07_14_b9rContactLookupRetryTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────

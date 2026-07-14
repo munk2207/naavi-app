@@ -806,7 +806,18 @@ export default function HomeScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const scrollRef = useRef<ScrollView>(null);
-  const [scrollContentHeight, setScrollContentHeight] = useState(0);
+  // B9q fix (2026-07-13) — the TTS chunk-sync scroll effect (below) used to
+  // compute its target position as a fraction of the ENTIRE conversation's
+  // rendered height (previously tracked via a state variable that has since
+  // been removed). That only lands correctly on the
+  // latest response near the start of a fresh conversation — for any turn
+  // after the first, it scrolls to some fraction of the whole chat history
+  // instead of the current response, visible live as a jump toward the top
+  // on every new answer. This ref tracks the latest turn's own on-screen
+  // position + height (captured via onLayout on its wrapper below) so the
+  // chunk-sync effect can scroll relative to where the current response
+  // actually is, not the whole conversation.
+  const latestTurnLayoutRef = useRef<{ y: number; height: number }>({ y: 0, height: 0 });
   const runSyncRef = useRef<(() => void) | null>(null);
   const avoidHighwaysRef = useRef(false);
   // V57.11.1 — mirror the input text in a ref so handleSend reads the
@@ -1309,17 +1320,27 @@ export default function HomeScreen() {
     }
   }, [compoundProgress?.current]);
 
-  // Chunk-scroll sync — scroll to the active TTS chunk as Naavi speaks.
-  // chunkIdx 0 = first chunk → scroll to top so Robert reads from the start.
-  // Later chunks → proportional scroll based on char offset in the full text.
+  // Chunk-scroll sync — scroll to the active TTS chunk as Naavi speaks, so
+  // the screen follows the response at the same pace it's spoken, no
+  // faster or slower.
+  // B9q fix (2026-07-13) — previously computed against the ENTIRE
+  // conversation's rendered height, which only ever landed on the
+  // latest response near the very start of a fresh conversation; for any
+  // later turn it scrolled to a fraction of the whole chat history instead
+  // of the current answer. Now scoped to latestTurnLayoutRef (the latest
+  // turn's own position + height, captured via onLayout above), so
+  // chunkIdx 0 lands at the top of THIS response (not the top of the whole
+  // conversation) and later chunks track proportionally within it.
   useEffect(() => {
-    if (!currentChunk || !scrollRef.current || scrollContentHeight === 0) return;
+    if (!currentChunk || !scrollRef.current) return;
+    const { y: turnY, height: turnHeight } = latestTurnLayoutRef.current;
+    if (turnHeight === 0) return;
     const { idx, charOffset, totalChars } = currentChunk;
     const y = idx === 0
-      ? 0
-      : Math.round((charOffset / Math.max(totalChars, 1)) * scrollContentHeight);
+      ? turnY
+      : turnY + Math.round((charOffset / Math.max(totalChars, 1)) * turnHeight);
     scrollRef.current.scrollTo({ y, animated: true });
-  }, [currentChunk, scrollContentHeight]);
+  }, [currentChunk]);
 
   // keyboardDidShow listener removed — caused keyboard to dismiss when typing
   // by scrolling the view while TextInput was focused (build 214 regression).
@@ -1948,7 +1969,6 @@ export default function HomeScreen() {
           enableOnAndroid={true}
           keyboardShouldPersistTaps="handled"
           extraScrollHeight={20}
-          onContentSizeChange={(_w, h) => setScrollContentHeight(h)}
         >
         <Pressable
           delayLongPress={300}
@@ -2130,7 +2150,12 @@ export default function HomeScreen() {
             const isLatest = ti === turns.length - 1;
             const isCollapsed = !isLatest && !expandedTurns.has(ti);
             return (
-            <View key={ti}>
+            <View
+              key={ti}
+              onLayout={isLatest ? (e) => {
+                latestTurnLayoutRef.current = { y: e.nativeEvent.layout.y, height: e.nativeEvent.layout.height };
+              } : undefined}
+            >
               {isCollapsed ? (
                 <TouchableOpacity
                   onPress={() => setExpandedTurns(prev => new Set([...prev, ti]))}

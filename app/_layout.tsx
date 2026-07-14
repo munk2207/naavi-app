@@ -151,14 +151,19 @@ export default function RootLayout() {
     // calling it on every launch is idempotent — same token → no-op,
     // fresh token → row updated. Wael testing 2026-04-30 surfaced this
     // class: 6 dead FCM tokens accumulated over weeks of installs.
+    // B9p fix (2026-07-13) — this used to call requestPermissionsAsync()
+    // itself when status was 'undetermined', racing against the geofence
+    // setup screen's own Notifications "Fix" button
+    // (hooks/useGeofencePermissions.ts). Android only shows its permission
+    // dialog a limited number of times before silently suppressing it; this
+    // auto-request fired first on cold start and burned that one-time
+    // dialog before the user ever consciously saw the setup screen, so by
+    // the time they tapped "Fix" nothing happened. The setup screen is now
+    // the ONE place that ever requests this permission — this function only
+    // checks status and registers the token if already granted.
     const maybeAutoRegisterPush = async () => {
       try {
-        let { status } = await Notifications.getPermissionsAsync();
-        if (status === 'undetermined') {
-          // Fresh install — request permission now so alerts are never silent.
-          const result = await Notifications.requestPermissionsAsync();
-          status = result.status;
-        }
+        const { status } = await Notifications.getPermissionsAsync();
         if (status === 'granted') {
           await registerPushNotifications();
         }
