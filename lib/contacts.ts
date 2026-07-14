@@ -11,6 +11,7 @@
 
 import { supabase } from './supabase';
 import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
+import { remoteLog } from './remoteLog';
 
 export interface ContactAddress {
   type: string;       // 'home' | 'work' | 'other' | etc.
@@ -28,11 +29,22 @@ export interface Contact {
   addresses?: ContactAddress[];
 }
 
-export async function lookupContactByPhone(phone: string): Promise<Contact | null> {
+export async function lookupContactByPhone(phone: string, diagSession?: string): Promise<Contact | null> {
   if (!supabase || !phone.trim()) return null;
 
   // Strip to digits only — e.g. "613-769-7957" → "6137697957"
-  const digits = phone.replace(/\D/g, '');
+  let digits = phone.replace(/\D/g, '');
+  // 2026-07-10 fix (B9g investigation) — if the caller passed a number that
+  // still includes the NANP country code (e.g. "+16137976746"), `digits` came
+  // out as 11 digits instead of 10, corrupting every variant built below:
+  // `+1${digits}` doubled the "1" ("+116137976746") and the spaced format's
+  // slice offsets shifted every group by one digit ("+1 161 379 76746") —
+  // confirmed live via Edge Function logs, both variants returned 0 results.
+  // useOrchestrator's caller now strips this before calling in, but this is
+  // kept as defense-in-depth for any other caller.
+  if (digits.length === 11 && digits.startsWith('1')) {
+    digits = digits.slice(1);
+  }
 
   // Try Google People API with multiple formats (dashes, digits, +1 prefix)
   const queries = [
@@ -42,14 +54,38 @@ export async function lookupContactByPhone(phone: string): Promise<Contact | nul
     `+1 ${digits.slice(0,3)} ${digits.slice(3,6)} ${digits.slice(6)}`, // "+1 613 769 7957"
   ];
 
+  // B9g diagnostic (2026-07-10) — confirmed via live Edge Function logs that
+  // the 3 corrupted variants above (pre-fix) all returned 0 results, including
+  // through lookup-contact's phonetic fallback — ruling that fallback out as
+  // the source of the "Laura" misroute. The successful match came from the
+  // correctly-formatted `phone.trim()` variant; which exact fallback path (if
+  // any) inside lookup-contact produced it is still not logged there. This
+  // logs which variant (if any) produced the match on this side so the next
+  // reproduction narrows it further.
+  if (diagSession) {
+    remoteLog(diagSession, 'phone-lookup-start', { phone, digits, queries });
+  }
+
   for (const query of queries) {
     try {
       const { data, error } = await invokeWithTimeout<any>('lookup-contact', { body: { name: query } }, 15_000);
       if (!error && !data?.error && data?.contact) {
         console.log('[contacts] Phone lookup found via Google People API:', data.contact.name);
+        if (diagSession) {
+          remoteLog(diagSession, 'phone-lookup-matched', {
+            query,
+            matched_name: data.contact.name,
+            matched_phone: data.contact.phone,
+            matched_email: data.contact.email,
+          });
+        }
         return data.contact;
       }
     } catch { /* continue */ }
+  }
+
+  if (diagSession) {
+    remoteLog(diagSession, 'phone-lookup-no-match', { phone, digits });
   }
 
   return null;

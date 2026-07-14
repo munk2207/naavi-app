@@ -273,7 +273,36 @@ function formatWhatHappens(r: ActionRule, userPhone: string | null, userEmail: s
     if (r.trigger_type === 'location' && (a.direction ?? r.trigger_config?.direction) === 'arrive') {
       chans.push('voice call');
     }
-    channelsLine = `Naavi sends you ${chans.join(', ')}${chans.length > 1 ? '' : ''} — all channels that are set up.`;
+    // F15 Defect A (2026-07-09) — a self-override ("email me at X") changes
+    // one channel's destination, not the whole delivery policy. Call out the
+    // overridden channel(s) specifically (matching the specificity a
+    // third-party alert already gets, e.g. "emails Bob at bob@x.com"), keep
+    // the rest generic — never silently imply "only email me" for a
+    // channel-scoped override.
+    // §1.2.2 (2026-07-09, post-closure revision) — one override per channel,
+    // not a shared "phone" field: text/WhatsApp/voice are independently
+    // overridable, matching the fix in the two dispatchers.
+    const selfOverrideEmail    = String(a.self_override_email ?? '').trim();
+    const selfOverrideSms      = String(a.self_override_sms ?? '').trim();
+    const selfOverrideWhatsapp = String(a.self_override_whatsapp ?? '').trim();
+    const selfOverrideVoice    = String(a.self_override_voice ?? '').trim();
+    if (selfOverrideEmail || selfOverrideSms || selfOverrideWhatsapp || selfOverrideVoice) {
+      const overrideParts: string[] = [];
+      if (selfOverrideEmail)    overrideParts.push(`email you at ${selfOverrideEmail}`);
+      if (selfOverrideSms)      overrideParts.push(`text you at ${selfOverrideSms}`);
+      if (selfOverrideWhatsapp) overrideParts.push(`WhatsApp you at ${selfOverrideWhatsapp}`);
+      if (selfOverrideVoice)    overrideParts.push(`call you at ${selfOverrideVoice}`);
+      const otherChans = chans.filter(c =>
+        !(selfOverrideEmail && c === 'email') &&
+        !(selfOverrideSms && c === 'text') &&
+        !(selfOverrideWhatsapp && c === 'WhatsApp') &&
+        !(selfOverrideVoice && c === 'voice call'),
+      );
+      const otherPart = otherChans.length ? ` Other channels (${otherChans.join(', ')}) reach you normally.` : '';
+      channelsLine = `Naavi will ${overrideParts.join(' and ')}.${otherPart}`;
+    } else {
+      channelsLine = `Naavi sends you ${chans.join(', ')}${chans.length > 1 ? '' : ''} — all channels that are set up.`;
+    }
   } else {
     const to = a.to_name ?? a.to ?? 'a contact';
     if (r.action_type === 'email') {

@@ -1283,7 +1283,15 @@ export default function HomeScreen() {
     if (turns.length > 0) {
       setChatCollapsed(false); // auto-expand when new message arrives
       const latest = turns[turns.length - 1];
-      const isCompoundPlan = latest?.assistantSpeech?.startsWith('Here are your');
+      // B9o fix (2026-07-13) — this used to match on `startsWith('Here are
+      // your')`, which also matches LIST_RULES's speech template ('Here are
+      // your alerts.', naavi-chat/index.ts:217), incorrectly scrolling to
+      // the top whenever the alerts list rendered instead of staying on the
+      // latest answer. Match the server's own compound-plan regex
+      // (naavi-chat/index.ts:4126, `/^Here are your \d+ actions:/`) instead
+      // of a loose prefix, so only a genuine compound-plan breakdown
+      // triggers the scroll-to-top behavior.
+      const isCompoundPlan = /^Here are your \d+ actions:/.test(latest?.assistantSpeech ?? '');
       if (latest?.isCompoundResult || isCompoundPlan) {
         // Compound result or planning breakdown: scroll to top so item #1 is visible first
         setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 100);

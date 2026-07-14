@@ -76,6 +76,13 @@ import { session2026_07_03_f2bReminderLabelTests } from './catalogue/session-202
 import { session2026_07_05_f12DefectBTests } from './catalogue/session-2026-07-05-f12-defect-b';
 import { session2026_07_05_f12ResolveRecipientTests } from './catalogue/session-2026-07-05-f12-resolve-recipient';
 import { session2026_07_06_f12HighRiskWiringTests } from './catalogue/session-2026-07-06-f12-high-risk-wiring';
+import { session2026_07_09_f15DefectBTests } from './catalogue/session-2026-07-09-f15-defect-b';
+import { session2026_07_09_f15DefectATests } from './catalogue/session-2026-07-09-f15-defect-a';
+import { session2026_07_10_b9iSelfOverrideTimeTests } from './catalogue/session-2026-07-10-b9i-self-override-time';
+import { session2026_07_13_b9kSelfAlertWhatsappWordingTests } from './catalogue/session-2026-07-13-b9k-self-alert-whatsapp-wording';
+import { session2026_07_13_b9lPhoneShapedToNameTests } from './catalogue/session-2026-07-13-b9l-phone-shaped-to-name';
+import { session2026_07_13_b9nSelfOverridePriorityTests } from './catalogue/session-2026-07-13-b9n-self-override-priority';
+import { session2026_07_13_b9oScrollToTopCollisionTests } from './catalogue/session-2026-07-13-b9o-scroll-to-top-collision';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -187,6 +194,13 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_07_05_f12DefectBTests,
   ...session2026_07_05_f12ResolveRecipientTests,
   ...session2026_07_06_f12HighRiskWiringTests,
+  ...session2026_07_09_f15DefectBTests,
+  ...session2026_07_09_f15DefectATests,
+  ...session2026_07_10_b9iSelfOverrideTimeTests,
+  ...session2026_07_13_b9kSelfAlertWhatsappWordingTests,
+  ...session2026_07_13_b9lPhoneShapedToNameTests,
+  ...session2026_07_13_b9nSelfOverridePriorityTests,
+  ...session2026_07_13_b9oScrollToTopCollisionTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────

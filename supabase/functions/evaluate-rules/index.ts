@@ -657,6 +657,15 @@ async function fireAction(
   let toEmail = String(config.to_email ?? '');
   const subject = String(config.subject ?? rule.label ?? 'Message from MyNaavi');
   let toName  = String(config.to_name ?? '');
+  // F15 Defect A (2026-07-09) — explicit self-alert destination override.
+  // Kept structurally separate from to_phone/to_email (which mean "this is
+  // a third party") — see docs/F15_PHASE2_CHANGE_PLAN_2026-07-09.md §1.
+  // §1.2.2 (2026-07-09, post-closure revision) — one override per channel,
+  // not a shared "phone" field.
+  const selfOverrideEmail    = String(config.self_override_email ?? '');
+  const selfOverrideSms      = String(config.self_override_sms ?? '');
+  const selfOverrideWhatsapp = String(config.self_override_whatsapp ?? '');
+  const selfOverrideVoice    = String(config.self_override_voice ?? '');
 
   // F12 Phase 4 (2026-07-06) — live re-resolution for contact-based recipients.
   // Wael's explicit lifecycle decision: a persisted recipient is a LIVE
@@ -814,7 +823,11 @@ async function fireAction(
   // with "no destination". Without this, every "alert me ..." rule silently
   // never fires.
   const noRecipient   = !toPhone && !toEmail;
-  const isSelfAlert   = Boolean(isSelfByPhone || isSelfByEmail || noRecipient);
+  // F15 Defect A — checked before address-matching so an override address
+  // that differs from the user's own registered contact info (the whole
+  // point of an override) can never be misclassified as third-party.
+  const hasSelfOverride = Boolean(selfOverrideEmail || selfOverrideSms || selfOverrideWhatsapp || selfOverrideVoice);
+  const isSelfAlert   = Boolean(hasSelfOverride || isSelfByPhone || isSelfByEmail || noRecipient);
 
   // Channel call helpers
   //
@@ -827,15 +840,26 @@ async function fireAction(
   // real-user rule's action_config never sets this field, so `from` is
   // `undefined` and send-sms behaves exactly as before — zero behavior
   // change for real alerts.
-  const callSMS = (channel: 'sms' | 'whatsapp', to: string) =>
+  // B9k fix (2026-07-13) — the WhatsApp send-sms path uses the approved
+  // naavi_message_from_sender template ("Hi {{1}}, {{2}} shared this message
+  // with you: {{3}} — Sent via MyNaavi."), which reads fine for third-party
+  // alerts ({{1}}=recipient's name, {{2}}=the user's own name) but was
+  // confusing for self-alerts, where the same defaults produced "Hi Robert,
+  // Naavi shared this message with you..." — sounding like a third party
+  // named "Naavi" messaged the user, when it's actually the user's own
+  // alert firing. Optional overrides let the self-alert branch below swap
+  // {{1}}/{{2}} to read as a note-to-self ("Hi there, Robert shared this
+  // message with you...") using the SAME approved template — no new Meta
+  // template submission needed.
+  const callSMS = (channel: 'sms' | 'whatsapp', to: string, overrides?: { recipientName?: string; senderName?: string }) =>
     fetch(`${supabaseUrl}/functions/v1/send-sms`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${interFnKey}` },
       body: JSON.stringify({
         to, body, channel,
         user_id: rule.user_id,
-        recipient_name: toName || userName || undefined,
-        sender_name: 'Naavi',
+        recipient_name: overrides?.recipientName ?? (toName || userName || undefined),
+        sender_name: overrides?.senderName ?? 'Naavi',
         source: 'alert',
         from: config.from_number || undefined,
       }),
@@ -937,15 +961,27 @@ async function fireAction(
   const sends: Promise<{ channel: string; ok: boolean }>[] = [];
 
   if (isSelfAlert) {
+    // F15 Defect A — channel-scoped substitution (Phase 2 §1.3, §1.7, §1.2.2):
+    // an override replaces only its own channel's destination. Every other
+    // enabled channel still goes to the user's own registered phone/email —
+    // one override per channel, not a shared "phone" field (§1.2.2 revision).
+    const selfEmailTarget    = selfOverrideEmail    || userEmail;
+    const selfSmsTarget      = selfOverrideSms      || userPhone;
+    const selfWhatsappTarget = selfOverrideWhatsapp || userPhone;
+    const selfVoiceTarget    = selfOverrideVoice    || userPhone;
     // 2026-05-21 (F2g Phase 1) — each channel gated by the user's
     // alert_channels_enabled preference. Default is all 5 on
     // (no behavior change for users who haven't customized).
-    if (userPhone) {
-      if (channelEnabled('sms'))      sends.push(callSMS('sms', userPhone));
-      if (channelEnabled('whatsapp')) sends.push(callSMS('whatsapp', userPhone));
+    if (selfSmsTarget && channelEnabled('sms'))           sends.push(callSMS('sms', selfSmsTarget));
+    if (selfWhatsappTarget && channelEnabled('whatsapp')) {
+      // B9k — self-alert note-to-self wording (see callSMS's docstring above).
+      sends.push(callSMS('whatsapp', selfWhatsappTarget, {
+        recipientName: 'there',
+        senderName: userName || 'You',
+      }));
     }
-    if (userEmail && channelEnabled('email')) {
-      sends.push(callEmail(userEmail));
+    if (selfEmailTarget && channelEnabled('email')) {
+      sends.push(callEmail(selfEmailTarget));
     }
     if (channelEnabled('push')) {
       // Push — function looks up tokens itself; attempt regardless of token presence.
@@ -954,8 +990,8 @@ async function fireAction(
 
     // Voice call fires whenever the user has enabled it — no trigger-type gate.
     // Robert's channel preference is his decision; we respect it unconditionally.
-    if (userPhone && channelEnabled('voice_call')) {
-      sends.push(callVoice(userPhone));
+    if (selfVoiceTarget && channelEnabled('voice_call')) {
+      sends.push(callVoice(selfVoiceTarget));
     }
   } else if (toPhone) {
     // Third-party phone — SMS + WhatsApp fan-out to the specified number,

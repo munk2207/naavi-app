@@ -44,7 +44,7 @@ export const session2026_06_17Tests: TestCase[] = [
         'V282 compound: isCompoundTurn flag not found in naavi-chat',
       );
       expectTruthy(
-        src.includes("tool_choice = { type: 'none' }") || src.includes('tool_choice: { type: \'none\' }') || src.includes("{ type: 'none' }"),
+        src.includes('delete claudeParams.tools') || src.includes("tool_choice = { type: 'none' }") || src.includes("{ type: 'none' }"),
         'V282 compound: tool_choice:none not applied on compound turns — Claude will emit tool calls on the breakdown turn',
       );
     },

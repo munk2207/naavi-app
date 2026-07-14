@@ -223,7 +223,20 @@ serve(async (req) => {
     // Phonetic fallback: if exact name returns 0 results, retry with a
     // 5-char prefix. Covers Claude normalizing spoken names before calling
     // lookup (e.g. "Fatma" → "Fatima" — prefix "Fatim"/"Fatma" → "Fatm" finds both).
-    if (results.length === 0 && name.trim().length >= 4) {
+    //
+    // 2026-07-10 fix (B9g root cause, confirmed live via Edge Function logs) —
+    // this fallback was designed for name typos, but callers doing a phone
+    // lookup (see lib/contacts.ts::lookupContactByPhone) also pass phone-digit
+    // strings through this same `name` parameter. For a spaced query like
+    // "+1 161 379 76746", `.split(/\s+/)[0]` extracts just "+1" — a 2-char
+    // near-universal prefix — which matched 3 unrelated contacts and picked
+    // one at random-ish (best="Laura") on a self-override alert that had
+    // nothing to do with her. Guard: never run this fallback for a
+    // phone-shaped query (digits/spaces/dashes/parens/plus only) — a typo
+    // heuristic never made sense for a phone number, and a real phone lookup
+    // should fail cleanly (not found) rather than guess.
+    const looksLikePhoneQuery = /^[\d\s\-().+]+$/.test(name.trim());
+    if (results.length === 0 && name.trim().length >= 4 && !looksLikePhoneQuery) {
       // Use first word only — avoids mangled multi-word strings like "fatma Fatma"
       const firstName = name.trim().split(/\s+/)[0];
       const prefix = firstName.slice(0, 5);

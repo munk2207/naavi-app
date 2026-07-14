@@ -2014,16 +2014,44 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       // ── STEP 2: Phone number lookup ────────────────────────────────────────────
       // Extract digits from message; if 10 consecutive or spaced digits found, treat as phone
       const digitsOnly = userMessage.replace(/[\s\-().+]/g, '');
-      const phoneDigitsMatch = digitsOnly.match(/1?(\d{10})/);
-      const phoneMatch = userMessage.match(/\b(\+?1?[\s\-.]?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4})\b/) ||
-                         (phoneDigitsMatch ? [null, phoneDigitsMatch[1]] : null);
+      // 2026-07-10 fix (B9g investigation) — the previous fixed-width regex
+      // (`\d{3}...\d{3}...\d{4}`, optionally preceded by "1") silently
+      // TRUNCATED any longer international number into a wrong 10-digit
+      // fragment instead of failing to match — confirmed live: "+447911123456"
+      // → "4479111234". That truncated garbage then drove a real contact
+      // lookup and could spuriously match an unrelated contact. Now: find the
+      // full digit run (letters are a natural boundary, so this can't merge
+      // unrelated numbers), and only treat it as a phone number if its length
+      // is a recognized NANP shape (10 digits, or 11 with a leading "1"
+      // country code, which is stripped here). Any other length — including
+      // real international numbers — is left alone, no injection, rather than
+      // guessed at. International phone-lookup support is tracked separately
+      // (holding list — international phone number gaps).
+      const digitRuns = digitsOnly.match(/\d+/g) ?? [];
+      const candidateRun = digitRuns.filter(r => r.length >= 7).sort((a, b) => b.length - a.length)[0] ?? null;
+      let phoneMatch: [string, string] | null = null;
+      if (candidateRun) {
+        if (candidateRun.length === 10) {
+          phoneMatch = [candidateRun, candidateRun];
+        } else if (candidateRun.length === 11 && candidateRun.startsWith('1')) {
+          phoneMatch = [candidateRun, candidateRun.slice(1)];
+        } else {
+          console.log('[Orchestrator] Digit run is not a recognized NANP phone shape — skipping (international?):', candidateRun);
+          remoteLog(diagSession, 'phone-lookup-skipped-unrecognized-shape', { candidateRun, length: candidateRun.length });
+        }
+      }
       if (phoneMatch) {
         const phone = phoneMatch[1];
         console.log('[Orchestrator] Phone number detected, looking up:', phone);
-        const contact = await lookupContactByPhone(phone);
+        const contact = await lookupContactByPhone(phone, diagSession);
         console.log('[Orchestrator] Phone lookup result:', contact);
         if (contact) {
           enrichedMessage = `${userMessage}\n\n## Contact found for ${phone}\nName: ${contact.name}${contact.email ? '\nEmail: ' + contact.email : ''}${contact.phone ? '\nPhone: ' + contact.phone : ''}`;
+          // B9g diagnostic (2026-07-10) — this is the injected block suspected
+          // of contaminating self-override extraction (no "me"/"myself" check
+          // exists here). Logging the exact injected text so the next
+          // reproduction shows precisely what Claude/Haiku actually saw.
+          remoteLog(diagSession, 'phone-lookup-context-injected', { phone, injected: enrichedMessage.slice(userMessage.length) });
         } else {
           enrichedMessage = `${userMessage}\n\n## Phone lookup result\nSearched for "${phone}" in contacts — no contact found with that number.`;
         }
@@ -2050,7 +2078,18 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       // Email alert creation contains an @ (sender address) but is NOT a retrieval query —
       // skip pre-search so unrelated inbox results don't appear alongside the confirm bubble.
       const isEmailAlertCreation = /\b(alert|notify|tell|let\s+me\s+know|ping)\s+me\s+(when|if|whenever)\b/i.test(userMessage);
-      const isRetrievalQuery = !isTicketCreation && !isEmailAlertCreation && (hasLongDigitRun || hasAtSign || retrievalRe.test(userMessage));
+      // B9n fix (2026-07-13) — a literal phone/WhatsApp send action ("send
+      // WhatsApp/text/message to +X in 3 minutes say Y", "WhatsApp me at +X
+      // when I arrive at Y") contains a 7+ digit run (the phone number
+      // itself), which used to trip hasLongDigitRun and get treated as a
+      // retrieval/lookup query. Confirmed live in production: this ran a
+      // pre-search contact lookup against the raw action-command text and
+      // surfaced a random unrelated contact ("Mario Venditti") as a "Results
+      // for..." card — the message was never a lookup question, it was an
+      // action to create. Same class of false-positive as isTicketCreation/
+      // isEmailAlertCreation above; excluded the same way.
+      const isMessageSendAction = /\b(send|text|whatsapp|message|email|call)\b[\s\S]*\b(say(ing)?|when\s+i\s+(arrive|get)|in\s+\d+\s*(minutes?|mins?|hours?)|at\s+\d{1,2}(:\d{2})?\s*(am|pm)?)\b/i.test(userMessage);
+      const isRetrievalQuery = !isTicketCreation && !isEmailAlertCreation && !isMessageSendAction && (hasLongDigitRun || hasAtSign || retrievalRe.test(userMessage));
 
       // Strip question/retrieval verbs and trailing filler so the search
       // query matches real content. The raw user message "Find Gordon Doig's
@@ -3222,7 +3261,14 @@ const oneShot = pending.originalAction?.one_shot ?? true;
             }
           }
         } else if (action.type === 'SET_ACTION_RULE') {
-          remoteLog(`[SET_ACTION_RULE] action received | trigger=${String((action as any).trigger_type)} | label=${String((action as any).label ?? '')}`);
+          // 2026-07-10 fix — these 4 remoteLog calls were previously passed
+          // only 1 argument (a formatted string). remoteLog requires
+          // (sessionId, step, payload) and no-ops silently when step is
+          // undefined (lib/remoteLog.ts:51's `if (!sessionId || !step) return;`
+          // guard) — this whole handler had zero effective diagnostic logging,
+          // discovered while investigating a silent action_rules-creation
+          // failure that could not be traced because of this exact gap.
+          remoteLog(diagSession, 'set-action-rule-received', { trigger: String((action as any).trigger_type), label: String((action as any).label ?? '') });
           if (supabase) {
             const session = await getSessionWithTimeout();
             if (session?.user) {
@@ -3230,6 +3276,22 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               const actionConfig = (action.action_config ?? {}) as Record<string, any>;
               const toName = String(actionConfig.to ?? '');
               const actionType = String(action.action_type ?? 'sms');
+
+              // B9n fix (2026-07-13) — strip a stray to/to_name that shouldn't
+              // coexist with a self_override_* field (see hasSelfOverride
+              // below). Without this, the contaminated name survives into the
+              // stored action_config even after skipping its resolution,
+              // which then makes app/alerts.tsx::detectIsSelf (which checks
+              // `to`/`to_phone`/`to_email` but not self_override_* presence)
+              // wrongly render the alert as a third-party message to that
+              // name instead of the self-alert it actually is.
+              if (
+                actionConfig.self_override_email || actionConfig.self_override_sms ||
+                actionConfig.self_override_whatsapp || actionConfig.self_override_voice
+              ) {
+                delete actionConfig.to;
+                delete actionConfig.to_name;
+              }
 
               // F12 Phase 4 (2026-07-06) — resolve via the shared Recipient
               // Resolver instead of the ad hoc lookupContact call it replaces.
@@ -3249,8 +3311,23 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               // "I don't have a contact named X" wording used elsewhere in
               // this file. A real interactive picker remains future work if
               // this turns out to be a common case in practice.
+              // B9n fix (2026-07-13) — Claude/Haiku can populate BOTH a
+              // self_override_* field AND to_name in the same params, even
+              // though the classifier prompt explicitly forbids it.
+              // Confirmed live twice this session: B9g (contaminated match
+              // to an unrelated contact "Laura") and again with a genuinely
+              // real contact ("Fatma Elmehelmy") whose phone happened to
+              // equal the self-override number — Claude then framed the
+              // confirm speech around the third party instead of the
+              // self-override. When any self_override_* field is present,
+              // it must win — never resolve/overwrite based on a to_name
+              // that should never have been set in the first place.
+              const hasSelfOverride = Boolean(
+                actionConfig.self_override_email || actionConfig.self_override_sms ||
+                actionConfig.self_override_whatsapp || actionConfig.self_override_voice,
+              );
               let recipientBlocked = false;
-              if (toName && !actionConfig.to_phone && !actionConfig.to_email) {
+              if (!hasSelfOverride && toName && !actionConfig.to_phone && !actionConfig.to_email) {
                 try {
                   const { data: resolved } = await invokeWithTimeout<any>(
                     'resolve-recipient',
@@ -3968,7 +4045,14 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               }
               // Route through manage-rules Edge Function (service_role) so the
               // insert bypasses RLS that blocks direct client writes on action_rules.
-              remoteLog(`[SET_ACTION_RULE] calling manage-rules create | trigger=${triggerType} | label=${String(action.label ?? '')} | userId=${session.user.id.slice(0,8)}`);
+              remoteLog(diagSession, 'set-action-rule-calling-manage-rules', {
+                trigger: triggerType,
+                label: String(action.label ?? ''),
+                userId: session.user.id.slice(0, 8),
+                trigger_config: normalizedTriggerConfig,
+                action_type: actionType,
+                action_config: actionConfig,
+              });
               const { data: createRes, error } = await invokeWithTimeout('manage-rules', {
                 body: {
                   op:             'create',
@@ -3981,12 +4065,12 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                   one_shot:       action.one_shot ?? true,
                 },
               }, 15_000);
-              remoteLog(`[SET_ACTION_RULE] manage-rules response | ok=${(createRes as any)?.ok} | id=${(createRes as any)?.id} | error=${JSON.stringify(error)}`);
+              remoteLog(diagSession, 'set-action-rule-manage-rules-response', { ok: (createRes as any)?.ok, id: (createRes as any)?.id, error });
               const insertedId = (createRes as any)?.id ?? null;
               const insertedRow = insertedId ? { id: insertedId } : null;
               if (error) {
                 console.error('[Orchestrator] SET_ACTION_RULE failed:', error.message);
-                remoteLog(`[SET_ACTION_RULE] FAILED | trigger=${triggerType} | error=${JSON.stringify(error)}`);
+                remoteLog(diagSession, 'set-action-rule-failed', { trigger: triggerType, error });
                 // Don't clobber compound queue speech ("On it. First — ...") with an error message.
                 // In a compound batch, other actions may have succeeded — log only.
                 const isCompoundBatch = (response.speech ?? '').startsWith('On it.');

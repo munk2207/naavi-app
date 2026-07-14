@@ -1636,12 +1636,30 @@ async function classifyIntent(
   userText: string,
 ): Promise<IntentClassification | null> {
   try {
+    // 2026-07-10 fix — this prompt previously gave Haiku only today's DATE
+    // (toLocaleDateString, no time-of-day at all). With no anchor for "now",
+    // any relative-time phrase ("in 3 minutes", "in an hour") had nothing to
+    // compute an offset FROM — confirmed live: two separate turns 56 minutes
+    // apart ("in 3 minutes" said at 4:41 AM and again at 5:37 AM) both
+    // produced the identical hallucinated datetime "2026-07-10T15:03:00-04:00",
+    // proving Haiku wasn't computing anything, just guessing a plausible-
+    // looking time. Same offset-computation pattern as lib/naavi-client.ts's
+    // buildSystemPrompt (avoids the classic getTimezoneOffset() DST bug by
+    // comparing Toronto wall-clock time against UTC ms directly).
+    const _ciNow = new Date();
+    const _ciTorontoStr = _ciNow.toLocaleString('sv-SE', { timeZone: 'America/Toronto' }).replace(' ', 'T');
+    const _ciOffsetMinutes = Math.round((new Date(_ciTorontoStr + 'Z').getTime() - _ciNow.getTime()) / 60000);
+    const _ciOffsetSign = _ciOffsetMinutes >= 0 ? '+' : '-';
+    const _ciOffsetAbs = Math.abs(_ciOffsetMinutes);
+    const _ciTorontoOffset = `${_ciOffsetSign}${String(Math.floor(_ciOffsetAbs / 60)).padStart(2, '0')}:${String(_ciOffsetAbs % 60).padStart(2, '0')}`;
+    const nowToronto = `${_ciTorontoStr}${_ciTorontoOffset}`;
+
     const res = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 200,
       temperature: 0,
       system: `Classify the message. JSON only. No fences.
-Today (America/Toronto): ${new Date().toLocaleDateString('en-CA', { timeZone: 'America/Toronto' })}. Use to resolve "tomorrow", "next Friday", etc. into ISO8601 with Toronto offset (e.g. "2026-06-14T15:00:00-04:00").
+Current date-time (America/Toronto): ${nowToronto}. Always use this exact date-time as "now" — never guess or estimate it. Use it to resolve "tomorrow", "next Friday", "in 3 minutes", "in an hour", etc. into ISO8601 with Toronto offset (e.g. "2026-06-14T15:00:00-04:00") by adding the requested duration to this exact current time.
 
 Levels:
 A = answerable from user's real data (calendar, contacts, alerts, lists, reminders, memories, email). Use intents: LIST_RULES, LOOKUP_CONTACT, CALENDAR_SEARCH, READ_CALENDAR, GMAIL_SEARCH, PERSON_LOOKUP, LIST_READ, REMINDER_READ, MEMORY_SEARCH, CREATE_TICKET
@@ -1662,7 +1680,7 @@ ADD_CONTACT → name, phone (E.164 if given), email (if given)
 DRAFT_MESSAGE → to_name (recipient name), body (message text), to_phone (E.164 if known)
 DELETE_EVENT → query (event name/keyword to find and delete)
 SCHEDULE_MEDICATION → medication (name + dosage), frequency (e.g. "once daily", "twice a day"), duration (e.g. "10 days"), start_date (ISO8601 Toronto or "today"). Use for "take X mg of Y", "take amoxicillin", "remind me to take my medication", any prescription or supplement schedule.
-SET_ACTION_RULE → location/email/time/contact-silence alerts. Params: trigger_type (email|location|time|contact_silence), from (email sender name/address), subject_keyword (keyword in subject line, e.g. "board meeting"), location (place name for location trigger), direction (arrive|leave), tasks (for location+reminder: extract the task text into this field — e.g. "remind me with X when I arrive at Y" OR "remind me when I arrive at Y with X" OR "remind me when I get to Y to X" → tasks:"X"). e.g. "alert me when I arrive at X" → {trigger_type:"location",location:"X",direction:"arrive"}; "remind me with Bob kid Sam when I arrive to Bob home" → {trigger_type:"location",location:"Bob home",direction:"arrive",tasks:"Bob kid Sam"}; "remind me when I arrive to Bob home with his kid Sam" → {trigger_type:"location",location:"Bob home",direction:"arrive",tasks:"his kid Sam"}; PRONOUN RULE: when message says "his/her/their/there home" and another person's name appears earlier in the same message, replace the pronoun with that name — e.g. "remind me with Bob kid Sam when I arrive to his home" → location:"Bob home" (resolve "his"→"Bob"); "remind me with James kids names when I arrive to his home" → location:"James home"; "remind me with Sarah info when I arrive to their home" → location:"Sarah home"; "remind me with Bob kids when I arrive to there home" → location:"Bob home"; "alert me when email from Bob about board meeting" → {trigger_type:"email",from:"Bob",subject_keyword:"board meeting"}; "alert me when an email arrives from Bob" → {trigger_type:"email",from:"Bob"}; "notify me when I get an email from Sarah" → {trigger_type:"email",from:"Sarah"}; "at 5:50 AM send Sarah an SMS say hi" → {trigger_type:"time",to_name:"Sarah",datetime:"2026-06-14T05:50:00-04:00",body:"hi"}; "text Bob at 9 AM say hello" → {trigger_type:"time",to_name:"Bob",datetime:"2026-06-14T09:00:00-04:00",body:"hello"}. CRITICAL: any "send/text/email [someone else] at [time]" → SET_ACTION_RULE trigger_type:'time', NEVER SET_REMINDER. Extract: to_name (recipient name), datetime (ISO8601 Toronto using today's date), body (message text).
+SET_ACTION_RULE → location/email/time/contact-silence alerts. Params: trigger_type (email|location|time|contact_silence), from (email sender name/address), subject_keyword (keyword in subject line, e.g. "board meeting"), location (place name for location trigger), direction (arrive|leave), tasks (for location+reminder: extract the task text into this field — e.g. "remind me with X when I arrive at Y" OR "remind me when I arrive at Y with X" OR "remind me when I get to Y to X" → tasks:"X"), to_name (for location alerts that name a THIRD PARTY to notify, not just self — e.g. "text Bob when I arrive at X" OR "tell my wife when I get to X" → to_name:"Bob"/"wife" — same extraction as the time-trigger case below, applied to location triggers too), action_type (for location alerts ONLY set this when the user's own words unambiguously name a channel: "email"/"e-mail" → action_type:"email"; "text"/"SMS"/"message" (without the word "email" also present) → action_type:"sms". Leave action_type unset/omitted for plain "alert me"/"notify me"/"let me know" with no channel word — it defaults to sms downstream. NEVER guess a channel from an ambiguous verb; only extract when the word itself is explicit), self_override_email / self_override_sms / self_override_whatsapp / self_override_voice (for a SELF-alert where the user gives an explicit literal address to override where ONE SPECIFIC CHANNEL goes — the word before the address is "me"/"myself", NOT a third-party name. Each field is scoped to exactly the channel the user named: "email"/"e-mail" → self_override_email; "text"/"SMS"/"message" (without "email") → self_override_sms; "WhatsApp" → self_override_whatsapp; "call" → self_override_voice. Only the named channel's destination changes — every other channel the user has enabled still reaches them normally, at their own registered phone/email. NEVER put a phone-based override in more than one of these fields for the same alert (e.g. don't also set self_override_voice just because self_override_sms is set) — they are independent per-channel overrides, not a shared "phone" concept. This is different from to_name: to_name is for notifying SOMEONE ELSE ("email Bob at..."); self_override_* is for redirecting the user's OWN notification on ONE channel to a specific address they gave explicitly. Never populate both to_name and any self_override_* field for the same alert.). e.g. "alert me when I arrive at X" → {trigger_type:"location",location:"X",direction:"arrive"}; "text Bob when I arrive at 50 Elm St" → {trigger_type:"location",location:"50 Elm St",direction:"arrive",to_name:"Bob",action_type:"sms"}; "email Bob when I arrive at 50 Elm St" → {trigger_type:"location",location:"50 Elm St",direction:"arrive",to_name:"Bob",action_type:"email"}; "email me at jane@example.com when I arrive at 50 Elm St" → {trigger_type:"location",location:"50 Elm St",direction:"arrive",action_type:"email",self_override_email:"jane@example.com"}; "text me at +16135551234 when I arrive at 50 Elm St" → {trigger_type:"location",location:"50 Elm St",direction:"arrive",action_type:"sms",self_override_sms:"+16135551234"}; "WhatsApp me at +16135551234 when I arrive at 50 Elm St" → {trigger_type:"location",location:"50 Elm St",direction:"arrive",action_type:"whatsapp",self_override_whatsapp:"+16135551234"}; "call me at +16135551234 when I arrive at 50 Elm St" → {trigger_type:"location",location:"50 Elm St",direction:"arrive",action_type:"sms",self_override_voice:"+16135551234"}; "remind me with Bob kid Sam when I arrive to Bob home" → {trigger_type:"location",location:"Bob home",direction:"arrive",tasks:"Bob kid Sam"}; "remind me when I arrive to Bob home with his kid Sam" → {trigger_type:"location",location:"Bob home",direction:"arrive",tasks:"his kid Sam"}; PRONOUN RULE: when message says "his/her/their/there home" and another person's name appears earlier in the same message, replace the pronoun with that name — e.g. "remind me with Bob kid Sam when I arrive to his home" → location:"Bob home" (resolve "his"→"Bob"); "remind me with James kids names when I arrive to his home" → location:"James home"; "remind me with Sarah info when I arrive to their home" → location:"Sarah home"; "remind me with Bob kids when I arrive to there home" → location:"Bob home"; "alert me when email from Bob about board meeting" → {trigger_type:"email",from:"Bob",subject_keyword:"board meeting"}; "alert me when an email arrives from Bob" → {trigger_type:"email",from:"Bob"}; "notify me when I get an email from Sarah" → {trigger_type:"email",from:"Sarah"}; "at 5:50 AM send Sarah an SMS say hi" → {trigger_type:"time",to_name:"Sarah",datetime:"2026-06-14T05:50:00-04:00",body:"hi"}; "text Bob at 9 AM say hello" → {trigger_type:"time",to_name:"Bob",datetime:"2026-06-14T09:00:00-04:00",body:"hello"}. CRITICAL: any "send/text/email [someone else] at [time]" → SET_ACTION_RULE trigger_type:'time', NEVER SET_REMINDER. Extract: to_name (recipient name), datetime (ISO8601 Toronto using today's date), body (message text).
 LIST_CONNECTION_QUERY → connecting/disconnecting a list to an alert. e.g. "add my X list to my Y alert", "connect my grocery list to Costco alert".
 
 Output: {"level":"A","intent":"LIST_RULES","confidence":"high","params":{}}
@@ -1812,6 +1830,37 @@ function buildActionConfirm(
         const haikuTasks = String((params as any).tasks ?? '').trim();
         if (haikuTasks && !Array.isArray(baseActionConfig.tasks)) {
           baseActionConfig.tasks = [haikuTasks];
+        }
+        // F15 (2026-07-09) — forward a Haiku-extracted recipient (from "text
+        // Bob when I arrive at X" style phrasing) into action_config.to. Layer
+        // 2's classifier can extract to_name for location triggers even
+        // without an explicit example (confirmed live, F15 Phase 1 Evidence
+        // B11), but this branch previously never read it, silently dropping
+        // the recipient before useOrchestrator's resolve-recipient call ever
+        // saw it. Guarded so it is a no-op for the majority of location
+        // alerts, which have no recipient at all.
+        const haikuToName = String((params as any).to_name ?? (params as any).to ?? '').trim();
+        if (haikuToName && !baseActionConfig.to) {
+          baseActionConfig.to = haikuToName;
+        }
+        // F15 Defect A (2026-07-09) — forward a self-alert destination override
+        // ("email me at X when I arrive at Y") into its own field, kept
+        // structurally separate from the third-party `to` field above. Reusing
+        // `to`/`to_email` here would make the fire-time dispatcher's self/
+        // third-party check (address-matching against user_settings) silently
+        // misclassify the alert as third-party whenever the override address
+        // doesn't equal the user's own registered email/phone — proven live,
+        // see docs/F15_PHASE2_CHANGE_PLAN_2026-07-09.md §1.3.1. Never set
+        // alongside `to`/`to_name` — the classifier prompt is instructed not
+        // to emit both for one alert.
+        // F15 §1.2.2 (2026-07-09, post-closure revision) — one field per
+        // channel, not a shared "phone" field. A user overriding SMS
+        // specifically must not also silently redirect WhatsApp/voice.
+        for (const _selfField of ['self_override_email', 'self_override_sms', 'self_override_whatsapp', 'self_override_voice']) {
+          const _val = String((params as any)[_selfField] ?? '').trim();
+          if (_val && !baseActionConfig[_selfField]) {
+            baseActionConfig[_selfField] = _val;
+          }
         }
         return { speech: s, display: s, actions: [{ type: 'SET_ACTION_RULE', trigger_type: 'location', trigger_config: { place_name: place, direction: String((params as any).direction ?? 'arrive') }, action_type: String((params as any).action_type ?? 'sms'), action_config: baseActionConfig, label: String((params as any).label ?? '').trim() || null, one_shot }] };
       }
@@ -2735,6 +2784,28 @@ Deno.serve(async (req) => {
             console.log(`[timing] ${elapsed()} | Level B — Claude best-effort, Path B disclosure`);
 
           } else if (classification.level === 'action' && HANDLED_ACTION_INTENTS.has(classification.intent)) {
+            // ── F15 TEMPORARY DIAGNOSTIC (2026-07-09) — runtime confirmation of
+            // which branch a classified action actually enters. Originally
+            // location-only (Evidence B9/B10); broadened to all trigger types
+            // to trace the time-trigger self-override path for Defect A's
+            // remaining evaluate-rules/Claude+tools validation gate (Phase 5
+            // Evidence Package §8). Remove once F15 closes.
+            {
+              try {
+                const _diagUrl = Deno.env.get('SUPABASE_URL') ?? '';
+                const _diagKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+                fetch(`${_diagUrl}/rest/v1/client_diagnostics`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'apikey': _diagKey, 'Authorization': `Bearer ${_diagKey}` },
+                  body: JSON.stringify({
+                    session_id: `f15-layer2-${Date.now()}`,
+                    step: 'f15-layer2-action-branch',
+                    user_id: userId ?? null,
+                    payload: { userText, level: classification.level, intent: classification.intent, params: classification.params },
+                  }),
+                }).catch(() => {});
+              } catch (_e) { /* diagnostic only */ }
+            }
             // ── Deterministic action — skip Claude entirely ───────────────────
             // Haiku extracted structured params. Validate completeness, then
             // generate templated confirm speech + embed PENDING_INTENT marker.
@@ -2746,7 +2817,7 @@ Deno.serve(async (req) => {
               if (_ftTrigger === 'time' && userId) {
                 const _ftParamAny = classification.params as any;
                 const _ftParamTaskActionsEarly: Array<Record<string, any>> = Array.isArray(_ftParamAny.action_config?.task_actions) ? _ftParamAny.action_config.task_actions : [];
-                const _ftToName    = String(_ftParamAny.to_name ?? _ftParamAny.to ?? _ftParamTaskActionsEarly[0]?.to_name ?? '').trim();
+                let _ftToName      = String(_ftParamAny.to_name ?? _ftParamAny.to ?? _ftParamTaskActionsEarly[0]?.to_name ?? '').trim();
                 const _ftDatetime  = String(_ftParamAny.datetime ?? _ftParamAny.trigger_config?.datetime ?? '').trim();
                 const _ftBody      = String(_ftParamAny.body ?? _ftParamAny.message ?? _ftParamTaskActionsEarly[0]?.body ?? '').trim();
                 const _ftActionType = String((classification.params as any).action_type ?? 'sms').toLowerCase();
@@ -2756,6 +2827,86 @@ Deno.serve(async (req) => {
                   || /^email\b/i.test(userText.trim());
                 const _ftUrl = Deno.env.get('SUPABASE_URL') ?? '';
                 const _ftKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+
+                // B9l fix (2026-07-13) — the classifier doesn't reliably put a
+                // self-override destination into self_override_*; it sometimes
+                // puts the literal phone number into to_name instead (confirmed
+                // live: "WhatsApp me at +16137976746 in 3 minutes say helo" ->
+                // params.to_name="+16137976746", no self_override_whatsapp at
+                // all), which then sends this down the third-party lookup-contact
+                // path below and fails with "I couldn't find a phone number for
+                // +16137976746 in your contacts" — there's no contact named a
+                // phone number. Deterministic guard, not a prompt fix: if
+                // to_name is itself phone-shaped, it was never a contact name to
+                // look up — move it into the self_override_* field matching
+                // action_type and treat it as a self-override, same as if the
+                // classifier had extracted it correctly the first time.
+                if (_ftToName && !_ftParamAny.self_override_email && !_ftParamAny.self_override_sms
+                    && !_ftParamAny.self_override_whatsapp && !_ftParamAny.self_override_voice
+                    && /^\+?\d[\d\s\-().]{5,}$/.test(_ftToName)) {
+                  const _selfField = _ftActionType === 'whatsapp' ? 'self_override_whatsapp'
+                    : _ftActionType === 'email' ? 'self_override_email'
+                    : 'self_override_sms';
+                  _ftParamAny[_selfField] = _ftToName;
+                  console.log(`[timing] ${elapsed()} | B9l: to_name "${_ftToName}" was phone-shaped, reclassified as ${_selfField}`);
+                  _ftToName = '';
+                }
+
+                // B9i fix (2026-07-10) — self-override time-trigger alerts ("WhatsApp/
+                // text/email/call me at X in 3 minutes") have no third-party to_name,
+                // so they used to fall straight into the !_ftToName branch below, which
+                // sets pathB and falls through to raw Claude reasoning with NO
+                // PENDING_INTENT marker embedded. Turn 1's confirm-ask still worked
+                // (genuine Claude tool reasoning), but Turn 2 ("yes") had nothing for
+                // Step 1.4 to deterministically execute — Claude just emitted its
+                // trust-the-server acknowledgment text with no tool call, so the rule
+                // was silently never created. Root-caused via live client_diagnostics +
+                // staging action_rules queries — see holding list item B9i. Fix: handle
+                // the self-override case explicitly, synchronously (no contact lookup
+                // needed — the destination is already a literal address/number), and
+                // embed a PENDING_INTENT marker so Step 1.4 (naavi-chat/index.ts:2235,
+                // which already forwards action_config — including self_override_* —
+                // untouched when to_name/to_email are both empty) can execute on Turn 2.
+                const _ftSelfOverrides: Record<string, string> = {};
+                for (const _sf of ['self_override_email', 'self_override_sms', 'self_override_whatsapp', 'self_override_voice']) {
+                  const _sv = String(_ftParamAny[_sf] ?? '').trim();
+                  if (_sv) _ftSelfOverrides[_sf] = _sv;
+                }
+                const _ftHasSelfOverride = Object.keys(_ftSelfOverrides).length > 0;
+
+                if (!_ftToName && _ftHasSelfOverride) {
+                  if (!_ftDatetime) {
+                    const msg = `What time should I send it?`;
+                    return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                  }
+                  if (!_ftBody) {
+                    const msg = `What should the message say?`;
+                    return jsonResponse({ rawText: JSON.stringify({ speech: msg, display: msg, actions: [], pendingThreads: [] }) });
+                  }
+                  const _ftDtLabel = fmtDtLocal(_ftDatetime, typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined);
+                  const _ftSelfChannel = _ftSelfOverrides.self_override_whatsapp ? 'WhatsApp'
+                    : _ftSelfOverrides.self_override_voice ? 'call'
+                    : _ftSelfOverrides.self_override_email ? 'email'
+                    : 'text';
+                  const _ftSelfDest = _ftSelfOverrides.self_override_whatsapp
+                    ?? _ftSelfOverrides.self_override_voice
+                    ?? _ftSelfOverrides.self_override_sms
+                    ?? _ftSelfOverrides.self_override_email
+                    ?? '';
+                  const _ftSelfParams: Record<string, any> = {
+                    trigger_type: 'time',
+                    trigger_config: { datetime: _ftDatetime },
+                    action_type: _ftActionType,
+                    action_config: { body: _ftBody, ..._ftSelfOverrides },
+                    label: `Self ${_ftSelfChannel} at ${_ftDtLabel}`,
+                  };
+                  const _ftSelfSpeech = _ftSelfChannel === 'call'
+                    ? `I'll call you at ${_ftSelfDest} at ${_ftDtLabel} and say "${_ftBody.slice(0, 60)}". Say yes to confirm, no to cancel.`
+                    : `I'll ${_ftSelfChannel === 'email' ? 'email' : _ftSelfChannel === 'WhatsApp' ? 'send you a WhatsApp message' : 'text you'} at ${_ftSelfDest} at ${_ftDtLabel} saying "${_ftBody.slice(0, 60)}". Say yes to confirm, no to cancel.`;
+                  const _ftSelfPi = JSON.stringify({ intent: 'SET_ACTION_RULE', level: 'action', confidence: 'high', params: _ftSelfParams });
+                  console.log(`[timing] ${elapsed()} | time-trigger self-override (${_ftSelfChannel}) — awaiting confirm`);
+                  return jsonResponse({ rawText: JSON.stringify({ speech: _ftSelfSpeech, display: `${_ftSelfSpeech}\n<!--PENDING_INTENT:${_ftSelfPi}-->`, actions: [], pendingThreads: [] }) });
+                }
 
                 if (!_ftToName) {
                   // Self-reminder ("remind me to X") — no recipient needed.
@@ -3317,6 +3468,34 @@ Deno.serve(async (req) => {
       .map((b: any) => String(b.text ?? ''))
       .join('');
     const toolUseBlocks = response.content.filter((b: any) => b.type === 'tool_use');
+
+    // ── F15 TEMPORARY DIAGNOSTIC (2026-07-09) — capture Claude's raw tool_use
+    // input for the two location tools BEFORE any transformation, to observe
+    // directly whether action_config.to is present at the source. Fire-and-
+    // forget, never blocks the response. Remove once F15 closes — see
+    // docs/F15_PHASE1_PROBLEM_DEFINITION_2026-07-09.md Evidence B8/§5.
+    for (const _diagBlock of toolUseBlocks) {
+      if (_diagBlock.name === 'set_location_rule_address' || _diagBlock.name === 'set_location_rule_chain') {
+        try {
+          const _diagUrl = Deno.env.get('SUPABASE_URL') ?? '';
+          const _diagKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+          fetch(`${_diagUrl}/rest/v1/client_diagnostics`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': _diagKey,
+              'Authorization': `Bearer ${_diagKey}`,
+            },
+            body: JSON.stringify({
+              session_id: `f15-raw-${Date.now()}`,
+              step: 'f15-raw-tool-use',
+              user_id: userId ?? null,
+              payload: { tool: _diagBlock.name, input: _diagBlock.input ?? {} },
+            }),
+          }).catch(() => {});
+        } catch (_e) { /* diagnostic only, never block the response */ }
+      }
+    }
 
     let actions = toolUseBlocks.map((b: any) => {
       const actionType = TOOL_NAME_TO_ACTION_TYPE[b.name];
