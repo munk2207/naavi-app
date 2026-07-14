@@ -89,6 +89,7 @@ import { session2026_07_14_b9rContactLookupRetryTests } from './catalogue/sessio
 import { session2026_07_14_b9cListsFocusRefetchTests } from './catalogue/session-2026-07-14-b9c-lists-focus-refetch';
 import { session2026_07_14_b9iFollowupBodyMarkerTests } from './catalogue/session-2026-07-14-b9i-followup-body-marker';
 import { session2026_07_14_b9fEvaluateRulesVoiceLoggingTests } from './catalogue/session-2026-07-14-b9f-evaluate-rules-voice-logging';
+import { session2026_07_14_b9uListDetailScreenFixesTests } from './catalogue/session-2026-07-14-b9u-list-detail-screen-fixes';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -213,6 +214,7 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_07_14_b9cListsFocusRefetchTests,
   ...session2026_07_14_b9iFollowupBodyMarkerTests,
   ...session2026_07_14_b9fEvaluateRulesVoiceLoggingTests,
+  ...session2026_07_14_b9uListDetailScreenFixesTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────

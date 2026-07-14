@@ -249,14 +249,21 @@ export async function readList(listName: string): Promise<ListResult> {
   const list = await findListByName(userId, listName);
   if (!list) return { success: false, error: `List "${listName}" not found` };
 
-  const content = await readDriveFile(list.drive_file_id);
+  const items = await readListItemsByFileId(list.drive_file_id, listName);
+  console.log(`[Lists] Read "${listName}" — ${items.length} items`);
+  return { success: true, list, items };
+}
+
+/** Read a list's items directly by Drive file ID — bypasses the
+ *  enabled-only name lookup findListByName does, so it works for disabled
+ *  lists too (list-detail screen needs this: it already has the list row,
+ *  including drive_file_id, from a by-ID fetch with no enabled filter). */
+export async function readListItemsByFileId(driveFileId: string, listName: string): Promise<string[]> {
+  const content = await readDriveFile(driveFileId);
   // Parse items — skip the first line only if it matches the list name (legacy lists had title as content)
   const allLines = content.split('\n').filter(l => l.trim());
   const firstLineIsTitle = allLines.length > 0 && allLines[0].toLowerCase().trim() === listName.toLowerCase().trim();
-  const items = firstLineIsTitle ? allLines.slice(1) : allLines;
-
-  console.log(`[Lists] Read "${listName}" — ${items.length} items`);
-  return { success: true, list, items };
+  return firstLineIsTitle ? allLines.slice(1) : allLines;
 }
 
 // ─── Get all lists for the user ─────────────────────────────────────────────

@@ -10,8 +10,8 @@
  *                     DISCONNECT under the hood).
  *   3. Items    — body lines from the Google Doc (read via read-drive-file).
  *
- * "Delete list" button at the bottom shows a cascade-warning modal,
- * then calls deleteListWithConnections.
+ * "Disable list" (enabled) / "Delete permanently" (already disabled) button
+ * at the bottom shows a confirm modal, then calls disableList / permanentlyDeleteListById.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -37,7 +37,7 @@ import {
   queryWithTimeout,
   getSessionWithTimeout,
 } from '@/lib/invokeWithTimeout';
-import { readList, disableList, reactivateList } from '@/lib/lists';
+import { readListItemsByFileId, disableList, reactivateList } from '@/lib/lists';
 import { disconnectEntityById, permanentlyDeleteListById } from '@/lib/list_connections';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -144,10 +144,13 @@ export default function ListDetailScreen() {
       }));
       setAttachments(described);
 
-      // 3. Read list items from the Drive Doc (uses the existing helper).
-      const itemsRes = await readList(detail.name);
-      if (itemsRes.success && Array.isArray(itemsRes.items)) {
-        setItems(itemsRes.items);
+      // 3. Read list items directly by drive_file_id — NOT via readList(name),
+      // which looks the list up by name through an enabled-only filter and
+      // would always come up empty for a disabled list even though the Drive
+      // doc content is fully preserved.
+      if (detail.drive_file_id) {
+        const listItems = await readListItemsByFileId(detail.drive_file_id, detail.name);
+        setItems(listItems);
       } else {
         setItems([]);
       }
@@ -403,7 +406,7 @@ export default function ListDetailScreen() {
             >
               <Ionicons name="trash" size={16} color="#fff" />
               <Text style={styles.deleteBtnText}>
-                {list.enabled ? 'Delete list' : 'Delete permanently'}
+                {list.enabled ? 'Disable list' : 'Delete permanently'}
               </Text>
             </TouchableOpacity>
           </View>
