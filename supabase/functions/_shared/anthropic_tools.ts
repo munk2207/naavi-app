@@ -108,10 +108,40 @@ const TRIGGER_CONFIG_CONTACT_SILENCE = {
 };
 
 // action_config common shape — Decision A: `to` is name only; no to_phone/to_email here.
+// F15 Defect A (2026-07-09) — self_override_* fields are a deliberate
+// exception to Decision A: they exist ONLY for a self-alert where the user
+// gives an explicit literal address to override where ONE SPECIFIC CHANNEL
+// delivers ("email me at X"), never for a third-party recipient (that stays
+// `to`, resolved via resolve-recipient). Kept as separate fields, not reused
+// `to`/`to_email`, because the fire-time dispatcher classifies self vs.
+// third-party by address-matching against the user's own registered contact
+// info — reusing to_email here would misclassify any override that (by
+// definition) doesn't match the user's own address as third-party, silently
+// dropping fan-out and channel preferences. Proven live, see
+// docs/F15_PHASE2_CHANGE_PLAN_2026-07-09.md §1.3.1/§1.7. §1.2.2 (post-closure
+// revision, 2026-07-09): one field per channel — self_override_sms overriding
+// SMS must NOT also silently redirect WhatsApp/voice; a shared "phone" field
+// was tried and explicitly rejected as confusing to explain to end users.
 const ACTION_CONFIG = {
   type: 'object',
   properties: {
     to: { type: 'string', description: 'Contact NAME only (e.g. "wife"). Orchestrator resolves phone/email.' },
+    self_override_email: {
+      type: 'string',
+      description: 'Self-alert only: an explicit literal email the user gave to override where the EMAIL channel of THEIR OWN notification is delivered (e.g. "email me at jane@example.com"). Only the email channel is affected. Never set for a third-party recipient — use `to` for that.',
+    },
+    self_override_sms: {
+      type: 'string',
+      description: 'Self-alert only: an explicit literal phone number the user gave to override where the SMS/TEXT channel of THEIR OWN notification is delivered (e.g. "text me at +16135551234"). Only the SMS channel is affected — WhatsApp and voice call still reach the user\'s own registered number unless separately overridden. Never set for a third-party recipient.',
+    },
+    self_override_whatsapp: {
+      type: 'string',
+      description: 'Self-alert only: an explicit literal phone number the user gave to override where the WHATSAPP channel of THEIR OWN notification is delivered (e.g. "WhatsApp me at +16135551234"). Only the WhatsApp channel is affected. Never set for a third-party recipient.',
+    },
+    self_override_voice: {
+      type: 'string',
+      description: 'Self-alert only: an explicit literal phone number the user gave to override where the VOICE CALL channel of THEIR OWN notification is delivered (e.g. "call me at +16135551234"). Only the voice-call channel is affected. Never set for a third-party recipient.',
+    },
     body: { type: 'string', description: 'Message body.' },
     tasks: {
       type: 'array',
@@ -278,7 +308,9 @@ export const NAAVI_TOOLS: NaaviTool[] = [
       '- "alert me at Joe\'s place" with no prior context → do NOT call; ask "where is Joe\'s place?".\n' +
       '- "remind me with James kids names Sam and Lila when I arrive at James home" → CALL with place_name="James home", action_config={tasks:["James kids: Sam and Lila"], body:"Reminder"}.\n' +
       '- "remind me to call the doctor when I arrive at the office" → CALL with place_name="office", action_config={tasks:["call the doctor"], body:"Reminder"}.\n' +
-      'IMPORTANT: When the user says "remind me with X when I arrive at Y", ALWAYS put X in action_config.tasks[]. NEVER emit REMEMBER for location-triggered reminders.',
+      '- "text Bob when I arrive at 50 Elm St" with Bob as a known contact and the address confirmed → CALL with place_name="50 Elm St", action_type="sms", action_config={to:"Bob", body:"Arrived at 50 Elm St."}. ALWAYS put the named recipient in action_config.to — never drop it, even though this tool\'s primary subject is the place, not the recipient.\n' +
+      '- "tell my wife when I get to the office" → CALL with place_name="office", action_type="sms", action_config={to:"wife", body:"He\'s arrived at the office."}.\n' +
+      'IMPORTANT: When the user says "remind me with X when I arrive at Y", ALWAYS put X in action_config.tasks[]. NEVER emit REMEMBER for location-triggered reminders. IMPORTANT: When the user names a recipient ("text Bob", "tell my wife", "message Sarah") anywhere in the sentence, ALWAYS put that name in action_config.to — this applies exactly the same way it does for set_action_rule\'s non-location triggers.',
     input_schema: {
       type: 'object',
       properties: {

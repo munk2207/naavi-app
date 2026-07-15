@@ -721,6 +721,17 @@ async function fireLocationAction(
   const toEmail = String(config.to_email ?? '');
   const subject = String(config.subject ?? rule.label ?? 'Location alert from MyNaavi');
   const toName  = String(config.to_name ?? '');
+  // F15 Defect A (2026-07-09) — explicit self-alert destination override
+  // ("email me at X when I arrive at Y"). Kept structurally separate from
+  // to_phone/to_email (which mean "this is a third party") so this alert is
+  // never misclassified — see docs/F15_PHASE2_CHANGE_PLAN_2026-07-09.md §1.
+  // §1.2.2 (2026-07-09, post-closure revision) — one override per channel,
+  // not a shared "phone" field: overriding SMS must not silently also
+  // redirect WhatsApp/voice for a user who didn't ask for that.
+  const selfOverrideEmail    = String(config.self_override_email ?? '');
+  const selfOverrideSms      = String(config.self_override_sms ?? '');
+  const selfOverrideWhatsapp = String(config.self_override_whatsapp ?? '');
+  const selfOverrideVoice    = String(config.self_override_voice ?? '');
 
   // Build the final body from base + inline tasks + linked list items.
   // Shared merge logic in _shared/alert_body.ts. Pass rule.id so F1a's
@@ -744,7 +755,13 @@ async function fireLocationAction(
   // channels rather than failing with "no destination". Mirrors the same
   // fallback in evaluate-rules/fireAction (which is the cron path).
   const noRecipient = !toPhone && !toEmail;
-  const isSelfAlert = Boolean(isSelfByPhone || isSelfByEmail || noRecipient);
+  // F15 Defect A — an explicit self-override is unconditionally self,
+  // checked BEFORE address-matching so it can never be misclassified as
+  // third-party just because the override address differs from the user's
+  // own registered contact info (that mismatch is the whole point of an
+  // override — proven live to misclassify otherwise, Phase 2 §1.3.1).
+  const hasSelfOverride = Boolean(selfOverrideEmail || selfOverrideSms || selfOverrideWhatsapp || selfOverrideVoice);
+  const isSelfAlert = Boolean(hasSelfOverride || isSelfByPhone || isSelfByEmail || noRecipient);
 
   const callSMS = (channel: 'sms' | 'whatsapp', to: string) =>
     fetch(`${supabaseUrl}/functions/v1/send-sms`, {
@@ -864,12 +881,23 @@ async function fireLocationAction(
   const direction = String(triggerConfig.direction ?? 'arrive');
   const isArrival = direction !== 'leave';
 
+  // F15 Defect A — channel-scoped substitution (Phase 2 §1.3, §1.7, §1.2.2):
+  // an override replaces only its own channel's destination. Every other
+  // enabled channel still goes to the user's own registered phone/email,
+  // unchanged. "Email me at X" does not mean "only email me," and (per the
+  // §1.2.2 revision) "text me at X" does not also redirect WhatsApp/voice.
+  const selfEmailTarget    = selfOverrideEmail    || userEmail;
+  const selfSmsTarget      = selfOverrideSms      || userPhone;
+  const selfWhatsappTarget = selfOverrideWhatsapp || userPhone;
+  const selfVoiceTarget    = selfOverrideVoice    || userPhone;
+
   const sends: Promise<{ channel: string; ok: boolean }>[] = [];
   if (isSelfAlert) {
-    if (userPhone) { sends.push(callSMS('sms', userPhone)); sends.push(callSMS('whatsapp', userPhone)); }
-    if (userEmail) { sends.push(callEmail(userEmail)); }
+    if (selfSmsTarget)      sends.push(callSMS('sms', selfSmsTarget));
+    if (selfWhatsappTarget) sends.push(callSMS('whatsapp', selfWhatsappTarget));
+    if (selfEmailTarget)    sends.push(callEmail(selfEmailTarget));
     sends.push(callPush());
-    if (userPhone && isArrival) sends.push(callVoice(userPhone));
+    if (selfVoiceTarget && isArrival) sends.push(callVoice(selfVoiceTarget));
   } else if (toPhone) {
     sends.push(callSMS('sms', toPhone));
     sends.push(callSMS('whatsapp', toPhone));
