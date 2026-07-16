@@ -57,6 +57,21 @@ async function rawInsert(ctx: TestContext, row: any): Promise<{ ok: boolean; sta
   return { ok: res.ok, status: res.status, body: await res.text() };
 }
 
+async function deleteLabelUniqueTestRules(ctx: TestContext) {
+  await fetch(
+    `${ctx.supabaseUrl}/rest/v1/action_rules`
+      + `?user_id=eq.${ctx.testUserId}`
+      + `&label=ilike.integrity-label-unique-*`,
+    {
+      method: 'DELETE',
+      headers: {
+        apikey: ctx.serviceRoleKey,
+        Authorization: `Bearer ${ctx.serviceRoleKey}`,
+      },
+    },
+  );
+}
+
 export const dataIntegrityTests: TestCase[] = [
   {
     id: 'integrity.action-rules-duplicate-location-rejected',
@@ -225,6 +240,170 @@ export const dataIntegrityTests: TestCase[] = [
       expectEqual(Array.isArray(rows) && rows.length, 1, `exactly one row expected, got ${Array.isArray(rows) ? rows.length : 'non-array'} (${JSON.stringify(rows).slice(0, 200)})`);
       expectEqual(rows[0].enabled, true, `re-armed row should be enabled=true (got ${rows[0].enabled})`);
       expectEqual(rows[0].last_fired_at, null, `re-armed row should have last_fired_at=null (got ${rows[0].last_fired_at})`);
+    },
+  },
+
+  // B9z (2026-07-16) — action_rules_user_label_unique was live in production
+  // with no enabled=true scoping and no git-tracked origin: a DISABLED row
+  // permanently blocked any new row with the same label, even long after the
+  // original alert had fired. Fixed by supabase/migrations/20260716000000_
+  // scope_action_rules_label_unique.sql. See docs/B9Z_PHASE1_PROBLEM_
+  // DEFINITION_2026-07-16.md for the root cause and docs/B9Z_PHASE5_
+  // EVIDENCE_2026-07-16.md for the manual staging verification these tests
+  // lock in as permanent regression coverage.
+
+  {
+    id: 'integrity.action-rules-label-unique-disabled-allows-reuse',
+    category: 'integrity',
+    description: 'B9z (2026-07-16) — a DISABLED row with label X no longer blocks a new row with the same label X. The over-block this ticket fixed.',
+    timeoutMs: 15_000,
+    async setup(ctx) { await deleteLabelUniqueTestRules(ctx); },
+    async teardown(ctx) { await deleteLabelUniqueTestRules(ctx); },
+    async run(ctx) {
+      const first = {
+        user_id: ctx.testUserId,
+        trigger_type: 'time',
+        trigger_config: { datetime: new Date(Date.now() + 3 * 60_000).toISOString() },
+        action_type: 'sms',
+        action_config: { self_override_sms: '+15555550100', body: 'test' },
+        label: 'integrity-label-unique-reuse-test',
+        one_shot: true,
+        enabled: true,
+      };
+      const r1 = await rawInsert(ctx, first);
+      expectEqual(r1.ok, true, `first insert (status=${r1.status} body=${r1.body.slice(0, 200)})`);
+      const inserted = JSON.parse(r1.body);
+      const firstId = Array.isArray(inserted) ? inserted[0]?.id : inserted?.id;
+      expectTruthy(firstId, 'first row should have an id');
+
+      const disableRes = await fetch(`${ctx.supabaseUrl}/rest/v1/action_rules?id=eq.${firstId}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: ctx.serviceRoleKey,
+          Authorization: `Bearer ${ctx.serviceRoleKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ enabled: false }),
+      });
+      expectEqual(disableRes.ok, true, `disabling first row should succeed (status=${disableRes.status})`);
+
+      const second = { ...first, action_config: { ...first.action_config, body: 'test recreated' } };
+      const r2 = await rawInsert(ctx, second);
+      expectEqual(r2.ok, true, `recreate with identical label after disable should SUCCEED but got status=${r2.status} body=${r2.body.slice(0, 200)}`);
+    },
+  },
+
+  {
+    id: 'integrity.action-rules-label-unique-active-blocks-duplicate',
+    category: 'integrity',
+    description: 'B9z (2026-07-16) — regression guard: an ENABLED row with label X still blocks a second ENABLED row with the same label X. True-duplicate prevention among active alerts must remain intact.',
+    timeoutMs: 15_000,
+    async setup(ctx) { await deleteLabelUniqueTestRules(ctx); },
+    async teardown(ctx) { await deleteLabelUniqueTestRules(ctx); },
+    async run(ctx) {
+      const baseRow = {
+        user_id: ctx.testUserId,
+        trigger_type: 'time',
+        trigger_config: { datetime: new Date(Date.now() + 3 * 60_000).toISOString() },
+        action_type: 'sms',
+        action_config: { self_override_sms: '+15555550100', body: 'test' },
+        label: 'integrity-label-unique-active-test',
+        one_shot: true,
+        enabled: true,
+      };
+      const first = await rawInsert(ctx, baseRow);
+      expectEqual(first.ok, true, `first insert (status=${first.status})`);
+
+      const dupe = {
+        ...baseRow,
+        // Distinct datetime — isolates this test to the label constraint
+        // specifically. With the same datetime, action_rules_unique_enabled_
+        // time (a separate constraint, keyed on (user_id, datetime) only)
+        // would ALSO reject this insert, making it impossible to tell which
+        // constraint actually fired. See the sibling different-label-allowed
+        // test, which hit exactly this ambiguity live.
+        trigger_config: { datetime: new Date(Date.now() + 4 * 60_000).toISOString() },
+        action_config: { ...baseRow.action_config, body: 'test duplicate' },
+      };
+      const second = await rawInsert(ctx, dupe);
+      expectEqual(second.ok, false, `duplicate label while first is still enabled should be REJECTED but got status=${second.status} body=${second.body.slice(0, 200)}`);
+      expectTruthy(
+        second.body.includes('action_rules_user_label_unique'),
+        `expected the action_rules_user_label_unique constraint specifically (isolated by using a different datetime), got status=${second.status} body=${second.body.slice(0, 200)}`,
+      );
+    },
+  },
+
+  {
+    id: 'integrity.action-rules-label-unique-different-label-allowed',
+    category: 'integrity',
+    description: 'B9z (2026-07-16) — two ENABLED rows for the same user with DIFFERENT labels both succeed — no cross-contamination between unrelated alerts.',
+    timeoutMs: 15_000,
+    async setup(ctx) { await deleteLabelUniqueTestRules(ctx); },
+    async teardown(ctx) { await deleteLabelUniqueTestRules(ctx); },
+    async run(ctx) {
+      const rowA = {
+        user_id: ctx.testUserId,
+        trigger_type: 'time',
+        trigger_config: { datetime: new Date(Date.now() + 3 * 60_000).toISOString() },
+        action_type: 'sms',
+        action_config: { self_override_sms: '+15555550100', body: 'test A' },
+        label: 'integrity-label-unique-diff-test-A',
+        one_shot: true,
+        enabled: true,
+      };
+      const rowB = {
+        ...rowA,
+        // Distinct datetime — action_rules_unique_enabled_time (a SEPARATE
+        // constraint, keyed on (user_id, datetime) only) would otherwise
+        // reject this insert regardless of label, since it's unrelated to
+        // what this test is isolating. Confirmed live: identical datetimes
+        // here produced a 409 against that other index, not the label one.
+        trigger_config: { datetime: new Date(Date.now() + 4 * 60_000).toISOString() },
+        label: 'integrity-label-unique-diff-test-B',
+        action_config: { ...rowA.action_config, body: 'test B' },
+      };
+      const r1 = await rawInsert(ctx, rowA);
+      const r2 = await rawInsert(ctx, rowB);
+      expectEqual(r1.ok, true, `row A insert (status=${r1.status})`);
+      expectEqual(r2.ok, true, `row B insert with different label (status=${r2.status} body=${r2.body.slice(0, 200)})`);
+    },
+  },
+
+  {
+    id: 'integrity.action-rules-label-unique-update-preserves-label',
+    category: 'integrity',
+    description: 'B9z (2026-07-16) — updating a field OTHER than label on an already-enabled row still succeeds. Guards against an unintended interaction between the new partial index and any UPDATE path.',
+    timeoutMs: 15_000,
+    async setup(ctx) { await deleteLabelUniqueTestRules(ctx); },
+    async teardown(ctx) { await deleteLabelUniqueTestRules(ctx); },
+    async run(ctx) {
+      const row = {
+        user_id: ctx.testUserId,
+        trigger_type: 'time',
+        trigger_config: { datetime: new Date(Date.now() + 3 * 60_000).toISOString() },
+        action_type: 'sms',
+        action_config: { self_override_sms: '+15555550100', body: 'original body' },
+        label: 'integrity-label-unique-update-test',
+        one_shot: true,
+        enabled: true,
+      };
+      const r1 = await rawInsert(ctx, row);
+      expectEqual(r1.ok, true, `insert (status=${r1.status})`);
+      const inserted = JSON.parse(r1.body);
+      const id = Array.isArray(inserted) ? inserted[0]?.id : inserted?.id;
+      expectTruthy(id, 'inserted row should have an id');
+
+      const updateRes = await fetch(`${ctx.supabaseUrl}/rest/v1/action_rules?id=eq.${id}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: ctx.serviceRoleKey,
+          Authorization: `Bearer ${ctx.serviceRoleKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action_config: { self_override_sms: '+15555550100', body: 'updated body' } }),
+      });
+      expectEqual(updateRes.ok, true, `updating action_config without touching label should succeed (status=${updateRes.status})`);
     },
   },
 ];
