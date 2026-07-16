@@ -4,7 +4,7 @@ Sources: `hooks/useOrchestrator.ts`, `naavi-voice-server/src/index.js`, `app/ind
 
 Legend: ✅ = fully working · ⚠️ = partial · ❌ = not implemented
 
-Last updated: 2026-06-15 (Build 255) — B2m CLOSED. UPDATE_MORNING_CALL brief_windows shipped both surfaces; timeToWindow zero-pad fix applied.
+Last updated: 2026-07-16 — B9z. Confirm-then-execute behavior for time-trigger `SET_ACTION_RULE` is now voice-only; mobile's equivalent path unverified against the same defect class. See row below and Voice-gaps table.
 
 ---
 
@@ -32,7 +32,8 @@ Last updated: 2026-06-15 (Build 255) — B2m CLOSED. UPDATE_MORNING_CALL brief_w
 | **ALERTS / RULES** | | | |
 | Create location alert | ✅ | ✅ | Parity — both have picker, 3-attempt cap, permission check |
 | Re-arm expired location alert | ✅ | ✅ | **FIXED 2026-06-15** — all 4 commitLocationRule paths offer inline re-arm |
-| Create email / time / calendar / weather / contact-silence alert | ✅ | ✅ | Parity |
+| Create email / time / calendar / weather / contact-silence alert | ✅ | ✅ | Parity on *whether* the alert gets created. **NOT parity on *how confirmation and result-reporting work*** — see confirm-gate row below, new 2026-07-16. |
+| Time-trigger confirm-then-execute (single attempt, truthful success/failure) | ⚠️ unverified | ✅ | **Voice gap, new 2026-07-16 (B9z).** Voice: `action_rule_confirm_gate.js` — proposal is stored pending, executed exactly once on explicit "yes," real result (success/fail) spoken back. Mobile: `useOrchestrator.ts` has its own, separate `SET_ACTION_RULE` creation code (direct insert ~line 810, and via `manage-rules` ~line 4096) — never touched by B9z, never checked for the same "fire before confirm / discard result" defect class B9z fixed on voice. Architecturally different (mobile's chat UI naturally gates on a tap before this code runs, unlike voice's single-turn phone call), so not proven vulnerable — but genuinely unverified, not confirmed-safe. See `docs/B9Z_PHASE1_PROBLEM_DEFINITION_2026-07-16.md` for the voice-side root cause this fixed. |
 | List rules | ✅ | ✅ | Parity |
 | Delete rule (single + bulk) | ✅ | ✅ | Parity |
 | **MEMORY / KNOWLEDGE** | | | |
@@ -77,6 +78,11 @@ Last updated: 2026-06-15 (Build 255) — B2m CLOSED. UPDATE_MORNING_CALL brief_w
 | Priority | Gap | Notes |
 |---|---|---|
 | Low | Verified-address gate before `FETCH_TRAVEL_TIME` | Mobile pre-verifies; voice calls Edge Function directly. Answer is correct either way. |
+
+### Mobile gaps, inverted — mobile *unverified* against a defect voice now has a fix for
+| Priority | Gap | Notes |
+|---|---|---|
+| Medium | Confirm-then-execute for time-trigger `SET_ACTION_RULE` | See "Time-trigger confirm-then-execute" row in the capability table above. Not confirmed as a mobile bug — confirmed as an *unchecked* code path. Recommend a dedicated investigation before assuming it's fine or assuming it's broken. |
 
 ---
 
