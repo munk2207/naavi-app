@@ -2,7 +2,7 @@
 
 Per `docs/AI_DEVELOPMENT_GOVERNANCE.md` Phase 3. Reviewer: ChatGPT (External Technical Reviewer). Subject: `docs/F19_TRACKB_PHASE2_CHANGE_PLAN_2026-07-15.md` (1c implementation plan, 1d decision point, 1e investigation plan). Required because 1c touches Protected Core (Voice orchestration) and was classified High Risk.
 
-**Four review rounds total.** Rounds 1-2 (below) reviewed the original Phase 2 draft and gated 1c's implementation (already shipped — see Outcome). Round 3 reviewed the Phase 2 *revision* — 1d's live-test procedure and 1e's widened, barge-in-inclusive investigation plan. Round 4 (added this revision) reviewed Round 3's own output and added the logging removal criteria.
+**Seven review rounds total.** Rounds 1-2 (below) reviewed the original Phase 2 draft and gated 1c's implementation (already shipped — see Outcome). Round 3 reviewed the Phase 2 *revision* — 1d's live-test procedure and 1e's widened, barge-in-inclusive investigation plan. Round 4 reviewed Round 3's own output and added the logging removal criteria. Round 5 reviewed Phase 2 §5a — the 1e implementation plan, written after Phase 1's third revision (proven defect) was itself separately reviewed and approved (see that document's own §7). Round 6 was a meta-review of the Round 1-5 record itself. Round 7 reviewed Phase 2 §5b — two None-risk follow-ups from Phase 1's fourth revision, reviewed anyway for audit-trail consistency even though not strictly required by governance's risk-based Phase 3 trigger.
 
 ---
 
@@ -137,3 +137,117 @@ Only the Phase 2 implementation scope above is authorized. Phase 4 must be check
 ### Round 4 outcome
 
 **APPROVE.** Phase 2 (with the logging removal criteria now added) and this Phase 3 document are both cleared for Phase 4.
+
+---
+
+## Round 5 — review of Phase 2 §5a (1e implementation plan)
+
+**Context:** submitted after Phase 1's third revision (the proven implementation defect, §2g) was itself separately reviewed and Approved (`docs/F19_TRACKB_PHASE1_PROBLEM_DEFINITION_2026-07-15.md` §7). Subject: Phase 2 §5a, restructured per that review's forward guidance into two distinct design questions (truthfulness of user feedback; conversation control) with independent alternatives (1a/1b/1c, 2a/2b/2c) evaluated before selecting a single confirmation-gate mechanism (option 1c + 2c, reusing `list_confirm_gate.js`'s pattern).
+
+**What the reviewer praised:**
+1. **Design process** — "§5a doesn't immediately jump to a solution... it explains why the selected design was chosen instead of merely describing what will be implemented."
+2. **Reuse of `list_confirm_gate.js`** — "already proven, already understood, smaller blast radius, consistent conversational behavior, easier Phase 6 auditing... preferable to introducing an entirely new confirmation framework."
+3. **Scope discipline** — narrowing to `trigger_type: 'time'` only, explicitly excluding `calendar`/`email`/`weather`/`contact_silence` despite the same underlying architecture plausibly affecting them: "exactly the restraint I expect after a Phase 1 investigation. The document fixes only what was proven. Nothing more."
+4. **Acceptance criteria** — all 7 covered: proposal, confirmation, duplicate confirmation, failure, cancellation, regression (location + lists), location exclusion. "I don't see any obvious missing user-facing scenario."
+5. **Audit trail** — "records why 1a wasn't chosen, why 1b wasn't chosen, why 2a wasn't chosen, why 2b wasn't chosen, why 1c + 2c became the selected architecture. Many design documents only record the chosen design. This one records the alternatives."
+
+**One recommendation (explicitly non-blocking, explicitly not for this Phase 2):** architectural, not project-specific — instead of `pendingActionRuleCreate` as a third independent state variable alongside `pendingLocation` and `pendingListAction`, a future generic `pendingConfirmation = { type, payload, handler }` could let location/lists/action-rules become different handlers under one abstraction rather than different state variables. **Reviewer was explicit this is not a recommendation to implement now:** "I am not recommending implementing that now. Given your governance rules, I would not expand the scope of this Phase 2. The current proposal is the correct implementation for this defect." Framed as something to consider only if more confirmation-gated actions accumulate over time.
+
+**Response:** not adopted into this Phase 2 — correctly out of scope per the reviewer's own framing. Logged here for the record; no document changes needed since Phase 2 already limits itself to the `pendingActionRuleCreate` design as proposed. If a future session adds a fourth or fifth confirmation-gated action type, this recommendation should be re-surfaced at that point, not before.
+
+**Governance assessment:**
+
+| Area | Assessment |
+|---|---|
+| Phase 1 alignment | ✅ Excellent |
+| Design reasoning | ✅ Excellent |
+| Alternative analysis | ✅ Excellent |
+| Scope control | ✅ Excellent |
+| Regression planning | ✅ Excellent |
+| Acceptance criteria | ✅ Excellent |
+| Hidden assumptions | None identified |
+
+**Verdict:** **Approved.** "This Phase 2 revision provides a well-reasoned implementation plan that is faithful to the approved Phase 1 investigation... I would not broaden the scope of this implementation to do that now, because the current proposal appropriately limits itself to the defect that was actually proven."
+
+### Round 5 — Implementation boundaries confirmed
+
+- **Authorized:** `naavi-voice-server/src/action_rule_confirm_gate.js` (new file, exactly as specified in Phase 2 §5a's table — `shouldGateAction`, `buildConfirmationSpeech`, `failSpeechForAction`, pure module, no I/O). `naavi-voice-server/src/index.js` — the two changes specified in §5a's table only: the action-classification branch (~line 12030) and the `pendingActionRuleCreate` handler (~line 9883).
+- **No additional files approved.** No other file touched.
+- **No opportunistic refactoring approved** — the generic `pendingConfirmation` abstraction raised in this round's recommendation is explicitly NOT authorized for this implementation.
+- **No architectural changes beyond what §5a describes** — scope stays `trigger_type: 'time'` only; `location`, `LIST_*`, and other `backgroundActions`-routed trigger types (`email`, `calendar`, `weather`, `contact_silence`) are untouched.
+- **1d** — still not authorized for implementation in this round (remains an unexecuted decision point, per its own Phase 2 §4).
+
+### Round 5 — Deferred architectural decisions
+
+*(Retroactively added per Round 6, below — see `docs/AI_DEVELOPMENT_GOVERNANCE.md` Phase 3 "Deferred Architectural Decisions," added at the same time.)*
+
+- **Generic `pendingConfirmation = { type, payload, handler }` framework.** Not approved for this implementation. Reason: only two confirmation-gated action families exist today (`LIST_*` via `list_confirm_gate.js`, and now `SET_ACTION_RULE`/`trigger_type:'time'` via `action_rule_confirm_gate.js`) plus `pendingLocation`'s bespoke state machine — not yet enough repetition to justify a shared abstraction. Reconsider if a third or fourth confirmation-gated action type appears.
+- **Extending the confirmation gate beyond `trigger_type: 'time'`** (to `email`, `calendar`, `weather`, `contact_silence`). Not approved. Reason: the fire-and-discard defect likely affects these too, but only `time` was reproduced and proven (Phase 1 §2g) — extending now would be scope creep beyond proven evidence. Reconsider if any of these trigger types produces its own proven reproduction.
+- **Generalizing background-action execution** (i.e., making `backgroundActions`/`executeAction()`'s result-handling truthful and awaited by default, rather than gating specific action types one at a time). Not approved. Reason: a much larger architectural change than this defect's proven scope justifies; the two-question analysis in §5a (truthfulness vs. conversation control) was deliberately answered per-action-type, not system-wide. Reconsider only as part of a dedicated architecture review, not as a Track B follow-on.
+
+### Round 5 outcome
+
+**APPROVE.** Phase 2 §5a is cleared for Phase 4 implementation.
+
+---
+
+## Round 6 — meta-review of the Track B review record itself
+
+**Context:** review of the overall Round 1-5 record for completeness and auditability, not of new document content.
+
+**Governance assessment:**
+
+| Area | Assessment |
+|---|---|
+| Historical continuity | ✅ Excellent |
+| Review traceability | ✅ Excellent |
+| Design audit trail | ✅ Excellent |
+| Implementation boundaries | ✅ Excellent |
+| Scope control | ✅ Excellent |
+| Governance compliance | ✅ Excellent |
+| Hidden assumptions | None identified |
+
+**One recommendation (process enhancement, framed for future documents generally, not a defect in this one):** collect intentionally deferred architectural ideas into a dedicated "Deferred architectural decisions" subsection, rather than leaving them implied in review prose — so future reviewers immediately recognize a deferred idea as already-considered-and-set-aside rather than rediscovering it as new.
+
+**Response — adopted in two places:** (1) the actual deferred ideas from Round 5 are now listed explicitly, above. (2) The pattern itself was added as a standing governance requirement — `docs/AI_DEVELOPMENT_GOVERNANCE.md` Phase 3, new "Deferred Architectural Decisions" subsection, added directly after "Implementation Boundaries Confirmed" (the same mechanism used to formalize that earlier Phase 3 addition), citing this round as the originating example.
+
+**Verdict:** **Approved.** "This revision completes the governance record for Track B in a disciplined and auditable way... The implementation boundaries are explicit, the scope remains tightly aligned with the proven Phase 1 findings, and the document provides a clear authorization baseline for Phase 4 implementation and a precise reference for Phase 6 audit."
+
+### Round 6 outcome
+
+**APPROVE.** No change to Phase 4's authorization (still Round 5's implementation boundaries, unchanged). This round is documentation-only — governance-process record-keeping, not a new gate on the implementation itself.
+
+---
+
+## Round 7 — review of Phase 2 §5b (follow-ups from Phase 1's fourth revision)
+
+**Context:** Phase 1's fourth revision (`docs/F19_TRACKB_PHASE1_PROBLEM_DEFINITION_2026-07-15.md` §2h) corrected the 409's root cause (a different, untracked constraint — `action_rules_user_label_unique` — not the one originally cited) after live-testing the shipped 1e confirm-gate fix. Phase 2 §5b plans the two resulting follow-ups: reading the constraint's actual definition, and flagging its untracked-migration status to T1a. Both classified **None risk** — read-only query, one documentation line, no code, no deploy.
+
+**Governance assessment:**
+
+| Area | Assessment |
+|---|---|
+| Historical integrity | ✅ Excellent |
+| Scope discipline | ✅ Excellent |
+| Evidence-first planning | ✅ Excellent |
+| Risk classification | ✅ Appropriate |
+| Architecture separation | ✅ Excellent |
+| Governance compliance | ✅ Excellent |
+| Hidden assumptions | None identified |
+
+**One recommendation:** strengthen Item 1's success criteria — define the expected outcomes of the constraint-definition query explicitly (partial/scoped vs. unconditional vs. neither), and state up front that any outcome requiring a behavioral change becomes its own new Phase 1. Removes ambiguity about what happens after the query returns.
+
+**Response — adopted directly.** Added an "Expected outcomes" table to Phase 2 §5b Item 1 — Outcome A (partial/scoped), B (unconditional), C (neither) — each with its own predetermined next step, plus an explicit rule that B or a behavior-requiring C becomes a new Phase 1, not an ad hoc fix off the query result.
+
+**One observation (not a defect):** a Phase 3 round is probably not strictly required here — no production code, no deployment, no behavior change, and governance's own Phase 3 trigger is scoped to Medium/High Risk changes. Doing one anyway is recommended purely for audit-trail consistency — so a future reviewer never has to wonder why this one revision skipped a phase the others didn't.
+
+**Verdict:** **Approved.** "This Phase 2 revision appropriately limits itself to the two follow-up actions justified by the latest Phase 1 evidence. It avoids designing fixes before confirming the underlying database constraint, correctly routes the schema-drift finding into the broader Architecture Integrity Audit, and maintains the project's strong separation between investigation, implementation, and governance."
+
+### Round 7 — Implementation boundaries confirmed
+
+- **Authorized:** Item 1 — run the read-only `pg_indexes` query via the Supabase SQL editor, no other action. Item 2 — add exactly one line to `docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md`'s T1a section, citing Phase 1 §2h.
+- **Not authorized:** any fix to `action_rules_user_label_unique` (adding scoping, redesigning the dedup key, writing a migration to formally adopt it) — all of that is gated behind Item 1's outcome per the new Outcome A/B/C table, and would need its own Phase 1.
+
+### Round 7 outcome
+
+**APPROVE.** Phase 2 §5b is cleared to execute — Item 1's query and Item 2's holding-list line, nothing beyond that.

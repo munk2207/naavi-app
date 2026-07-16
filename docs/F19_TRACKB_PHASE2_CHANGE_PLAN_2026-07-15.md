@@ -1,6 +1,10 @@
 # F19 Track B — Phase 2: Change Planning
 
-**Second revision (this revision).** Written after Phase 1's second revision (§2f — the barge-in/STT truncation finding, surfaced while verifying 1c live) and after 1c itself shipped, deployed, and was verified live twice (see `docs/SESSION_HANDOFF_2026-07-15_F19_TRACKA_CLOSED_TRACKB_1C_SHIPPED.md`). **§1-3 (1c) are unchanged from the original revision and are historical record only — 1c is closed, already reviewed by Phase 3 (2 rounds, APPROVE), implemented, and verified. Nothing in §1-3 is reopened by this revision.** Only §4 (1d) and §5 (1e) are revised, per Wael's confirmed scope: 1d gets a concrete live-test procedure (was previously only a trigger/question, never executed); 1e's logging plan is widened to capture the `[Barge-in]` flag per turn and is explicitly combined with the pre-existing, unfixed barge-in/STT truncation bug (`project_naavi_deepgram_first_word_truncation`) into one investigation rather than two, per Phase 1 §6's recommendation.
+**Fourth revision (this revision) — see §5b, planning the two follow-ups from Phase 1's fourth revision (`docs/F19_TRACKB_PHASE1_PROBLEM_DEFINITION_2026-07-15.md` §2h, approved): reading `action_rules_user_label_unique`'s actual definition, and flagging its untracked-migration status to T1a. §5a (1e's confirm-gate fix) is unchanged, already shipped and verified — historical record only.**
+
+**Third revision — 1e now has a proven root cause and an implementation plan, see §5a.** The investigation Phase 2 originally scoped (§5, second revision) was run live on production (2026-07-15, ~23:17-23:18 EDT) and found a precisely-located defect, documented in `docs/F19_TRACKB_PHASE1_PROBLEM_DEFINITION_2026-07-15.md` third revision §2g. §5's original investigation plan is left unchanged below as historical record; §5a is new.
+
+**Second revision.** Written after Phase 1's second revision (§2f — the barge-in/STT truncation finding, surfaced while verifying 1c live) and after 1c itself shipped, deployed, and was verified live twice (see `docs/SESSION_HANDOFF_2026-07-15_F19_TRACKA_CLOSED_TRACKB_1C_SHIPPED.md`). **§1-3 (1c) are unchanged from the original revision and are historical record only — 1c is closed, already reviewed by Phase 3 (2 rounds, APPROVE), implemented, and verified. Nothing in §1-3 is reopened by this revision.** Only §4 (1d) and §5 (1e) are revised, per Wael's confirmed scope: 1d gets a concrete live-test procedure (was previously only a trigger/question, never executed); 1e's logging plan is widened to capture the `[Barge-in]` flag per turn and is explicitly combined with the pre-existing, unfixed barge-in/STT truncation bug (`project_naavi_deepgram_first_word_truncation`) into one investigation rather than two, per Phase 1 §6's recommendation.
 
 Per `docs/AI_DEVELOPMENT_GOVERNANCE.md` Phase 2. Builds on `docs/F19_TRACKB_PHASE1_PROBLEM_DEFINITION_2026-07-15.md` (second revision, approved by ChatGPT with the softened 1d framing adopted). Touches Protected Core (Voice orchestration). Per Phase 1's evidence, this is **High Risk** for 1c (Protected Core prompt/schema change affecting every voice call — already shipped), and **Low Risk** for the 1d live-test and 1e's logging addition (diagnostic/read-only, no behavior change) — see revised §6.
 
@@ -122,16 +126,114 @@ This table is the fixed interpretation rule for the trace collected in §5 — l
 
 **Once all three are met, logging removal happens under one of two paths, not left open-ended:** (a) as its own small implementation task (a single-file revert of the diagnostic logging added here, its own minimal Phase 2/4 given the low risk), or (b) folded directly into the subsequent fix's own implementation, if a fix is approved and scoped soon after the verdict — in which case the fix's own Phase 4 removes the temporary logging as part of the same commit rather than as a separate step. Either path must be recorded in this document's revision history (or a superseding revision) so the logging's lifecycle is auditable end to end — added here, used for X, removed there.
 
-**Not part of this Phase 2:** removing the temporary logging (scoped above as its own follow-on task, not executed here), choosing/implementing a fix for the barge-in truncation bug (its 4 candidate directions remain unevaluated), or any code change to the confirmation flow itself — those depend entirely on what the combined trace shows and would need their own Phase 1 (this investigation's findings) before a fix could be planned.
+**Not part of this Phase 2 (original, §5 scope):** removing the temporary logging (scoped above as its own follow-on task, not executed here), choosing/implementing a fix for the barge-in truncation bug (its 4 candidate directions remain unevaluated), or any code change to the confirmation flow itself — those depend entirely on what the combined trace shows and would need their own Phase 1 (this investigation's findings) before a fix could be planned.
 
 ---
 
-## 6. Risk classification — overall
+## 5a. Track B-1e — implementation plan (new this revision — Phase 1 approved, this is the fix)
 
-**1c: High** — already shipped under this classification (unchanged, historical). **1d (revised): Low** — the live-test procedure in §4 is read-only against production (a real call + a temporary DB row Wael creates and deletes via SQL editor, no code path changed) — same shape as 1c's own verification, which carried no separate risk beyond 1c's own deploy. **1e (revised): Low** — the widened logging in §5 is still diagnostic-only console output, no behavior change, easily reverted; the only change from the original revision is *what* gets logged (adding the `[Barge-in]` boolean), not a new code path or a new risk category. Carried forward reasoning from the original revision: nothing gates or gradually rolls out a tool-description edit for 1c specifically — the very next voice call after deploy reads the new text — which is why 1c alone was High; 1d and 1e do not touch that file or any prompt/schema text, so that reasoning does not extend to them.
+Per `docs/F19_TRACKB_PHASE1_PROBLEM_DEFINITION_2026-07-15.md` third revision §2g/§7, **now fully Approved** (wording condition applied, then a follow-up review confirmed it — both rounds recorded in that document's §7): the live-traced investigation found a "Neither confirmed" verdict on the two original hypotheses, then a proven implementation defect (with one contributing detail, the origin of the first 409, still open but not load-bearing for this fix). This section proposes the fix for that proven defect, structured per the approved Phase 1's forward guidance as two distinct design questions (below) before settling on one mechanism.
+
+**Defect, restated:** `naavi-voice-server/src/index.js:12030-12044` classifies every action as either (a) gated by the existing `list_confirm_gate.js` module (LIST_* types only) or (b) pushed to `backgroundActions`, executed fire-and-forget *after* TTS is sent, result discarded except for a console log (lines 12194-12199). `SET_ACTION_RULE` with `trigger_type: 'time'` falls into (b). There is no confirm-before-execute gate for this action, unlike `location` triggers (which use `pendingLocation`, an explicit two-turn state machine) or `LIST_*` actions (which use `list_confirm_gate.js`, the same pattern proposed here).
+
+### Two distinct design questions (per Phase 1 review §7 — evaluated separately before choosing an implementation)
+
+The reviewer's forward guidance on the approved Phase 1 revision: don't treat this as one undifferentiated fix. Evaluated here as two questions, each with its own alternatives, before settling on a single mechanism.
+
+**Question 1 — Truthfulness of user feedback:** how does Naavi avoid telling the user something ("Done," or even "I'll do X, say yes to confirm") before the system knows the outcome?
+- *1a — await before any speech.* Block TTS on `executeAction()`'s result for every turn that proposes this action. Fully truthful, simplest to reason about, but adds a network round-trip's latency to the very first proposal turn too — a cost paid even on the (common) case where the user hasn't confirmed anything yet.
+- *1b — speak provisionally, correct on failure.* Keep today's latency profile; if the awaited result arrives after TTS and shows failure, issue a second, separate corrective message. Avoids 1a's latency cost but adds a delayed-correction mechanism and a second speech event on the failure path.
+- *1c — defer the truth claim to the confirmed turn.* The first turn speaks a *proposal*, not a completion claim ("I'll do X, say yes to confirm" — true regardless of outcome, since nothing has been attempted yet). Only the second turn, after the user confirms, speaks a completion claim — and only that turn needs to await the result. No latency cost on the proposal turn; full truthfulness on the completion claim.
+
+**Question 2 — Conversation control:** how does Naavi avoid the same underlying write firing more than once, whether from Claude re-proposing the action or the user saying "yes" more than once?
+- *2a — idempotency at the write layer.* Give each proposed action a stable client-generated ID; make the backend de-duplicate on it instead of rejecting repeats as conflicts. Doesn't touch voice-server turn logic, but changes `action_rules`' write contract for every caller, not just this one path — larger blast radius.
+- *2b — a standalone per-call de-dup flag.* Track "this exact action is already pending" as its own piece of state, separate from any confirmation mechanism. Narrow, but adds a second state variable alongside whatever answers Question 1.
+- *2c — one execution, gated on confirmation.* Store the action once when first proposed; execute it exactly once, only when the user confirms; clear the pending state immediately before executing. Claude's tool call reaching the server more than once no longer matters, because only a confirmed "yes" ever reaches `executeAction()`.
+
+**Why one mechanism answers both here:** option 1c (defer the truth claim) and option 2c (execute once, on confirmation) turn out to be the same mechanism — a store-then-confirm gate. That's not assumed going in; 1a/1b and 2a/2b were real independent alternatives that could have produced two separate fixes (e.g., 1b's correction message plus 2a's idempotency key, with no gate at all). They're recorded above so this choice is auditable. The gate is chosen because it's the exact pattern already shipped and proven for `LIST_*` actions (`list_confirm_gate.js`) — reusing a known-good mechanism over inventing two new ones.
+
+**Proposed fix — reuse the exact pattern already proven for `LIST_*` actions, applied to `trigger_type: 'time'` `SET_ACTION_RULE`:**
+
+| File | Classification | Change | Risk |
+|---|---|---|---|
+| `naavi-voice-server/src/action_rule_confirm_gate.js` (new file) | Shared Logic (Protected Core) | Pure helper module, modeled directly on `list_confirm_gate.js`: `shouldGateAction(action)` returns true only for `action.type === 'SET_ACTION_RULE' && action.trigger_type === 'time'`; `buildConfirmationSpeech(action)` builds the "I'll [do X]. Say yes to confirm, no to cancel, or tell me what to change." line from the action's label/config, same shape as the existing tool-generated speech; `failSpeechForAction(action, result)` builds a truthful failure message (e.g., "I couldn't set that up — you may already have an identical alert.") for the 409/duplicate case specifically, since that's the proven failure mode. No I/O, no side effects — same design constraint as `list_confirm_gate.js`. | **Low** — new pure module, no existing code touched by its addition alone |
+| `naavi-voice-server/src/index.js` | Backend (Protected Core — voice orchestration) | Two changes: (1) at the action-classification site (~line 12030), add an `else if (actionRuleGate.shouldGateAction(action) && !skipGateForChain)` branch before the `backgroundActions.push(action)` fallback — sets `pendingActionRuleCreate = action`, sets `finalSpeech = actionRuleGate.buildConfirmationSpeech(action)`, does **not** execute. (2) At the message-loop top (~line 9883, alongside the existing `pendingListAction` block), add a `pendingActionRuleCreate` handler with the same three-way shape already proven for lists: **yes** → `await executeAction(saved, userId)`, speak `"Done."` on `result.success`, speak `actionRuleGate.failSpeechForAction(saved, result)` on failure (truthful, not "Done"); **no** → "Cancelled."; **other** → clear and fall through to normal Claude handling. | **High** — Protected Core, changes when/whether a time-trigger alert actually gets created; a bug here risks either double-gating (asks to confirm twice) or under-gating (regresses to today's silent-fire behavior) |
+
+**Explicitly out of scope for this fix (matches what was proven, not extended beyond it):** `location` triggers (already gated via `pendingLocation`, untouched); `LIST_*` actions (already gated, untouched); other `backgroundActions`-routed trigger types (`email`, `calendar`, `weather`, `contact_silence`) — the same fire-and-discard architecture likely affects them too, but that is **not proven** by this session's evidence (only `time` was reproduced and traced). Extending the gate to those types now would be scope creep beyond what §2g actually demonstrated — flagged as a follow-up investigation, not folded into this fix.
+
+### Acceptance criteria — what Phase 5 must verify
+
+1. "Text me at [phone] in 3 minutes" → Naavi's first response is a confirmation ("I'll send an SMS to [phone] in 3 minutes. Say yes to confirm...") and **no** `[Action] SET_ACTION_RULE` log line appears yet (nothing written to the DB before confirmation).
+2. Saying "yes" once → exactly one `[Action] SET_ACTION_RULE ... status 200` (or equivalent success) log line, and Naavi says "Done." — not a repeat of the confirmation question.
+3. Repeating "yes" a second time after criterion 2 already succeeded → does not re-attempt the write (the pending state was cleared after the first confirmed execution) — falls through to normal Claude handling instead of looping.
+4. If the write fails (e.g., a genuine duplicate-timestamp conflict) → Naavi speaks a truthful failure message, not "Done."
+5. Saying "no" after the confirmation → "Cancelled.", no DB write attempted.
+6. Location-triggered alerts ("alert me when I arrive at Costco") and list actions ("add milk to my list") — regression check, both continue working exactly as before (neither routes through the new gate).
+7. A self-override *location* alert ("email me at X when I arrive at Costco") — regression check, unaffected (trigger_type is `location`, not `time`, so this gate never engages).
+
+### Regression impact
+
+| Area | Impact | Why |
+|---|---|---|
+| Voice commands | **Affected — primary surface**, but narrowly: only `SET_ACTION_RULE` calls with `trigger_type: 'time'`. All other action types (SET_REMINDER, ADD_CONTACT, DRAFT_MESSAGE, etc.) are untouched — they still go through `backgroundActions` exactly as before. | Direct files touched |
+| Geofencing | Not affected. `location` triggers keep using `pendingLocation`, untouched by this change. | No overlap |
+| Gmail integration | Not affected. | No overlap |
+| Calendar integration | Not affected — `trigger_type: 'calendar'` SET_ACTION_RULE stays on the background path, unchanged (not in scope, see above). | No overlap |
+| Reminders | Not affected — `SET_REMINDER` is a different action type entirely, untouched. | No overlap |
+| SMS / call alerts | **Affected — this is the fix's purpose.** Time-triggered self/self-override alerts now execute exactly once, only after confirmation, with a truthful spoken result. | Direct purpose |
+| Onboarding | Not affected. | No overlap |
+| Staging build | N/A for voice — same as every other voice-side Track B change this session (no staging environment for voice; push to `main` is the only deploy). | Confirmed in F17 Phase 2 §0 |
+
+---
+
+## 5b. Follow-ups from Phase 1's fourth revision (`§2h`) — two diagnostic/documentation items, no code
+
+Per Phase 1 §6's fourth-revision addition, approved: two follow-ups, neither an implementation.
+
+**Item 1 — read `action_rules_user_label_unique`'s actual definition.** Phase 1 §2h inferred the constraint is likely unconditional (no `enabled = true` scoping) from a single observed collision against a disabled row — that inference should not be treated as proven, and no fix should be designed on it alone.
+
+| Action | Classification | Change | Risk |
+|---|---|---|---|
+| Read the constraint definition via Supabase SQL editor | Diagnostic, read-only | Run `SELECT indexdef FROM pg_indexes WHERE indexname = 'action_rules_user_label_unique';` (or equivalent `\d action_rules` in a `psql`-compatible view) against production. No table/data modified. | **None** — pure read |
+
+**Procedure:** Wael runs the query above in the Supabase SQL editor (`https://supabase.com/dashboard/project/hhgyppbxgmjrwdpdubcx/sql`), pastes back the `indexdef` (or constraint definition) text. That confirms or corrects §2h's "likely unconditional" inference with the literal `CREATE UNIQUE INDEX` / `ALTER TABLE` statement — direct evidence, not inference.
+
+**Expected outcomes (added per Phase 3 review — defined before the query runs, so the next decision point is predetermined by evidence, not decided after the fact):**
+
+| Outcome | What the `indexdef` shows | Next step |
+|---|---|---|
+| **A — partial, scoped to `enabled = true`** | The index definition includes a `WHERE enabled = true` (or equivalent) clause. | §2h's "likely unconditional" inference was wrong — the July 15 collision against a disabled row needs its own explanation (a separate open question). No behavioral change implied by the constraint itself; **no new Phase 1 required** for the constraint's scope, though the collision itself may still need investigating separately. |
+| **B — unconditional, no scoping** | No `WHERE` clause at all — applies to every row regardless of `enabled`. | Confirms §2h's inference. This is the "real users repeating identical phrasing get permanently blocked" risk described in §2h, now proven rather than inferred. **A new Phase 1 is required** to decide whether/how to fix (e.g., add `enabled = true` scoping, redesign the label as a dedup key, or accept the current behavior as intentional). |
+| **C — something else** (different columns, different WHERE clause, doesn't match either expectation) | The definition doesn't match A or B. | **A new Phase 1 is required** regardless — the actual mechanism needs its own fresh investigation rather than being retrofitted into either predefined outcome. |
+
+**Rule:** any outcome requiring a behavioral change (B, or C if it turns out to need one) becomes its own new Phase 1 — not folded into this Phase 2, and not implemented ad hoc off the query result.
+
+**Outcome, confirmed 2026-07-16:** **B.** `pg_indexes` read shows `WHERE (label IS NOT NULL) AND (label <> ''::text)` — a null/empty guard only, no `enabled` scoping. Per the rule above, a new Phase 1 was opened: **B9z**, `docs/B9Z_PHASE1_PROBLEM_DEFINITION_2026-07-16.md`. Item 1 is closed — the query ran, the outcome was evaluated against the predefined table, and the predetermined consequence (new Phase 1) was executed exactly as planned.
+
+**Item 2 — flag the untracked-migration finding to T1a.** Per `[[project_naavi_architecture_integrity_audit]]` (T1a, spun out of F19 Phase 1, tracked in `docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md`) — T1a's own scope already covers exactly this class of finding (a live production schema object with no git-tracked origin). This is not a Track B fix; it's a pointer into an already-open, separately-scoped audit.
+
+| Action | Classification | Change | Risk |
+|---|---|---|---|
+| Add an entry to `docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md`'s T1a section | Documentation | One new line: `action_rules_user_label_unique` — live in production since ≥2026-06-14, used by `manage-rules`, no corresponding file in `supabase/migrations/`. Cite `docs/F19_TRACKB_PHASE1_PROBLEM_DEFINITION_2026-07-15.md` §2h as the discovery evidence. | **None** — documentation only |
+
+**Explicitly not part of this Phase 2:** designing a fix for the untracked constraint (writing a migration to formally adopt it, adding an `enabled = true` scope if Item 1 shows it's missing, or redesigning the label-based dedup key entirely per §2h's open design question). Any of those would need their own Phase 1 investigation once Item 1's evidence is in — this Phase 2 only plans the two read/document steps needed to close out what's currently open.
+
+### Regression impact (§5b)
+
+Both items are read-only or documentation-only — no code path, no user-facing behavior, no deploy. All eight regression categories (voice, geofencing, Gmail, calendar, reminders, SMS/alerts, onboarding, staging) — **not affected**, by construction.
+
+---
+
+## 6. Risk classification — overall (revised this revision)
+
+**1c: High** — already shipped under this classification (unchanged, historical). **1d: Low** — the live-test procedure in §4 is read-only against production (a real call + a temporary DB row Wael creates and deletes via SQL editor, no code path changed) — not yet executed. **1e's investigation (§5): Low** — diagnostic logging, already shipped (`fb63a29`) and used to produce the trace in Phase 1 §2g. **1e's fix (§5a): High** — Protected Core (`naavi-voice-server/src/index.js` + new gate module), changes actual execution/confirmation behavior for a real action type — already shipped and verified live (`74a05d6`). **§5b's two follow-ups (new this revision): None** — read-only SQL query and a documentation line, no code, no deploy.
 
 ---
 
 ## 7. Next step
 
-Submit this revision to Phase 3 (ChatGPT review) before any logging code is written or any live test is run. Recommend Phase 3 confirm: (a) 1d's live-test procedure (§4) is sufficiently low-risk to run directly on production without its own separate review cycle, (b) the widened 1e logging plan (§5) correctly avoids conflating "STT truncation is the cause of 1e" with "STT truncation is worth testing first" per Phase 1 §2f's own careful wording, and (c) whether the barge-in truncation bug's eventual fix (once the combined trace points to one) should be scoped as its own new Phase 1, given it is foundational and not specific to Track B.
+**1d and original-scope 1e (§4, §5):** unchanged from the prior revision — still pending Phase 3 sign-off before execution, not yet run.
+
+**1e's fix (§5a):** already reviewed (Phase 3 Round 5, Approved), implemented, shipped, and verified live (`74a05d6`) — historical record, not pending anything.
+
+**§5b's two follow-ups (new this revision):** governance's Phase 3 requirement is explicitly scoped to Medium/High Risk changes; §5b is classified None (read-only query, one documentation line, no code, no deploy). On that basis a Phase 3 round isn't strictly required — but flagging that explicitly here rather than silently skipping it, since every other change this session went through review regardless of stated risk. Recommend Wael confirm whether to send §5b for a (likely very short) Phase 3 pass anyway, or proceed straight to running Item 1's query and adding Item 2's holding-list line, given the near-zero risk.
