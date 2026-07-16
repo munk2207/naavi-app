@@ -35,12 +35,16 @@ None of these touch `action_rules`, `naavi-voice-server`'s confirm-gate, or anyt
 
 ## Part 2 — Manual validation (voice)
 
-**Status: Pending.** Per governance, manual validation is mandatory for voice-touching changes regardless of automated test results. Needed: a real phone call reproducing the original B9z scenario end-to-end through the actual `naavi-voice-server` code path (not the SQL-simulated tests, which bypass STT/Claude/voice orchestration entirely) — confirm "text me at X in [time]" can be repeated on a different occasion (after the first alert is disabled) without hitting the label conflict.
+**Status: Complete — PASSED.** Two real calls placed by Wael to production voice (2026-07-16), traced via Railway logs and direct DB reads.
 
-Steps given to Wael, not yet completed.
+**Call 1 (~01:55 EDT):** "text 3433332567 in 3 minutes" → confirm-gate correctly caught the "yes" and executed exactly once — `[Process] Action rule confirm — executing SET_ACTION_RULE` (single occurrence) → `status 201` (success). Row `fdabf556-...` created, later fired and auto-disabled as expected. **Found along the way, not a B9z defect:** the phone number captured was `23433332456` instead of `3433332567` — a digit-capture error matching the separate, already-tracked, still-open [[B9y]] ticket. Logged there, not fixed under B9z.
+
+**Call 2 (~02:19 EDT), same phrasing, repeated deliberately:** confirm-gate again executed exactly once, this time with the **correct** phone number — `[Action] SET_ACTION_RULE "SMS to 343-333-2567 in 3 minutes" — status 201`. Row `594ede24-...` created cleanly. Confirms B9y's digit-capture issue is intermittent (as its own ticket already documents), not something this call introduced, and confirms the confirm-gate is stable across repeated real-world use, not just a single lucky run.
+
+**Also found, not a B9z defect:** immediately after Call 2's SMS fired, Railway logs show a `/speak-alert` voice call also placed to Wael's own phone (`[prepare-alert]` → `[Voice] /speak-alert`). Traced to `evaluate-rules/index.ts`'s documented 5-channel self-alert fan-out (`CLAUDE.md` "Alert Fan-Out" design): `self_override_sms` being set makes the rule `isSelfAlert = true`, which fans out to all 5 channels by default. `self_override_sms` only redirects the *SMS* leg to the override number — the other 4 channels (including voice call) still target Wael's own registered contact info, by design. Not a bug, not in scope for this ticket — surfaced for awareness since it produced a confusing result (asked for SMS-only, also got a call) but not investigated further here.
 
 ---
 
 ## Outcome
 
-*Pending Part 2. Part 1 is complete and green (accounting for pre-existing, unrelated gaps).*
+**Both parts complete.** Part 1 (automated) green, accounting for pre-existing unrelated gaps. Part 2 (manual voice) passed on two independent real calls, confirming the confirm-gate fix is stable through the actual production code path. B9z is closed.
