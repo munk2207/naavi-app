@@ -8,6 +8,17 @@ Per `docs/AI_DEVELOPMENT_GOVERNANCE.md` Phase 5. Covers Phase 4's implementation
 
 `action_rules_user_label_unique` — a UNIQUE constraint on `(user_id, label)` — was live in production with no `enabled = true` scoping and no git-tracked origin, permanently blocking any user from recreating an alert whose generated label matched a prior, already-disabled alert. Fixed by adding `enabled = true` to the constraint's `WHERE` clause and, in the same migration, formally checking the constraint into git for the first time.
 
+### Completion status at a glance
+
+| Check | Result |
+|---|---|
+| Recreate after disable | ✅ PASS |
+| Block duplicate active (regression guard) | ✅ PASS |
+| Different label unaffected | ✅ PASS |
+| UPDATE without label change | ✅ PASS |
+| Staging/production parity | ✅ PASS |
+| Cleanup completed | ✅ PASS |
+
 ---
 
 ## Phase 5A — Implementation evidence
@@ -91,3 +102,27 @@ All four test rows deleted immediately after (`DELETE ... WHERE label LIKE 'B9Z-
 ## Closure
 
 Phase 5A and 5B are both complete. B9z is ready for Phase 6 (Technical Review — After Coding).
+
+---
+
+## Phase 5 review record (2026-07-16)
+
+Reviewer: ChatGPT (External Technical Reviewer), via Wael.
+
+**Governance assessment:**
+
+| Area | Assessment |
+|---|---|
+| Implementation evidence | ✅ Excellent |
+| Behavior verification | ✅ Excellent |
+| Acceptance criteria coverage | ✅ Complete |
+| Test isolation | ✅ Excellent |
+| Auditability | ✅ Excellent |
+| Governance compliance | ✅ Excellent |
+| Hidden assumptions | None identified |
+
+**Recommendation (optional):** add a summary table of acceptance-criteria results, so completion status is visible at a glance for future audits. **Response — adopted directly**, added to the Summary section above.
+
+**Governance observation:** across B9z's full lifecycle — Phase 1 identified the defect, Phase 2 selected the minimal corrective design, Phase 3 strengthened the migration governance (pre-check + rollback + extra criterion), Phase 4 implemented exactly the approved scope, Phase 5 verified both schema correctness and business behavior — "there are no obvious gaps between the phases."
+
+**Verdict:** **Approved.** "This revised Phase 5 evidence package completes the verification work that was still outstanding in the previous revision. The implementation is no longer supported solely by migration evidence; it is now backed by direct behavioral verification demonstrating that disabled alerts can be recreated, active duplicates remain blocked, unrelated labels are unaffected, and UPDATE operations continue to function correctly. With the implementation verified, the environments aligned, and the deferred architectural work explicitly left out of scope, B9z is ready to proceed to Phase 6 (Technical Review – After Coding)."
