@@ -136,6 +136,18 @@ The reviewer evaluates:
 
 The objective is to prevent incorrect solutions before code exists.
 
+**Implementation Boundaries Confirmed**
+
+Every Phase 3 review must close with an explicit statement of what is authorized, so Phase 4 has a boundary to implement against and Phase 6 has a boundary to audit against — not an inference from the surrounding discussion. State plainly:
+
+- Which files are authorized, and what change in each (not "the general area," the specific file and the specific change).
+- That no additional files are approved beyond those listed.
+- That no opportunistic refactoring is approved.
+- That no architectural changes are approved beyond what the plan describes.
+- Which parts of the reviewed plan (if any) are explicitly excluded from this authorization — e.g. a sibling item deferred to a future decision point, or a sub-plan that is investigation-only and not yet cleared for implementation.
+
+Added 2026-07-15, per F19 Track B's Phase 3 review — see `docs/F19_TRACKB_PHASE3_TECHNICAL_REVIEW_2026-07-15.md` for the originating example.
+
 ---
 
 ### Phase 4 — Implementation
