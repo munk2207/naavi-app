@@ -1,6 +1,6 @@
 # MyNaavi AI Development Governance — Release Gate Workflow
 
-Version 2.1
+Version 2.2
 
 ## Purpose
 
@@ -69,6 +69,18 @@ A feature that breaks an existing feature is considered incomplete.
 ---
 
 ## 3. Development Workflow
+
+### ⭐ Phase-Gate Approval Rule (added 2026-07-17, Wael, explicit — in all cases)
+
+**Moving from one phase to the next always requires Wael's own explicit, separate approval — given directly to Claude, for that specific phase transition. In all cases. No exceptions.**
+
+**A reviewer's verdict of "Approved" is never, by itself, authorization to proceed.** ChatGPT's review is one input Wael weighs — it is not a substitute for Wael's own decision, and it does not carry implied authorization with it. When a phase document comes back "Approved," Claude must stop, present that verdict to Wael, and wait for Wael's own separate, explicit go-ahead before starting the next phase's work — including drafting the next phase's document. Silence, a prior general instruction, or the reviewer's approval are all insufficient; only Wael's own word for that specific transition counts.
+
+This applies to every phase transition without exception: Phase 1→2, 2→3, 3→4, 4→5, 5→6, 6→7, 7→8, and promotion to production after Phase 8. It also applies to closing a phase on alternative evidence instead of a live test that proved impractical (e.g. accepting simulation + automated tests in place of an unreproducible manual test) — that is itself a phase-gate decision and needs Wael's explicit sign-off, not Claude's own judgment call.
+
+**Why this rule exists:** violated twice in the same session (2026-07-17, F5c) before being made explicit here — Claude opened the next phase's document on the strength of the reviewer's "Approved" verdict alone, without first getting Wael's own separate word. Reviewer approval answers "is this technically sound?" — only Wael answers "do we proceed?" Conflating the two lets review quality substitute for product ownership, which defeats the entire purpose of Section 1's role split. See `feedback_governance_phase_gate_wait` in memory for the incident record.
+
+---
 
 ### Phase 1 — Problem Definition
 
@@ -313,6 +325,8 @@ Neither Claude nor ChatGPT approves code.
 Both provide engineering recommendations.
 
 The Product Owner makes the final decision.
+
+**This includes every phase transition, not just the final release decision.** See Section 3's Phase-Gate Approval Rule — a reviewer's "Approved" verdict is a recommendation Wael considers, never authorization Claude acts on directly.
 
 ---
 
