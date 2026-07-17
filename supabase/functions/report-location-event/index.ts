@@ -30,6 +30,7 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { buildAlertBody } from '../_shared/alert_body.ts';
+import { executeTaskActions } from '../_shared/task_actions.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -736,8 +737,14 @@ async function fireLocationAction(
   // Build the final body from base + inline tasks + linked list items.
   // Shared merge logic in _shared/alert_body.ts. Pass rule.id so F1a's
   // list_connections path can surface a connected list in the fan-out.
-  const body = await buildAlertBody(config, rule.user_id, supabaseUrl, interFnKey, rule.id)
-    || `You've arrived at ${rule.label ?? 'your destination'}.`;
+  // B10h — rawBody kept separate from the self-alert fallback below: a
+  // self-alert with no content legitimately defaults to "You've arrived at
+  // X." (that IS the intended message for a bare "alert me when I arrive"),
+  // but a THIRD PARTY must never receive that fallback in place of content
+  // the user never actually provided — see the third-party branches below,
+  // which check rawBody directly instead of the post-fallback `body`.
+  const rawBody = await buildAlertBody(config, rule.user_id, supabaseUrl, interFnKey, rule.id);
+  const body = rawBody || `You've arrived at ${rule.label ?? 'your destination'}.`;
 
   // User's own contact info for self-alert detection
   const { data: settings } = await admin
@@ -899,10 +906,20 @@ async function fireLocationAction(
     sends.push(callPush());
     if (selfVoiceTarget && isArrival) sends.push(callVoice(selfVoiceTarget));
   } else if (toPhone) {
-    sends.push(callSMS('sms', toPhone));
-    sends.push(callSMS('whatsapp', toPhone));
+    // B10h — fail-closed: never send a third party the self-alert fallback
+    // text in place of content the user never actually provided.
+    if (rawBody) {
+      sends.push(callSMS('sms', toPhone));
+      sends.push(callSMS('whatsapp', toPhone));
+    } else {
+      console.warn(`[report-location-event] B10h: SKIPPED third-party SMS/WhatsApp (no_content) rule=${rule.id} to=${toName || toPhone}`);
+    }
   } else if (toEmail) {
-    sends.push(callEmail(toEmail));
+    if (rawBody) {
+      sends.push(callEmail(toEmail));
+    } else {
+      console.warn(`[report-location-event] B10h: SKIPPED third-party email (no_content) rule=${rule.id} to=${toName || toEmail}`);
+    }
   } else {
     console.error(`[report-location-event] Rule ${rule.id}: no destination`);
     return false;
@@ -921,6 +938,11 @@ async function fireLocationAction(
   }
   const mode = isSelfAlert ? 'self' : (toPhone ? 'third-party-phone' : 'third-party-email');
   console.log(`[report-location-event] Rule ${rule.id} fan-out (${mode}): ${parts.join(' ')} — ${successCount}/${sends.length} ok`);
+
+  // B10g — task_actions previously had zero execution path for location-
+  // triggered alerts. Runs after the main notification so the primary
+  // alert always fires first, even if task execution fails.
+  await executeTaskActions({ config, rule, userName, supabaseUrl, interFnKey });
 
   return successCount > 0;
 }

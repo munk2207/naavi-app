@@ -22,6 +22,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { buildAlertBody } from '../_shared/alert_body.ts';
+import { executeTaskActions } from '../_shared/task_actions.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -748,6 +749,12 @@ async function fireAction(
   }
 
   if (!body) {
+    // B10h (2026-07-17) — confirmed during implementation that this existing
+    // guard already fails closed for third-party sends when content is
+    // missing, unconditionally, before the self/third-party branch below
+    // even runs. No change needed here; Phase 3 assumed a symmetric fix
+    // would be required, this file already had it. See
+    // docs/B10H_PHASE5_EVIDENCE_2026-07-17.md.
     console.error(`[evaluate-rules] Rule ${rule.id}: empty body after buildAlertBody`);
     return false;
   }
@@ -1061,102 +1068,11 @@ async function fireAction(
     `[evaluate-rules] Rule ${rule.id} fan-out (${mode}): ${parts.join(' ')} — ${successCount}/${sends.length} ok`,
   );
 
-  // F5c — execute structured task_actions stored at alert-set time.
-  // These are auto-send tasks (text/email a contact) that the user attached
-  // when creating the location alert. Runs after the main notification so
-  // the primary alert always fires first, even if task execution fails.
-  // Accept both task_actions (canonical) and tasks (Claude sometimes uses this key).
-  const taskActions = Array.isArray(config.task_actions)
-    ? (config.task_actions as Array<Record<string, string>>)
-    : Array.isArray((config as Record<string, unknown>).tasks)
-      ? ((config as Record<string, unknown>).tasks as Array<Record<string, string>>)
-      : [];
-  if (taskActions.length > 0) {
-    // Resolve missing to_phone/to_email via lookup-contact for any task_action
-    // that has only to_name. Uses the user's Google OAuth stored in user_tokens.
-    const resolvedActions = await Promise.all(taskActions.map(async ta => {
-      if ((ta.type === 'send_sms' && !ta.to_phone && ta.to_name) ||
-          (ta.type === 'send_email' && !ta.to_email && ta.to_name)) {
-        // F5c fix (2026-07-17) — defense-in-depth: a to_name this short can
-        // never safely identify one contact. docs/F5C_PHASE1_PROBLEM_DEFINITION_2026-07-17.md
-        if (ta.to_name.trim().length < 2) {
-          console.warn(`[evaluate-rules] F5c: SKIPPED (name_too_short) to_name="${ta.to_name}"`);
-          return ta;
-        }
-        try {
-          const res = await fetch(`${supabaseUrl}/functions/v1/lookup-contact`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${interFnKey}` },
-            body: JSON.stringify({ name: ta.to_name, user_id: rule.user_id }),
-          });
-          if (res.ok) {
-            const data = await res.json() as { contacts?: Array<{ name?: string; phone?: string; email?: string }> };
-            const matches = data.contacts ?? [];
-            // F5c fix — the correctness guarantee: resolve only on exactly one
-            // match. Zero or multiple matches must fail closed, never guess.
-            if (matches.length === 1) {
-              const best = matches[0];
-              return {
-                ...ta,
-                to_phone: ta.to_phone || best.phone || '',
-                to_email: ta.to_email || best.email || '',
-                to_name:  ta.to_name  || best.name  || ta.to_name,
-              };
-            }
-            if (matches.length === 0) {
-              console.warn(`[evaluate-rules] F5c: SKIPPED (zero_matches) to_name="${ta.to_name}"`);
-            } else {
-              console.warn(`[evaluate-rules] F5c: SKIPPED (ambiguous_multiple_matches) to_name="${ta.to_name}" match_count=${matches.length}`);
-            }
-          }
-        } catch (e) {
-          console.warn(`[evaluate-rules] F5c contact lookup failed for "${ta.to_name}":`, e);
-        }
-      }
-      return ta;
-    }));
-
-    const taskSends = resolvedActions.map(ta => {
-      if (ta.type === 'send_sms' && ta.to_phone) {
-        return fetch(`${supabaseUrl}/functions/v1/send-sms`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${interFnKey}` },
-          body: JSON.stringify({
-            to: ta.to_phone, body: ta.body, channel: 'sms',
-            user_id: rule.user_id, recipient_name: ta.to_name,
-            sender_name: userName || 'Naavi', source: 'alert_task',
-          }),
-        }).then(r => ({ ok: r.ok, label: `sms→${ta.to_name}` }))
-          .catch(() => ({ ok: false, label: `sms→${ta.to_name}` }));
-      }
-      if (ta.type === 'send_email' && ta.to_email) {
-        return fetch(`${supabaseUrl}/functions/v1/send-user-email`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${interFnKey}` },
-          body: JSON.stringify({
-            user_id: rule.user_id,
-            subject: `Message from ${userName || 'Naavi'}`,
-            body: ta.body,
-            to: ta.to_email,
-          }),
-        }).then(r => ({ ok: r.ok, label: `email→${ta.to_name}` }))
-          .catch(() => ({ ok: false, label: `email→${ta.to_name}` }));
-      }
-      // F5c fix — closes a prior silent-drop gap (Rule 21): any task_action
-      // reaching here has no resolved destination and will never send.
-      console.warn(`[evaluate-rules] F5c: SKIPPED (no_resolved_destination) to_name="${ta.to_name}" type="${ta.type}"`);
-      return null;
-    }).filter((p): p is Promise<{ ok: boolean; label: string }> => p !== null);
-
-    if (taskSends.length > 0) {
-      const taskResults = await Promise.allSettled(taskSends);
-      for (const r of taskResults) {
-        if (r.status === 'fulfilled') {
-          console.log(`[evaluate-rules] F5c task_action ${r.value.label}: ${r.value.ok ? 'ok' : 'fail'}`);
-        }
-      }
-    }
-  }
+  // B10g — extracted to _shared/task_actions.ts so report-location-event can
+  // execute task_actions too (previously had zero execution path for them).
+  // Runs after the main notification so the primary alert always fires
+  // first, even if task execution fails. Logic unchanged from F5c.
+  await executeTaskActions({ config, rule, userName, supabaseUrl, interFnKey });
 
   return successCount > 0;
 }

@@ -311,17 +311,29 @@ export const session2026_06_13Tests: TestCase[] = [
   },
   {
     id: 'f5c.evaluate-rules-executes-task-actions',
-    description: 'F5c: evaluate-rules fireAction executes task_actions after main fan-out',
+    description: 'F5c: evaluate-rules fireAction executes task_actions after main fan-out (B10g, 2026-07-17: extracted to _shared/task_actions.ts so report-location-event can share it; evaluate-rules now calls the shared function)',
     tags: ['f5c', 'evaluate-rules'],
     run: async () => {
-      const src = readFileSync(
+      const evaluateRulesSrc = readFileSync(
         join(process.cwd(), 'supabase', 'functions', 'evaluate-rules', 'index.ts'),
         'utf8',
       );
-      expectTruthy(src.includes('task_actions'), 'evaluate-rules missing task_actions execution');
-      expectTruthy(src.includes("ta.type === 'send_sms'"), 'evaluate-rules missing send_sms task execution');
-      expectTruthy(src.includes("ta.type === 'send_email'"), 'evaluate-rules missing send_email task execution');
-      expectTruthy(src.includes('alert_task'), 'task executions should use source: alert_task');
+      expectTruthy(
+        evaluateRulesSrc.includes("import { executeTaskActions } from '../_shared/task_actions.ts';"),
+        'evaluate-rules must import executeTaskActions from the shared module',
+      );
+      expectTruthy(
+        evaluateRulesSrc.includes('await executeTaskActions('),
+        'evaluate-rules must call executeTaskActions after the main fan-out',
+      );
+      const taskActionsSrc = readFileSync(
+        join(process.cwd(), 'supabase', 'functions', '_shared', 'task_actions.ts'),
+        'utf8',
+      );
+      expectTruthy(taskActionsSrc.includes('task_actions'), 'shared module missing task_actions execution');
+      expectTruthy(taskActionsSrc.includes("ta.type === 'send_sms'"), 'shared module missing send_sms task execution');
+      expectTruthy(taskActionsSrc.includes("ta.type === 'send_email'"), 'shared module missing send_email task execution');
+      expectTruthy(taskActionsSrc.includes('alert_task'), 'task executions should use source: alert_task');
     },
   },
   // RULE 26 — Time-anchor split

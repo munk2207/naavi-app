@@ -94,6 +94,8 @@ import { session2026_07_14_b9vNotificationFixDiagnosticsTests } from './catalogu
 import { session2026_07_16_b10aRecipientOrderTests } from './catalogue/session-2026-07-16-b10a-recipient-order';
 import { session2026_07_16_b10bFailSpeechTests } from './catalogue/session-2026-07-16-b10b-fail-speech';
 import { session2026_07_17_f5cTaskActionsResolutionTests } from './catalogue/session-2026-07-17-f5c-taskactions-resolution';
+import { session2026_07_17_b10gLocationTaskActionsFixTests } from './catalogue/session-2026-07-17-b10g-location-taskactions-fix';
+import { session2026_07_17_b10hLocationContentGuardTests } from './catalogue/session-2026-07-17-b10h-location-content-guard';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -223,6 +225,8 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_07_16_b10aRecipientOrderTests,
   ...session2026_07_16_b10bFailSpeechTests,
   ...session2026_07_17_f5cTaskActionsResolutionTests,
+  ...session2026_07_17_b10gLocationTaskActionsFixTests,
+  ...session2026_07_17_b10hLocationContentGuardTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────

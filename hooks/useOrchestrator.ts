@@ -644,6 +644,25 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
     createdAt: number;
   } | null>(null);
 
+  // B10h — content-clarification pending state (docs/B10H_PHASE1-3_2026-07-17.md).
+  // When a location alert's third-party recipient is resolved but there's no
+  // message content (body/tasks/list_name all empty), we ask what to tell
+  // them instead of saving an alert that will later synthesize fallback text
+  // ("You've arrived at X.") for a real person. Unlike pendingLocationRef,
+  // this does NOT skip the Claude round-trip — Phase 3's original "resume
+  // mid-flow" design would have required duplicating ~400 lines of address-
+  // resolution logic (possessive lookup, resolve-place, memory-hit vs.
+  // confirm-flow branching), the exact "two independently drifting copies"
+  // failure mode this project has already paid for three times (F5c, B10d,
+  // B10g). Instead: store just enough to rebuild a complete sentence, then
+  // retry through the normal Claude pipeline on the next turn.
+  const pendingContentClarificationRef = useRef<{
+    toName: string;
+    placeName: string;
+    direction: string;
+    createdAt: number;
+  } | null>(null);
+
   // Cross-turn state for DELETE_RULE disambiguation. When a delete matched
   // multiple rules and all=false, Naavi asks "which one?" Next turn the user
   // may reply "all" / "all of them" / a specific hint — without this state
@@ -1261,6 +1280,34 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
         // moved on. Clear the pending state and fall through to Claude so
         // the new turn is interpreted fresh.
         pendingDeleteRef.current = null;
+      }
+    }
+
+    // ── PENDING CONTENT CLARIFICATION (B10h) ────────────────────────────────
+    // If the previous turn asked "What should I tell X?" (a location alert's
+    // third-party recipient had no message content), treat this reply as the
+    // answer — rebuild a complete sentence and retry through the NORMAL
+    // Claude round-trip (does not skip Claude, unlike pendingLocationRef
+    // below — see the ref's own comment for why). Same staleness/escape
+    // handling as pendingLocationRef.
+    if (pendingContentClarificationRef.current) {
+      const pendingContent = pendingContentClarificationRef.current;
+      const contentMsg = userMessage.trim();
+      const contentAgeMs = Date.now() - pendingContent.createdAt;
+      const contentIsStale  = contentAgeMs > 5 * 60 * 1000;
+      const contentIsEscape = QUESTION_ESCAPE_RE.test(contentMsg) || FRESH_COMMAND_RE.test(contentMsg);
+      if (contentIsStale || contentIsEscape) {
+        if (contentIsStale)  console.log(`[Orchestrator] pending content clarification expired (${Math.round(contentAgeMs/1000)}s old) — dropping`);
+        if (contentIsEscape) console.log('[Orchestrator] pending content clarification dropped — escape pattern');
+        pendingContentClarificationRef.current = null;
+        // fall through to normal flow below
+      } else if (contentMsg) {
+        pendingContentClarificationRef.current = null;
+        const directionWord = pendingContent.direction === 'leave' ? 'leave' : 'arrive at';
+        const correctedMessage = `Text ${pendingContent.toName} saying ${contentMsg} when I ${directionWord} ${pendingContent.placeName}`;
+        console.log(`[Orchestrator] content clarification answered — retrying via Claude: "${correctedMessage}"`);
+        if (sendRef.current) sendRef.current(correctedMessage);
+        return;
       }
     }
 
@@ -3422,6 +3469,35 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                   turnSpeechOverride = "I didn't catch the place for that alert. Can you say it again?";
                   console.log('[orch:loc] empty placeName — skipping');
                   continue;
+                }
+
+                // B10h — fail-closed content guard (docs/B10H_PHASE1-3_2026-07-17.md).
+                // A resolved third-party recipient with no body/tasks/list_name means
+                // Naavi has nothing real to tell them — block and ask before any
+                // address-resolution work starts, rather than saving an alert that
+                // will later synthesize fallback content ("You've arrived at X.") for
+                // a real person. Layer 2/3 of the defense-in-depth model; Layer 4 is
+                // the fire-time backstop in report-location-event/evaluate-rules.
+                {
+                  const hasThirdPartyRecipient = Boolean(actionConfig.to_phone || actionConfig.to_email);
+                  const hasContent = Boolean(
+                    String(actionConfig.body ?? '').trim() ||
+                    (Array.isArray(actionConfig.tasks) && actionConfig.tasks.length > 0) ||
+                    String(actionConfig.list_name ?? '').trim()
+                  );
+                  if (hasThirdPartyRecipient && !hasContent) {
+                    const clarifyToName = String(actionConfig.to_name || actionConfig.to || 'them');
+                    pendingContentClarificationRef.current = {
+                      toName: clarifyToName,
+                      placeName: spokenLabel,
+                      direction: String((action.trigger_config as any)?.direction ?? 'arrive'),
+                      createdAt: Date.now(),
+                    };
+                    locationIntercepted = true;
+                    turnSpeechOverride = `What should I tell ${clarifyToName}?`;
+                    console.log(`[orch:loc] B10h content guard blocked — to="${clarifyToName}" place="${spokenLabel}" (no body/tasks/list_name)`);
+                    continue;
+                  }
                 }
 
                 // 2026-05-22 (Wael) — POSSESSIVE CONTACT RESOLUTION. Voice
