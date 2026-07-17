@@ -148,6 +148,18 @@ Every Phase 3 review must close with an explicit statement of what is authorized
 
 Added 2026-07-15, per F19 Track B's Phase 3 review — see `docs/F19_TRACKB_PHASE3_TECHNICAL_REVIEW_2026-07-15.md` for the originating example.
 
+**Deferred Architectural Decisions**
+
+Any architectural idea a reviewer or Claude raises during Phase 3 but explicitly does not approve for the current implementation must be recorded in its own short subsection, separate from the Implementation Boundaries list above — not left implied in the surrounding review prose. State plainly, for each deferred idea:
+
+- What the idea is (one line).
+- That it is not approved for this implementation, and why (usually: broader blast radius, premature given current scope, or a generalization not yet justified by enough concrete cases).
+- What condition, if any, would make it worth reconsidering later (e.g., "if a third confirmation-gated action type appears").
+
+The purpose is to keep deferred ideas visible without letting them expand the current implementation's scope: a future reviewer or session should immediately recognize a deferred idea as *already considered and intentionally set aside*, not rediscover it as a fresh suggestion and re-litigate it from scratch.
+
+Added 2026-07-15, per F19 Track B's Round 5→6 Phase 3 review — see `docs/F19_TRACKB_PHASE3_TECHNICAL_REVIEW_2026-07-15.md` Round 5/6 for the originating example (the deferred generic `pendingConfirmation` framework).
+
 ---
 
 ### Phase 4 — Implementation
