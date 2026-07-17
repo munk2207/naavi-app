@@ -24,6 +24,7 @@ import type { TestCase } from '../lib/types';
 const ORCHESTRATOR_PATH = join(process.cwd(), 'hooks', 'useOrchestrator.ts');
 const REPORT_LOCATION_EVENT_PATH = join(process.cwd(), 'supabase', 'functions', 'report-location-event', 'index.ts');
 const EVALUATE_RULES_PATH = join(process.cwd(), 'supabase', 'functions', 'evaluate-rules', 'index.ts');
+const NAAVI_CHAT_PATH = join(process.cwd(), 'supabase', 'functions', 'naavi-chat', 'index.ts');
 
 export const session2026_07_17_b10hLocationContentGuardTests: TestCase[] = [
   {
@@ -137,6 +138,60 @@ export const session2026_07_17_b10hLocationContentGuardTests: TestCase[] = [
       expectTruthy(
         src.includes('B10h (2026-07-17) — confirmed during implementation that this existing'),
         'the finding (no change needed, already fail-closed) must be documented in the source, not silently absent',
+      );
+    },
+  },
+  {
+    id: 'b10h.readback-names-recipient-and-message-pending-commit-path',
+    category: 'rules',
+    description:
+      'Rule 12 readback fix, found live the moment the naavi-chat body-forwarding fix started working: the pendingLocationRef "yes" commit path\'s speech was a generic "Alert set — one time you arrive at X." that never named a third-party recipient or message, which is exactly why the earlier body-drop bug went unnoticed at creation time. Asserts the speech now appends a recipient/body suffix when present.',
+    async run() {
+      const src = readFileSync(ORCHESTRATOR_PATH, 'utf8');
+      const commitBlockIdx = src.indexOf("if (isYes && pending.resolved) {");
+      const speechRecipientIdx = src.indexOf('const speechRecipient = String(speechActionConfig.to_name || speechActionConfig.to || \'\').trim();', commitBlockIdx);
+      const recipientSuffixUsageIdx = src.indexOf('`Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.${recipientSuffix}`', commitBlockIdx);
+      expectTruthy(commitBlockIdx > -1, 'the pendingLocationRef "yes" commit block must exist');
+      expectTruthy(speechRecipientIdx > commitBlockIdx, 'the commit path must read a recipient name from action_config for the readback');
+      expectTruthy(recipientSuffixUsageIdx > speechRecipientIdx, 'the "Alert set" speech must include the recipient suffix, not a bare generic line');
+    },
+  },
+  {
+    id: 'b10h.readback-names-recipient-and-message-memory-hit-path',
+    category: 'rules',
+    description: 'same Rule 12 readback fix applied to the second, independent memory-hit insert path (settings_home/settings_work/contact fast path), which has its own separate speech template.',
+    async run() {
+      const src = readFileSync(ORCHESTRATOR_PATH, 'utf8');
+      const memoryHitRecipientIdx = src.indexOf('const memoryHitRecipient = String((actionConfig as any).to_name || (actionConfig as any).to || \'\').trim();');
+      const memoryHitSuffixUsageIdx = src.indexOf('`Alert set — ${modeText} you arrive at ${displayName}.${memoryHitRecipientSuffix}`');
+      expectTruthy(memoryHitRecipientIdx > -1, 'the memory-hit path must read a recipient name from action_config for the readback');
+      expectTruthy(memoryHitSuffixUsageIdx > memoryHitRecipientIdx, 'the memory-hit "Alert set" speech must include the recipient suffix, not a bare generic line');
+    },
+  },
+  {
+    id: 'b10h.naavi-chat-forwards-classifier-body-into-action-config',
+    category: 'rules',
+    description:
+      'Root-cause fix, found live during Phase 7 manual testing: buildActionConfirm\'s location branch forwarded to_name/tasks/self_override_* into action_config but never params.body, so Layer 2 always dropped the message content — even on the retry-through-Claude resume — causing an infinite "what should I tell X?" loop. This asserts the forwarding line exists in the same style as the neighboring to_name/self_override_* forwarding.',
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      const locationBranchIdx = src.indexOf("if (tt === 'location') {");
+      const selfOverrideLoopIdx = src.indexOf("for (const _selfField of ['self_override_email'", locationBranchIdx);
+      const haikuBodyIdx = src.indexOf('const haikuBody = String((params as any).body ?? (params as any).message ?? \'\').trim();', locationBranchIdx);
+      const returnIdx = src.indexOf('return { speech: s, display: s, actions: [{ type: \'SET_ACTION_RULE\', trigger_type: \'location\'', locationBranchIdx);
+      expectTruthy(locationBranchIdx > -1, 'the location branch of buildActionConfirm must exist');
+      expectTruthy(selfOverrideLoopIdx > locationBranchIdx, 'the self_override forwarding loop must exist inside the location branch');
+      expectTruthy(
+        haikuBodyIdx > selfOverrideLoopIdx,
+        'the body-forwarding line must exist, positioned after the self_override forwarding loop',
+      );
+      expectTruthy(
+        haikuBodyIdx > -1 && returnIdx > haikuBodyIdx,
+        'the body-forwarding line must run before the action is constructed and returned',
+      );
+      expectTruthy(
+        src.includes('if (haikuBody && !baseActionConfig.body) {\n          baseActionConfig.body = haikuBody;\n        }'),
+        'a non-empty classifier body must be written into baseActionConfig.body only when not already present, matching the to_name/self_override_* forwarding pattern',
       );
     },
   },

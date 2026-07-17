@@ -1651,12 +1651,22 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         const modeText = oneShot ? 'one time' : 'every time';
         const newTasks = Array.isArray((pending.originalAction?.action_config as any)?.tasks) ? (pending.originalAction!.action_config as any).tasks as string[] : [];
         const newListName = String((pending.originalAction?.action_config as any)?.list_name ?? '').trim();
+        // B10h readback fix (2026-07-17) — Rule 12 requires the post-action
+        // readback to name every resolved input. The generic "Alert set" line
+        // never mentioned a third-party recipient or message, which is how
+        // the body-forwarding bug went unnoticed until fire time.
+        const speechActionConfig = (pending.originalAction?.action_config ?? {}) as any;
+        const speechRecipient = String(speechActionConfig.to_name || speechActionConfig.to || '').trim();
+        const speechBody = String(speechActionConfig.body ?? '').trim();
+        const recipientSuffix = speechRecipient
+          ? (speechBody ? ` ${speechRecipient} will get "${speechBody}".` : ` ${speechRecipient} will be notified.`)
+          : '';
         const speech = ok
           ? merged
-            ? `Got it — I've added ${newListName ? `your ${newListName} list` : newTasks.join(', ') || 'the reminder'} to your existing alert for ${pending.resolved.place_name}.`
+            ? `Got it — I've added ${newListName ? `your ${newListName} list` : newTasks.join(', ') || 'the reminder'} to your existing alert for ${pending.resolved.place_name}.${recipientSuffix}`
             : reactivated
-              ? `Your previous alert for ${pending.resolved.place_name} was re-enabled — ${modeText} you arrive.`
-              : `Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.`
+              ? `Your previous alert for ${pending.resolved.place_name} was re-enabled — ${modeText} you arrive.${recipientSuffix}`
+              : `Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.${recipientSuffix}`
           : `Couldn't save the rule — something went wrong. Try again?`;
         // V57.4 Part B — attach the toggle card when the rule was saved.
         // V57.13.4 — also pass address so the card shows the street segment.
@@ -3945,8 +3955,16 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       (insertErr as any)?.code === '23505' ||
                       /duplicate|already exists|conflict/i.test(insertErr?.message ?? '');
                     const displayName = formatLocationLabel(spokenLabel) || data.place_name;
+                    // B10h readback fix (2026-07-17) — same fix as the pendingLocationRef
+                    // commit path above: name the recipient + message when this alert
+                    // targets a third party, instead of a generic "Alert set" line.
+                    const memoryHitRecipient = String((actionConfig as any).to_name || (actionConfig as any).to || '').trim();
+                    const memoryHitBody = String((actionConfig as any).body ?? '').trim();
+                    const memoryHitRecipientSuffix = memoryHitRecipient
+                      ? (memoryHitBody ? ` ${memoryHitRecipient} will get "${memoryHitBody}".` : ` ${memoryHitRecipient} will be notified.`)
+                      : '';
                     turnSpeechOverride = insertSucceeded
-                      ? `Alert set — ${modeText} you arrive at ${displayName}.`
+                      ? `Alert set — ${modeText} you arrive at ${displayName}.${memoryHitRecipientSuffix}`
                       : isDuplicate
                         ? `You already have an alert set for ${displayName}.`
                         : `I couldn't save the alert — please try again in a moment.`;

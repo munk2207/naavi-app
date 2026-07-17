@@ -1902,6 +1902,15 @@ function buildActionConfirm(
             baseActionConfig[_selfField] = _val;
           }
         }
+        // B10h root-cause fix (2026-07-17) — Layer 2 extracts message content
+        // ("text Bob saying X when I arrive home") into params.body, but this
+        // branch never forwarded it into action_config, silently dropping the
+        // message on every location-alert call (not just the bare phrasing).
+        // Same forwarding pattern as to_name/self_override_* above.
+        const haikuBody = String((params as any).body ?? (params as any).message ?? '').trim();
+        if (haikuBody && !baseActionConfig.body) {
+          baseActionConfig.body = haikuBody;
+        }
         return { speech: s, display: s, actions: [{ type: 'SET_ACTION_RULE', trigger_type: 'location', trigger_config: { place_name: place, direction: String((params as any).direction ?? 'arrive') }, action_type: String((params as any).action_type ?? 'sms'), action_config: baseActionConfig, label: String((params as any).label ?? '').trim() || null, one_shot }] };
       }
       // Other trigger types (time, contact_silence, weather) — fall through to Claude
