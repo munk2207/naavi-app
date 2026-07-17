@@ -15,39 +15,41 @@ Every session that touches this document MUST follow the classification scheme b
 
 Research-and-planning session output. Walks the 26-item holding list from `docs/SESSION_HANDOFF_2026-05-07_V57.13.7_BUILD_165.md` and classifies each item.
 
-## ⭐⭐⭐ PRIORITY QUEUE (as of 2026-07-17) — work top to bottom, one item per session
+## ⭐⭐⭐ PRIORITY QUEUE (as of 2026-07-17) — work top to bottom, one governed item per session
 
 This is the definitive work order across all open items in this document. Don't re-derive priority from scratch each session — start here, take the top open item, close it (updating this doc per the governance rules above), then move to the next. Re-generate this queue whenever a tier's contents materially change (an item closes, a new one is found) — don't let it go stale the way the rest of this doc did before 2026-07-17.
 
+**Governance level, per `docs/AI_DEVELOPMENT_GOVERNANCE.md` §4:** anything touching **Protected Core** (Voice orchestration, Action Rules, Reminder Engine, Geofencing, Calendar, Gmail, Auth, Permissions, Background scheduling, Notification routing, DB schema, API contracts) automatically requires full Phase 1-8 with mandatory Phase 3 + Phase 6 external review — regardless of how small the fix looks. Non-Protected-Core, UI-only changes with zero shared-logic/backend/config touch can be waived by Wael's direct request (the F10a precedent). **One governed item per session, not paced by time** — a full Phase 1-8 cycle for a Protected-Core bug is enough for one sitting; cramming two risks the same under-verification failures this project has already hit twice.
+
 **Tier 1 — Active risk, real harm already occurred**
-1. **[[F5c]] — `task_actions` recipient resolution.** Real unconfirmed SMS already sent to real people. No Phase 1 written.
-2. **[[B4b]] — Deepgram drops leading words on barge-in.** Directly feeds into #1's failure mode (a dropped recipient name silently becomes a self-alert). 4 fresh reproductions in one session.
+1. **[[F5c]] — `task_actions` recipient resolution.** Real unconfirmed SMS already sent to real people. No Phase 1 written. **Governance: Full Phase 1-8** (Action Rules + Notification routing).
+2. **[[B4b]] — Deepgram drops leading words on barge-in.** Directly feeds into #1's failure mode (a dropped recipient name silently becomes a self-alert). 4 fresh reproductions in one session. **Governance: Full Phase 1-8** (Voice orchestration). Causally linked to #1 but a separate root cause — investigate/fix in its own session, not combined.
 
 **Tier 2 — Blocks F19's close-out**
-3. Audit `hooks/useOrchestrator.ts` against [[B9z]]'s, [[B10a]]'s, and [[F5c]]'s defect classes — unanswered, must happen before mobile can safely ship.
-4. **[[F19]] Track C** — mobile production promotion (only after #3, ideally after #1 too).
+3. Audit `hooks/useOrchestrator.ts` against [[B9z]]'s, [[B10a]]'s, and [[F5c]]'s defect classes — unanswered, must happen before mobile can safely ship. **Governance: investigation only, no code yet** — governance applies only if it produces a fix.
+4. **[[F19]] Track C** — mobile production promotion (only after #3, ideally after #1 too). **Governance: existing Two-Phase Build + Three Test Gates release process (CLAUDE.md)**, not a fresh Phase 1-8, unless #3's audit finds something new to fix first.
 
 **Tier 3 — Known, real, medium-priority bugs**
-5. [[B10c]] — voice confirm-turn datetime recompute, wrong by ~10 min.
-6. [[B9a]] — ambiguous verbs silently default instead of asking (violates deterministic-design principle).
-7. [[B9m]] — contact search collision (Google-side cache issue, one call site partially mitigated).
-8. [[B9y]] — digit-capture inconsistency, intermittent.
-9. [[B9x]] — unresolved location recipient silently misfires to self.
+5. [[B10c]] — voice confirm-turn datetime recompute, wrong by ~10 min. **Governance: Full Phase 1-8** (Voice orchestration + Action Rules).
+6. [[B9a]] — ambiguous verbs silently default instead of asking (violates deterministic-design principle). **Governance: Full Phase 1-8** (prompt drives Action Rules creation).
+7. [[B9m]] — contact search collision (Google-side cache issue, one call site partially mitigated). **Governance: Full Phase 1-8** (Action Rules recipient resolution).
+8. [[B9y]] — digit-capture inconsistency, intermittent. **Governance: Full Phase 1-8** (Voice orchestration + Action Rules).
+9. [[B9x]] — unresolved location recipient silently misfires to self. **Governance: Full Phase 1-8** (Action Rules + Notification routing).
 
 **Tier 4 — Lower priority, cosmetic, or not yet ticketed**
-10. [[B10d]] — WhatsApp fan-out ignoring channel preference (Wael's call: not critical).
-11. [[B9b]] — contact query returns wrong field.
-12. [[B9d]] — safe-area insets / force-stop.
-13. [[B9s]] — stray field cleanup.
-14. DRAFT_MESSAGE misroute (name-at-end-of-sentence gets treated as an immediate send, not a location-alert recipient) — found 2026-07-16, needs its own ID and Phase 1 before it can move up this list.
-15. Confirmation-speech gaps (recipient not named in readback; silent alert replacement not disclosed) — found 2026-07-16, needs its own ID and Phase 1.
-16. [[F18]] — international phone support audit.
+10. [[B10d]] — WhatsApp fan-out ignoring channel preference (Wael's call: not critical). **Governance: Full Phase 1-8** — the severity is low, but the rule applies regardless since it's Notification routing.
+11. [[B9b]] — contact query returns wrong field. **Governance: candidate for waiver** — read-only Q&A formatting, no Protected Core; ask Wael before assuming full ceremony, same as F10a.
+12. [[B9d]] — safe-area insets / force-stop. **Governance: recommend Phase 3 review** despite being a UI bug — suspected link to geofencing reliability elevates it past pure cosmetic.
+13. [[B9s]] — stray field cleanup. **Governance: candidate for waiver** — touches Action Rules files but confirmed inert; flag and ask, don't assume.
+14. DRAFT_MESSAGE misroute (name-at-end-of-sentence gets treated as an immediate send, not a location-alert recipient) — found 2026-07-16, needs its own ID and Phase 1 before it can move up this list. **Governance: TBD until scoped.**
+15. Confirmation-speech gaps (recipient not named in readback; silent alert replacement not disclosed) — found 2026-07-16, needs its own ID and Phase 1. **Governance: likely Full Phase 1-8** (Action Rules readback).
+16. [[F18]] — international phone support audit. **Governance: audit itself is lightweight; any resulting fix likely Full Phase 1-8** (touches Action Rules files).
 
 **Tier 5 — Larger initiatives, not bugs**
-17. Voice Staging platform for `naavi-voice-server` — own Railway service, staging number, staging config, staging Supabase connection, controlled promotion path. Placeholder'd 2026-07-17, not started.
-18. [[T1a]] — architecture integrity audit.
-19. [[F9a]] — Google App Actions spike (approved, waiting on v300 close).
-20. [[F11a]] — demo scenario rebuild (approved; flagged "next session's priority" in an older session — verify still current before starting).
+17. Voice Staging platform for `naavi-voice-server` — own Railway service, staging number, staging config, staging Supabase connection, controlled promotion path. Placeholder'd 2026-07-17, not started. **Governance: scoped project with its own checkpoints, not the standard ceremony** — infra, not Protected Core code.
+18. [[T1a]] — architecture integrity audit. **Governance: Phase 1 (the audit) first, decide depth once scoped.**
+19. [[F9a]] — Google App Actions spike (approved, waiting on v300 close). **Governance: recommend Phase 3 review** — new mobile native-module integration surface.
+20. [[F11a]] — demo scenario rebuild (approved; flagged "next session's priority" in an older session — verify still current before starting). **Governance: Full Phase 1-8, already decided in its own entry** — public phone line content, not a low-risk isolated change.
 
 ---
 
