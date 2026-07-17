@@ -1077,6 +1077,12 @@ async function fireAction(
     const resolvedActions = await Promise.all(taskActions.map(async ta => {
       if ((ta.type === 'send_sms' && !ta.to_phone && ta.to_name) ||
           (ta.type === 'send_email' && !ta.to_email && ta.to_name)) {
+        // F5c fix (2026-07-17) — defense-in-depth: a to_name this short can
+        // never safely identify one contact. docs/F5C_PHASE1_PROBLEM_DEFINITION_2026-07-17.md
+        if (ta.to_name.trim().length < 2) {
+          console.warn(`[evaluate-rules] F5c: SKIPPED (name_too_short) to_name="${ta.to_name}"`);
+          return ta;
+        }
         try {
           const res = await fetch(`${supabaseUrl}/functions/v1/lookup-contact`, {
             method: 'POST',
@@ -1085,14 +1091,22 @@ async function fireAction(
           });
           if (res.ok) {
             const data = await res.json() as { contacts?: Array<{ name?: string; phone?: string; email?: string }> };
-            const best = data.contacts?.[0];
-            if (best) {
+            const matches = data.contacts ?? [];
+            // F5c fix — the correctness guarantee: resolve only on exactly one
+            // match. Zero or multiple matches must fail closed, never guess.
+            if (matches.length === 1) {
+              const best = matches[0];
               return {
                 ...ta,
                 to_phone: ta.to_phone || best.phone || '',
                 to_email: ta.to_email || best.email || '',
                 to_name:  ta.to_name  || best.name  || ta.to_name,
               };
+            }
+            if (matches.length === 0) {
+              console.warn(`[evaluate-rules] F5c: SKIPPED (zero_matches) to_name="${ta.to_name}"`);
+            } else {
+              console.warn(`[evaluate-rules] F5c: SKIPPED (ambiguous_multiple_matches) to_name="${ta.to_name}" match_count=${matches.length}`);
             }
           }
         } catch (e) {
@@ -1128,6 +1142,9 @@ async function fireAction(
         }).then(r => ({ ok: r.ok, label: `email→${ta.to_name}` }))
           .catch(() => ({ ok: false, label: `email→${ta.to_name}` }));
       }
+      // F5c fix — closes a prior silent-drop gap (Rule 21): any task_action
+      // reaching here has no resolved destination and will never send.
+      console.warn(`[evaluate-rules] F5c: SKIPPED (no_resolved_destination) to_name="${ta.to_name}" type="${ta.type}"`);
       return null;
     }).filter((p): p is Promise<{ ok: boolean; label: string }> => p !== null);
 

@@ -91,6 +91,9 @@ import { session2026_07_14_b9iFollowupBodyMarkerTests } from './catalogue/sessio
 import { session2026_07_14_b9fEvaluateRulesVoiceLoggingTests } from './catalogue/session-2026-07-14-b9f-evaluate-rules-voice-logging';
 import { session2026_07_14_b9uListDetailScreenFixesTests } from './catalogue/session-2026-07-14-b9u-list-detail-screen-fixes';
 import { session2026_07_14_b9vNotificationFixDiagnosticsTests } from './catalogue/session-2026-07-14-b9v-notification-fix-diagnostics';
+import { session2026_07_16_b10aRecipientOrderTests } from './catalogue/session-2026-07-16-b10a-recipient-order';
+import { session2026_07_16_b10bFailSpeechTests } from './catalogue/session-2026-07-16-b10b-fail-speech';
+import { session2026_07_17_f5cTaskActionsResolutionTests } from './catalogue/session-2026-07-17-f5c-taskactions-resolution';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -217,6 +220,9 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_07_14_b9fEvaluateRulesVoiceLoggingTests,
   ...session2026_07_14_b9uListDetailScreenFixesTests,
   ...session2026_07_14_b9vNotificationFixDiagnosticsTests,
+  ...session2026_07_16_b10aRecipientOrderTests,
+  ...session2026_07_16_b10bFailSpeechTests,
+  ...session2026_07_17_f5cTaskActionsResolutionTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
