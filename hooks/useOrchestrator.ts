@@ -1658,9 +1658,21 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         const speechActionConfig = (pending.originalAction?.action_config ?? {}) as any;
         const speechRecipient = String(speechActionConfig.to_name || speechActionConfig.to || '').trim();
         const speechBody = String(speechActionConfig.body ?? '').trim();
+        // B10j readback fix (2026-07-17) — the same Rule 12 gap exists for a
+        // self-primary alert whose third-party send lives in task_actions,
+        // not the top-level to_name/to this check originally covered.
+        const speechTaskActions = Array.isArray(speechActionConfig.task_actions) ? speechActionConfig.task_actions : [];
         const recipientSuffix = speechRecipient
           ? (speechBody ? ` ${speechRecipient} will get "${speechBody}".` : ` ${speechRecipient} will be notified.`)
-          : '';
+          : speechTaskActions
+              .map((ta: any) => {
+                const taName = String(ta?.to_name ?? '').trim();
+                const taBody = String(ta?.body ?? '').trim();
+                if (!taName) return '';
+                return taBody ? ` ${taName} will get "${taBody}".` : ` ${taName} will be notified.`;
+              })
+              .filter(Boolean)
+              .join('');
         const speech = ok
           ? merged
             ? `Got it — I've added ${newListName ? `your ${newListName} list` : newTasks.join(', ') || 'the reminder'} to your existing alert for ${pending.resolved.place_name}.${recipientSuffix}`
@@ -3960,9 +3972,21 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                     // targets a third party, instead of a generic "Alert set" line.
                     const memoryHitRecipient = String((actionConfig as any).to_name || (actionConfig as any).to || '').trim();
                     const memoryHitBody = String((actionConfig as any).body ?? '').trim();
+                    // B10j readback fix (2026-07-17) — same Rule 12 gap as the
+                    // pendingLocationRef commit path above: a self-primary alert's
+                    // third-party send lives in task_actions, not to_name/to.
+                    const memoryHitTaskActions = Array.isArray((actionConfig as any).task_actions) ? (actionConfig as any).task_actions : [];
                     const memoryHitRecipientSuffix = memoryHitRecipient
                       ? (memoryHitBody ? ` ${memoryHitRecipient} will get "${memoryHitBody}".` : ` ${memoryHitRecipient} will be notified.`)
-                      : '';
+                      : memoryHitTaskActions
+                          .map((ta: any) => {
+                            const taName = String(ta?.to_name ?? '').trim();
+                            const taBody = String(ta?.body ?? '').trim();
+                            if (!taName) return '';
+                            return taBody ? ` ${taName} will get "${taBody}".` : ` ${taName} will be notified.`;
+                          })
+                          .filter(Boolean)
+                          .join('');
                     turnSpeechOverride = insertSucceeded
                       ? `Alert set — ${modeText} you arrive at ${displayName}.${memoryHitRecipientSuffix}`
                       : isDuplicate
