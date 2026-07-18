@@ -96,6 +96,7 @@ import { session2026_07_16_b10bFailSpeechTests } from './catalogue/session-2026-
 import { session2026_07_17_f5cTaskActionsResolutionTests } from './catalogue/session-2026-07-17-f5c-taskactions-resolution';
 import { session2026_07_17_b10gLocationTaskActionsFixTests } from './catalogue/session-2026-07-17-b10g-location-taskactions-fix';
 import { session2026_07_17_b10hLocationContentGuardTests } from './catalogue/session-2026-07-17-b10h-location-content-guard';
+import { session2026_07_17_b10jLocationCompoundSelfReminderTests } from './catalogue/session-2026-07-17-b10j-location-compound-self-reminder';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -227,6 +228,7 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_07_17_f5cTaskActionsResolutionTests,
   ...session2026_07_17_b10gLocationTaskActionsFixTests,
   ...session2026_07_17_b10hLocationContentGuardTests,
+  ...session2026_07_17_b10jLocationCompoundSelfReminderTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
