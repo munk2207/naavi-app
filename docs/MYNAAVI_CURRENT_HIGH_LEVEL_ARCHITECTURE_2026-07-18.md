@@ -1,10 +1,17 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Purpose:** a single reference for where things actually live in this codebase — not where they were designed to live, not where a comment claims they live, but where direct code verification confirms they live. This document exists because assumptions about "shared vs. duplicated" have caused real bugs this project has already paid for (see §6 and the Appendix). Every claim below was checked against the actual source, not inferred from file names or comments.
+**Architecture Version:** 2026.07.18.3 (date-and-revision format: 3rd revision recorded on this date — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc)
+**Diagram Version:** 1 (the Data Flow diagram in §6 — increments independently of the document's overall version when the diagram itself changes)
+**Last Verified:** 2026-07-18
+**Verified Against:** direct code inspection of `munk2207/naavi-app` and `munk2207/naavi-voice-server`, both at their `main` branch HEAD as of the date above
+**Repositories:** `munk2207/naavi-app`, `munk2207/naavi-voice-server`
+**Architecture Owner:** Wael. Claude proposes architecture changes and updates to this document; ChatGPT reviews them; only Wael approves an architectural ownership change (per Governance §4's Ownership Change Rule) or a new Architecture Version.
+
+**Purpose:** a single reference for where things actually live in this codebase — not where they were designed to live, not where a comment claims they live, but where direct code verification confirms they live. This document exists because assumptions about "shared vs. duplicated" have caused real bugs this project has already paid for (see §5 and the Appendix). Every claim below was checked against the actual source, not inferred from file names or comments.
 
 **Scope:** high-level only, no source code. File paths are given as location references, the way a floor plan gives room names — not as code to read.
 
-**How to read this document:** if you're about to add a feature or fix a bug, read §1 to find where the capability actually lives, §3 to check if you're touching Protected Core, and §6 before deciding whether to reuse or duplicate.
+**How to read this document:** if you're about to add a feature or fix a bug, read §2 to find where the capability actually lives, §4 to check if you're touching Protected Core, and §7 before deciding whether to reuse or duplicate.
 
 ---
 
@@ -18,9 +25,32 @@ Naavi is not one program — it's three, talking to one shared database:
 
 The mobile app and the voice server **do not call each other**. They are two independent clients of the same backend. Whether a capability is "shared" depends entirely on whether both clients call the *same* Edge Function, or whether each has written its own version of the same logic.
 
+### 0a. Ownership Model
+
+| Component | Owner |
+|---|---|
+| Shared Core (Supabase Edge Functions + Postgres) | The Edge Functions codebase, `munk2207/naavi-app/supabase/functions/*` |
+| Voice | The Voice Server, `munk2207/naavi-voice-server` |
+| Mobile | The React Native App, `munk2207/naavi-app` (client code under `app/`, `hooks/`) |
+
+Each component's owner is the single codebase responsible for that component's correctness. "I thought the other side handled it" is not a valid explanation for a gap — if a capability's owner is genuinely ambiguous, that ambiguity is itself a defect to resolve, not a reason to skip verification.
+
 ---
 
-## 1. Shared Core Boundaries
+## 1. Architecture Principles
+
+The architecture follows these principles. They are the lens every future decision should be evaluated through:
+
+- One source of truth wherever practical.
+- Shared business logic belongs in Shared Core.
+- Entry points translate requests rather than implement business logic.
+- Platform-specific capabilities remain platform-specific.
+- Duplication is allowed only by explicit architectural decision.
+- Architecture documents describe verified implementation, not intended design.
+
+---
+
+## 2. Shared Core Boundaries
 
 For each capability, where the authoritative implementation actually lives — verified against source, not assumed.
 
@@ -35,18 +65,18 @@ For each capability, where the authoritative implementation actually lives — v
 | List creation | `manage-list` (Shared Core) | Genuinely shared for writes |
 | List reading | Duplicated | Both mobile-backend and voice independently query the `lists` table directly, rather than through one read function |
 | Calendar — writes (create/delete event) | `create-calendar-event`, `delete-calendar-event` (Shared Core) | Genuinely shared |
-| Calendar — reads (live event fetch) | Duplicated | Both `naavi-chat` and the voice server independently call the Google Calendar API themselves |
+| Calendar — reads (live event fetch) | Duplicated | Both `naavi-chat` and the voice server independently call the Google Calendar API themselves — see `docs/adr/0002-calendar-reads-remain-duplicated.md` |
 | Gmail — background sync | `sync-gmail` (Shared Core) | Genuinely shared, cron-driven, writes to `gmail_messages` |
 | Gmail — live/recent read | Duplicated | Both sides independently call the Gmail API directly for "what's new" reads |
 | Drive saves (notes, transcripts, lists) | `save-to-drive` (Shared Core) | Genuinely shared — both mobile client and voice call it |
 | Document harvesting (attachments → Drive) | Mobile-backend only | Voice never calls this; it's wired into the email-sync pipeline only |
-| Reminders (`reminders` table) | Voice-only in current practice | Mobile's equivalent requests are redirected into `action_rules` instead of the `reminders` table; a mobile client function that writes to `reminders` exists but is dead code (never called) |
+| Reminders (`reminders` table) | Voice-only in current practice | Mobile's equivalent requests are redirected into `action_rules` instead of the `reminders` table; a mobile client function that writes to `reminders` exists but is dead code (never called) — see `docs/adr/0003-voice-reminders-write-path-diverges-from-mobile.md` |
 | Geofencing (background location) | Mobile-only, by nature | A phone call has no background location; this capability structurally cannot exist on voice |
-| **Action Rules — creation (the classifier)** | **Duplicated, two independent implementations** | The single most important duplication in the system — see §1a below |
+| **Action Rules — creation (the classifier)** | **Duplicated, two independent implementations** | The single most important duplication in the system — see §2a below |
 | Conversation/turn state (pending confirmations) | Duplicated, two independent state machines | Mobile and voice each track "what are we in the middle of" separately; neither reads the other's state |
 | Authentication / user identity | Two genuinely different mechanisms, not a duplication | Mobile identifies the user via login (JWT). Voice identifies the user via caller phone number lookup. Different problems, correctly solved differently — both ultimately read the same `user_settings` table |
 
-### 1a. Why "Action Rules creation" is the important one
+### 2a. Why "Action Rules creation" is the important one
 
 This is the capability most likely to surprise you, and the one that produced this session's most expensive lesson. When a user asks to create an alert — "remind me when I arrive at Costco," "text Bob at 9am" — **mobile and voice each decide what to do independently**, using separately-written classification logic. Voice never calls the mobile backend's Edge Function for this at all. It has its own, much simpler classifier that only recognizes read-only questions (contacts, calendar, lists) — anything resembling "create an alert" falls straight through to voice's own full Claude reasoning, which is a different code path (though it does successfully use the genuinely-shared `get-naavi-prompt` system prompt once it gets there).
 
@@ -54,7 +84,7 @@ This is the capability most likely to surprise you, and the one that produced th
 
 ---
 
-## 2. Entry Point Responsibilities
+## 3. Entry Point Responsibilities
 
 An "entry point" should only translate between the user and the Shared Core — not reimplement business logic. Current state, honestly:
 
@@ -79,7 +109,7 @@ An "entry point" should only translate between the user and the Shared Core — 
 
 ---
 
-## 3. Protected Core
+## 4. Protected Core
 
 Per `docs/AI_DEVELOPMENT_GOVERNANCE.md` §4, these areas require technical review before *and* after any change, regardless of how small the change looks. Mapped to actual files:
 
@@ -104,7 +134,19 @@ Per `docs/AI_DEVELOPMENT_GOVERNANCE.md` §4, these areas require technical revie
 
 ---
 
-## 4. Duplication Inventory
+## 5. Current Architecture Debt
+
+Ranked by priority. Debt that isn't visible stops being tracked and becomes a permanent trap — this section exists specifically so that doesn't happen here.
+
+**Priority 1 — Action Rule classifier duplicated.** Mobile (`naavi-chat`'s classifier + `buildActionConfirm`) and voice (its own Claude reasoning loop) each independently decide what a new alert should be, using separately-written logic. This is the duplication that directly caused B10k (a mobile-side fix that never reached voice callers). No unification planned. See `docs/adr/0001-action-rules-classifier-duplication-accepted.md` for the Architecture Exception record.
+
+**Priority 2 — Calendar reads duplicated.** Both sides independently call the Google Calendar API for live event data, instead of sharing one fetch. No unification planned. See `docs/adr/0002-calendar-reads-remain-duplicated.md`.
+
+**Priority 3 — Gmail reads duplicated.** Both sides independently call the Gmail API for "what's new" reads — separate from the genuinely-shared `sync-gmail` background cron. No unification planned.
+
+**Priority 4 — Conversation state duplicated.** Mobile and voice each track pending-confirmation state independently, in incompatible ways (different runtimes, different session models — this is architecturally difficult to unify, not just unscheduled). No unification planned.
+
+### 5a. Full Duplication Inventory
 
 | Capability | Shared | Duplicated | Planned to unify |
 |---|---|---|---|
@@ -117,18 +159,20 @@ Per `docs/AI_DEVELOPMENT_GOVERNANCE.md` §4, these areas require technical revie
 | Calendar writes | ✅ | | |
 | Gmail background sync | ✅ | | |
 | Drive saves | ✅ | | |
-| **Action Rules creation (classifier)** | | ✅ | Not scheduled — no plan exists yet |
-| Calendar reads | | ✅ | Not scheduled |
-| Gmail live reads | | ✅ | Not scheduled |
+| **Action Rules creation (classifier)** — Priority 1 | | ✅ | Not scheduled — no plan exists yet |
+| Calendar reads — Priority 2 | | ✅ | Not scheduled |
+| Gmail live reads — Priority 3 | | ✅ | Not scheduled |
 | List reads | | ✅ | Not scheduled |
-| Conversation/turn state | | ✅ | Not scheduled — architecturally difficult (different runtimes, different session models) |
+| Conversation/turn state — Priority 4 | | ✅ | Not scheduled — architecturally difficult (different runtimes, different session models) |
 | `task_actions` on location alerts, real-world reach | | ✅ (voice literally cannot produce this input) | Deferred pending a production-promotion or voice-staging decision (see Appendix) |
 
 **Reading this table:** every ✅ in the "Duplicated" column is a place where a fix applied to one side silently does not apply to the other, and nothing in the codebase enforces that they stay in sync. This has already caused at least four confirmed incidents in this project's history (see Appendix's T1a reference) — it is the single highest-leverage category of future bug.
 
 ---
 
-## 5. Data Flow
+## 6. Data Flow
+
+*Diagram Version 1 — see the version block at the top of this document. Bump this label independently when the diagram itself changes, per the Architecture Change Procedure (§8).*
 
 ```
 Voice caller
@@ -161,7 +205,7 @@ Mobile app (React Native)                                     │
 
 ---
 
-## 6. Decision Rules
+## 7. Decision Rules
 
 When adding new functionality, in order:
 
@@ -169,8 +213,27 @@ When adding new functionality, in order:
 2. **Entry points may only translate.** Mobile should convert taps/typed text into a request and convert the response into UI. Voice should convert speech into a request and convert the response into audio. Neither should independently decide business logic that the other surface also needs.
 3. **Duplication requires explicit approval, named as duplication, not discovered later.** If a capability truly cannot be shared (e.g., geofencing is mobile-only by nature — that's fine, it's not duplication, it's a mobile-specific capability), say so explicitly in the Phase 2 Change Plan. If two surfaces really do need independent implementations of the same idea, that decision needs its own stated reason, not silence.
 4. **Before claiming "this is already shared," verify it against the actual other codebase.** This document exists because that exact assumption, unverified, was wrong once this session and cost real re-work. Grep the other codebase for the specific function or logic in question before writing "shared" anywhere.
-5. **A shared Edge Function does not guarantee shared behavior.** Confirm both callers actually reach the code path you changed — see §1a: `evaluate-rules`/`report-location-event` are genuinely shared, but voice's own creation path can't produce the input (`task_actions`) that exercises the shared fix. "The backend is shared" and "both surfaces can actually trigger this" are two separate claims — check both.
+5. **A shared Edge Function does not guarantee shared behavior.** Confirm both callers actually reach the code path you changed — see §2a: `evaluate-rules`/`report-location-event` are genuinely shared, but voice's own creation path can't produce the input (`task_actions`) that exercises the shared fix. "The backend is shared" and "both surfaces can actually trigger this" are two separate claims — check both.
 6. **Protected Core changes always follow the full governance process** (`docs/AI_DEVELOPMENT_GOVERNANCE.md`), regardless of how small the diff looks. Size of change and required rigor are not correlated in this codebase's history — several of its cheapest-looking fixes caused the most expensive regressions.
+
+### 7a. Never
+
+- Copy Shared Core logic into an entry point.
+- Declare functionality shared without verification.
+- Modify Protected Core outside governance.
+- Introduce duplicate implementations without explicit approval.
+
+---
+
+## 8. Architecture Change Procedure
+
+Whenever a change:
+- moves responsibility between components,
+- introduces duplication,
+- removes duplication, or
+- changes Shared Core ownership,
+
+this document must be updated in the same implementation — the same commit or session as the code change, not deferred to a later cleanup pass. An architecture document that lags the code it describes is worse than no document at all, because it creates false confidence that a check happened when it didn't.
 
 ---
 
@@ -180,4 +243,4 @@ This reference was written 2026-07-18, immediately after a session that surfaced
 
 The broader pattern — features added to one of two independently-maintained implementations and never mirrored to the other — is tracked as **T1a** (architecture integrity audit) in the same holding list, with four confirmed instances at the time of writing (recipient resolution, channel-preference handling, `task_actions` execution, and the alert-creation classifier itself).
 
-This document should be treated as a snapshot, not a permanent truth — re-verify any specific claim before relying on it for a real decision, the same way every claim in it was verified before being written down.
+This document is authoritative until superseded by a newer verified version. Any architectural claim not reflected here must be verified directly against the code before implementation.
