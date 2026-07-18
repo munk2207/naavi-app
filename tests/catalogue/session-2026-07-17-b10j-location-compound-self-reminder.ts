@@ -20,6 +20,8 @@
  * established pattern in tests/catalogue/prompt-regression.ts.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { adapters } from '../lib/adapters';
 import {
   expect2xx,
@@ -28,6 +30,8 @@ import {
   chatWithConfirm,
 } from '../lib/assertions';
 import type { TestCase } from '../lib/types';
+
+const ALERTS_SCREEN_PATH = join(process.cwd(), 'app', 'alerts.tsx');
 
 // True only when the alert stayed self-primary (no third-party to/to_name/
 // to_phone/to_email on the primary action_config) AND the third party's
@@ -111,6 +115,23 @@ export const session2026_07_17_b10jLocationCompoundSelfReminderTests: TestCase[]
     timeoutMs: 60_000,
     async run(ctx) {
       await expectMajoritySelfPrimary(ctx, "When I arrive home remind me to lock the door and send sms to bob saying i'm home", 'positive-control-2');
+    },
+  },
+  {
+    id: 'b10j.alerts-screen-recognizes-send-sms-task-actions',
+    category: 'rules',
+    description:
+      'Found live during B10j manual testing: app/alerts.tsx\'s "Also notifies" section filtered task_actions for type==="sms", but every task_actions entry ever produced by naavi-chat/get-naavi-prompt uses type="send_sms" — the filter never matched anything, making the section permanently dead code regardless of B10j. Fixed to match the real value. Bob\'s alert still fires correctly either way (this is display-only); the bug was that the Alerts screen never showed he was being notified.',
+    async run() {
+      const src = readFileSync(ALERTS_SCREEN_PATH, 'utf8');
+      expectTruthy(
+        src.includes("ta?.type === 'send_sms' && ta?.to_name"),
+        'the "Also notifies" filter must match the real task_actions type value (send_sms), not the never-produced "sms"',
+      );
+      expectTruthy(
+        !src.includes("ta?.type === 'sms' && ta?.to_name"),
+        'the old, always-false filter condition must not remain alongside the fix',
+      );
     },
   },
   {

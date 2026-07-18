@@ -874,7 +874,7 @@ export default function AlertsScreen() {
                           const taskActions: any[] = Array.isArray((rule.action_config as any)?.task_actions)
                             ? (rule.action_config as any).task_actions
                             : [];
-                          const smsActions = taskActions.filter(ta => ta?.type === 'sms' && ta?.to_name);
+                          const smsActions = taskActions.filter(ta => ta?.type === 'send_sms' && ta?.to_name);
                           if (smsActions.length === 0) return null;
                           return (
                             <>
