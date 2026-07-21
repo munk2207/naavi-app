@@ -46,7 +46,7 @@ export const session2026_07_21_b10oLocationReadbackTests: TestCase[] = [
   {
     id: 'b10o.self-task-and-third-party-the-original-bug',
     category: 'session-2026-07-21',
-    description: 'The exact live-reproduced bug scenario, 2026-07-21: "feed the cat" AND "sms bob saying I\'m home" — both must now appear, self-task first per the approved precedence.',
+    description: 'A hypothetical shape where tasks/to_name/body all coexist — both must appear, self-task first per the approved precedence.',
     run: async () => {
       const out = buildAlertReadbackSuffix({ tasks: 'feed the cat', to_name: 'Bob', body: "I'm home." });
       expectEqual(
@@ -54,6 +54,40 @@ export const session2026_07_21_b10oLocationReadbackTests: TestCase[] = [
         ' Note: feed the cat. Bob will get "I\'m home.".',
         'self-task + third-party combined suffix',
       );
+    },
+  },
+  {
+    id: 'b10o.self-task-and-third-party-the-REAL-original-bug',
+    category: 'session-2026-07-21',
+    description: 'Found via Phase 7 manual test on build 312, 2026-07-21 — the ACTUAL shape Claude produces for this scenario per get-naavi-prompt\'s LOCATION SELF-ALERT PRIMARY RULE: self-task text in `body`, third party in `task_actions`, NO top-level to_name/to. The original test above used an assumed/hypothetical shape that never matched live data — this test locks in the real one, which initially still failed after the first B10o/B10p ship (formatSelfTaskClause never read `body`).',
+    run: async () => {
+      const out = buildAlertReadbackSuffix({
+        body: 'Feed the cat.',
+        task_actions: [{ to_name: 'Bob', body: "I'm home." }],
+      });
+      expectEqual(
+        out,
+        ' Note: Feed the cat.. Bob will get "I\'m home.".',
+        'body-as-self-task + task_actions third-party, the real live shape',
+      );
+    },
+  },
+  {
+    id: 'b10o.body-belongs-to-top-level-recipient-not-self-task',
+    category: 'session-2026-07-21',
+    description: 'Regression guard for the body-fallback fix: when a top-level recipient (to_name/to) IS present, `body` belongs to that recipient (the original B10h shape) and must NOT also be treated as a self-task — no double-counting, no self-task clause appears.',
+    run: async () => {
+      const out = buildAlertReadbackSuffix({ to_name: 'Bob', body: "I'm home." });
+      expectEqual(out, ' Bob will get "I\'m home.".', 'body stays third-party-only when to_name is present');
+    },
+  },
+  {
+    id: 'b10o.body-alone-with-no-recipient-signal-is-not-guessed-as-self-task',
+    category: 'session-2026-07-21',
+    description: 'Regression guard: `body` with neither a top-level recipient NOR task_actions present is an ambiguous/incomplete shape — must not be guessed as a self-task (fails safe to empty rather than inventing meaning for unclear data).',
+    run: async () => {
+      const out = buildAlertReadbackSuffix({ body: 'Feed the cat.' });
+      expectEqual(out, '', 'ambiguous body-only shape produces no clause, not a guess');
     },
   },
   {

@@ -25,9 +25,22 @@ export interface AlertReadbackActionConfig {
 
 function formatSelfTaskClause(actionConfig: AlertReadbackActionConfig): string {
   const raw = actionConfig.tasks;
-  const taskList: string[] = Array.isArray(raw)
+  let taskList: string[] = Array.isArray(raw)
     ? raw.map((t) => String(t ?? '').trim()).filter(Boolean)
     : (raw ? [String(raw).trim()] : []).filter(Boolean);
+  // Found via Phase 7 manual test, 2026-07-21 — for the compound self+third-
+  // party shape (get-naavi-prompt's LOCATION SELF-ALERT PRIMARY RULE), the
+  // self-task text lands in `body`, not `tasks`, because the third party's
+  // own message lives separately in `task_actions[].body`. Only treat `body`
+  // as the self-task when there's no top-level recipient (to_name/to) — when
+  // one IS present, `body` belongs to that recipient instead (the original
+  // B10h shape), which formatThirdPartyClause already owns.
+  if (taskList.length === 0) {
+    const hasTopLevelRecipient = !!(actionConfig.to_name || actionConfig.to);
+    const hasTaskActions = Array.isArray(actionConfig.task_actions) && actionConfig.task_actions.length > 0;
+    const bodyAsSelfTask = (!hasTopLevelRecipient && hasTaskActions) ? String(actionConfig.body ?? '').trim() : '';
+    if (bodyAsSelfTask) taskList = [bodyAsSelfTask];
+  }
   if (taskList.length === 0) return '';
   // "Note:" reads naturally whether the task text is a verb phrase ("feed
   // the cat") or a noun phrase ("shopping list") — "I'll remind you to
