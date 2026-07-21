@@ -1,6 +1,6 @@
 # MyNaavi AI Development Governance — Release Gate Workflow
 
-Version 3.5 — 2026-07-18. See §13 Changelog for the full version history.
+Version 3.6 — 2026-07-21. See §13 Changelog for the full version history.
 
 ## Purpose
 
@@ -329,6 +329,8 @@ Numeric scores (for example 9.8/10 or 10/10) are not used because they can hide 
 2. **Diverges because of an intentional, approved architectural change made during this work item.** Not a FAIL — but the Architecture Reference update (Phase 8) becomes a hard precondition for merge, not an optional follow-up.
 3. **Diverges for any other reason** — an unapproved change slipped in, or the Reference was already stale before this work started. **Implementation stops.** The discrepancy must be resolved and the Architecture Reference reconciled *before* Phase 6 review is repeated — this is not something to note and continue past. An architecture document that's already known to be wrong is worse than no document, and proceeding on top of a known-wrong map is exactly the failure this entire framework exists to prevent.
 
+**Invalidated Planning Assumption Rule.** When implementation (Phase 4) finds that a Phase 2 plan cannot be carried out exactly as written — without that finding also being an implementation error — Phase 6 shall explicitly record it as a **planning assumption invalidated during implementation**, distinct from an omitted feature or a deliberate scope cut. State what Phase 2 assumed, what Phase 4 discovered instead, and why the assumption didn't hold. This distinction is not cosmetic: a planning error, an implementation error, and a deliberate scope-control decision each point future Phase 2 work toward a different improvement, and collapsing all three into "wasn't done" loses that signal. Added 2026-07-21, per B10o's Phase 6 review — see `docs/B10O_PHASE6_TECHNICAL_REVIEW_2026-07-21.md` §2 for the originating example (Phase 2 planned to extend two merge-path call sites to cover `task_actions` merging; Phase 4 found this required genuine new merge/business logic beyond the fix's stated "readback-text-only" scope).
+
 ---
 
 ### Phase 7 — Testing
@@ -542,3 +544,4 @@ Every governance change is recorded here, per §9's Governance Change Approval P
 - **v3.3 → v3.4 (2026-07-18):** Architecture Reference Version Verification (Phase 1A + Phase 8), Ownership Change Rule (§4), Architecture Exception format (§5a), new §6 Architectural Decision Records (ADRs), explicit Governance Change Approval Process checklist (§9), this Changelog (§13).
 - **v3.4 → v3.5 (2026-07-18):** Phase 6's Architecture Completeness checklist gained an explicit "ownership changed?" item; ADR Lifecycle rule added (annual review or next Audit Trigger, whichever first); the Phase 1A known-limitation note now explicitly names the Architecture Audit Trigger as the long-horizon compensating mechanism. Companion edits in the Architecture Reference: formal dated version identifier, Diagram Version label, explicit Architecture Owner statement, and four backfilled ADRs (`docs/adr/0001`-`0004`) linked from the Reference instead of embedding rationale inline.
 - **v3.5 (2026-07-18):** finalized as the project's canonical governance document, replacing the prior `docs/AI_DEVELOPMENT_GOVERNANCE.md` (v2.2).
+- **v3.5 → v3.6 (2026-07-21):** Phase 6 gained the Invalidated Planning Assumption Rule — when Phase 4 finds a Phase 2 plan can't be carried out exactly as written, without that being an implementation error, Phase 6 must record it as an invalidated planning assumption, distinct from an omitted feature or a deliberate scope cut. Per §9's Governance Change Approval Process: problem/benefit/example stated, external review done, Wael's explicit approval given, this changelog entry. Originating example: `docs/B10O_PHASE6_TECHNICAL_REVIEW_2026-07-21.md`.
