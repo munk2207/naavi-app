@@ -72,3 +72,35 @@ export function formatThirdPartyClause(actionConfig: AlertReadbackActionConfig):
 export function buildAlertReadbackSuffix(actionConfig: AlertReadbackActionConfig): string {
   return formatSelfTaskClause(actionConfig) + formatThirdPartyClause(actionConfig);
 }
+
+// B10p — presentation-by-fact-count (docs/B10P_PHASE2_CHANGE_PLAN_2026-07-21.md).
+
+/**
+ * Returns the self-task and third-party clauses as clean, independent
+ * sentence fragments (no leading space, unlike the suffix-oriented
+ * formatSelfTaskClause/formatThirdPartyClause above, which are formatted
+ * for string concatenation) — suitable as numbered-list items. Order
+ * matches the approved precedence: self-task first, then third-party.
+ * Absent facts are omitted, not returned as empty strings.
+ */
+export function getAlertReadbackFacts(actionConfig: AlertReadbackActionConfig): string[] {
+  return [formatSelfTaskClause(actionConfig), formatThirdPartyClause(actionConfig)]
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Combines a headline (passed WITHOUT trailing punctuation, e.g. "Alert set
+ * — one time you arrive at Home") with 0, 1, or 2+ facts, per the count-tier
+ * table in docs/B10P_PHASE2_CHANGE_PLAN_2026-07-21.md:
+ *   0 facts -> "{headline}."
+ *   1 fact  -> "{headline}. {fact}"
+ *   2+      -> "{headline}:\n1. {fact}\n2. {fact}..."
+ * Pure, deterministic, side-effect free — formatting only, no business logic.
+ */
+export function combineHeadlineAndFacts(headline: string, facts: string[]): string {
+  const cleanHeadline = headline.trim();
+  if (facts.length === 0) return `${cleanHeadline}.`;
+  if (facts.length === 1) return `${cleanHeadline}. ${facts[0]}`;
+  return `${cleanHeadline}:\n${facts.map((f, i) => `${i + 1}. ${f}`).join('\n')}`;
+}

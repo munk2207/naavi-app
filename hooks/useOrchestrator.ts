@@ -42,7 +42,7 @@ import type { StorageFile, NavigationResult } from '@/lib/types';
 
 import { isConfirmable, buildActionSummary, SPEECH, type PendingAction } from '@/lib/voice-confirm';
 import { normalizePlaceName } from '@/lib/normalizePlaceName';
-import { buildAlertReadbackSuffix, formatThirdPartyClause, type AlertReadbackActionConfig } from '@/lib/alertReadback';
+import { formatThirdPartyClause, getAlertReadbackFacts, combineHeadlineAndFacts, type AlertReadbackActionConfig } from '@/lib/alertReadback';
 
 // Endpoints for direct Edge Function calls from the orchestrator (location-rule
 // confirmation flow and resolve-place cache writes).
@@ -445,11 +445,12 @@ async function reArmLocationRule(
     // third-party recipient/message at all. Reads the merged config if this
     // re-arm carried updates, else falls back to the existing rule's own
     // stored config, so a plain re-enable still restates what's resolved.
+    // B10p (2026-07-21) — 2+ facts render as a numbered list.
     const reArmActionConfig = (mergedActionConfig ?? existingRule?.action_config ?? {}) as AlertReadbackActionConfig;
-    const reArmReadbackSuffix = buildAlertReadbackSuffix(reArmActionConfig);
+    const reArmFacts = getAlertReadbackFacts(reArmActionConfig);
     return {
       success: true,
-      speech:  `Re-armed your alert — ${modeText} you arrive at ${placeName}${addrSuffix}.${reArmReadbackSuffix}`,
+      speech:  combineHeadlineAndFacts(`Re-armed your alert — ${modeText} you arrive at ${placeName}${addrSuffix}`, reArmFacts),
       ruleId:  String(existingRule.id),
     };
   } catch (err: any) {
@@ -1664,18 +1665,21 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         // third-party recipient/message (B10h/B10j fixed that); it also never
         // mentioned the user's own self-task for a brand-new or reactivated
         // alert, which B10o fixes via the shared lib/alertReadback.ts helper.
-        // The "merged" branch's own headline already names the self-task in
-        // its own words ("I've added X to your existing alert"), so it uses
-        // the third-party-only clause to avoid naming it twice.
+        // B10p (2026-07-21) — 2+ facts now render as a numbered list instead
+        // of a run-on sentence, per docs/B10P_PHASE2_CHANGE_PLAN_2026-07-21.md's
+        // count-tier table. The "merged" branch's own headline already names
+        // the self-task in its own words ("I've added X to your existing
+        // alert"), so it stays on the third-party-only clause (unchanged by
+        // B10p, out of scope per Phase 2/3) to avoid naming it twice.
         const speechActionConfig = (pending.originalAction?.action_config ?? {}) as AlertReadbackActionConfig;
-        const recipientSuffix = buildAlertReadbackSuffix(speechActionConfig);
+        const speechFacts = getAlertReadbackFacts(speechActionConfig);
         const mergedThirdPartySuffix = formatThirdPartyClause(speechActionConfig);
         const speech = ok
           ? merged
             ? `Got it — I've added ${newListName ? `your ${newListName} list` : newTasks.join(', ') || 'the reminder'} to your existing alert for ${pending.resolved.place_name}.${mergedThirdPartySuffix}`
             : reactivated
-              ? `Your previous alert for ${pending.resolved.place_name} was re-enabled — ${modeText} you arrive.${recipientSuffix}`
-              : `Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.${recipientSuffix}`
+              ? combineHeadlineAndFacts(`Your previous alert for ${pending.resolved.place_name} was re-enabled — ${modeText} you arrive`, speechFacts)
+              : combineHeadlineAndFacts(`Alert set — ${modeText} you arrive at ${pending.resolved.place_name}`, speechFacts)
           : `Couldn't save the rule — something went wrong. Try again?`;
         // V57.4 Part B — attach the toggle card when the rule was saved.
         // V57.13.4 — also pass address so the card shows the street segment.
@@ -1797,13 +1801,14 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               // named the self-task or the third-party recipient/message at
               // all (it predates the 2026-07-17 B10h/B10j fix, which only
               // reached the other two commit paths). Uses the same shared
-              // helper as those paths now.
+              // helper as those paths now. B10p (2026-07-21) — 2+ facts
+              // render as a numbered list.
               const clarifActionConfig = (pending.originalAction?.action_config ?? {}) as AlertReadbackActionConfig;
-              const clarifReadbackSuffix = buildAlertReadbackSuffix(clarifActionConfig);
+              const clarifFacts = getAlertReadbackFacts(clarifActionConfig);
               const speech = ok
                 ? reactivated
-                  ? `Your previous alert for ${data.place_name} was re-enabled — ${modeText} you arrive.${clarifReadbackSuffix}`
-                  : `${data.place_name}${sourceText ? ' ' + sourceText : ''} — alert set ${modeText} you arrive.${clarifReadbackSuffix}`
+                  ? combineHeadlineAndFacts(`Your previous alert for ${data.place_name} was re-enabled — ${modeText} you arrive`, clarifFacts)
+                  : combineHeadlineAndFacts(`${data.place_name}${sourceText ? ' ' + sourceText : ''} — alert set ${modeText} you arrive`, clarifFacts)
                 : `Couldn't save the rule — something went wrong.`;
               const cards = ok && ruleId
                 ? [{ ruleId, placeName: data.place_name, address: data.address ?? null, oneShot }]
@@ -3975,9 +3980,10 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                     // (2026-07-21) — name both the third-party recipient/message
                     // and the user's own self-task via the shared helper in
                     // lib/alertReadback.ts, instead of a generic "Alert set" line.
-                    const memoryHitReadbackSuffix = buildAlertReadbackSuffix(actionConfig as AlertReadbackActionConfig);
+                    // B10p (2026-07-21) — 2+ facts render as a numbered list.
+                    const memoryHitFacts = getAlertReadbackFacts(actionConfig as AlertReadbackActionConfig);
                     turnSpeechOverride = insertSucceeded
-                      ? `Alert set — ${modeText} you arrive at ${displayName}.${memoryHitReadbackSuffix}`
+                      ? combineHeadlineAndFacts(`Alert set — ${modeText} you arrive at ${displayName}`, memoryHitFacts)
                       : isDuplicate
                         ? `You already have an alert set for ${displayName}.`
                         : `I couldn't save the alert — please try again in a moment.`;
