@@ -145,27 +145,27 @@ export const session2026_07_17_b10hLocationContentGuardTests: TestCase[] = [
     id: 'b10h.readback-names-recipient-and-message-pending-commit-path',
     category: 'rules',
     description:
-      'Rule 12 readback fix, found live the moment the naavi-chat body-forwarding fix started working: the pendingLocationRef "yes" commit path\'s speech was a generic "Alert set — one time you arrive at X." that never named a third-party recipient or message, which is exactly why the earlier body-drop bug went unnoticed at creation time. Asserts the speech now appends a recipient/body suffix when present.',
+      'Rule 12 readback fix, found live the moment the naavi-chat body-forwarding fix started working: the pendingLocationRef "yes" commit path\'s speech was a generic "Alert set — one time you arrive at X." that never named a third-party recipient or message, which is exactly why the earlier body-drop bug went unnoticed at creation time. Asserts the speech now appends a recipient/body suffix when present. UPDATED 2026-07-21 (B10o) — the inline recipient-reading logic this test originally checked for was extracted into the shared lib/alertReadback.ts helper (see tests/catalogue/session-2026-07-21-b10o-location-readback.ts for the helper\'s own behavioral tests); this test now checks the call site wires into that helper correctly, not the old inline variable names.',
     async run() {
       const src = readFileSync(ORCHESTRATOR_PATH, 'utf8');
       const commitBlockIdx = src.indexOf("if (isYes && pending.resolved) {");
-      const speechRecipientIdx = src.indexOf('const speechRecipient = String(speechActionConfig.to_name || speechActionConfig.to || \'\').trim();', commitBlockIdx);
+      const helperCallIdx = src.indexOf('const recipientSuffix = buildAlertReadbackSuffix(speechActionConfig);', commitBlockIdx);
       const recipientSuffixUsageIdx = src.indexOf('`Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.${recipientSuffix}`', commitBlockIdx);
       expectTruthy(commitBlockIdx > -1, 'the pendingLocationRef "yes" commit block must exist');
-      expectTruthy(speechRecipientIdx > commitBlockIdx, 'the commit path must read a recipient name from action_config for the readback');
-      expectTruthy(recipientSuffixUsageIdx > speechRecipientIdx, 'the "Alert set" speech must include the recipient suffix, not a bare generic line');
+      expectTruthy(helperCallIdx > commitBlockIdx, 'the commit path must build the readback suffix via the shared alertReadback helper');
+      expectTruthy(recipientSuffixUsageIdx > helperCallIdx, 'the "Alert set" speech must include the recipient suffix, not a bare generic line');
     },
   },
   {
     id: 'b10h.readback-names-recipient-and-message-memory-hit-path',
     category: 'rules',
-    description: 'same Rule 12 readback fix applied to the second, independent memory-hit insert path (settings_home/settings_work/contact fast path), which has its own separate speech template.',
+    description: 'same Rule 12 readback fix applied to the second, independent memory-hit insert path (settings_home/settings_work/contact fast path), which has its own separate speech template. UPDATED 2026-07-21 (B10o) — checks the shared helper wiring, not the old inline variable names.',
     async run() {
       const src = readFileSync(ORCHESTRATOR_PATH, 'utf8');
-      const memoryHitRecipientIdx = src.indexOf('const memoryHitRecipient = String((actionConfig as any).to_name || (actionConfig as any).to || \'\').trim();');
-      const memoryHitSuffixUsageIdx = src.indexOf('`Alert set — ${modeText} you arrive at ${displayName}.${memoryHitRecipientSuffix}`');
-      expectTruthy(memoryHitRecipientIdx > -1, 'the memory-hit path must read a recipient name from action_config for the readback');
-      expectTruthy(memoryHitSuffixUsageIdx > memoryHitRecipientIdx, 'the memory-hit "Alert set" speech must include the recipient suffix, not a bare generic line');
+      const helperCallIdx = src.indexOf('const memoryHitReadbackSuffix = buildAlertReadbackSuffix(actionConfig as AlertReadbackActionConfig);');
+      const memoryHitSuffixUsageIdx = src.indexOf('`Alert set — ${modeText} you arrive at ${displayName}.${memoryHitReadbackSuffix}`');
+      expectTruthy(helperCallIdx > -1, 'the memory-hit path must build the readback suffix via the shared alertReadback helper');
+      expectTruthy(memoryHitSuffixUsageIdx > helperCallIdx, 'the memory-hit "Alert set" speech must include the recipient suffix, not a bare generic line');
     },
   },
   {

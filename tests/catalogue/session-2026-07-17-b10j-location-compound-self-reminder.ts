@@ -33,6 +33,7 @@ import type { TestCase } from '../lib/types';
 
 const ALERTS_SCREEN_PATH = join(process.cwd(), 'app', 'alerts.tsx');
 const ORCHESTRATOR_PATH = join(process.cwd(), 'hooks', 'useOrchestrator.ts');
+const ALERT_READBACK_PATH = join(process.cwd(), 'lib', 'alertReadback.ts');
 
 // True only when the alert stayed self-primary (no third-party to/to_name/
 // to_phone/to_email on the primary action_config) AND the third party's
@@ -139,27 +140,28 @@ export const session2026_07_17_b10jLocationCompoundSelfReminderTests: TestCase[]
     id: 'b10j.readback-names-task-actions-recipient-pending-commit-path',
     category: 'rules',
     description:
-      'Rule 12 follow-on gap, found live during manual trials 1-2: the B10h readback fix only checked top-level to_name/to, so a self-primary alert whose third party lives in task_actions got a bare "Alert set" with no mention of Bob at all, even though he was correctly notified underneath. Fixed to also name task_actions recipients when no top-level recipient exists.',
+      'Rule 12 follow-on gap, found live during manual trials 1-2: the B10h readback fix only checked top-level to_name/to, so a self-primary alert whose third party lives in task_actions got a bare "Alert set" with no mention of Bob at all, even though he was correctly notified underneath. Fixed to also name task_actions recipients when no top-level recipient exists. UPDATED 2026-07-21 (B10o) — the task_actions-reading logic this test checked for was extracted into the shared lib/alertReadback.ts helper (`formatThirdPartyClause`); this test now checks the call site wires into the shared helper, and that the helper module itself still contains the task_actions naming logic (behaviorally re-verified in tests/catalogue/session-2026-07-21-b10o-location-readback.ts).',
     async run() {
       const src = readFileSync(ORCHESTRATOR_PATH, 'utf8');
       const commitBlockIdx = src.indexOf("if (isYes && pending.resolved) {");
-      const taskActionsVarIdx = src.indexOf('const speechTaskActions = Array.isArray(speechActionConfig.task_actions)', commitBlockIdx);
+      const helperCallIdx = src.indexOf('const recipientSuffix = buildAlertReadbackSuffix(speechActionConfig);', commitBlockIdx);
       expectTruthy(commitBlockIdx > -1, 'the pendingLocationRef "yes" commit block must exist');
-      expectTruthy(taskActionsVarIdx > commitBlockIdx, 'the commit path must read task_actions for the readback fallback');
+      expectTruthy(helperCallIdx > commitBlockIdx, 'the commit path must build the readback suffix via the shared alertReadback helper, which reads task_actions internally');
+      const alertReadbackSrc = readFileSync(ALERT_READBACK_PATH, 'utf8');
       expectTruthy(
-        src.includes('return taBody ? ` ${taName} will get "${taBody}".` : ` ${taName} will be notified.`;'),
-        'the task_actions readback fallback must name the recipient and their message, matching the existing to_name/to phrasing',
+        alertReadbackSrc.includes('return taBody ? ` ${taName} will get "${taBody}".` : ` ${taName} will be notified.`;'),
+        'the shared helper\'s task_actions readback fallback must name the recipient and their message, matching the existing to_name/to phrasing',
       );
     },
   },
   {
     id: 'b10j.readback-names-task-actions-recipient-memory-hit-path',
     category: 'rules',
-    description: 'same Rule 12 follow-on fix applied to the second, independent memory-hit insert path.',
+    description: 'same Rule 12 follow-on fix applied to the second, independent memory-hit insert path. UPDATED 2026-07-21 (B10o) — checks the shared helper wiring, not the old inline variable name.',
     async run() {
       const src = readFileSync(ORCHESTRATOR_PATH, 'utf8');
-      const memoryHitTaskActionsIdx = src.indexOf('const memoryHitTaskActions = Array.isArray((actionConfig as any).task_actions)');
-      expectTruthy(memoryHitTaskActionsIdx > -1, 'the memory-hit path must read task_actions for the readback fallback');
+      const helperCallIdx = src.indexOf('const memoryHitReadbackSuffix = buildAlertReadbackSuffix(actionConfig as AlertReadbackActionConfig);');
+      expectTruthy(helperCallIdx > -1, 'the memory-hit path must build the readback suffix via the shared alertReadback helper, which reads task_actions internally');
     },
   },
   {

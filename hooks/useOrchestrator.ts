@@ -42,6 +42,7 @@ import type { StorageFile, NavigationResult } from '@/lib/types';
 
 import { isConfirmable, buildActionSummary, SPEECH, type PendingAction } from '@/lib/voice-confirm';
 import { normalizePlaceName } from '@/lib/normalizePlaceName';
+import { buildAlertReadbackSuffix, formatThirdPartyClause, type AlertReadbackActionConfig } from '@/lib/alertReadback';
 
 // Endpoints for direct Edge Function calls from the orchestrator (location-rule
 // confirmation flow and resolve-place cache writes).
@@ -440,9 +441,15 @@ async function reArmLocationRule(
         ruleId:  null,
       };
     }
+    // B10o (2026-07-21) — re-arm speech never named the self-task or
+    // third-party recipient/message at all. Reads the merged config if this
+    // re-arm carried updates, else falls back to the existing rule's own
+    // stored config, so a plain re-enable still restates what's resolved.
+    const reArmActionConfig = (mergedActionConfig ?? existingRule?.action_config ?? {}) as AlertReadbackActionConfig;
+    const reArmReadbackSuffix = buildAlertReadbackSuffix(reArmActionConfig);
     return {
       success: true,
-      speech:  `Re-armed your alert — ${modeText} you arrive at ${placeName}${addrSuffix}.`,
+      speech:  `Re-armed your alert — ${modeText} you arrive at ${placeName}${addrSuffix}.${reArmReadbackSuffix}`,
       ruleId:  String(existingRule.id),
     };
   } catch (err: any) {
@@ -1651,31 +1658,21 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         const modeText = oneShot ? 'one time' : 'every time';
         const newTasks = Array.isArray((pending.originalAction?.action_config as any)?.tasks) ? (pending.originalAction!.action_config as any).tasks as string[] : [];
         const newListName = String((pending.originalAction?.action_config as any)?.list_name ?? '').trim();
-        // B10h readback fix (2026-07-17) — Rule 12 requires the post-action
-        // readback to name every resolved input. The generic "Alert set" line
-        // never mentioned a third-party recipient or message, which is how
-        // the body-forwarding bug went unnoticed until fire time.
-        const speechActionConfig = (pending.originalAction?.action_config ?? {}) as any;
-        const speechRecipient = String(speechActionConfig.to_name || speechActionConfig.to || '').trim();
-        const speechBody = String(speechActionConfig.body ?? '').trim();
-        // B10j readback fix (2026-07-17) — the same Rule 12 gap exists for a
-        // self-primary alert whose third-party send lives in task_actions,
-        // not the top-level to_name/to this check originally covered.
-        const speechTaskActions = Array.isArray(speechActionConfig.task_actions) ? speechActionConfig.task_actions : [];
-        const recipientSuffix = speechRecipient
-          ? (speechBody ? ` ${speechRecipient} will get "${speechBody}".` : ` ${speechRecipient} will be notified.`)
-          : speechTaskActions
-              .map((ta: any) => {
-                const taName = String(ta?.to_name ?? '').trim();
-                const taBody = String(ta?.body ?? '').trim();
-                if (!taName) return '';
-                return taBody ? ` ${taName} will get "${taBody}".` : ` ${taName} will be notified.`;
-              })
-              .filter(Boolean)
-              .join('');
+        // B10h/B10j readback fix (2026-07-17), B10o readback fix (2026-07-21)
+        // — Rule 12 requires the post-action readback to name every resolved
+        // input. The generic "Alert set" line originally never mentioned a
+        // third-party recipient/message (B10h/B10j fixed that); it also never
+        // mentioned the user's own self-task for a brand-new or reactivated
+        // alert, which B10o fixes via the shared lib/alertReadback.ts helper.
+        // The "merged" branch's own headline already names the self-task in
+        // its own words ("I've added X to your existing alert"), so it uses
+        // the third-party-only clause to avoid naming it twice.
+        const speechActionConfig = (pending.originalAction?.action_config ?? {}) as AlertReadbackActionConfig;
+        const recipientSuffix = buildAlertReadbackSuffix(speechActionConfig);
+        const mergedThirdPartySuffix = formatThirdPartyClause(speechActionConfig);
         const speech = ok
           ? merged
-            ? `Got it — I've added ${newListName ? `your ${newListName} list` : newTasks.join(', ') || 'the reminder'} to your existing alert for ${pending.resolved.place_name}.${recipientSuffix}`
+            ? `Got it — I've added ${newListName ? `your ${newListName} list` : newTasks.join(', ') || 'the reminder'} to your existing alert for ${pending.resolved.place_name}.${mergedThirdPartySuffix}`
             : reactivated
               ? `Your previous alert for ${pending.resolved.place_name} was re-enabled — ${modeText} you arrive.${recipientSuffix}`
               : `Alert set — ${modeText} you arrive at ${pending.resolved.place_name}.${recipientSuffix}`
@@ -1796,10 +1793,17 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                                  data.source === 'settings_work' ? 'from Settings (work)' :
                                  '';
               const modeText = oneShot ? 'one time' : 'every time';
+              // B10o (2026-07-21) — this clarification-memory-hit path never
+              // named the self-task or the third-party recipient/message at
+              // all (it predates the 2026-07-17 B10h/B10j fix, which only
+              // reached the other two commit paths). Uses the same shared
+              // helper as those paths now.
+              const clarifActionConfig = (pending.originalAction?.action_config ?? {}) as AlertReadbackActionConfig;
+              const clarifReadbackSuffix = buildAlertReadbackSuffix(clarifActionConfig);
               const speech = ok
                 ? reactivated
-                  ? `Your previous alert for ${data.place_name} was re-enabled — ${modeText} you arrive.`
-                  : `${data.place_name}${sourceText ? ' ' + sourceText : ''} — alert set ${modeText} you arrive.`
+                  ? `Your previous alert for ${data.place_name} was re-enabled — ${modeText} you arrive.${clarifReadbackSuffix}`
+                  : `${data.place_name}${sourceText ? ' ' + sourceText : ''} — alert set ${modeText} you arrive.${clarifReadbackSuffix}`
                 : `Couldn't save the rule — something went wrong.`;
               const cards = ok && ruleId
                 ? [{ ruleId, placeName: data.place_name, address: data.address ?? null, oneShot }]
@@ -3967,28 +3971,13 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                       (insertErr as any)?.code === '23505' ||
                       /duplicate|already exists|conflict/i.test(insertErr?.message ?? '');
                     const displayName = formatLocationLabel(spokenLabel) || data.place_name;
-                    // B10h readback fix (2026-07-17) — same fix as the pendingLocationRef
-                    // commit path above: name the recipient + message when this alert
-                    // targets a third party, instead of a generic "Alert set" line.
-                    const memoryHitRecipient = String((actionConfig as any).to_name || (actionConfig as any).to || '').trim();
-                    const memoryHitBody = String((actionConfig as any).body ?? '').trim();
-                    // B10j readback fix (2026-07-17) — same Rule 12 gap as the
-                    // pendingLocationRef commit path above: a self-primary alert's
-                    // third-party send lives in task_actions, not to_name/to.
-                    const memoryHitTaskActions = Array.isArray((actionConfig as any).task_actions) ? (actionConfig as any).task_actions : [];
-                    const memoryHitRecipientSuffix = memoryHitRecipient
-                      ? (memoryHitBody ? ` ${memoryHitRecipient} will get "${memoryHitBody}".` : ` ${memoryHitRecipient} will be notified.`)
-                      : memoryHitTaskActions
-                          .map((ta: any) => {
-                            const taName = String(ta?.to_name ?? '').trim();
-                            const taBody = String(ta?.body ?? '').trim();
-                            if (!taName) return '';
-                            return taBody ? ` ${taName} will get "${taBody}".` : ` ${taName} will be notified.`;
-                          })
-                          .filter(Boolean)
-                          .join('');
+                    // B10h/B10j readback fix (2026-07-17), B10o readback fix
+                    // (2026-07-21) — name both the third-party recipient/message
+                    // and the user's own self-task via the shared helper in
+                    // lib/alertReadback.ts, instead of a generic "Alert set" line.
+                    const memoryHitReadbackSuffix = buildAlertReadbackSuffix(actionConfig as AlertReadbackActionConfig);
                     turnSpeechOverride = insertSucceeded
-                      ? `Alert set — ${modeText} you arrive at ${displayName}.${memoryHitRecipientSuffix}`
+                      ? `Alert set — ${modeText} you arrive at ${displayName}.${memoryHitReadbackSuffix}`
                       : isDuplicate
                         ? `You already have an alert set for ${displayName}.`
                         : `I couldn't save the alert — please try again in a moment.`;

@@ -97,6 +97,7 @@ import { session2026_07_17_f5cTaskActionsResolutionTests } from './catalogue/ses
 import { session2026_07_17_b10gLocationTaskActionsFixTests } from './catalogue/session-2026-07-17-b10g-location-taskactions-fix';
 import { session2026_07_17_b10hLocationContentGuardTests } from './catalogue/session-2026-07-17-b10h-location-content-guard';
 import { session2026_07_17_b10jLocationCompoundSelfReminderTests } from './catalogue/session-2026-07-17-b10j-location-compound-self-reminder';
+import { session2026_07_21_b10oLocationReadbackTests } from './catalogue/session-2026-07-21-b10o-location-readback';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -229,6 +230,7 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_07_17_b10gLocationTaskActionsFixTests,
   ...session2026_07_17_b10hLocationContentGuardTests,
   ...session2026_07_17_b10jLocationCompoundSelfReminderTests,
+  ...session2026_07_21_b10oLocationReadbackTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -330,6 +332,22 @@ async function main(): Promise<void> {
     console.error('Set them in .env (project root) or tests/.env');
     process.exit(2);
   }
+
+  // Loudly announce which environment this run targets — SUPABASE_URL has no
+  // built-in staging/production label, and defaulting to the wrong one gives
+  // false confidence that a gate covered an environment it never touched
+  // (see 2026-07-20 incident: Gate 1 passed against production while the
+  // fix under test had only been deployed to staging).
+  const ENV_LABELS: Record<string, string> = {
+    'xugvnfudofuskxoknhve': 'STAGING',
+    'hhgyppbxgmjrwdpdubcx': 'PRODUCTION',
+  };
+  const projectRefMatch = supabaseUrl.match(/https:\/\/([a-z0-9]+)\.supabase\.co/);
+  const projectRef = projectRefMatch ? projectRefMatch[1] : '';
+  const envLabel = ENV_LABELS[projectRef] ?? 'UNKNOWN';
+  console.log('════════════════════════════════════════════════════════');
+  console.log(`  Testing against: ${envLabel}  (${projectRef || supabaseUrl})`);
+  console.log('════════════════════════════════════════════════════════');
 
   const baseCtx: TestContext = {
     supabaseUrl,
