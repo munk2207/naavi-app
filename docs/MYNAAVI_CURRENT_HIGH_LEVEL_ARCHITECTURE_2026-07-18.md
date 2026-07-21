@@ -1,6 +1,6 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.07.18.3 (date-and-revision format: 3rd revision recorded on this date — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc)
+**Architecture Version:** 2026.07.18.4 (date-and-revision format: 4th revision recorded on this date — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc). This revision is T1a's Phase 4 output: corrects the "Action Rules — execution/firing" row (§2) to reflect an intra-Shared-Core duplication proven by three incidents, cross-references ADR 0003 from the "Reminders" row, and adds two previously-missing rows to §5a's Duplication Inventory. See `docs/T1A_PHASE2_CHANGE_PLAN_2026-07-18.md` and `docs/T1A_PHASE5_EVIDENCE_2026-07-18.md` for the full audit trail.
 **Diagram Version:** 1 (the Data Flow diagram in §6 — increments independently of the document's overall version when the diagram itself changes)
 **Last Verified:** 2026-07-18
 **Verified Against:** direct code inspection of `munk2207/naavi-app` and `munk2207/naavi-voice-server`, both at their `main` branch HEAD as of the date above
@@ -57,7 +57,7 @@ For each capability, where the authoritative implementation actually lives — v
 | Capability | Authoritative implementation | Status |
 |---|---|---|
 | Contacts / name resolution | `lookup-contact`, `resolve-recipient` (Shared Core) | Genuinely shared — voice calls the real Edge Functions, no inline reimplementation |
-| Action Rules — execution/firing | `evaluate-rules`, `report-location-event` (Shared Core) | Genuinely shared — single non-duplicated functions, confirmed by exhaustive grep of the voice codebase |
+| Action Rules — execution/firing | `evaluate-rules`, `report-location-event` (Shared Core) | Shared in the sense that voice has no separate copy of this logic (confirmed by exhaustive grep of the voice codebase) — but **internally duplicated**: `evaluate-rules` and `report-location-event` are two independently-maintained Shared-Core functions with overlapping fan-out logic (channel selection, self-alert detection, `task_actions` execution) and only a code comment ("keep both in sync") holding them together. Proven by three separate drift incidents (F5c's partial recipient-resolution fix, B10d's channel-preference gap, B10g's `task_actions` gap) — see ADR 0005 |
 | `task_actions` (third-party sends attached to an alert) | Mobile-only creation, Shared Core execution | Voice cannot currently create this — its own action-creation path never populates the field |
 | Notification sending (SMS/email) | `send-sms`, `send-email` (Shared Core) | Genuinely shared senders — every alert-firing function funnels through these |
 | Global Search | `global-search` (Shared Core) | Genuinely shared — voice calls the same 10-adapter search |
@@ -70,7 +70,7 @@ For each capability, where the authoritative implementation actually lives — v
 | Gmail — live/recent read | Duplicated | Both sides independently call the Gmail API directly for "what's new" reads |
 | Drive saves (notes, transcripts, lists) | `save-to-drive` (Shared Core) | Genuinely shared — both mobile client and voice call it |
 | Document harvesting (attachments → Drive) | Mobile-backend only | Voice never calls this; it's wired into the email-sync pipeline only |
-| Reminders (`reminders` table) | Voice-only in current practice | Mobile's equivalent requests are redirected into `action_rules` instead of the `reminders` table; a mobile client function that writes to `reminders` exists but is dead code (never called) — see `docs/adr/0003-voice-reminders-write-path-diverges-from-mobile.md` |
+| Reminders (`reminders` table) | Voice-only in current practice | Mobile's equivalent requests are redirected into `action_rules` instead of the `reminders` table; a mobile client function that writes to `reminders` exists but is dead code (never called). **This is a documented divergence, not a settled design** — ADR 0003 recommends bringing voice's write path in line with mobile's `action_rules` redirect rather than treating this as permanent; tracked as holding-list item `B10l` — see `docs/adr/0003-voice-reminders-write-path-diverges-from-mobile.md` |
 | Geofencing (background location) | Mobile-only, by nature | A phone call has no background location; this capability structurally cannot exist on voice |
 | **Action Rules — creation (the classifier)** | **Duplicated, two independent implementations** | The single most important duplication in the system — see §2a below |
 | Conversation/turn state (pending confirmations) | Duplicated, two independent state machines | Mobile and voice each track "what are we in the middle of" separately; neither reads the other's state |
@@ -138,20 +138,25 @@ Per `docs/AI_DEVELOPMENT_GOVERNANCE.md` §4, these areas require technical revie
 
 Ranked by priority. Debt that isn't visible stops being tracked and becomes a permanent trap — this section exists specifically so that doesn't happen here.
 
-**Priority 1 — Action Rule classifier duplicated.** Mobile (`naavi-chat`'s classifier + `buildActionConfirm`) and voice (its own Claude reasoning loop) each independently decide what a new alert should be, using separately-written logic. This is the duplication that directly caused B10k (a mobile-side fix that never reached voice callers). No unification planned. See `docs/adr/0001-action-rules-classifier-duplication-accepted.md` for the Architecture Exception record.
+**Priority 1 — Action Rule classifier duplicated.** Mobile (`naavi-chat`'s classifier + `buildActionConfirm`) and voice (its own Claude reasoning loop) each independently decide what a new alert should be, using separately-written logic. This is the duplication that directly caused B10k (a mobile-side fix that never reached voice callers). No unification planned — formally accepted as an Architecture Exception, dated, reviewable 2027-07-18 or at the next Architecture Audit Trigger. See `docs/adr/0001-action-rules-classifier-duplication-accepted.md`.
 
-**Priority 2 — Calendar reads duplicated.** Both sides independently call the Google Calendar API for live event data, instead of sharing one fetch. No unification planned. See `docs/adr/0002-calendar-reads-remain-duplicated.md`.
+**Priority 1b — Action Rules execution (fan-out) duplicated intra-Shared-Core.** `evaluate-rules` and `report-location-event` independently implement overlapping fan-out logic (channel selection, self-alert detection, `task_actions` execution) for different trigger types, with only a code comment enforcing "keep both in sync." Proven by three confirmed drift incidents (F5c's partial fix, B10d's channel-preference gap, B10g's `task_actions` gap) — found during T1a (Architecture Integrity Audit, 2026-07-18). No full unification planned — the narrower "extract the specific drifted piece into a shared module" pattern (B10g's `_shared/task_actions.ts`) is the accepted approach instead. See `docs/adr/0005-action-rules-execution-fanout-duplication-accepted.md`.
 
-**Priority 3 — Gmail reads duplicated.** Both sides independently call the Gmail API for "what's new" reads — separate from the genuinely-shared `sync-gmail` background cron. No unification planned.
+**Priority 2 — Calendar reads duplicated.** Both sides independently call the Google Calendar API for live event data, instead of sharing one fetch. No unification planned — formally accepted as an Architecture Exception, dated, reviewable 2027-07-18 or at the next Architecture Audit Trigger. See `docs/adr/0002-calendar-reads-remain-duplicated.md`.
 
-**Priority 4 — Conversation state duplicated.** Mobile and voice each track pending-confirmation state independently, in incompatible ways (different runtimes, different session models — this is architecturally difficult to unify, not just unscheduled). No unification planned.
+**Priority 3 — Gmail reads duplicated.** Both sides independently call the Gmail API for "what's new" reads — separate from the genuinely-shared `sync-gmail` background cron. Voice itself has two independent internal call sites, not just one vs. mobile's one. No unification planned — formally accepted as an Architecture Exception. See `docs/adr/0006-gmail-live-reads-remain-duplicated.md`.
+
+**Priority — List reads duplicated (previously unranked).** Both sides independently query the `lists` table directly (different client mechanisms, same pattern) instead of sharing one read path, even though list *writes* already go through the shared `manage-list` function. No unification planned — formally accepted as an Architecture Exception. See `docs/adr/0007-list-reads-remain-duplicated.md`.
+
+**Priority 4 — Conversation state duplicated.** Mobile and voice each track pending-confirmation state independently, in incompatible ways (different runtimes, different session models). Unlike Priorities 1/1b/2/3/List reads, this one has a substantive technical reason to remain duplicated (no shared cross-runtime session layer exists for either side to unify into) rather than simply being unexamined debt — formally accepted as an Architecture Exception on those grounds. See `docs/adr/0008-conversation-turn-state-remains-duplicated.md`.
+
+**Priority 5 — Reminders write-path divergence.** Voice writes directly to the `reminders` table; mobile redirects the same request into `action_rules` instead (for a real, documented reason — Alerts-screen visibility). Voice's side has no equivalent documented reasoning and most likely predates mobile's redirect. Unlike the other priorities above, this one is **not** formally accepted — ADR 0003 recommends bringing voice's path in line with mobile's, and it is tracked as its own fix candidate, holding-list item `B10l`, not an indefinite Exception. See `docs/adr/0003-voice-reminders-write-path-diverges-from-mobile.md`.
 
 ### 5a. Full Duplication Inventory
 
 | Capability | Shared | Duplicated | Planned to unify |
 |---|---|---|---|
 | Contacts / name resolution | ✅ | | |
-| Action Rules execution (firing) | ✅ | | |
 | Notification sending | ✅ | | |
 | Global Search | ✅ | | |
 | Claude system prompt (non-classifier) | ✅ | | |
@@ -159,11 +164,13 @@ Ranked by priority. Debt that isn't visible stops being tracked and becomes a pe
 | Calendar writes | ✅ | | |
 | Gmail background sync | ✅ | | |
 | Drive saves | ✅ | | |
-| **Action Rules creation (classifier)** — Priority 1 | | ✅ | Not scheduled — no plan exists yet |
-| Calendar reads — Priority 2 | | ✅ | Not scheduled |
-| Gmail live reads — Priority 3 | | ✅ | Not scheduled |
-| List reads | | ✅ | Not scheduled |
-| Conversation/turn state — Priority 4 | | ✅ | Not scheduled — architecturally difficult (different runtimes, different session models) |
+| **Action Rules creation (classifier)** — Priority 1 | | ✅ | Not scheduled — Accepted as Architecture Exception (ADR 0001), dated, review 2027-07-18 or next Audit Trigger |
+| **Action Rules execution (fan-out), intra-Shared-Core** — Priority 1b | | ✅ | Not fully scheduled — Accepted as Architecture Exception (ADR 0005); narrower per-drift extraction pattern (B10g's `_shared/task_actions.ts`) is the accepted ongoing approach, review 2027-07-18 or next Audit Trigger. **Corrected 2026-07-18 (T1a):** this row previously appeared only in the ✅ Shared section above, worded "genuinely shared" — true only for the mobile-vs-voice axis; the intra-Shared-Core duplication between `evaluate-rules` and `report-location-event` was unstated until this audit |
+| Calendar reads — Priority 2 | | ✅ | Not scheduled — Accepted as Architecture Exception (ADR 0002), dated, review 2027-07-18 or next Audit Trigger |
+| Gmail live reads — Priority 3 | | ✅ | Not scheduled — Accepted as Architecture Exception (ADR 0006), dated, review 2027-07-18 or next Audit Trigger |
+| List reads | | ✅ | Not scheduled — Accepted as Architecture Exception (ADR 0007), dated, review 2027-07-18 or next Audit Trigger |
+| Conversation/turn state — Priority 4 | | ✅ | Not scheduled — Accepted as Architecture Exception (ADR 0008) for a substantive technical reason (no shared cross-runtime session layer exists), not just unprioritized debt; review 2027-07-18 or next Audit Trigger |
+| **Reminders write-path divergence** — Priority 5 (**new row, was missing despite having ADR 0003**) | | ✅ | **Not** an accepted Exception — ADR 0003 recommends a fix (align voice's write path with mobile's `action_rules` redirect); tracked as holding-list item `B10l` |
 | `task_actions` on location alerts, real-world reach | | ✅ (voice literally cannot produce this input) | Deferred pending a production-promotion or voice-staging decision (see Appendix) |
 
 **Reading this table:** every ✅ in the "Duplicated" column is a place where a fix applied to one side silently does not apply to the other, and nothing in the codebase enforces that they stay in sync. This has already caused at least four confirmed incidents in this project's history (see Appendix's T1a reference) — it is the single highest-leverage category of future bug.
@@ -242,5 +249,7 @@ this document must be updated in the same implementation — the same commit or 
 This reference was written 2026-07-18, immediately after a session that surfaced exactly the risk this document is meant to prevent: a governance document confidently claimed a classifier fix was "shared across mobile and voice, no voice-server change needed" — a claim that turned out to be false when actually checked against the voice codebase. That specific gap is tracked as **B10k** in `docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md` (Tier 1, top of the priority queue as of this writing) — the fix exists in mobile's Shared-Core-adjacent prompt file, but has not been promoted to the production environment voice actually runs against.
 
 The broader pattern — features added to one of two independently-maintained implementations and never mirrored to the other — is tracked as **T1a** (architecture integrity audit) in the same holding list, with four confirmed instances at the time of writing (recipient resolution, channel-preference handling, `task_actions` execution, and the alert-creation classifier itself).
+
+**Update, 2026-07-18 (T1a Phase 4 execution):** the audit's coverage check dispositioned seven items total (the four above, plus Calendar reads, Gmail live reads, and List reads, which had no confirmed incident but were verified as genuinely duplicated) and surfaced one item that wasn't previously in this table at all (Reminders write-path divergence, ADR 0003 — pre-existing but never cross-referenced here). Six are now formally Accepted Architecture Exceptions with dated review triggers (ADRs 0001, 0002, 0005, 0006, 0007, 0008); one (Reminders) is explicitly **not** accepted and is tracked as a fix candidate, holding-list item `B10l`. Full execution record: `docs/T1A_PHASE5_EVIDENCE_2026-07-18.md`.
 
 This document is authoritative until superseded by a newer verified version. Any architectural claim not reflected here must be verified directly against the code before implementation.

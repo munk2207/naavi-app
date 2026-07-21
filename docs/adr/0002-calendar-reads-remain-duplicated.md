@@ -16,9 +16,9 @@ Both `naavi-chat` and `naavi-voice-server` independently call the Google Calenda
 Architecture Exception
 Capability: Calendar live reads
 Reason: Lower severity than the classifier duplication (ADR-0001) — a stale or slightly-different read doesn't misdirect a message to a real person, it at worst shows slightly different calendar data on the two surfaces. Not yet prioritized above Priority 1.
-Owner approval: Wael (pending)
-Expiration date: none set — tied to whichever session picks up T1a
-Review date: at T1a's next scoping session, same as ADR-0001
+Owner approval: Wael, 2026-07-18 (T1a Phase 4 execution, per his explicit "Go - Phase 4")
+Expiration date: 2027-07-18
+Review date: 2027-07-18, or the next Architecture Audit Trigger (Governance §6 ADR Lifecycle), whichever comes first
 ```
 
 ## Alternatives Considered

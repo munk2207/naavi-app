@@ -18,9 +18,9 @@ What *is* being decided here, explicitly, for the first time: **the duplication 
 Architecture Exception
 Capability: Action Rules creation (classifier)
 Reason: Unifying requires either (a) voice calling mobile's naavi-chat Edge Function for every classification decision (latency impact on a live phone call unverified), or (b) voice re-implementing mobile's full classifier logic in a second, still-independently-maintained copy (the same failure mode this exception is about, just moved). Neither has been evaluated with real data yet.
-Owner approval: Wael (pending — this ADR proposes the exception, formal sign-off tracked in T1a)
-Expiration date: none set yet — must be set when T1a is scoped
-Review date: at T1a's next scoping session
+Owner approval: Wael, 2026-07-18 (T1a Phase 4 execution, per his explicit "Go - Phase 4")
+Expiration date: 2027-07-18
+Review date: 2027-07-18, or the next Architecture Audit Trigger (Governance §6 ADR Lifecycle), whichever comes first
 ```
 
 ## Alternatives Considered

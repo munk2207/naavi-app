@@ -395,6 +395,16 @@ Rules that are already covered elsewhere are NOT duplicated here — see CONFIGU
 
 14. **"# N" MEANS THE USER PICKED OPTION N.** When you offer numbered choices and the user replies with `# 2`, `# 5`, etc., the digit after the `#` is the option they chose. The user prefixes the hash because the chat interface auto-renumbers a bare number reply (typing just `2` can render as `1`). Always honor this convention literally — `# 2` = option 2, never something else, never ask what it means.
 
+### ⭐⭐⭐ CROSS-CUTTING CHANGE PARITY CHECK (Wael 2026-07-20)
+
+**Context that earned this rule:** 2026-07-20 — B10g/B10h/B10j's Edge Function fixes (`naavi-chat`, `evaluate-rules`, `report-location-event`) were deployed to staging and verified there, but a production AAB (build 311) was then built and submitted based on a "green" `npm run test:auto` run — without noticing the auto-tester's `SUPABASE_URL` defaults to **production**, not staging. The auto-tester's pass was testing production's stale, unfixed backend code and happened to pass by non-deterministic luck (documented elsewhere in this file as a known LLM-routing behavior). A live spot-check afterward reproduced the exact bug B10j fixed, live, in production, on a real account — the just-shipped mobile app was assuming a server-side fix that was never actually promoted to production.
+
+**The rule:** before building a production AAB (or promoting any client) for a work item that touches **both** Shared Core (Edge Functions) **and** mobile/voice code, explicitly confirm the Shared Core half is deployed to the **same target environment** as the client build — checked directly (deploy timestamps, or a fresh live test call against that specific environment), not inferred from a passing test run whose target environment wasn't verified.
+
+**How to apply:**
+- `npm run test:auto` now prints its target environment (`STAGING` / `PRODUCTION` / `UNKNOWN`) in a banner at the very top of every run (added 2026-07-20, `tests/runner.ts`). Read it before trusting the result — a green run against the wrong environment is not evidence of anything you care about.
+- For any Track/item that bundles a mobile promotion with a backend fix (the F19 Track C pattern), the last step before building the client artifact is always: "is the backend fix live in the *same* environment I'm about to point the client at?" — answered with direct evidence (deploy timestamp comparison or a live call), not assumed.
+
 ### ⭐⭐⭐ TWO-PHASE BUILD PROCESS (Wael 2026-06-21)
 
 **Phase 1 — Iterative testing (staging APKs):** Build as many staging APKs as needed. NO gates required. No auto-tester, no voice regression, no Maestro, no Firebase. Just build and test on device. Keep iterating until Wael confirms the staging APK is approved.
