@@ -148,8 +148,8 @@ export const session2026_05_28Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-07-02-v132-f5b-dedup-confirmation-wording',
-        `Expected version "2026-07-02-v132-f5b-dedup-confirmation-wording", got "${version}"`,
+        version === '2026-07-18-b10k-production-promotion',
+        `Expected version "2026-07-18-b10k-production-promotion", got "${version}"`,
       );
     },
   },
