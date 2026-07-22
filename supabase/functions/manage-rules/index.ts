@@ -302,6 +302,21 @@ serve(async (req) => {
     }
 
     if (body.op === 'create') {
+      // B10q — an email-trigger rule with no from_name/from_email/subject_keyword
+      // matches every incoming email instead of none (evaluate-rules treats an
+      // absent filter field as "match anything"). The chat classifier already
+      // asks a clarifying question before reaching here, but this is the actual
+      // write chokepoint — any other caller must be blocked here too.
+      if (body.trigger_type === 'email') {
+        const tc = (body.trigger_config ?? {}) as Record<string, unknown>;
+        const hasFilter = !!(tc.from_name || tc.from_email || tc.subject_keyword);
+        if (!hasFilter) {
+          return new Response(JSON.stringify({ error: 'email_alert_unscoped' }), {
+            status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
       // Service-role insert — bypasses RLS that blocks direct client writes.
       // Used by useOrchestrator for non-location SET_ACTION_RULE actions
       // (time, weather, calendar, contact_silence triggers).

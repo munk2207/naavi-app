@@ -1849,7 +1849,10 @@ function buildActionConfirm(
       const tt = String(params.trigger_type ?? '');
       if (tt === 'email') {
         if (!params.from && !params.subject_keyword) {
-          return { speech: '', display: '', actions: [], missingParam: "Who should the email be from, or what keyword should be in the subject?" };
+          // B10q — full decline+clarify wording (not a bare clarifying question),
+          // so the message itself already covers a user who insists on "all
+          // emails" without needing separate loop-detection logic.
+          return { speech: '', display: '', actions: [], missingParam: "I can't set an alert for every email — that's what your email app is already for. Who should it be from, or what should it be about?" };
         }
         const fromPart = params.from ? `from ${params.from}` : '';
         const kwPart   = params.subject_keyword ? `about "${params.subject_keyword}"` : '';
@@ -2439,6 +2442,33 @@ Deno.serve(async (req) => {
               const normalizedTC: any = typeof pendingParams.trigger_config === 'string'
                 ? (() => { try { return JSON.parse(pendingParams.trigger_config); } catch { return {}; } })()
                 : (pendingParams.trigger_config ?? {});
+              // B10q follow-up — found via manual-test prep, 2026-07-21. The
+              // classifier's PENDING_INTENT carries the email filter on
+              // pendingParams.from/subject_keyword (used above only to build
+              // fromPart/kwPart for the spoken description) but never copies
+              // it into trigger_config, which is the field actually sent to
+              // manage-rules. A correctly-specified request ("email alert
+              // from Bob") could therefore reach the DB write with an EMPTY
+              // trigger_config — before B10q's validation this silently
+              // created an unscoped, fire-on-everything rule while speaking a
+              // confident but false "Email alert from Bob set."; after B10q's
+              // validation it's correctly rejected, but for the wrong
+              // apparent reason (looks like "no filter" when the user did
+              // specify one). Fix: map the classifier's captured fields into
+              // trigger_config here, before the write, same scope as B10q
+              // (trigger_type==='email' only).
+              if (tt === 'email') {
+                if (pendingParams.from && !normalizedTC.from_name && !normalizedTC.from_email) {
+                  if (String(pendingParams.from).includes('@')) {
+                    normalizedTC.from_email = pendingParams.from;
+                  } else {
+                    normalizedTC.from_name = pendingParams.from;
+                  }
+                }
+                if (pendingParams.subject_keyword && !normalizedTC.subject_keyword) {
+                  normalizedTC.subject_keyword = pendingParams.subject_keyword;
+                }
+              }
               const _mrUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/manage-rules`;
               const _mrKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
               const _mrPayload = {
@@ -2462,11 +2492,13 @@ Deno.serve(async (req) => {
               let _mrData: any = {};
               try { _mrData = JSON.parse(_mrRawText); } catch { /* ignore */ }
               const insErr = (!_mrRes.ok || _mrData.error) ? (_mrData.error ?? 'manage-rules failed') : null;
-              const speech = insErr
-                ? `I had trouble saving that alert — please try again.`
-                : _mrData.merged
-                  ? `Done. Added to your existing reminder at that time.`
-                  : `Done. ${desc}`;
+              const speech = insErr === 'email_alert_unscoped'
+                ? `I can't set an alert for every email — that's what your email app is already for. Who should it be from, or what should it be about?`
+                : insErr
+                  ? `I had trouble saving that alert — please try again.`
+                  : _mrData.merged
+                    ? `Done. Added to your existing reminder at that time.`
+                    : `Done. ${desc}`;
               if (insErr) console.error(`[timing] ${elapsed()} | SET_ACTION_RULE manage-rules failed: ${insErr}`);
               else console.log(`[timing] ${elapsed()} | SET_ACTION_RULE manage-rules succeeded | merged=${!!_mrData.merged}`);
               return jsonResponse({ rawText: JSON.stringify({ speech, display: speech, actions: [], pendingThreads: [] }) });
@@ -2645,12 +2677,17 @@ Deno.serve(async (req) => {
     }
 
     // ── EMAIL ALERT pre-Haiku bypass ───────────────────────────────────────────
-    // "Alert me when [an] email arrives from X" / "Alert me when X emails me"
+    // "Alert me when/if [an] email arrives from X" / "Alert me when X emails me"
     // Haiku consistently classifies these as LIST_RULES (reads "alert me" as
     // "show me my alerts"). Intercept before classification and route directly
     // to buildActionConfirm(SET_ACTION_RULE, email).
+    // B10q follow-up (2026-07-21) — found via real mobile manual test: "Alert
+    // me IF i get emails" fell through this bypass (only matched "when") to
+    // Haiku's known LIST_RULES misclassification, so the user got "You don't
+    // have any alerts set up yet" instead of ever reaching B10q's validation/
+    // decline. Broadened to also match "if"/"whenever".
     {
-      const _eaRe = /^\s*(?:alert\s+me|notify\s+me|let\s+me\s+know)\s+when\b.{0,80}\bemail/is;
+      const _eaRe = /^\s*(?:alert\s+me|notify\s+me|let\s+me\s+know)\s+(?:when|if|whenever)\b.{0,80}\bemail/is;
       if (_eaRe.test(userText)) {
         let _eaFrom = '';
         let _eaSubject = '';
@@ -2667,10 +2704,22 @@ Deno.serve(async (req) => {
         if (_eaFrom)    _eaParams.from             = _eaFrom;
         if (_eaSubject) _eaParams.subject_keyword   = _eaSubject;
         const _eaConfirm = buildActionConfirm('SET_ACTION_RULE', _eaParams, typeof bodyClientTimezone === 'string' ? bodyClientTimezone : undefined);
-        if (_eaConfirm.speech) {
+        // B10q follow-up (2026-07-21) — found via real mobile manual test:
+        // this bypass only checked `.speech`, but the no-filter case (exactly
+        // the case B10q's decline exists for) returns speech:'' and puts the
+        // real message in `.missingParam` instead (same pattern consumed
+        // elsewhere, e.g. line ~3176). The empty-filter case therefore always
+        // fell through this bypass to Haiku's non-deterministic classifier —
+        // which is exactly the failure mode this bypass exists to prevent.
+        const _eaSpeech = _eaConfirm.speech || (_eaConfirm.missingParam && _eaConfirm.missingParam !== '__FALLTHROUGH__' ? _eaConfirm.missingParam : '');
+        if (_eaSpeech) {
           const _eaPi = JSON.stringify({ intent: 'SET_ACTION_RULE', level: 'action', confidence: 'high', params: _eaParams });
-          console.log(`[timing] ${elapsed()} | EMAIL_ALERT bypass from="${_eaFrom}" subject="${_eaSubject}"`);
-          return jsonResponse({ rawText: JSON.stringify({ speech: _eaConfirm.speech, display: `${_eaConfirm.display}\n<!--PENDING_INTENT:${_eaPi}-->`, actions: [], pendingThreads: [] }) });
+          console.log(`[timing] ${elapsed()} | EMAIL_ALERT bypass from="${_eaFrom}" subject="${_eaSubject}" viaMissingParam=${!_eaConfirm.speech}`);
+          // Unscoped requests (missingParam path) must not carry a
+          // PENDING_INTENT — there is nothing pending to confirm, only a
+          // decline. Only attach it when there's a real proposal (speech set).
+          const _eaDisplay = _eaConfirm.speech ? `${_eaConfirm.display}\n<!--PENDING_INTENT:${_eaPi}-->` : _eaSpeech;
+          return jsonResponse({ rawText: JSON.stringify({ speech: _eaSpeech, display: _eaDisplay, actions: [], pendingThreads: [] }) });
         }
       }
     }
