@@ -38,23 +38,6 @@ async function retrieveKey(key: string): Promise<string | null> {
   return await SecureStore.getItemAsync(key);
 }
 
-// ─── Demo Mode (V282) ───────────────────────────────────────────────────────
-// Demo Mode skips the "say yes to confirm" step and auto-sends drafts so a
-// compound question can be recorded as one smooth uncut take. It is gated to
-// wael.aggan@gmail.com in the Settings UI AND re-checked server-side in
-// naavi-chat — a non-Wael account can never activate it even if the flag leaks.
-const DEMO_MODE_KEY = 'naavi_demo_mode';
-export const DEMO_MODE_EMAIL = 'wael.aggan@gmail.com';
-
-export async function setDemoMode(on: boolean): Promise<void> {
-  await storeKey(DEMO_MODE_KEY, on ? '1' : '0');
-}
-
-export async function getDemoMode(): Promise<boolean> {
-  const v = await retrieveKey(DEMO_MODE_KEY);
-  return v === '1';
-}
-
 // ─── User profile ─────────────────────────────────────────────────────────────
 
 /** Save the user's own name — used to auto-label conversations and by voice/edge functions */
@@ -597,7 +580,6 @@ export async function sendToNaavi(
   briefItems: BriefItem[] = [],
   language: 'en' | 'fr' = 'en',
   diagSessionId?: string,
-  demoMode = false,
 ): Promise<NaaviResponse> {
   const log = (step: string, payload?: Record<string, unknown>) => {
     if (diagSessionId) remoteLog(diagSessionId, step, payload);
@@ -685,7 +667,6 @@ export async function sendToNaavi(
         briefItems,
         healthContext,
         knowledgeContext,
-        demoMode,
       },
       diagSessionId,
     );

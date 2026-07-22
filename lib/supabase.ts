@@ -238,7 +238,6 @@ export interface NaaviCallContext {
   briefItems: any[];
   healthContext: string;
   knowledgeContext: string;
-  demoMode?: boolean;
 }
 
 export async function callNaaviEdgeFunction(
@@ -289,9 +288,6 @@ export async function callNaaviEdgeFunction(
     health_context: ctx.healthContext,
     knowledge_context: ctx.knowledgeContext,
     ...(userIdForBody ? { user_id: userIdForBody } : {}),
-    // V282 — Demo Mode flag. naavi-chat re-checks the caller's email before
-    // honoring it, so a leaked flag from a non-Wael account does nothing.
-    ...(ctx.demoMode ? { demo_mode: true } : {}),
     // Phone's local timezone + current time — used by get-naavi-prompt to
     // compute "is this time in the past?" correctly for users outside Toronto.
     client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,

@@ -17,7 +17,7 @@ import * as Speech from 'expo-speech';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
-import { sendToNaavi, getDemoMode, type NaaviMessage, type NaaviAction, type BriefItem, type GlobalSearchResult } from '@/lib/naavi-client';
+import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem, type GlobalSearchResult } from '@/lib/naavi-client';
 import { isVoiceEnabledSync } from '@/lib/voicePref';
 import { saveContact, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
 import { invokeWithTimeout, queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
@@ -2060,7 +2060,7 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       // that path failed most items (5-of-6 in V281 testing) and the focused
       // per-item UI never synced reliably. The whole compound question now goes
       // to Claude in one turn — Claude lays the items out as a numbered list and
-      // executes them after one confirmation (or immediately in Demo Mode). This
+      // executes them after one confirmation. This
       // is the path Wael verified working 2026-06-21 (all 6 actions, one "Yes").
 
       // ── STEP 1: Person context lookup (async) ──────────────────────────────────
@@ -2311,10 +2311,8 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       }
 
       stepLog('pre-naavi-chat done');
-      // V282 — Demo Mode (gated to wael.aggan@gmail.com, re-checked server-side).
-      const demoMode = await getDemoMode().catch(() => false);
       const [response, knowledgeResult] = await Promise.all([
-        sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language, diagSession, demoMode),
+        sendToNaavi(enrichedMessage, historyRef.current, briefRef.current, language, diagSession),
         isBroadQuery ? fetchAllKnowledge(100) : Promise.resolve([]),
       ]);
       stepLog('naavi-chat returned');
@@ -4647,26 +4645,6 @@ const oneShot = pending.originalAction?.one_shot ?? true;
     setStatus('idle');
 
   }, [language]);
-
-  // V282 — Demo Mode auto-send. When a confirmable draft (SMS/email) creates a
-  // pending action AND Demo Mode is on, fire confirmPending automatically so
-  // the message sends without a Send tap — needed for an uncut demo recording.
-  // Demo Mode is gated to wael.aggan@gmail.com in Settings, so the flag can
-  // only be set on Wael's own device.
-  useEffect(() => {
-    if (!pendingAction) return;
-    let cancelled = false;
-    getDemoMode()
-      .then(on => {
-        if (on && !cancelled && pendingActionRef.current) {
-          // Small delay so the draft card renders on screen before it flips to
-          // "sent" — keeps the demo readable.
-          setTimeout(() => { if (!cancelled) confirmPending(); }, 700);
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [pendingAction, confirmPending]);
 
   const cancelPending = useCallback(async (speechOverride?: string) => {
     pendingActionRef.current = null;
