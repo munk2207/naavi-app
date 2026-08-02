@@ -169,7 +169,7 @@ export async function signInWithGoogle(): Promise<void> {
     options: {
       redirectTo,
       skipBrowserRedirect: true,
-      scopes: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/tasks.readonly https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/contacts',
+      scopes: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.insert https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/tasks.readonly https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/contacts',
       queryParams: { access_type: 'offline', prompt: 'consent' },
     },
   });
@@ -192,7 +192,8 @@ export async function signOut(): Promise<void> {
 // Never decrement. History:
 //   1 — initial scopes (calendar, gmail, drive, contacts.readonly)
 //   2 — added contacts write scope for MyNaavi Community feature (2026-05-29)
-export const REQUIRED_OAUTH_SCOPE_VERSION = 2;
+//   3 — added gmail.insert for YouTube demo seed-data script (2026-08-01)
+export const REQUIRED_OAUTH_SCOPE_VERSION = 3;
 const SCOPE_VERSION_KEY = 'naavi_oauth_scope_version';
 
 /**
