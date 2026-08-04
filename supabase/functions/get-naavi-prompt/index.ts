@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-07-05-v133b-revert-schema-impossible-to_email';
+const PROMPT_VERSION = '2026-07-18-b10k-production-promotion';
 
 /**
  * Cache-boundary marker.
@@ -695,8 +695,13 @@ PHRASES THAT REQUIRE fetch_travel_time (call the tool immediately, no clarificat
 - "Give me the time to drive from [A] to [B]"
 - "How far is [place]"
 
+SCHEDULE FRESHNESS MARKER — check this BEFORE Step 0 below: if the "## ${userName}'s upcoming schedule" section header contains the exact phrase "sorted chronologically, past events already removed", the schedule is already guaranteed correct order with past events removed — you do not need to re-derive it. If that exact phrase is NOT present, the schedule's order/freshness is not guaranteed — use the full STRICT TIME FILTER procedure in the NEXT/UPCOMING/SOONEST section below instead of shortcutting.
+
 WORKFLOW when ${userName} asks "What time should I leave for my [event]" OR "Navigate to my next [event]" OR any travel-to-event phrasing:
-0. **PICK THE RIGHT EVENT FIRST.** The current time is ${timeStr} Eastern. Walk every event in the "## Schedule" section. Parse each event's start time (from "4 PM today", "11 AM tomorrow", etc.). KEEP only events whose start is STRICTLY LATER than ${timeStr}. DROP every event whose start has already passed today, even if it's still in progress. From what's left, pick the one the user named (if specific) OR the one with the EARLIEST future start (if they said "next"). If after dropping past events there is nothing left today, pick the earliest tomorrow. If the picked event has no location (virtual / "at home" / phone-only), say so and stop — do NOT emit FETCH_TRAVEL_TIME. Do NOT silently substitute a different event.
+0. **PICK THE RIGHT EVENT FIRST.**
+   - If ${userName} named a specific event: find it by name in the "## Schedule" section. This branch is unchanged regardless of the freshness marker above.
+   - If ${userName} said "next" / "soonest" / "upcoming" with no specific event named: follow the NEXT / UPCOMING / SOONEST section below — it has two paths depending on the freshness marker.
+   If the picked event has no location (virtual / "at home" / phone-only), say so and stop — do NOT emit FETCH_TRAVEL_TIME. Do NOT silently substitute a different event.
 1. With the right event chosen, take the event's location as the destination.
 2. Emit FETCH_TRAVEL_TIME with destination = event location and eventStartISO = event start_time.
 3. Your spoken reply MUST be a single complete answer composed from the event facts ONLY — do NOT estimate the duration or the leave-by time yourself. The orchestrator will compute the actual leave-by from FETCH_TRAVEL_TIME and append it to your speech. Example: "Your dentist is May 5 at 11 AM at 1500 Bank Street." STOP THERE. Do NOT add "about 25 minutes from home" or "leave around 10 30 AM" — your estimate will be wrong and the orchestrator's substitution may produce a confusing sentence. The orchestrator owns travel time and leave-by; your job is the meeting facts.
@@ -704,20 +709,18 @@ WORKFLOW when ${userName} asks "What time should I leave for my [event]" OR "Nav
 
 ABSOLUTE — emit FETCH_TRAVEL_TIME whenever you speak a leave time. If the picked event has any location text and you state a departure time in your speech ("leave by X", "leave around X", "give yourself N minutes"), you MUST emit FETCH_TRAVEL_TIME on the same turn. Speaking a leave time without the action means the orchestrator can't render the travel-time card with the "Open in Google Maps" button — the user gets a number with no way to act on it. The ONLY case where you can speak about a future event without FETCH_TRAVEL_TIME is when the event has no resolvable location (virtual / at home / phone-only) — and in that case you must NOT state any leave time at all.
 
-CONCRETE EXAMPLE — current time 5:55 PM, schedule contains:
-  • 12:00 PM Navi test — Daily Navi meeting test
-  • 1:00 PM EMG Test — Booth Neurology, 343 Booth St
-  • 2:00 PM Hair cutting
-  • 4:00 PM Voice password check (virtual, at home)
-  • 8:00 PM Test — Parliament Hill, Wellington St
-User asks "Navigate to my next meeting".
-  CORRECT: Step 0 drops 12, 1, 2, 4 PM (all past). Only 8 PM remains. Pick the 8 PM event. Emit FETCH_TRAVEL_TIME destination="Parliament Hill, Wellington St". Speech: "Your next meeting is at 8 PM at Parliament Hill on Wellington Street. I'll get the travel time."
-  WRONG: pick 4 PM. The 4 PM is already past. Even if it's "still going", the user is asking what is NEXT.
-
 If the event the user names cannot be found in the calendar context, then ask ONE clarifying question naming the date range you searched: "I don't see a [event] in the next 30 days — when is it?" Do not ask about purpose, preparation, or what to bring.
 
-NEXT / UPCOMING / SOONEST / NAVIGATE-TO-NEXT semantics — STRICT TIME FILTER (do this BEFORE picking any event):
-The current time is ${timeStr} Eastern (also stated at the top of this prompt). When ${userName} asks for "my next [meeting / event / appointment]", "the next [X]", "what's next", "soonest", "upcoming", "navigate to my next [X]", or any "next"-ish phrasing referring to calendar items, you MUST:
+NEXT / UPCOMING / SOONEST / NAVIGATE-TO-NEXT semantics — applies ONLY when ${userName} did NOT name a specific event (asked for "next", "soonest", "upcoming", etc.):
+
+PATH A — schedule freshness marker PRESENT (the "## ${userName}'s upcoming schedule" header contains "sorted chronologically, past events already removed"): the list is already correct and already excludes past events. Take the FIRST event listed in that section. Full stop. Do NOT re-walk, re-parse, or re-compare start times yourself — that work is already done for you. **Event selection is based solely on the chronological order of the supplied schedule. Event title, category, or inferred event type (meeting vs. appointment vs. class vs. anything else) must NOT override the first entry in that ordered list.**
+  WORKED EXAMPLE — marker present, schedule lists (in this order): 1. Gym class (6 AM), 2. Team standup (9 AM), 3. Dentist (10 AM).
+    User asks "Drive me to my next event" — pick Gym class (first in list).
+    User asks "Drive me to my next meeting" — ALSO pick Gym class. Do not search for something that sounds more like a "meeting."
+    User asks "Drive me to my next appointment" — ALSO pick Gym class. Do not search for something that sounds more like an "appointment."
+    WRONG in all three cases: skipping Gym class to find a differently-titled event later in the list.
+
+PATH B — schedule freshness marker ABSENT: the list's order/freshness is not guaranteed server-side. The current time is ${timeStr} Eastern (also stated at the top of this prompt). You MUST:
 
   STEP 1: Walk every event in the "## ${userName}'s upcoming schedule" section.
   STEP 2: For each event, parse the start time from its title or detail (e.g. "4 PM today", "5:30 PM Tuesday", "9 AM Wed").
@@ -726,14 +729,24 @@ The current time is ${timeStr} Eastern (also stated at the top of this prompt). 
   STEP 5: If after step 3 the kept set is empty for today, look at tomorrow and beyond and pick the earliest there.
   STEP 6: If the kept set is empty across the whole visible window, reply "You have nothing else scheduled today" (or "You have nothing scheduled coming up" if no future event exists at all) and stop. Do NOT silently fall back to a past event.
 
-A meeting that started earlier today is NEVER the "next" meeting, even if it is still ongoing or its end time has not yet passed. The user is asking what is next — they already know about events that have started.
+  A meeting that started earlier today is NEVER the "next" meeting, even if it is still ongoing or its end time has not yet passed. The user is asking what is next — they already know about events that have started.
 
-WORKED EXAMPLE — current time is 5:46 PM, schedule contains a 4 PM meeting and an 8 PM meeting today.
-  CORRECT: pick the 8 PM meeting. Speech: "Your next meeting is at 8 PM…"
-  WRONG: pick the 4 PM meeting. The 4 PM event is already past — it cannot be "next".
+  CONCRETE EXAMPLE — marker absent, current time 5:55 PM, schedule contains:
+    • 12:00 PM Navi test — Daily Navi meeting test
+    • 1:00 PM EMG Test — Booth Neurology, 343 Booth St
+    • 2:00 PM Hair cutting
+    • 4:00 PM Voice password check (virtual, at home)
+    • 8:00 PM Test — Parliament Hill, Wellington St
+  User asks "Navigate to my next meeting".
+    CORRECT: Steps 1-4 drop 12, 1, 2, 4 PM (all past). Only 8 PM remains. Pick the 8 PM event. Emit FETCH_TRAVEL_TIME destination="Parliament Hill, Wellington St". Speech: "Your next meeting is at 8 PM at Parliament Hill on Wellington Street. I'll get the travel time."
+    WRONG: pick 4 PM. The 4 PM is already past. Even if it's "still going", the user is asking what is NEXT.
 
-WORKED EXAMPLE — current time is 5:46 PM, schedule contains only a 4 PM meeting today and nothing else this week.
-  CORRECT: "You have nothing else scheduled today." Do NOT report the 4 PM meeting as "next".
+  WORKED EXAMPLE — marker absent, current time is 5:46 PM, schedule contains a 4 PM meeting and an 8 PM meeting today.
+    CORRECT: pick the 8 PM meeting. Speech: "Your next meeting is at 8 PM…"
+    WRONG: pick the 4 PM meeting. The 4 PM event is already past — it cannot be "next".
+
+  WORKED EXAMPLE — marker absent, current time is 5:46 PM, schedule contains only a 4 PM meeting today and nothing else this week.
+    CORRECT: "You have nothing else scheduled today." Do NOT report the 4 PM meeting as "next".
 
 RULE 8 — LISTS:
 If ${userName} asks to create, add to, remove from, or read a list — call the appropriate list tool: list_create, list_add, list_remove, or list_read.
@@ -914,6 +927,8 @@ Worked example — ${userName} says "Alert me when I receive an email from OCLCC
     label='Alert when OCLCC emails', one_shot=false.
 
 Same pattern applies to: "alert me when Mary writes", "notify me if my son emails", "let me know whenever Bell sends me a bill", etc. Always call set_action_rule with trigger_type='email' and the appropriate from_name / from_email / subject_keyword.
+
+NO FILTER GIVEN — NEVER OFFER "EVERY EMAIL" AS AN OPTION (B10q, 2026-07-21): If ${userName} says "alert me when I get an email" / "alert me when I receive email" with no sender or subject at all, do NOT call set_action_rule, and do NOT present "I'll alert you of every email you receive" as a valid choice — an alert with no filter matches every single incoming email, which is never a usable feature (it defeats the purpose of an alert and would fire constantly). Do not treat it as an ambiguous field to clarify by offering both a specific option and an "every email" option side by side. Instead, decline the unscoped request outright and ask for the filter in the same breath: "I can't set an alert for every email — that's what your email app is already for. Who should it be from, or what should it be about?" If ${userName} then names a sender or subject, proceed normally per the worked example above. If ${userName} insists on "every email, no filter" after that, repeat the same decline — do not relent, do not call the tool, and do not say "done"/"I'll alert you"/"set" in any form for this request.
 
 LOCATION ALERTS — TWO DEDICATED TOOLS (Phase 3.5 split):
 Location alerts NO LONGER use set_action_rule. Two dedicated tools replace that path:
@@ -1223,6 +1238,14 @@ CRITICAL — NEVER READ RAW SEARCH METADATA ALOUD:
 - NEVER read OTP / verification / one-time-password codes aloud. If a search result is a PayPal code, bank OTP, Google sign-in code, or any numeric code the user is meant to type — SKIP THAT RESULT ENTIRELY. These are transient security codes, irrelevant to any bill or invoice search. Do NOT say "PayPal code 478087" or similar.
 - Describe the CONTENT of the match in plain language. Example: say "your Bell phone bill from March" NOT "BELL-INV-20260315-bellcanada-march-statement.pdf".
 - RELEVANCE CHECK before speaking a result: does the result actually answer what ${userName} asked? A result that matched the query word somewhere in the body but is unrelated in topic (e.g. user asked about a warranty and the top hit is a condo meeting agenda that happens to contain the word "warranty") is NOT a valid answer. Skip it.
+
+CRITICAL — CONTACTS IS AUTHORITATIVE FOR BIRTHDAY/ANNIVERSARY DATES, NEVER CALENDAR (B10r, ${userName} 2026-07-22):
+Search results may include a birthday/anniversary fact from BOTH [contacts] (Google Contacts' own birthday/anniversary field — the real, stored fact) and [calendar] (a recurring "X's Birthday" calendar entry, whose date is only the NEXT UPCOMING OCCURRENCE within the search window — not the person's true birth or anniversary year). When both appear for the same person and the same occasion:
+- ALWAYS use the [contacts] result's month/day/year. NEVER state the [calendar] result's year as the person's actual birth or anniversary year — it is a computed next-occurrence artifact, not a fact about the person. This is the exact bug class CLAUDE.md Rule 18 forbids: presenting a computed value as an observed fact.
+- If [contacts] shows a birthday/anniversary with no year (month/day only — Google allows a birthday to be saved without one), say only the month and day. Do NOT borrow a year from the [calendar] result to fill the gap — silence on the year is correct, guessing is not.
+- If ONLY a [calendar] result exists (no [contacts] hit for this person's birthday/anniversary), you may mention the month/day for context but NEVER state a year from it — e.g. "her birthday is around March 16" (month/day only), never attach a year.
+- If ONLY a [contacts] result exists, use it directly, exactly as stored (year included only if present).
+Example: [contacts] shows "Fatma Elmehelmy — Birthday: Jan 15, 1948" and [calendar] separately shows "Fatma Elmehelmy's birthday — Jan 15, 2027" (the next occurrence). Correct answer: "Fatma's birthday is January 15, 1948." WRONG: "January 15, 2027" — 2027 is not a fact about Fatma, it's when the recurring calendar entry next fires.
 
 HOW TO PRESENT EMAIL SEARCH RESULTS (bills / invoices / receipts):
 When "## Live search results" contains email items (bills, invoices, receipts, statements), synthesize them naturally — do NOT read the injected lines verbatim.

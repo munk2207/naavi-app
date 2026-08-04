@@ -13,6 +13,15 @@
  *
  * After this runs, all Calendar and Task lookups query Supabase — no Google
  * API calls from the browser, no token expiry issues for Robert.
+ *
+ * Ticket C (2026-08-02) — atomic sync. Pruning (deleting local rows for
+ * events no longer live on Google) now runs only if that user's
+ * reconciliation completed without an unrecovered write or fetch error —
+ * see the `syncOk` tracking below. API contract: the overall HTTP response
+ * is always 200 (matches the existing per-user-loop pattern, where one
+ * user's failure was already isolated via try/catch and did not fail the
+ * whole request) — per-user failure is reported inside `results[i]` via
+ * `sync_ok: false` and `abort_reason`, not via the response status code.
  */
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
@@ -97,6 +106,24 @@ serve(async (req) => {
       let taskCount  = 0;
       const liveIds: string[] = [];
 
+      // ── Ticket C — atomic sync ────────────────────────────────────────────────
+      // Prune must never run against an incomplete or partially-failed
+      // reconciliation — that was the root cause of the 2026-08-02 incident
+      // (writes were silently failing on a missing column while prune kept
+      // running normally, deleting rows for events that were still live).
+      // "Successful sync" for this user means: every calendar's event pages
+      // fetched completely, every event upsert succeeded, every fetched task
+      // list's pages fetched completely, and every task upsert succeeded. A
+      // task-scope-not-granted response (existing, expected, handled below)
+      // is not a failure — there's nothing to reconcile in that case.
+      let syncOk = true;
+      let abortReason: string | null = null;
+      let writeErrorCount = 0;
+      const markFailure = (reason: string) => {
+        syncOk = false;
+        if (!abortReason) abortReason = reason;
+      };
+
       // ── Calendar Events ──────────────────────────────────────────────────────
       const calListRes = await fetch(CALENDAR_LIST_API, {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -126,6 +153,7 @@ serve(async (req) => {
 
           if (!res.ok) {
             console.warn(`[sync-calendar] Calendar ${cal.id} returned ${res.status} — skipping`);
+            markFailure(`calendar ${cal.id} fetch returned ${res.status} (incomplete event list)`);
             break;
           }
 
@@ -170,7 +198,13 @@ serve(async (req) => {
               .from('calendar_events')
               .upsert(baseRow, { onConflict: 'user_id,google_event_id' });
 
-            if (!error) eventCount++;
+            if (!error) {
+              eventCount++;
+            } else {
+              writeErrorCount++;
+              console.error(`[sync-calendar] upsert failed for event ${event.id} (user ${user_id}): ${error.message}`);
+              markFailure(`event upsert failed: ${error.message}`);
+            }
           }
 
           pageToken = data.nextPageToken;
@@ -200,6 +234,7 @@ serve(async (req) => {
 
           if (!tasksRes.ok) {
             console.warn(`[sync-calendar] Task list ${list.id} returned ${tasksRes.status} — skipping`);
+            markFailure(`task list ${list.id} fetch returned ${tasksRes.status} (incomplete task list)`);
             continue;
           }
 
@@ -236,7 +271,13 @@ serve(async (req) => {
                 updated_at:  new Date().toISOString(),
               }, { onConflict: 'user_id,google_event_id' });
 
-            if (!error) taskCount++;
+            if (!error) {
+              taskCount++;
+            } else {
+              writeErrorCount++;
+              console.error(`[sync-calendar] upsert failed for task ${task.id} (user ${user_id}): ${error.message}`);
+              markFailure(`task upsert failed: ${error.message}`);
+            }
           }
         }
       } else {
@@ -245,19 +286,53 @@ serve(async (req) => {
       }
 
       // ── Prune deleted events and tasks within the sync window ────────────────
-      if (liveIds.length > 0) {
-        await adminClient
+      // Ticket C — 2026-08-02: this step may run only if reconciliation for
+      // this user completed without an unrecovered write or fetch error
+      // (syncOk). Pruning after a partial/failed sync was the exact root
+      // cause of the incident this fix addresses — the local cache would be
+      // compared against an incomplete "live" set and rows for events that
+      // are still genuinely live could be deleted. This does not make every
+      // future synchronization failure impossible; it eliminates this
+      // specific asymmetric failure mode (write failed, delete ran anyway).
+      let prunedCount: number | null = null;
+      let prunedItems: { title: string; google_event_id: string; start_time: string | null }[] = [];
+      if (!syncOk) {
+        console.warn(`[sync-calendar] user ${user_id} — prune SKIPPED. Reason: ${abortReason}`);
+      } else if (liveIds.length > 0) {
+        const { data: deleted, error: pruneError } = await adminClient
           .from('calendar_events')
           .delete()
           .eq('user_id', user_id)
           .gte('start_time', timeMin.toISOString())
           .lte('start_time', timeMax.toISOString())
-          .not('google_event_id', 'in', `(${liveIds.map(id => `"${id}"`).join(',')})`);
-        console.log(`[sync-calendar] Pruned deleted items for user ${user_id}`);
+          .not('google_event_id', 'in', `(${liveIds.map(id => `"${id}"`).join(',')})`)
+          .select('title, google_event_id, start_time');
+        if (pruneError) {
+          console.error(`[sync-calendar] user ${user_id} — prune query failed: ${pruneError.message}`);
+        } else {
+          prunedCount = deleted?.length ?? 0;
+          prunedItems = deleted ?? [];
+        }
+        console.log(`[sync-calendar] Pruned ${prunedCount ?? 0} deleted item(s) for user ${user_id}`);
+      } else {
+        prunedCount = 0;
       }
 
-      results.push({ user_id, events: eventCount, tasks: taskCount });
-      console.log(`[sync-calendar] Synced ${eventCount} events + ${taskCount} tasks for user ${user_id}`);
+      results.push({
+        user_id,
+        events: eventCount,
+        tasks: taskCount,
+        sync_ok: syncOk,
+        ...(syncOk ? {} : { abort_reason: abortReason }),
+        pruned: prunedCount,
+      });
+      console.log(
+        `[sync-calendar] user=${user_id} fetched=${liveIds.length} written=${eventCount + taskCount} ` +
+        `failed=${writeErrorCount} sync_ok=${syncOk} prune=${syncOk ? (liveIds.length > 0 ? 'ran' : 'skipped(no live ids)') : 'skipped'} ` +
+        `pruned=${prunedCount ?? 'n/a'}` +
+        (abortReason ? ` reason="${abortReason}"` : '') +
+        (prunedItems.length > 0 ? ` deleted=${JSON.stringify(prunedItems)}` : '')
+      );
 
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

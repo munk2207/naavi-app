@@ -500,6 +500,92 @@ function isCalendarReadIntent(text: string): boolean {
   return true;
 }
 
+// ── Deterministic next-event travel-time selection (Ticket B redesign, 2026-08-03) ──
+// Both the prompt-only rule and the marker-gated prompt design failed live
+// validation: Claude applied semantic type-matching ("next meeting" != "next
+// event" != "next appointment") despite an explicit prohibition against it.
+// Root cause: this decision depended on Claude following an instruction, and
+// live testing proved it sometimes doesn't. Fix: remove Claude from this one
+// decision entirely, same pattern as the B6e calendar-read bypass above —
+// deterministic code can't semantically drift the way a model can.
+//
+// Scope, explicitly (governance Phase 3 mandatory change, 2026-08-03):
+//   INTERCEPT — unnamed, generic-noun "next" travel-time requests only:
+//     "next meeting" / "next appointment" / "next event" / "my next meeting" /
+//     "drive me to my next appointment" / "when should I leave for my next
+//     meeting" / "soonest" / "upcoming" / "what's next" / "navigate to my next X".
+//   DO NOT INTERCEPT — anything naming a specific event, person, or date:
+//     "Team standup" / "Gym class" / "dentist" / "Bob meeting" /
+//     "next Tuesday meeting" / "meeting with Sarah". These stay on Claude's
+//     existing named-event branch (RULE 7, get-naavi-prompt), unchanged.
+// Single owner: this bypass owns unnamed "next" requests exclusively; Claude's
+// named-event branch owns named requests exclusively. Event selection must
+// never be performed twice — if this classifier ever matched a named
+// request, that would be a bug.
+const TRAVEL_TIME_TRIGGER_RE =
+  /\bdrive\s+me\s+to\b|\btake\s+me\s+to\b|\bhow\s+long\s+(?:to|does\s+it\s+take|will\s+it\s+take)\b|\btravel\s+time\b|\bwhat\s+time\s+(?:should|do)\s+i\s+leave\b|\bwhen\s+should\s+i\s+(?:leave|head\s+out|depart)\b|\bhow\s+early\s+do\s+i\s+need\s+to\s+(?:go|leave)\b|\bnavigate\s+to\b|\bhow\s+far\s+is\b|\bdirections?\s+to\b/i;
+
+// Requires "next" immediately followed by a generic noun (not a proper noun,
+// day name, or "with X") — this is what naturally excludes "next Tuesday
+// meeting" (next → Tuesday, not next → meeting) and "meeting with Sarah"
+// (no "next" at all) without needing named-entity detection.
+const UNNAMED_NEXT_EVENT_RE =
+  /\b(?:my\s+)?next\s+(?:meeting|appointment|event|class|thing)\b|\bsoonest\b|\bupcoming\b|\bwhat'?s\s+next\b/i;
+
+function isUnnamedNextEventTravelTimeIntent(text: string): boolean {
+  if (typeof text !== 'string' || text.length === 0) return false;
+  if (!TRAVEL_TIME_TRIGGER_RE.test(text)) return false;
+  if (!UNNAMED_NEXT_EVENT_RE.test(text)) return false;
+  return true;
+}
+
+// Builds the deterministic travel-time response for an unnamed "next" request.
+// Consumes fetchLiveCalendarEvents's existing sorted/past-filtered result
+// AS-IS — index [0] is authoritative. No additional sort, no additional
+// filter, no duplicated logic (governance Phase 3 mandatory change: single
+// source of truth). Address resolution falls back to `rawDescription` when
+// `rawLocation` is empty (fixes B11a for this path specifically — this
+// dataset's real addresses live in the calendar description field, which
+// the general `detail` formatting above never reads). Never guesses an
+// address it wasn't given.
+function buildNextEventTravelTimeResponse(
+  liveEvents: MobileBriefItem[],
+  requestedWord: string,
+): { speech: string; display: string; actions: any[] } {
+  const calendarOnly = liveEvents.filter(i => i.category === 'calendar');
+  if (calendarOnly.length === 0) {
+    const speech = "You have nothing else scheduled coming up.";
+    return { speech, display: speech, actions: [] };
+  }
+  const next = calendarOnly[0];
+  const title = next.title ?? 'Event';
+  const address = (next.rawLocation && next.rawLocation.trim())
+    ? next.rawLocation.trim()
+    : (next.rawDescription && next.rawDescription.trim())
+      ? next.rawDescription.trim()
+      : null;
+
+  // Time label for speech, from the same detail string already built for display.
+  const timeMatch = (next.detail ?? '').match(/^(\w+\s+\d+)\s+(?:at\s+(.+?)(?:\s+at\s+.+)?|(all day))$/);
+  const whenLabel = timeMatch ? (timeMatch[3] ? `${timeMatch[1]} (all day)` : `${timeMatch[1]} at ${timeMatch[2]}`) : (next.detail ?? '');
+
+  if (!address) {
+    const speech = `Your next ${requestedWord} is ${title}, ${whenLabel}. I don't have an address for it — where is it?`;
+    return { speech, display: speech, actions: [] };
+  }
+
+  const speech = `Your next ${requestedWord} is ${title}, ${whenLabel}. Let me get the travel time.`;
+  return {
+    speech,
+    display: speech,
+    actions: [{
+      type: 'FETCH_TRAVEL_TIME',
+      destination: address,
+      eventStartISO: next.startISO ?? '',
+    }],
+  };
+}
+
 type CalendarWindow = 'today' | 'tomorrow' | 'this week' | 'next week' | 'this month' | 'next 7 days';
 
 function detectCalendarWindow(text: string): CalendarWindow {
@@ -940,7 +1026,7 @@ async function fetchLiveCalendarEvents(
           if (!res.ok) return [];
           const data = await res.json();
           return (data?.items ?? []) as Array<{
-            id?: string; summary?: string; location?: string;
+            id?: string; summary?: string; location?: string; description?: string;
             attendees?: Array<{ email?: string; displayName?: string; self?: boolean }>;
             start?: { dateTime?: string; date?: string };
             end?: { dateTime?: string; date?: string };
@@ -953,7 +1039,7 @@ async function fetchLiveCalendarEvents(
     // Re-sort by start time since parallel fetches interleave calendars.
     const seen = new Set<string>();
     const items: Array<{
-      id?: string; summary?: string; location?: string;
+      id?: string; summary?: string; location?: string; description?: string;
       attendees?: Array<{ email?: string; displayName?: string; self?: boolean }>;
       start?: { dateTime?: string; date?: string };
       end?: { dateTime?: string; date?: string };
@@ -1065,6 +1151,9 @@ async function fetchLiveCalendarEvents(
           category: 'calendar',
           title: e.summary ?? 'Event',
           detail: detailParts.join(' '),
+          startISO: isAllDay ? undefined : (e.start?.dateTime ?? undefined),
+          rawLocation: e.location,
+          rawDescription: e.description,
         } as MobileBriefItem;
       });
   } catch (err) {
@@ -1214,6 +1303,15 @@ interface MobileBriefItem {
   title?: string;
   detail?: string;
   urgent?: boolean;
+  // Ticket B deterministic redesign (2026-08-03) — raw fields alongside the
+  // formatted `detail` string, so the deterministic next-event travel-time
+  // bypass can consume fetchLiveCalendarEvents's existing sorted/filtered
+  // result directly (single source of truth) instead of re-fetching or
+  // re-parsing `detail`. Optional — every other consumer of this type is
+  // unaffected.
+  startISO?: string;
+  rawLocation?: string;
+  rawDescription?: string;
 }
 
 // ─── Prompt cache ─────────────────────────────────────────────────────────────
@@ -1356,12 +1454,23 @@ async function assembleSystemPromptServerSide(
   const nonCalendarMobile = (opts.briefItems ?? []).filter(item => item.category !== 'calendar');
   const mergedBrief: MobileBriefItem[] = [...liveCalendar, ...nonCalendarMobile];
 
+  // Ticket B (Travel Event Selection Semantics) — schedule freshness marker.
+  // fetchLiveCalendarEvents (needsLiveCalendar branch) guarantees chronological
+  // sort + past-event filtering server-side (see its own comment at the sort/
+  // filter site). The opts.briefItems fallback (client-supplied, used when the
+  // query isn't calendar-shaped) has no such verified guarantee, so it never
+  // gets the marker — RULE 7 falls back to its own walk/parse/compare logic
+  // for that case, unchanged from before this ticket.
+  const scheduleHeader = needsLiveCalendar
+    ? `## ${userName}'s upcoming schedule (next 7 days — sorted chronologically, past events already removed)`
+    : `## ${userName}'s upcoming schedule (next 7 days)`;
+
   const briefContext = mergedBrief.length > 0
-    ? `\n\n## ${userName}'s upcoming schedule (next 7 days)\n` +
+    ? `\n\n${scheduleHeader}\n` +
       mergedBrief
         .map(item => `- [${item.category ?? 'task'}] ${item.title ?? ''}${item.detail ? ` — ${item.detail}` : ''}`)
         .join('\n')
-    : `\n\n## ${userName}'s upcoming schedule (next 7 days)\n- No events found for the next 7 days.`;
+    : `\n\n${scheduleHeader}\n- No events found for the next 7 days.`;
 
   const userRefParts: string[] = [];
   if (userHomeAddress) userRefParts.push(`- Home address: ${userHomeAddress}`);
@@ -1662,6 +1771,8 @@ IMPORTANT time-anchor rule (SET_REMINDER only — does NOT apply to location ale
 chat = conversational, no data question — ALSO use for multi-action messages (2+ distinct actions)
 
 Level A params: CALENDAR_SEARCH→keyword (core noun only, strip "appointment/meeting"). CALENDAR_SEARCH ONLY when user asks about a SPECIFIC event by name ("do I have a dentist appointment", "is my board meeting on Tuesday") — NEVER for email queries. READ_CALENDAR (no keyword param) for general schedule reads with no specific event named: "what do I have today", "what's coming up", "show me my schedule", "do I have anything tomorrow", "what's next" — use READ_CALENDAR, NOT CALENDAR_SEARCH, when there is no specific event name to search for. GMAIL_SEARCH→keyword (sender name or specific subject topic ONLY — never temporal/generic words). GMAIL_SEARCH for PAST email queries only: "Did I get email from X", "Did I receive email from X", "Any email from X", "Check my email for X" → GMAIL_SEARCH. keyword must be the sender name or topic (e.g. "Bob", "invoice", "board meeting") — NOT words like "new", "any", "recent", "latest", "email" which mean "show recent emails" → use empty keyword "" for those. IMPORTANT: "alert me when I receive email from X" or "notify me when email from X arrives" = SET_ACTION_RULE (action level), NOT GMAIL_SEARCH — the presence of "alert me"/"notify me"/"let me know" + "when" signals a future rule, not a past query. LOOKUP_CONTACT/PERSON_LOOKUP→name. LIST_READ→listName. MEMORY_SEARCH→topic. CREATE_TICKET→reporter_email, body.
+
+TRAVEL-PLANNING EXCLUSION (checked before applying CALENDAR_SEARCH or READ_CALENDAR above): questions asking when the user should leave, depart, head out, begin travelling, or how early they must go to reach a calendar event are travel-planning requests — not calendar reads and not calendar searches, even when they name a specific event. This classifier has no travel-time tool; only the main assistant does. Never classify these as READ_CALENDAR or CALENDAR_SEARCH. Instead return level:"B" with no Level A intent, so the request reaches the main assistant, which calculates the real travel time and leave-by time. This is a meaning-based exclusion, not a fixed phrase list — it covers any wording expressing the same intent (leaving, departing, heading out, commute time, drive time, navigation time), not only messages containing the literal words "leave" or "travel time". Examples: "What time should I leave for my dentist appointment" → level B, no intent. "When should I head out for my next meeting" → level B, no intent. "How early do I need to go to my next meeting" → level B, no intent. "What time do I need to depart for my dentist appointment" → level B, no intent. "How much time should I allow to get to my dentist appointment" → level B, no intent. Contrast — these are NOT travel-planning and keep their normal classification: "When is my dentist appointment" (asks when the event itself occurs, not when to leave for it) → still CALENDAR_SEARCH. "What do I have today" / "what's coming up" (no specific event, no travel question) → still READ_CALENDAR.
 
 Level action intents and params (extract what's present, empty string if not mentioned):
 SET_ACTION_RULE (trigger_type:'time') → for ALL "remind me at [time]" or "remind me on [day]" requests. Params: trigger_type:'time', datetime (ISO8601 Toronto), body (what to remind), tasks (array of task strings if user lists multiple things). e.g. "remind me to call John tomorrow at 3pm" → {trigger_type:'time',datetime:'<ISO8601>',body:'Call John.',tasks:['Call John.']}. "remind me Sunday to call John and review budget" → {trigger_type:'time',datetime:'<ISO8601 Sunday>',body:'Call John and review budget.',tasks:['Call John.','Review budget.']}. NEVER use SET_REMINDER for time-based reminders — always SET_ACTION_RULE with trigger_type:'time'.
@@ -2084,6 +2195,28 @@ Deno.serve(async (req) => {
       const filtered   = filterCalendarBriefByWindow(liveEvents, window);
       const built      = buildCalendarReadResponse(filtered, window);
       console.log(`[timing] ${elapsed()} | B6e bypass — events=${liveEvents.length} | filtered=${filtered.length} | window=${window}`);
+      return jsonResponse({
+        rawText: JSON.stringify({
+          speech:         built.speech,
+          display:        built.display,
+          actions:        built.actions,
+          pendingThreads: [],
+        }),
+      });
+    }
+
+    // ── Deterministic next-event travel-time bypass (Ticket B redesign, 2026-08-03) ──
+    // See isUnnamedNextEventTravelTimeIntent / buildNextEventTravelTimeResponse
+    // above for full scope and rationale. Runs before Claude; owns unnamed
+    // "next" travel-time requests exclusively — named-event requests never
+    // match this classifier and fall through to Claude's existing branch.
+    if (isUnnamedNextEventTravelTimeIntent(userText)) {
+      const wordMatch = userText.match(/\bnext\s+(meeting|appointment|event|class|thing)\b/i);
+      const requestedWord = wordMatch ? wordMatch[1].toLowerCase() : 'event';
+      console.log(`[timing] ${elapsed()} | deterministic next-event travel-time bypass — word="${requestedWord}"`);
+      const liveEvents = await fetchLiveCalendarEvents(supabase, userId);
+      const built = buildNextEventTravelTimeResponse(liveEvents, requestedWord);
+      console.log(`[timing] ${elapsed()} | next-event bypass — events=${liveEvents.length} | destination=${JSON.stringify(built.actions[0]?.destination)}`);
       return jsonResponse({
         rawText: JSON.stringify({
           speech:         built.speech,
