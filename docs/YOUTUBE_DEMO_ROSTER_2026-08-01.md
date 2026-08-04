@@ -85,11 +85,11 @@ On-screen title: **THE ASK**
 
 On-screen title: **THE SPLIT** (freeze-frame here — this is the whole point of the demo)
 
-**Actual tested line** (live call, Demo Mode ON, production, 2026-07-20 — captured after fixing and re-verifying the backend, 3/3 trials correct):
+**Actual tested line** (live call, production, 2026-07-20 — captured after fixing and re-verifying the backend, 3/3 trials correct):
 
 > "I'll set up a location alert for when you arrive home. This will remind you to feed the cat and send your wife a text saying you're home."
 
-With Demo Mode on, there's no separate "say yes" turn — this is Naavi's one immediate reply, and it already clearly names both halves. *(Live LLM phrasing — exact wording may vary slightly take to take. With Demo Mode OFF, expect the more clipped, past-tense "Alert set — Linda will get..." confirm-then-act phrasing, at the cost of needing to say "yes" on camera.)*
+*(Demo Mode removed 2026-07-22 — this confirm-then-act reply is now the only path; there's no skip-confirmation option anymore. Say "yes" after this line, then cut to Part 3. Live LLM phrasing — exact wording may vary slightly take to take.)*
 
 Callout text to overlay: *"One request → one reminder for you, one message for someone else — automatically separated."*
 
@@ -115,7 +115,7 @@ Callout text to overlay: *"Two people. Two different messages. One sentence."*
 - [ ] Clear any pre-existing "arrive at Home" alert first — a same-label alert can hit a duplicate-prevention guard and block the new one from being created.
 - [ ] Confirm your Home address is already saved/verified in MyNaavi (Settings).
 - [ ] Decide: real drive/walk for Part 3, or a controlled simulated-arrival take.
-- [ ] Decide: Demo Mode ON (clean one-take, no "say yes" step) or OFF (clipped confirm-then-act phrasing, needs a "yes" on camera).
+- [ ] Plan for the "say yes" confirm turn on camera — Demo Mode (which used to skip it) was removed 2026-07-22 and no longer exists.
 
 ---
 
@@ -161,11 +161,11 @@ On-screen title: **THE ASK**
 
 > **"At 8pm tonight, remind me to take my medication and text Linda asking if she's free for lunch tomorrow."**
 
-### Part 2 — "THE CONFIRM" (skip if Demo Mode is on)
+### Part 2 — "THE CONFIRM"
 
 On-screen title: **THE CONFIRM**
 
-With Demo Mode off, expect a confirm-then-act reply naming both halves; say "yes." With Demo Mode on, this collapses into one immediate reply.
+Expect a confirm-then-act reply naming both halves; say "yes." *(Demo Mode, which used to skip this step, was removed 2026-07-22 — this confirm turn always happens now.)*
 
 ### Part 3 — "THE TRIGGER"
 
@@ -231,7 +231,7 @@ On-screen title: **THE ASK**
 
 > **"How much has Reyes Build billed me?"**
 
-Uses the seeded Reyes Build invoice ($4,200.00 progress billing) as the real data behind the number.
+Uses the seeded Reyes Build invoices as the real data behind the number — total **$7,975.00** (two `documents` rows: $3,125.00 + $4,850.00, verified live in the staging DB 2026-08-04).
 
 ### Part 2 — "THE NUMBER"
 
@@ -243,7 +243,7 @@ Callout text to overlay: *"Not a guess. A real sum, calculated server-side."*
 
 ### Setup checklist before recording
 
-- [ ] Confirm the Reyes Build invoice ($4,200.00) is actually seeded in the account before filming (part of the YouTube demo seed data — email #10, `docs/YOUTUBE_DEMO_SEED_DATA_2026-07-23.md`).
+- [ ] Confirm the two Reyes Build invoices ($3,125.00 + $4,850.00 = $7,975.00 total, `source: demo-seed` in `documents`) are still present before filming. **Note:** the original $4,200.00 invoice described in `docs/YOUTUBE_DEMO_SEED_DATA_2026-07-23.md` (email #10) was never actually harvested into `documents` — that figure does not exist in the account. These two rows, seeded directly 2026-08-03, are the real numbers Naavi will report.
 - [ ] Run this exact line live once before filming to confirm the number comes back correctly and the "no number in the first reply" pacing reads naturally on camera, not awkwardly.
 - [ ] If a true "all bills total" ask is wanted instead, that's a different, unproven code path — flag before scripting further.
 
@@ -263,13 +263,13 @@ On-screen title: **THE ASK**
 
 > **"Alert me when I get an email from James."**
 
-### Part 2 — "THE CONFIRM" (skip if Demo Mode is on)
+### Part 2 — "THE CONFIRM"
 
 On-screen title: **THE CONFIRM**
 
 > "I'll alert you when an email from James arrives. Say yes to confirm, no to cancel, or tell me what to change."
 
-Say "yes." *(Demo Mode collapses this into one immediate reply, same tradeoff as the other alert demos.)*
+Say "yes." *(Demo Mode, which used to skip this step, was removed 2026-07-22 — this confirm turn always happens now.)*
 
 ### Part 3 — "THE TRIGGER"
 

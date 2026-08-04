@@ -100,6 +100,7 @@ import { session2026_07_17_b10jLocationCompoundSelfReminderTests } from './catal
 import { session2026_07_21_b10oLocationReadbackTests } from './catalogue/session-2026-07-21-b10o-location-readback';
 import { session2026_07_21_b10pLocationNumberedFactsTests } from './catalogue/session-2026-07-21-b10p-location-numbered-facts';
 import { session2026_07_21_b10qEmailAlertValidationTests } from './catalogue/session-2026-07-21-b10q-email-alert-validation';
+import { b10rContactBirthdaysTests } from './catalogue/session-2026-07-22-b10r-contact-birthdays';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -235,6 +236,7 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_07_21_b10oLocationReadbackTests,
   ...session2026_07_21_b10pLocationNumberedFactsTests,
   ...session2026_07_21_b10qEmailAlertValidationTests,
+  ...b10rContactBirthdaysTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -334,6 +336,24 @@ async function main(): Promise<void> {
   if (missing.length > 0) {
     console.error('Missing required env vars: ' + missing.join(', '));
     console.error('Set them in .env (project root) or tests/.env');
+    process.exit(2);
+  }
+
+  // Hard block, checked again (belt-and-suspenders with tests/lib/fixtures.ts)
+  // before any setup/teardown work starts — see PROTECTED_ACCOUNT_IDS there
+  // for why this is a hard-coded list and not an env toggle (B10y, 2026-08-03).
+  const PROTECTED_ACCOUNT_IDS: Record<string, string> = {
+    'f1bc46b8-a478-43ad-bf09-e138099c8847':
+      'robert.esm.2207@gmail.com — live manual demo/testing account, never auto-tester-owned (B10y incident 2026-08-03)',
+  };
+  if (PROTECTED_ACCOUNT_IDS[testUserId]) {
+    console.error('════════════════════════════════════════════════════════');
+    console.error(`  REFUSING TO RUN: TEST_USER_ID resolves to a protected account`);
+    console.error(`  ${testUserId} — ${PROTECTED_ACCOUNT_IDS[testUserId]}`);
+    console.error(`  This is hard-blocked, not an env toggle. See tests/lib/fixtures.ts`);
+    console.error(`  PROTECTED_ACCOUNT_IDS. Get explicit pre-authorization before ever`);
+    console.error(`  changing this, then edit that list in its own dedicated commit.`);
+    console.error('════════════════════════════════════════════════════════');
     process.exit(2);
   }
 

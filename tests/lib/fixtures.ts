@@ -44,6 +44,37 @@ const OWNED_TABLES = [
 // at suite start; restore them at suite end.
 let originalPhoneSnapshot: { phone: string | null; phone_numbers: string[] | null } | null = null;
 
+/**
+ * Accounts the auto-tester must NEVER write to or delete from, regardless
+ * of which env var (TEST_USER_ID, STAGING_TEST_USER_ID, or any future
+ * alias) happens to resolve to them. Hard-coded on purpose, not an env
+ * toggle: B10y (2026-08-03) wiped Robert's real calendar_events because a
+ * config value pointed the suite at his live demo/testing account
+ * (f1bc46b8-a478-43ad-bf09-e138099c8847, robert.esm.2207@gmail.com) — an
+ * env var is too easy to change by accident or by a future session
+ * "helpfully" reusing an ID. This list requires an actual code change
+ * (visible in git history, subject to review) to ever be lifted. If
+ * there's ever a real reason to run tests against one of these accounts,
+ * get Wael's explicit pre-authorization first, then edit this list in its
+ * own dedicated commit — never work around it with an env var.
+ */
+const PROTECTED_ACCOUNT_IDS: Record<string, string> = {
+  'f1bc46b8-a478-43ad-bf09-e138099c8847':
+    'robert.esm.2207@gmail.com — live manual demo/testing account, never auto-tester-owned (B10y incident 2026-08-03)',
+};
+
+function assertNotProtectedAccount(ctx: TestContext): void {
+  const reason = PROTECTED_ACCOUNT_IDS[ctx.testUserId];
+  if (reason) {
+    throw new Error(
+      `[fixtures] REFUSING to run against protected account ${ctx.testUserId} (${reason}). ` +
+      `This account is hard-blocked in tests/lib/fixtures.ts — TEST_USER_ID (or any other env var) ` +
+      `must not resolve to it. If there's a real reason to test against it, get Wael's explicit ` +
+      `pre-authorization first, then edit PROTECTED_ACCOUNT_IDS in its own dedicated commit.`
+    );
+  }
+}
+
 async function snapshotOriginalPhones(ctx: TestContext): Promise<void> {
   try {
     const url = `${ctx.supabaseUrl}/rest/v1/user_settings?user_id=eq.${ctx.testUserId}&select=phone,phone_numbers`;
@@ -81,6 +112,7 @@ async function restoreOriginalPhones(ctx: TestContext): Promise<void> {
 }
 
 export async function setupSuite(ctx: TestContext): Promise<void> {
+  assertNotProtectedAccount(ctx);
   // Snapshot phones BEFORE teardown so we capture the real value.
   await snapshotOriginalPhones(ctx);
   // Idempotent — we don't insert auth.users, the test user must exist.
@@ -89,6 +121,7 @@ export async function setupSuite(ctx: TestContext): Promise<void> {
 }
 
 export async function teardownSuite(ctx: TestContext): Promise<void> {
+  assertNotProtectedAccount(ctx);
   for (const table of OWNED_TABLES) {
     try {
       await db.delete(ctx, table, `user_id=eq.${ctx.testUserId}`);
