@@ -46,7 +46,24 @@ serve(async (req) => {
   }
 
   const body = await req.json();
-  const { summary, description, start, end, attendees, recurrence, is_priority, user_id: bodyUserId, suppress_reminders } = body;
+  const { summary, description, start, end, attendees, recurrence, is_priority, user_id: bodyUserId, suppress_reminders, time_zone: bodyTimeZone } = body;
+
+  // B10x Track 2 (2026-08-05) — optional caller-supplied timezone for
+  // interpreting a naive (no offset) start/end string. Defaults to
+  // 'America/Toronto', matching every existing caller's behavior exactly
+  // (none of them passed this before — zero behavior change for callers
+  // that still don't). Validated the same way Track 1's
+  // resolveClientTimezone validates a client-supplied value — an invalid
+  // non-empty string must not reach Google's API unvalidated.
+  let eventTimeZone = 'America/Toronto';
+  if (typeof bodyTimeZone === 'string' && bodyTimeZone) {
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: bodyTimeZone });
+      eventTimeZone = bodyTimeZone;
+    } catch {
+      console.error('[create-calendar-event] Invalid time_zone, defaulting to America/Toronto:', bodyTimeZone);
+    }
+  }
 
   if (!summary || !start || !end) {
     return new Response(JSON.stringify({ error: 'Missing summary, start, or end' }), {
@@ -178,8 +195,8 @@ serve(async (req) => {
     const event: Record<string, unknown> = {
       summary,
       description: description ?? '',
-      start: isDateOnly(normalisedStart) ? { date: normalisedStart } : { dateTime: normalisedStart, timeZone: 'America/Toronto' },
-      end:   isDateOnly(normalisedEnd)   ? { date: normalisedEnd }   : { dateTime: normalisedEnd,   timeZone: 'America/Toronto' },
+      start: isDateOnly(normalisedStart) ? { date: normalisedStart } : { dateTime: normalisedStart, timeZone: eventTimeZone },
+      end:   isDateOnly(normalisedEnd)   ? { date: normalisedEnd }   : { dateTime: normalisedEnd,   timeZone: eventTimeZone },
     };
 
     // Only include attendees that look like email addresses

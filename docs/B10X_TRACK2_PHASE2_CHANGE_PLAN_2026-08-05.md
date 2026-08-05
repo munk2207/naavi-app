@@ -7,6 +7,28 @@
 
 ---
 
+## AMENDMENT — 2026-08-05, same session, Wael's direct simplification
+
+Revision 2's capture design (lazy trigger via `requiresConfirmedTimezone`'s intent/action gate, mid-conversation interrupt via `pendingTimezoneCapture` holding and resuming an original utterance) is **superseded** by a much simpler design, per Wael's explicit direction after a discovery mid-session changed the picture:
+
+**The discovery:** `lib/location.ts::syncDeviceTimezone()` already exists and already writes the device's real timezone to `user_settings.timezone` automatically on every mobile sign-in/foreground event (`app/_layout.tsx:194, 239`) — a live mechanism, not a hypothetical one, which Track 2 Phase 1's evidence had twice failed to find. This raised the question of whether voice could just trust that value directly. Investigation found no reliable way to distinguish "mobile keeps this fresh" from "stale one-time snapshot" for a given caller — `user_settings.updated_at` is contaminated by voice's own writes (e.g. `morning_call_status`, `:12566`), so it can't serve as a proxy for mobile recency.
+
+**Resolution — do not try to distinguish these cases at all.** For **inbound voice calls specifically**:
+- Every call, unconditionally, the first thing Naavi does — before any other processing, not gated by intent/action classification — is ask the same question the demo line already proves works: *"What city or time zone are you in?"*, confirm with the same *"Got it — {zone} time. Is that right?"* pattern, using the same `parseTimezone.js` module, unchanged.
+- The confirmed answer is written into `user_settings.timezone` + `timezone_confirmed_at` — the **same two columns** `syncDeviceTimezone` writes, so a voice-captured answer is indistinguishable from a mobile-synced one to any other reader. (`syncDeviceTimezone` itself should also be updated to set `timezone_confirmed_at`, so its automatic sync counts as a confirmation too — a small addition to `lib/location.ts`, mobile-side, cross-referenced here since it's a shared dependency, not owned by either track alone.)
+- **`timezone_confirmed_at` is never checked on the voice side to decide whether to ask.** Every new call asks again, regardless of what a previous call or mobile already established. The stored value exists for *other* readers (mobile, `trigger-morning-call`, or a future feature) — voice itself doesn't consult it before asking.
+- Within a single call, the confirmed value is held in a simple call-scoped variable (same lifetime/scope as the other `pendingX` state, e.g. `let effectiveTimezone`) and used directly for every timezone-dependent call site in that call — no DB re-read needed mid-call.
+- **Outbound calls (the morning brief, Groups M/N) are unaffected — this ask never happens there**, per the earlier, separate decision: the brief uses `resolveEffectiveTimezone(userSettings)` reading whatever is already stored (confirmed by a prior voice call or by mobile), falling back to a disclosed Toronto default, exactly as already designed. There's no live caller to ask before the call connects.
+
+**What this removes from Revision 2's design:**
+- `requiresConfirmedTimezone.js`'s intent/action classification (`TIMEZONE_SENSITIVE_INTENTS`/`TIMEZONE_SENSITIVE_ACTION_TYPES`) — no longer needed; the ask isn't conditioned on what the caller is about to request.
+- `pendingTimezoneCapture`'s "hold the original utterance and resume it after confirmation" logic — no longer needed; nothing has started yet when the question is asked, so there's nothing to resume.
+- The distinction between "mobile-active" vs "voice-only" callers — no longer needed; voice always asks regardless.
+
+**What's retained unchanged:** the migration (`timezone_confirmed_at`), `resolveEffectiveTimezone.js` (still the single read-path for outbound/background contexts and as the general-purpose resolver), `parseTimezone.js` reused as-is, the call-site classification table (Groups A-N still need the literal replaced — just sourced from the call-scoped variable for inbound groups, and from `resolveEffectiveTimezone()` for outbound Groups M/N).
+
+---
+
 ## Correction to Phase 1's evidence (found while resolving Blocker 2)
 
 Track 2 Phase 1 claimed `user_settings.timezone` was "completely unused." **That was wrong.** `supabase/functions/trigger-morning-call/index.ts:77-78` already reads it: `const tz = s.timezone || 'America/Toronto'; const todayStr = now.toLocaleDateString('sv-SE', { timeZone: tz });` — used to decide *when* to place each user's morning call. This wasn't found in Phase 1 because that grep only covered `naavi-chat`, the voice server, and mobile — not every Edge Function individually. This finding directly resolves Blocker 2 (below) and *strengthens* the case for this track: the exact "value-or-Toronto-fallback" pattern this track proposes is already live in production, proven safe.
