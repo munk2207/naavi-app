@@ -4309,32 +4309,72 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       // Build compound plan for "One Request. Six Actions." demo rendering
       const isCompoundResult = compoundBreakdownLines.length >= 3 && dedupedActions.length >= 3;
       let compoundNotesLink: string | undefined;
-      if (isCompoundResult) {
-        try {
-          const summaryTitle = `Naavi Summary — ${new Date().toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-          const summaryContent = compoundBreakdownLines.join('\n');
-          const file = await registry.storage.save(summaryTitle, summaryContent, '', 'note');
-          compoundNotesLink = file.webViewLink;
-        } catch (err) {
-          console.warn('[Orchestrator] compound summary Drive save failed:', err);
-        }
-      }
       let compoundPlan: ConversationTurn['compoundPlan'];
       if (isCompoundResult) {
+        // 2026-08-05 (Demo 1 testing, Wael) — compoundBreakdownLines is
+        // Claude's own freehand prose (parsed from lastTurnSpeech), and its
+        // weekday/date arithmetic isn't reliable even when the accompanying
+        // tool-call JSON is correct: observed live — Claude said "Monday,
+        // August 11" and "Sunday, August 10" in the confirmation text while
+        // the actual CREATE_EVENT it executed correctly used Monday, August
+        // 10 (verified against the live Google Calendar event). Same class
+        // of bug Ticket B fixed for travel-event selection — don't trust
+        // Claude's freehand arithmetic for something that must be exact;
+        // recompute the weekday+date phrase deterministically from the
+        // resolved action data (which the tool-call schema keeps reliable)
+        // and substitute it into the displayed line.
+        const WEEKDAY_DATE_RE = /\b(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday),?\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?\b/i;
+        const correctWeekdayDatePhrase = (label: string, iso: string): string => {
+          if (!iso || !WEEKDAY_DATE_RE.test(label)) return label;
+          try {
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return label;
+            const correct = d.toLocaleDateString('en-US', { timeZone: 'America/Toronto', weekday: 'long', month: 'long', day: 'numeric' });
+            return label.replace(WEEKDAY_DATE_RE, correct);
+          } catch {
+            return label;
+          }
+        };
+        const createEventActionsForPlan = dedupedActions.filter((a: any) => a.type === 'CREATE_EVENT');
+        const timeReminderActionsForPlan = dedupedActions.filter((a: any) => a.type === 'SET_ACTION_RULE' && String((a as any).trigger_type ?? '') === 'time');
+        let calActionCursor = 0, remActionCursor = 0;
+
         // Detect expected card type from breakdown line keywords — avoids
         // card/label mismatch when Claude emits tools in a different order
         // than the numbered list the user sees.
         const detectSlot = (line: string): 'sent' | 'calendar' | 'location' | 'list' | null => {
           const l = line.toLowerCase();
-          if (/\btext\b|\bsms\b|\bmessage\b|\bsend\b|\bwhatsapp\b/.test(l)) return 'sent';
+          // 2026-08-05 (Demo 1 testing) — "draft"/"email" added. Without
+          // these, a line like "Draft an email to Linda asking for her
+          // review on the budget" matched no keyword at all, so it got
+          // cardSlot=null. That's not just a missing card — the
+          // non-compound draft fallback (app/index.tsx:2210) is gated on
+          // `!turn.isCompoundResult`, so on a compound turn a null cardSlot
+          // means the draft is completely unreachable: created in app
+          // state via turnDrafts.push(action), but no Send button anywhere
+          // can ever reach it. Routing to 'sent' here lets the existing
+          // draftCursor fallback (below) pick it up once turnSentMessages
+          // (auto-sent SMS/WhatsApp) is exhausted.
+          if (/\btext\b|\bsms\b|\bmessage\b|\bsend\b|\bwhatsapp\b|\bdraft\b|\bemail\b/.test(l)) return 'sent';
           if (/\bmeeting\b|\bcalendar\b|\bbook\b|\bevent\b/.test(l)) return 'calendar';
           if (/\barrive\b|\bwhen i\b|\bat his\b|\bat her\b|\bat my\b|\bat the\b|\btoyota\b/.test(l)) return 'location';
           if (/\blist\b|\battach\b/.test(l)) return 'list';
           return null;
         };
         let sentCursor = 0, draftCursor = 0, calCursor = 0, locCursor = 0, listCursor = 0;
-        compoundPlan = compoundBreakdownLines.map((label: string) => {
-          const slot = detectSlot(label);
+        compoundPlan = compoundBreakdownLines.map((rawLabel: string) => {
+          const slot = detectSlot(rawLabel);
+          let label = rawLabel;
+          if (slot === 'calendar') {
+            const evtAction = createEventActionsForPlan[calActionCursor] as any;
+            calActionCursor++;
+            if (evtAction?.start) label = correctWeekdayDatePhrase(label, String(evtAction.start));
+          } else if (/\bremind\b/i.test(rawLabel) && WEEKDAY_DATE_RE.test(rawLabel)) {
+            const remAction = timeReminderActionsForPlan[remActionCursor] as any;
+            remActionCursor++;
+            const dt = remAction?.trigger_config?.datetime;
+            if (dt) label = correctWeekdayDatePhrase(label, String(dt));
+          }
           if (slot === 'sent' && sentCursor < turnSentMessages.length) { sentCursor++; return { label, cardSlot: 'sent' as const }; }
           if (slot === 'sent' && draftCursor < turnDrafts.length) { draftCursor++; return { label, cardSlot: 'draft' as const }; }
           if (slot === 'calendar' && calCursor < turnEvents.length) { calCursor++; return { label, cardSlot: 'calendar' as const }; }
@@ -4342,6 +4382,14 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           if (slot === 'list' && listCursor < turnLists.length) { listCursor++; return { label, cardSlot: 'list' as const }; }
           return { label, cardSlot: null as const };
         });
+        try {
+          const summaryTitle = `Naavi Summary — ${new Date().toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+          const summaryContent = compoundPlan.map(p => p.label).join('\n');
+          const file = await registry.storage.save(summaryTitle, summaryContent, '', 'note');
+          compoundNotesLink = file.webViewLink;
+        } catch (err) {
+          console.warn('[Orchestrator] compound summary Drive save failed:', err);
+        }
       }
       const newTurn: ConversationTurn = {
         userMessage,

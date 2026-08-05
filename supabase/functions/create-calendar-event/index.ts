@@ -238,13 +238,23 @@ serve(async (req) => {
       updated_at: new Date().toISOString(),
     };
     if (isAllDayInsert) {
-      calRow.start_date = normalisedStart;
-      calRow.end_date   = normalisedEnd;
+      calRow.start_date = created.start?.date ?? normalisedStart;
+      calRow.end_date   = created.end?.date   ?? normalisedEnd;
       calRow.start_time = null;
       calRow.end_time   = null;
     } else {
-      calRow.start_time = normalisedStart;
-      calRow.end_time   = normalisedEnd;
+      // 2026-08-05 (Demo 1 testing) — write Google's own echoed dateTime,
+      // not our locally-built naive string. normalisedStart has no UTC
+      // offset (by design — Google converts it using the `timeZone` field
+      // we send alongside it). Writing that naive string directly into a
+      // timestamptz column has Postgres apply ITS OWN session timezone
+      // instead, silently landing the DB mirror 4 hours off from the real
+      // event. created.start.dateTime is Google's already-correct UTC
+      // value for the same instant — use that as the single source of
+      // truth so the mirror can never diverge from what Google actually
+      // stored.
+      calRow.start_time = created.start?.dateTime ?? normalisedStart;
+      calRow.end_time   = created.end?.dateTime   ?? normalisedEnd;
       calRow.start_date = null;
       calRow.end_date   = null;
     }
