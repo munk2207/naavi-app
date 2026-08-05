@@ -2370,6 +2370,60 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         return out;
       })();
 
+      // 2026-08-05 (Demo 1 testing) — Claude's own confirmation TEXT
+      // sometimes pairs the correct weekday name with the wrong day-of-month,
+      // even though the accompanying tool-call JSON (the thing that actually
+      // executes) is correct — verified live: said "Monday, August 11" /
+      // "Sunday, August 10" while the real created event/reminder used
+      // Monday, August 10 / Sunday, August 9 (confirmed against the live
+      // Google Calendar event and the Alerts screen). Same class Ticket B
+      // fixed for travel-event selection: don't trust Claude's freehand
+      // arithmetic for something that must be exact; recompute it
+      // deterministically from the resolved action data and substitute it
+      // into whatever text is about to be shown. Used both for this turn's
+      // own displayed text (below) and for the following turn's echo of it
+      // (compoundPlan, further below) — one definition, two call sites.
+      const WEEKDAY_DATE_RE = /\b(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday),?\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?\b/i;
+      const correctWeekdayDatePhrase = (label: string, iso: string): string => {
+        if (!iso || !WEEKDAY_DATE_RE.test(label)) return label;
+        try {
+          const d = new Date(iso);
+          if (isNaN(d.getTime())) return label;
+          const correct = d.toLocaleDateString('en-US', { timeZone: 'America/Toronto', weekday: 'long', month: 'long', day: 'numeric' });
+          return label.replace(WEEKDAY_DATE_RE, correct);
+        } catch {
+          return label;
+        }
+      };
+      // Matches each calendar or reminder line to the corresponding action
+      // by position — same convention already used for card-slot matching.
+      // Note: "remind" (not "\bremind\b") on purpose — the real breakdown
+      // wording is "Set a **reminder** for...", and a trailing word
+      // boundary after "remind" doesn't match "reminder" (no boundary
+      // between "d" and "e", both word characters). This exact gap let
+      // "Sunday, August 10" (wrong) slip through uncorrected in live
+      // testing 2026-08-05.
+      const correctDatesInLines = (lines: string[], actionsForDates: NaaviAction[]): string[] => {
+        const createEventActionsForDates  = actionsForDates.filter((a: any) => a.type === 'CREATE_EVENT');
+        const timeReminderActionsForDates = actionsForDates.filter((a: any) => a.type === 'SET_ACTION_RULE' && String((a as any).trigger_type ?? '') === 'time');
+        let calIdx = 0, remIdx = 0;
+        return lines.map((line) => {
+          const l = line.toLowerCase();
+          if (/\bmeeting\b|\bcalendar\b|\bbook\b|\bevent\b/.test(l)) {
+            const evtAction = createEventActionsForDates[calIdx] as any;
+            calIdx++;
+            return evtAction?.start ? correctWeekdayDatePhrase(line, String(evtAction.start)) : line;
+          }
+          if (/remind/i.test(l) && WEEKDAY_DATE_RE.test(line)) {
+            const remAction = timeReminderActionsForDates[remIdx] as any;
+            remIdx++;
+            const dt = remAction?.trigger_config?.datetime;
+            return dt ? correctWeekdayDatePhrase(line, String(dt)) : line;
+          }
+          return line;
+        });
+      };
+
       // B1b backstop (Wael 2026-05-10): if the user clearly asked to list /
       // show / count their alerts but Claude didn't emit a LIST_RULES action,
       // synthesize one so the orchestrator's LIST_RULES handler runs and
@@ -4250,6 +4304,33 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       if (turnSpeechOverride !== null) {
         displaySpeech = turnSpeechOverride;
       }
+      // 2026-08-05 (Demo 1 testing) — correct any weekday+date mismatch in
+      // Claude's own numbered breakdown using the resolved action data this
+      // turn is about to execute/propose. Live-confirmed: Claude said
+      // "Monday, August 11" / "Sunday, August 10" in THIS turn's own text
+      // while the actual CREATE_EVENT / SET_ACTION_RULE it emitted in the
+      // SAME response correctly used Monday, August 10 / Sunday, August 9
+      // (verified against the real Google Calendar event and the Alerts
+      // screen). The compound-plan correction further below only fixes the
+      // FOLLOWING turn's echo of this text — it never touches the turn's
+      // own first display, which is what the user actually reads and
+      // confirms against. Fix it here too, at the source.
+      if (turnSpeechOverride === null && dedupedActions.length > 0) {
+        // Correct the WHOLE set of numbered lines in one call — calling
+        // correctDatesInLines per-line would reset its calendar/reminder
+        // cursor to 0 on every call, silently binding every calendar line
+        // to the FIRST CREATE_EVENT action (etc.) instead of advancing
+        // through them in order for turns with more than one of a kind.
+        const speechLines = displaySpeech.split('\n');
+        const numberedIndices: number[] = [];
+        const numberedLines: string[] = [];
+        speechLines.forEach((line: string, i: number) => {
+          if (/^\s*\d+\./.test(line)) { numberedIndices.push(i); numberedLines.push(line); }
+        });
+        const correctedNumberedLines = correctDatesInLines(numberedLines, dedupedActions);
+        numberedIndices.forEach((lineIdx, j) => { speechLines[lineIdx] = correctedNumberedLines[j]; });
+        displaySpeech = speechLines.join('\n');
+      }
       // V57.11.3 — align the bubble's "Leave by" with the card data,
       // matching finalSpeech below. V57.11.5 — also strip Claude's
       // best-effort duration estimate ("About 15 minutes from here")
@@ -4314,30 +4395,12 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         // 2026-08-05 (Demo 1 testing, Wael) — compoundBreakdownLines is
         // Claude's own freehand prose (parsed from lastTurnSpeech), and its
         // weekday/date arithmetic isn't reliable even when the accompanying
-        // tool-call JSON is correct: observed live — Claude said "Monday,
-        // August 11" and "Sunday, August 10" in the confirmation text while
-        // the actual CREATE_EVENT it executed correctly used Monday, August
-        // 10 (verified against the live Google Calendar event). Same class
-        // of bug Ticket B fixed for travel-event selection — don't trust
-        // Claude's freehand arithmetic for something that must be exact;
-        // recompute the weekday+date phrase deterministically from the
-        // resolved action data (which the tool-call schema keeps reliable)
-        // and substitute it into the displayed line.
-        const WEEKDAY_DATE_RE = /\b(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday),?\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?\b/i;
-        const correctWeekdayDatePhrase = (label: string, iso: string): string => {
-          if (!iso || !WEEKDAY_DATE_RE.test(label)) return label;
-          try {
-            const d = new Date(iso);
-            if (isNaN(d.getTime())) return label;
-            const correct = d.toLocaleDateString('en-US', { timeZone: 'America/Toronto', weekday: 'long', month: 'long', day: 'numeric' });
-            return label.replace(WEEKDAY_DATE_RE, correct);
-          } catch {
-            return label;
-          }
-        };
-        const createEventActionsForPlan = dedupedActions.filter((a: any) => a.type === 'CREATE_EVENT');
-        const timeReminderActionsForPlan = dedupedActions.filter((a: any) => a.type === 'SET_ACTION_RULE' && String((a as any).trigger_type ?? '') === 'time');
-        let calActionCursor = 0, remActionCursor = 0;
+        // tool-call JSON is correct. Corrected via the shared
+        // correctDatesInLines/correctWeekdayDatePhrase helpers defined above
+        // (right after dedupedActions) — same logic also applied to this
+        // turn's own displaySpeech, so both the original plan proposal and
+        // its echo in the following turn show the same, correct date.
+        const correctedBreakdownLines = correctDatesInLines(compoundBreakdownLines, dedupedActions);
 
         // Detect expected card type from breakdown line keywords — avoids
         // card/label mismatch when Claude emits tools in a different order
@@ -4362,19 +4425,8 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           return null;
         };
         let sentCursor = 0, draftCursor = 0, calCursor = 0, locCursor = 0, listCursor = 0;
-        compoundPlan = compoundBreakdownLines.map((rawLabel: string) => {
-          const slot = detectSlot(rawLabel);
-          let label = rawLabel;
-          if (slot === 'calendar') {
-            const evtAction = createEventActionsForPlan[calActionCursor] as any;
-            calActionCursor++;
-            if (evtAction?.start) label = correctWeekdayDatePhrase(label, String(evtAction.start));
-          } else if (/\bremind\b/i.test(rawLabel) && WEEKDAY_DATE_RE.test(rawLabel)) {
-            const remAction = timeReminderActionsForPlan[remActionCursor] as any;
-            remActionCursor++;
-            const dt = remAction?.trigger_config?.datetime;
-            if (dt) label = correctWeekdayDatePhrase(label, String(dt));
-          }
+        compoundPlan = correctedBreakdownLines.map((label: string) => {
+          const slot = detectSlot(label);
           if (slot === 'sent' && sentCursor < turnSentMessages.length) { sentCursor++; return { label, cardSlot: 'sent' as const }; }
           if (slot === 'sent' && draftCursor < turnDrafts.length) { draftCursor++; return { label, cardSlot: 'draft' as const }; }
           if (slot === 'calendar' && calCursor < turnEvents.length) { calCursor++; return { label, cardSlot: 'calendar' as const }; }
