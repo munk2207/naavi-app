@@ -959,9 +959,27 @@ async function lookupContactsByName(
 // Google Calendar and Naavi kept reporting the old time because the brief
 // passed by mobile was loaded at app launch and only refreshed every 60s.
 // Pulling per-request adds ~500ms latency but eliminates the staleness.
+// B10x Track 1 (2026-08-05) — validates an arbitrary request-supplied
+// timezone before it reaches toLocaleDateString/toLocaleTimeString. A bare
+// `clientTimezone || 'America/Toronto'` fallback handles a missing value
+// but not an invalid non-empty one (e.g. "Not/AZone"), which would throw a
+// RangeError deep inside the all-day-event filter instead of degrading
+// safely.
+function resolveClientTimezone(value?: string): string {
+  if (!value) return 'America/Toronto';
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: value });
+    return value;
+  } catch {
+    console.error('[fetchLiveCalendarEvents] Invalid client timezone:', value);
+    return 'America/Toronto';
+  }
+}
+
 async function fetchLiveCalendarEvents(
   supabase: ReturnType<typeof createClient>,
   userId: string,
+  clientTimezone?: string,
 ): Promise<MobileBriefItem[]> {
   try {
     const { data: tokenRow } = await supabase
@@ -1106,7 +1124,7 @@ async function fetchLiveCalendarEvents(
     // to fit a column it doesn't have). Same Victoria Day bug class as
     // B3i shipped for assistant-fulfillment.
     const now = Date.now();
-    const todayTorontoStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Toronto' });
+    const todayTorontoStr = new Date().toLocaleDateString('sv-SE', { timeZone: resolveClientTimezone(clientTimezone) });
     return items
       .map(e => {
         const isAllDay = !e.start?.dateTime && !!e.start?.date;
@@ -1441,7 +1459,7 @@ async function assembleSystemPromptServerSide(
       .catch(() => []),
     // 5. Live calendar — only fetched when query is calendar-shaped (saves 2-4s otherwise).
     needsLiveCalendar
-      ? fetchLiveCalendarEvents(supabase, userId)
+      ? fetchLiveCalendarEvents(supabase, userId, opts.clientTimezone)
       : Promise.resolve((opts.briefItems ?? []).filter(item => item.category === 'calendar')),
   ]);
 
@@ -2190,7 +2208,7 @@ Deno.serve(async (req) => {
     // Schedule section." Bypass returns deterministic brief contents.
     if (isCalendarReadIntent(userText)) {
       console.log(`[timing] ${elapsed()} | B6e bypass — calendar-read intent detected`);
-      const liveEvents = await fetchLiveCalendarEvents(supabase, userId);
+      const liveEvents = await fetchLiveCalendarEvents(supabase, userId, bodyClientTimezone);
       const window     = detectCalendarWindow(userText);
       const filtered   = filterCalendarBriefByWindow(liveEvents, window);
       const built      = buildCalendarReadResponse(filtered, window);
@@ -2214,7 +2232,7 @@ Deno.serve(async (req) => {
       const wordMatch = userText.match(/\bnext\s+(meeting|appointment|event|class|thing)\b/i);
       const requestedWord = wordMatch ? wordMatch[1].toLowerCase() : 'event';
       console.log(`[timing] ${elapsed()} | deterministic next-event travel-time bypass — word="${requestedWord}"`);
-      const liveEvents = await fetchLiveCalendarEvents(supabase, userId);
+      const liveEvents = await fetchLiveCalendarEvents(supabase, userId, bodyClientTimezone);
       const built = buildNextEventTravelTimeResponse(liveEvents, requestedWord);
       console.log(`[timing] ${elapsed()} | next-event bypass — events=${liveEvents.length} | destination=${JSON.stringify(built.actions[0]?.destination)}`);
       return jsonResponse({
@@ -2308,7 +2326,7 @@ Deno.serve(async (req) => {
               return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
             }
             if (pending.intent === 'CALENDAR_SEARCH' && pending.params.keyword) {
-              const liveEvents = await fetchLiveCalendarEvents(supabase, userId);
+              const liveEvents = await fetchLiveCalendarEvents(supabase, userId, bodyClientTimezone);
               const result = await handleCalendarSearch(liveEvents, pending.params.keyword);
               return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
             }
@@ -2941,13 +2959,13 @@ Deno.serve(async (req) => {
                 return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
               }
               if (classification.intent === 'CALENDAR_SEARCH' && classification.params.keyword) {
-                const liveEventsL2 = await fetchLiveCalendarEvents(supabase, userId);
+                const liveEventsL2 = await fetchLiveCalendarEvents(supabase, userId, bodyClientTimezone);
                 const result = await handleCalendarSearch(liveEventsL2, classification.params.keyword);
                 console.log(`[timing] ${elapsed()} | Level A CALENDAR_SEARCH deterministic`);
                 return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
               }
               if (classification.intent === 'READ_CALENDAR') {
-                const liveEventsRC = await fetchLiveCalendarEvents(supabase, userId);
+                const liveEventsRC = await fetchLiveCalendarEvents(supabase, userId, bodyClientTimezone);
                 const rcWindow     = detectCalendarWindow(userText);
                 const rcFiltered   = filterCalendarBriefByWindow(liveEventsRC, rcWindow);
                 const rcBuilt      = buildCalendarReadResponse(rcFiltered, rcWindow);

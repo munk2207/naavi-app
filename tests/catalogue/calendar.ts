@@ -152,6 +152,126 @@ export const calendarTests: TestCase[] = [
     },
   },
 
+  // ── B10x Track 1 — all-day event timezone boundary (2026-08-05) ──────────────
+  // fetchLiveCalendarEvents hardcoded "America/Toronto" for its all-day
+  // current/past/upcoming filter (index.ts, the todayTorontoStr anchor),
+  // ignoring the client_timezone already sent on every request.
+  //
+  // Design note (corrected after a first live attempt failed for a reason
+  // worth recording): the code-level filter is `start >= anchor OR end >
+  // anchor` — permissive for future dates, so a "west-lags-Toronto" event
+  // dated for the lagging zone's own "today" (Toronto's "yesterday")
+  // cannot actually prove the fix live, because Google's own list-API
+  // timeMin=now filter resolves an all-day event's date to a UTC instant
+  // range independently of either zone, and an event dated "Toronto's
+  // yesterday" has already ended in that UTC-anchored sense by the time
+  // any reasonable test runs — Google excludes it before our code's
+  // comparison ever runs, regardless of which fix is deployed. Confirmed
+  // live: the first version of this test errored with the event simply
+  // absent from either response.
+  //
+  // The provable direction is the reverse: an event dated for TORONTO'S
+  // OWN current date, checked against an EAST-of-Toronto zone whose "today"
+  // is already Toronto's tomorrow. That event reliably survives Google's
+  // UTC-anchored filter (it spans well into the future in UTC terms for
+  // nearly the entire Toronto calendar day), while the code-level anchor
+  // comparison differs: under Toronto's own anchor it's correctly
+  // included; under the ahead zone's anchor it's correctly excluded
+  // (already "yesterday" from that zone's perspective) — which is exactly
+  // where the OLD hardcoded-Toronto code got it wrong: it would have used
+  // Toronto's anchor regardless of which zone the client actually
+  // reported, wrongly including the event for the ahead-zone case too.
+  {
+    id: 'calendar.all-day-event-timezone-boundary',
+    category: 'calendar',
+    description: 'all-day event current/past/upcoming determination uses client_timezone, not a hardcoded Toronto assumption — 3 cases: Toronto (event stays current), an ahead-of-Toronto zone (event correctly excluded as already past for that zone), invalid-value safe fallback',
+    timeoutMs: 45_000,
+    async run(ctx) {
+      const AHEAD_ZONE = 'Pacific/Kiritimati'; // UTC+14 — furthest-ahead real IANA zone, maximizes the divergence window from Toronto
+      const todayInToronto = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Toronto' });
+      const todayInAheadZone = new Date().toLocaleDateString('sv-SE', { timeZone: AHEAD_ZONE });
+      if (todayInToronto === todayInAheadZone) {
+        throw new TestSkippedError(
+          `America/Toronto and ${AHEAD_ZONE} currently report the same calendar date (${todayInToronto}) — this test needs them to diverge to be meaningful. Inherently time-of-day dependent; re-run at a different time.`,
+        );
+      }
+
+      const EVENT_TITLE = 'Auto-tester timezone-boundary all-day event';
+      const endDate = (() => {
+        const d = new Date(todayInToronto + 'T00:00:00Z');
+        d.setUTCDate(d.getUTCDate() + 1);
+        return d.toISOString().slice(0, 10);
+      })();
+
+      const { status: createStatus, data: createData } = await adapters.createCalendarEvent(ctx, {
+        summary: EVENT_TITLE,
+        start: todayInToronto,
+        end: endDate,
+        description: 'Created by Naavi auto-tester. Safe to delete.',
+      });
+      const createErrMsg = String(createData?.error ?? '');
+      if (createStatus === 401 || createStatus === 403 || /token (refresh|expired|revoked|invalid)|invalid_grant|insufficient.*(scope|permission)/i.test(createErrMsg)) {
+        throw new TestSkippedError('Google Calendar OAuth not connected for test user.');
+      }
+      expect2xx(createStatus, 'create all-day boundary test event');
+
+      const askWithTimezone = async (clientTimezone: string) => {
+        const url = `${ctx.supabaseUrl}/functions/v1/naavi-chat`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${ctx.anonKey}` },
+          body: JSON.stringify({
+            messages: [{ role: 'user', content: "What's on my calendar?" }],
+            max_tokens: 512,
+            user_id: ctx.testUserId,
+            client_timezone: clientTimezone,
+          }),
+        });
+        let data: any = null;
+        try { data = await res.json(); } catch { /* non-JSON */ }
+        return { status: res.status, data };
+      };
+
+      try {
+        // Case 1: Toronto client_timezone — the event (dated for Toronto's
+        // own today) must be present. Unaffected by this fix either way,
+        // but confirms no regression.
+        const torontoResult = await askWithTimezone('America/Toronto');
+        expect2xx(torontoResult.status, 'naavi-chat with client_timezone=America/Toronto');
+        const torontoText = String(torontoResult.data?.rawText ?? '');
+        expectTruthy(
+          torontoText.includes(EVENT_TITLE),
+          `Expected the all-day event to appear when client_timezone=America/Toronto (it's dated for Toronto's own today) — got: ${torontoText.slice(0, 300)}`,
+        );
+
+        // Case 2: an ahead-of-Toronto zone — the event must NOT appear,
+        // since it's already "yesterday" from that zone's own today. This
+        // is the case that actually proves the fix: the OLD hardcoded-
+        // Toronto code would have used Toronto's anchor regardless of
+        // client_timezone and wrongly included it here too.
+        const aheadResult = await askWithTimezone(AHEAD_ZONE);
+        expect2xx(aheadResult.status, `naavi-chat with client_timezone=${AHEAD_ZONE}`);
+        const aheadText = String(aheadResult.data?.rawText ?? '');
+        expectTruthy(
+          !aheadText.includes(EVENT_TITLE),
+          `Expected the all-day event to NOT appear when client_timezone=${AHEAD_ZONE} (already "yesterday" relative to that zone's own today right now) — got: ${aheadText.slice(0, 300)}`,
+        );
+
+        // Case 3: invalid client_timezone — must not throw/error, and must
+        // safely fall back to Toronto's own (correct, unaffected) behavior.
+        const invalidResult = await askWithTimezone('Not/AZone');
+        expect2xx(invalidResult.status, 'naavi-chat with an invalid client_timezone must not error');
+        const invalidText = String(invalidResult.data?.rawText ?? '');
+        expectTruthy(
+          invalidText.includes(EVENT_TITLE),
+          `Expected an invalid client_timezone to safely fall back to Toronto behavior (event present, same as case 1), not error or silently exclude it — got: ${invalidText.slice(0, 300)}`,
+        );
+      } finally {
+        await adapters.deleteCalendarEvent(ctx, EVENT_TITLE);
+      }
+    },
+  },
+
   // ── ARCH-1 READ_CALENDAR regression (2026-06-13) ─────────────────────────────
   // "what do I have today" must return a deterministic calendar answer —
   // never Claude hedging like "I don't have access" or a list/alert read.
