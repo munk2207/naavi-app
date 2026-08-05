@@ -7,7 +7,7 @@
  * doesn't drive OAuth — that's a manual one-time step.)
  */
 
-import { adapters } from '../lib/adapters';
+import { adapters, db } from '../lib/adapters';
 import { expect2xx, expectTruthy, extractSpeech, findActionInRawText, TestSkippedError } from '../lib/assertions';
 import type { TestCase } from '../lib/types';
 
@@ -81,6 +81,74 @@ export const calendarTests: TestCase[] = [
       }
       expect2xx(status, 'create-calendar-event');
       expectTruthy(data?.htmlLink, 'event htmlLink');
+    },
+  },
+
+  // ── DB mirror timezone regression (2026-08-05, Demo 1 live testing) ──────────
+  // create-calendar-event used to write its own naive local datetime string
+  // (no UTC offset — the exact shape Claude's CREATE_EVENT tool calls use,
+  // per get-naavi-prompt: "2026-04-28T14:00:00", never "...Z") directly into
+  // calendar_events.start_time, a timestamptz column. Postgres applied its
+  // own session timezone instead of the America/Toronto offset Google
+  // itself correctly used, landing the DB mirror 4 hours off from the real
+  // event (an 11 AM Eastern meeting showed as 7 AM in the mirror). Fixed by
+  // writing back Google's own echoed start/end dateTime instead of
+  // reconstructing it locally. The existing calendar.create-event test above
+  // doesn't catch this — it builds start/end via .toISOString(), which is
+  // already a proper UTC string and never exercised the bug. This test uses
+  // a naive local string, matching production's actual input shape.
+  {
+    id: 'calendar.create-event-db-mirror-matches-google-time',
+    category: 'calendar',
+    description: 'create-calendar-event DB mirror reads back the correct America/Toronto wall-clock time for a naive local input, not a timezone-dropped one',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      // ~3 days out, fixed local wall-clock hour, naive string (no offset).
+      const future = new Date(Date.now() + 3 * 24 * 60 * 60_000);
+      const y = future.getFullYear();
+      const m = String(future.getMonth() + 1).padStart(2, '0');
+      const d = String(future.getDate()).padStart(2, '0');
+      const naiveStart = `${y}-${m}-${d}T14:00:00`;
+      const naiveEnd   = `${y}-${m}-${d}T15:00:00`;
+
+      const { status, data } = await adapters.createCalendarEvent(ctx, {
+        summary: 'Auto-tester DB-mirror timezone check',
+        start: naiveStart,
+        end: naiveEnd,
+        description: 'Created by Naavi auto-tester. Safe to delete.',
+      });
+      ctx.log(`create-event status=${status} data=${JSON.stringify(data).slice(0, 200)}`);
+
+      const errMsg = String(data?.error ?? '');
+      if (status === 401 || status === 403 || /token (refresh|expired|revoked|invalid)|invalid_grant|insufficient.*(scope|permission)|insufficientPermissions/i.test(errMsg)) {
+        throw new TestSkippedError(
+          `Google Calendar OAuth not connected for test user. Sign in to Google Calendar once with mynaavi2207@gmail.com to enable.`,
+        );
+      }
+      expect2xx(status, 'create-calendar-event');
+      expectTruthy(data?.eventId, 'event eventId');
+
+      try {
+        const rows = await db.select(
+          ctx, 'calendar_events',
+          `google_event_id=eq.${data.eventId}&select=start_time,end_time`,
+        );
+        expectTruthy(rows.length === 1, `expected exactly one calendar_events row for ${data.eventId}, got ${rows.length}`);
+
+        const dbStartLocal = new Date(rows[0].start_time).toLocaleTimeString('en-GB', {
+          timeZone: 'America/Toronto', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+        });
+        expectTruthy(
+          dbStartLocal === '14:00',
+          `DB mirror start_time (${rows[0].start_time}) reads back as ${dbStartLocal} in America/Toronto, expected 14:00 — this is the 2026-08-05 bug: the mirror stored the naive local string as if it were already UTC.`,
+        );
+      } finally {
+        // Cleanup — real Google event + DB row. Suite teardown also clears
+        // calendar_events for the test user, but do it explicitly here too
+        // since we know the exact event, and to avoid leaving a real event
+        // on the test account's live Google Calendar between suite runs.
+        await adapters.deleteCalendarEvent(ctx, 'Auto-tester DB-mirror timezone check');
+      }
     },
   },
 
