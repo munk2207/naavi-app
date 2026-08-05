@@ -2395,6 +2395,43 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           return label;
         }
       };
+      // Demo 1 live test, 2026-08-05 — the two call sites above only fire
+      // when a resolved action (CREATE_EVENT.start / trigger_config.datetime)
+      // already exists to correct FROM. On a compound multi-action turn's
+      // OWN first display, no action exists yet — Naavi's standard pattern
+      // is confirmation text now, tool calls only after the user says "yes"
+      // — so "Monday, August 11" (wrong) passed through untouched even with
+      // the fix above in place. Live-confirmed on the SAME turn the fix
+      // still isn't reachable for: Claude gets the WEEKDAY NAME right even
+      // when the paired day-of-month is wrong (confirmed both times: build
+      // 314's "Monday, August 11"/"Sunday, August 10" and build 315's
+      // identical repeat). So instead of needing a resolved action, this
+      // fallback recomputes the date from "today" for whatever weekday name
+      // Claude already wrote — the single reliable input Claude provides.
+      // Scope note: assumes the target is the NEXT occurrence of that
+      // weekday within 7 days, which matches "next Monday"/"Sunday" style
+      // phrasing but would be wrong for a date further out named by weekday
+      // (e.g. "in three weeks on a Monday") — an edge case out of scope for
+      // this fix; the following turn's source-based correction (above) is
+      // authoritative once a real action exists regardless.
+      const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const correctWeekdayDatePhraseFromToday = (label: string): string => {
+        const m = label.match(WEEKDAY_DATE_RE);
+        if (!m) return label;
+        const targetIdx = WEEKDAY_NAMES.findIndex((n) => n.toLowerCase() === m[1].toLowerCase());
+        if (targetIdx < 0) return label;
+        try {
+          const torontoNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Toronto' }));
+          let diff = targetIdx - torontoNow.getDay();
+          if (diff <= 0) diff += 7; // always the NEXT occurrence, never today
+          const target = new Date(torontoNow);
+          target.setDate(target.getDate() + diff);
+          const correct = target.toLocaleDateString('en-US', { timeZone: 'America/Toronto', weekday: 'long', month: 'long', day: 'numeric' });
+          return label.replace(WEEKDAY_DATE_RE, correct);
+        } catch {
+          return label;
+        }
+      };
       // Matches each calendar or reminder line to the corresponding action
       // by position — same convention already used for card-slot matching.
       // Note: "remind" (not "\bremind\b") on purpose — the real breakdown
@@ -2412,13 +2449,13 @@ const oneShot = pending.originalAction?.one_shot ?? true;
           if (/\bmeeting\b|\bcalendar\b|\bbook\b|\bevent\b/.test(l)) {
             const evtAction = createEventActionsForDates[calIdx] as any;
             calIdx++;
-            return evtAction?.start ? correctWeekdayDatePhrase(line, String(evtAction.start)) : line;
+            return evtAction?.start ? correctWeekdayDatePhrase(line, String(evtAction.start)) : correctWeekdayDatePhraseFromToday(line);
           }
           if (/remind/i.test(l) && WEEKDAY_DATE_RE.test(line)) {
             const remAction = timeReminderActionsForDates[remIdx] as any;
             remIdx++;
             const dt = remAction?.trigger_config?.datetime;
-            return dt ? correctWeekdayDatePhrase(line, String(dt)) : line;
+            return dt ? correctWeekdayDatePhrase(line, String(dt)) : correctWeekdayDatePhraseFromToday(line);
           }
           return line;
         });
@@ -4315,7 +4352,18 @@ const oneShot = pending.originalAction?.one_shot ?? true;
       // FOLLOWING turn's echo of this text — it never touches the turn's
       // own first display, which is what the user actually reads and
       // confirms against. Fix it here too, at the source.
-      if (turnSpeechOverride === null && dedupedActions.length > 0) {
+      //
+      // 2026-08-05 (Demo 1 re-test, build 315) — dropped the
+      // `dedupedActions.length > 0` requirement. Naavi's proposal turn
+      // (before the user says "yes") has NO actions yet — they're only
+      // created on the confirm turn — so that guard skipped this correction
+      // entirely on exactly the turn the user actually reads, which is why
+      // "Monday, August 11" still showed live on build 315 despite this
+      // block existing. correctDatesInLines now falls back to a
+      // from-today/weekday-name recomputation when no action exists yet
+      // (see correctWeekdayDatePhraseFromToday above), so it's safe to run
+      // unconditionally here.
+      if (turnSpeechOverride === null) {
         // Correct the WHOLE set of numbered lines in one call — calling
         // correctDatesInLines per-line would reset its calendar/reminder
         // cursor to 0 on every call, silently binding every calendar line
