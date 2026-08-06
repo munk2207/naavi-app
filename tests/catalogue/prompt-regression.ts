@@ -943,4 +943,88 @@ export const promptRegressionTests: TestCase[] = [
       );
     },
   },
+
+  // ──────────────────────────────────────────────────────────────────────
+  // B10r — Contacts-vs-Calendar birthday/anniversary authority rule.
+  // REMOVED 2026-07-22 (found during this same day's Phase 4 testing, not
+  // carried forward as dead weight): both cases here assumed "Tell me about
+  // X" reaches Claude's Path B (get-naavi-prompt), constructing a fake
+  // "## Live search results" block to test that. It doesn't — confirmed via
+  // live staging test that this phrasing is intercepted by naavi-chat's
+  // Layer 2 deterministic classifier (`intentHandlers.ts`'s
+  // `handlePersonLookup`), which runs its own fresh `global-search` call and
+  // ignores any pre-search text already in the message. One case errored
+  // outright (3/3 trials returned the generic "I didn't find anything about
+  // Fatma" fallback); the other "passed" only because it hit the identical
+  // fallback, which vacuously has no year in it either — a false pass, not
+  // real coverage. The actual fix (stripping the false year at its source,
+  // `global-search/adapters/calendar.ts`) is covered by
+  // `session-2026-07-22-b10r-contact-birthdays.ts`'s calendar-adapter tests
+  // instead, which exercise the real deployed function directly rather than
+  // assuming which response path handles a given phrasing. The
+  // `get-naavi-prompt` rule this file would have tested remains in place as
+  // defense-in-depth for Path B — see `docs/B10R_PHASE1_PROBLEM_DEFINITION_
+  // 2026-07-22.md`'s Addendum 2 for the full root-cause writeup.
+  // ──────────────────────────────────────────────────────────────────────
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Capability-answer JSON break (2026-08-06). Root cause: Path B
+  // (naavi-chat's Claude tool-use flow) expects plain prose in Claude's
+  // text block, but get-naavi-prompt's formatRule separately tells Claude
+  // to emit a {"speech":...,"display":...} JSON envelope AS ITS TEXT. For
+  // a capability question Claude has no tool call to make, so it complied
+  // with formatRule literally — the whole JSON envelope landed inside
+  // `speech`, got copied into `display`, then wrapped a second time,
+  // producing a double-nested response the mobile client couldn't parse.
+  // Fixed server-side in naavi-chat/index.ts (~line 3708): unwrap an
+  // embedded {speech,display} JSON blob out of Claude's text block before
+  // anything downstream touches it, so the bug is caught regardless of
+  // client build or channel. See docs/SESSION_HANDOFF_2026-08-06_B10X_
+  // SHIPPED_YOUTUBE_DEMO_PREP_CAPABILITY_JSON_BREAK_OPEN.md.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'prompt-regression.capability-answer-no-nested-json',
+    category: 'prompt-regression',
+    description: '2026-08-06 — capability question with a specific requested count must not leak JSON syntax into speech/display (Path B double-nesting bug)',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'tell me about your top 4 capabilities' }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      const rawText = data?.rawText ?? '';
+      ctx.log(`rawText: ${rawText.slice(0, 500)}…`);
+
+      let parsed: any = null;
+      try {
+        const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+        parsed = JSON.parse(cleaned);
+      } catch (e) {
+        throw new Error(`Response is not valid top-level JSON at all — worse than the known bug. rawText: ${JSON.stringify(rawText.slice(0, 300))}`);
+      }
+
+      const speech = typeof parsed.speech === 'string' ? parsed.speech : '';
+      const display = typeof parsed.display === 'string' ? parsed.display : '';
+      ctx.log(`speech (${speech.length}c): ${JSON.stringify(speech.slice(0, 200))}`);
+      ctx.log(`display (${display.length}c): ${JSON.stringify(display.slice(0, 200))}`);
+
+      const looksLikeLeakedJson = (s: string) =>
+        /"speech"\s*:/.test(s) || /"display"\s*:/.test(s) || /"pendingThreads"\s*:/.test(s);
+
+      expectTruthy(
+        !looksLikeLeakedJson(speech),
+        `speech field contains leaked JSON envelope syntax (e.g. "speech": or "display": as literal text) — Path B double-nesting regression. speech: ${JSON.stringify(speech.slice(0, 300))}`,
+      );
+      expectTruthy(
+        !looksLikeLeakedJson(display),
+        `display field contains leaked JSON envelope syntax — Path B double-nesting regression. display: ${JSON.stringify(display.slice(0, 300))}`,
+      );
+      expectTruthy(
+        speech.length > 0,
+        `speech field is empty — response may have collapsed entirely into display. rawText: ${JSON.stringify(rawText.slice(0, 300))}`,
+      );
+    },
+  },
+  // ──────────────────────────────────────────────────────────────────────
 ];

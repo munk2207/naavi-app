@@ -3705,10 +3705,31 @@ Deno.serve(async (req) => {
     // Extract speech (text blocks) and actions (tool_use blocks) from the
     // structured response. Multiple text blocks (rare) are concatenated; tool
     // calls preserve order so REMEMBER+CREATE_EVENT fanouts arrive in sequence.
-    const speechBlocks = response.content
+    const speechBlocksRaw = response.content
       .filter((b: any) => b.type === 'text')
       .map((b: any) => String(b.text ?? ''))
       .join('');
+
+    // Path B expects plain prose in text blocks — this whole flow is built
+    // to synthesize its own { speech, display, actions, pendingThreads }
+    // envelope below (see comment above claudeParams). But get-naavi-prompt's
+    // formatRule separately tells Claude to emit a {"speech":...,"display":...}
+    // JSON envelope AS ITS TEXT, which Claude sometimes does literally when it
+    // has no tool call to make (e.g. capability questions). Without this
+    // unwrap, that whole JSON blob lands in `speech`, gets copied into
+    // `display` below, then wrapped a second time — a double-nested response
+    // (2026-08-06, capability-answer JSON break investigation). Unwrap once,
+    // here, before anything downstream touches it.
+    let speechBlocks = speechBlocksRaw;
+    let claudeProvidedDisplay: string | null = null;
+    const { parsed: _embeddedJson } = extractAndParseJson(speechBlocksRaw);
+    if (_embeddedJson && typeof _embeddedJson.speech === 'string' && _embeddedJson.speech.length > 0) {
+      speechBlocks = _embeddedJson.speech;
+      if (typeof _embeddedJson.display === 'string' && _embeddedJson.display.length > 0) {
+        claudeProvidedDisplay = _embeddedJson.display;
+      }
+      console.log(`[naavi-chat] Unwrapped embedded {speech,display} JSON from Path B text block (raw=${speechBlocksRaw.length}c → speech=${speechBlocks.length}c, display=${claudeProvidedDisplay?.length ?? 0}c)`);
+    }
     const toolUseBlocks = response.content.filter((b: any) => b.type === 'tool_use');
 
     // ── F15 TEMPORARY DIAGNOSTIC (2026-07-09) — capture Claude's raw tool_use
@@ -4481,7 +4502,16 @@ Deno.serve(async (req) => {
     const pendingTimeMarker = embedPendingTime
       ? `\n<!--PENDING_INTENT:${JSON.stringify(pendingTimeRule)}-->`
       : '';
-    const display = speech + pendingTimeMarker;
+    // Prefer Claude's own display text (unwrapped above) when speech wasn't
+    // further overridden by a special-case path below (server rejection,
+    // ADD_TO_COMMUNITY readback, Path B disclosure, phone injection, etc.) —
+    // those all operate on `speech` only, so if any of them fired, `speech`
+    // no longer matches the unwrapped speechBlocks and the richer display
+    // would be stale relative to what's actually being said. Fall back to
+    // the legacy speech-mirroring behavior in that case.
+    const display = (claudeProvidedDisplay && speech === speechBlocks)
+      ? claudeProvidedDisplay + pendingTimeMarker
+      : speech + pendingTimeMarker;
     if (embedPendingTime) {
       console.log(`[naavi-chat] Embedded PENDING_INTENT for time-trigger SET_ACTION_RULE in display`);
     }
