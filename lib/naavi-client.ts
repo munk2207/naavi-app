@@ -731,7 +731,39 @@ function buildFallback(rawText: string): NaaviResponse {
     ? lastMatch[1].replace(/\\n/g, ' ').replace(/\\"/g, '"')
     : 'I had trouble with that — could you try again?';
   console.error('[NaaviClient] All parse attempts failed. Raw:', rawText);
-  return { speech, actions: [], pendingThreads: [] };
+  return unwrapNestedJson({ speech, actions: [], pendingThreads: [] });
+}
+
+// 2026-08-06 — Claude occasionally nests the whole response schema one
+// level too deep: `speech` is itself a JSON-encoded string of the SAME
+// {speech, display, actions, pendingThreads} shape, instead of plain
+// prose. Live-observed on a self-referential "list your capabilities"
+// query, reproduced non-deterministically — same prompt sometimes nests,
+// sometimes doesn't (LLM sampling variance, not a deterministic code
+// path). Every parse route above successfully parses the OUTER JSON, so
+// this can't be fixed by trying harder to parse — it needs a check on the
+// RESULT. Unwraps up to a few levels in case it repeats; bails out (keeps
+// the outer text as-is) the moment a level doesn't look like nested JSON.
+function unwrapNestedJson(result: NaaviResponse): NaaviResponse {
+  let current = result;
+  for (let depth = 0; depth < 3; depth++) {
+    const trimmed = current.speech.trim();
+    if (!trimmed.startsWith('{')) break;
+    try {
+      const inner = JSON.parse(trimmed);
+      if (typeof inner.speech !== 'string') break;
+      console.warn('[NaaviClient] Unwrapped nested JSON in speech field, depth', depth + 1);
+      current = {
+        speech: inner.speech,
+        display: typeof inner.display === 'string' ? inner.display : current.display,
+        actions: Array.isArray(inner.actions) ? inner.actions : current.actions,
+        pendingThreads: Array.isArray(inner.pendingThreads) ? inner.pendingThreads : current.pendingThreads,
+      };
+    } catch {
+      break;
+    }
+  }
+  return current;
 }
 
 function extractJsonBlocks(text: string): string[] {
@@ -743,6 +775,21 @@ function extractJsonBlocks(text: string): string[] {
     else if (text[i] === '}') { depth--; if (depth === 0 && start !== -1) blocks.push(text.slice(start, i + 1)); }
   }
   return blocks.reverse(); // last block first — Claude's self-correction is most recent
+}
+
+// Builds the final NaaviResponse from a successfully-parsed JSON object —
+// shared by every pass below so the nested-JSON unwrap (and fixSentLanguage)
+// only needs to live in one place.
+function finalizeParsedResponse(json: any): NaaviResponse {
+  const actions = Array.isArray(json.actions) ? json.actions : [];
+  const speech = typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?';
+  const unwrapped = unwrapNestedJson({
+    speech,
+    display: typeof json.display === 'string' ? json.display : undefined,
+    actions,
+    pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
+  });
+  return { ...unwrapped, speech: fixSentLanguage(unwrapped.speech, unwrapped.actions) };
 }
 
 function parseResponse(rawText: string): NaaviResponse {
@@ -757,13 +804,7 @@ function parseResponse(rawText: string): NaaviResponse {
     try {
       const json = JSON.parse(block);
       if (typeof json.speech === 'string') {
-        const actions = Array.isArray(json.actions) ? json.actions : [];
-        return {
-          speech: fixSentLanguage(json.speech, actions),
-          display: typeof json.display === 'string' ? json.display : undefined,
-          actions,
-          pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
-        };
+        return finalizeParsedResponse(json);
       }
     } catch { /* try next block */ }
   }
@@ -782,14 +823,7 @@ function parseResponse(rawText: string): NaaviResponse {
   // Pass 1 — standard parse
   try {
     const json = JSON.parse(jsonSlice);
-    const actions = Array.isArray(json.actions) ? json.actions : [];
-    const speech = typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?';
-    return {
-      speech: fixSentLanguage(speech, actions),
-      display: typeof json.display === 'string' ? json.display : undefined,
-      actions,
-      pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
-    };
+    return finalizeParsedResponse(json);
   } catch { /* fall through */ }
 
   // Pass 2 — fix literal newlines inside string values
@@ -799,14 +833,7 @@ function parseResponse(rawText: string): NaaviResponse {
       (_, inner) => `"${inner.replace(/\n/g, '\\n').replace(/\r/g, '')}"`
     );
     const json = JSON.parse(sanitized);
-    const actions = Array.isArray(json.actions) ? json.actions : [];
-    const speech = typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?';
-    return {
-      speech: fixSentLanguage(speech, actions),
-      display: typeof json.display === 'string' ? json.display : undefined,
-      actions,
-      pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
-    };
+    return finalizeParsedResponse(json);
   } catch { /* fall through */ }
 
   // Pass 3 — aggressively strip all control characters and retry
@@ -816,14 +843,7 @@ function parseResponse(rawText: string): NaaviResponse {
       .replace(/,\s*([}\]])/g, '$1')             // remove trailing commas
       .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":'); // quote unquoted keys
     const json = JSON.parse(aggressive);
-    const actions = Array.isArray(json.actions) ? json.actions : [];
-    const speech = typeof json.speech === 'string' ? json.speech : 'I did not catch that — could you say it again?';
-    return {
-      speech: fixSentLanguage(speech, actions),
-      display: typeof json.display === 'string' ? json.display : undefined,
-      actions,
-      pendingThreads: Array.isArray(json.pendingThreads) ? json.pendingThreads : [],
-    };
+    return finalizeParsedResponse(json);
   } catch { /* fall through */ }
 
   // All passes failed — extract speech with regex as last resort
