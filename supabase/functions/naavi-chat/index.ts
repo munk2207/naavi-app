@@ -2322,7 +2322,7 @@ Deno.serve(async (req) => {
               return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
             }
             if (pending.intent === 'LOOKUP_CONTACT' && pending.params.name) {
-              const result = await handleLookupContact(supabase, userId, pending.params.name);
+              const result = await handleLookupContact(supabase, userId, pending.params.name, userText);
               return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
             }
             if (pending.intent === 'CALENDAR_SEARCH' && pending.params.keyword) {
@@ -2954,7 +2954,7 @@ Deno.serve(async (req) => {
                 return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
               }
               if (classification.intent === 'LOOKUP_CONTACT' && classification.params.name) {
-                const result = await handleLookupContact(supabase, userId, classification.params.name);
+                const result = await handleLookupContact(supabase, userId, classification.params.name, userText);
                 console.log(`[timing] ${elapsed()} | Level A LOOKUP_CONTACT deterministic`);
                 return jsonResponse({ rawText: JSON.stringify({ speech: result.speech, display: result.display, actions: result.actions, pendingThreads: [] }) });
               }

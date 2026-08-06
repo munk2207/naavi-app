@@ -26,6 +26,7 @@
 
 import type { SearchAdapter, SearchContext, SearchResult } from './_interface.ts';
 import { computeContactHash, COMMUNITY_PERSON_FIELDS } from '../../_shared/community_hash.ts';
+import { contactDateFacts, type PersonBirthday, type PersonEvent } from '../../_shared/contact_date_facts.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const GOOGLE_TOKEN_URL       = 'https://oauth2.googleapis.com/token';
@@ -84,6 +85,9 @@ type PersonPhone        = { value?: string; type?: string };
 type PersonAddress      = { formattedValue?: string; postalCode?: string; city?: string; type?: string };
 type PersonMembership   = { contactGroupMembership?: { contactGroupId?: string; contactGroupResourceName?: string } };
 type PersonOrganization = { name?: string; title?: string };
+// B10w — PersonDate/PersonBirthday/PersonEvent moved to
+// `_shared/contact_date_facts.ts` (imported above) so `lookup-contact`
+// can share the identical types and formatting logic instead of a copy.
 type Person = {
   resourceName?: string;
   names?: PersonName[];
@@ -92,10 +96,36 @@ type Person = {
   addresses?: PersonAddress[];
   memberships?: PersonMembership[];
   organizations?: PersonOrganization[];
+  birthdays?: PersonBirthday[];
+  events?: PersonEvent[];
 };
 
 function normalizePhone(s: string): string {
   return s.replace(/[^\d]/g, '');
+}
+
+// B10r — single-contact enrichment for the Phase 1 (community DB) fast
+// path, which returns cached name/email/phone only and never carries
+// birthday/anniversary data. Called ONLY on an actual Phase 1 hit (a
+// small, curated MyNaavi-labeled set, not the full address book), so this
+// stays a bounded, single-lookup cost — not a repeat of Phase 2's full
+// contact-list fetch. On any failure, returns null so the caller can fall
+// back to today's cached-only result unchanged (graceful degradation).
+async function fetchPersonDateFacts(
+  accessToken: string,
+  resourceName: string,
+): Promise<{ birthday: string | null; anniversary: string | null } | null> {
+  try {
+    const url = new URL(`https://people.googleapis.com/v1/${resourceName}`);
+    url.searchParams.set('personFields', 'birthdays,events');
+    const res = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) return null;
+    const person = (await res.json()) as Person;
+    return contactDateFacts(person);
+  } catch (err) {
+    console.warn('[contacts-adapter] fetchPersonDateFacts failed:', err);
+    return null;
+  }
 }
 
 async function getAccessToken(refreshToken: string): Promise<string | null> {
@@ -143,7 +173,7 @@ async function fetchConnections(accessToken: string): Promise<Person[]> {
   let pageToken: string | undefined = undefined;
   while (out.length < MAX_CONTACTS_PER_SOURCE) {
     const url = new URL(PEOPLE_CONNECTIONS_API);
-    url.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers,addresses,memberships,organizations');
+    url.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers,addresses,memberships,organizations,birthdays,events');
     url.searchParams.set('pageSize', '1000');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
     try {
@@ -172,7 +202,7 @@ async function fetchOtherContacts(accessToken: string): Promise<Person[]> {
   let pageToken: string | undefined = undefined;
   while (out.length < MAX_CONTACTS_PER_SOURCE) {
     const url = new URL(OTHER_CONTACTS_API);
-    url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers,addresses,memberships');
+    url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers,addresses,memberships,birthdays,events');
     url.searchParams.set('pageSize', '1000');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
     try {
@@ -365,13 +395,19 @@ export const contactsAdapter: SearchAdapter = {
               const displayName = p.names?.[0]?.displayName ?? '';
               const emails = (p.emailAddresses ?? []).map(e => e.value ?? '').filter(Boolean);
               const phones = (p.phoneNumbers  ?? []).map(ph => ph.value ?? '').filter(Boolean);
+              const { birthday, anniversary } = contactDateFacts(p);
               const url = phones[0]
                 ? `tel:${phones[0].replace(/[^\d+]/g, '')}`
                 : emails[0] ? `mailto:${emails[0]}` : undefined;
               communityHits.push({
                 source: 'contacts',
                 title: displayName || emails[0] || phones[0] || 'Contact',
-                snippet: [emails[0], phones[0]].filter(Boolean).join(' · '),
+                snippet: [
+                  emails[0],
+                  phones[0],
+                  birthday ? `Birthday: ${birthday}` : null,
+                  anniversary ? `Anniversary: ${anniversary}` : null,
+                ].filter(Boolean).join(' · '),
                 score: 1.5,
                 url,
                 metadata: {
@@ -381,6 +417,8 @@ export const contactsAdapter: SearchAdapter = {
                   phones,
                   is_community: true,
                   addresses: [],
+                  birthday,
+                  anniversary,
                 },
               });
             }
@@ -518,7 +556,46 @@ export const contactsAdapter: SearchAdapter = {
     if (communityHits.length > 0) {
       console.log(`[contacts-adapter] Phase 1: ${communityHits.length} community hit(s) for "${q}"`);
       communityHits.sort((a, b) => b.score - a.score);
-      return communityHits.slice(0, ctx.limit);
+      const topHits = communityHits.slice(0, ctx.limit);
+
+      // B10r — enrich Phase 1 hits with birthday/anniversary. The community
+      // DB cache never stores these, so without this step a MyNaavi-labeled
+      // contact never gets past-Phase-1 birthday data at all. Bounded cost:
+      // only runs for actual hits (a small, curated list), and any failure
+      // (missing token, network error) falls back to today's behavior —
+      // the hit is still returned, just without the enrichment.
+      try {
+        const { data: enrichTokenRow } = await ctx.supabase
+          .from('user_tokens')
+          .select('refresh_token')
+          .eq('user_id', ctx.userId)
+          .eq('provider', 'google')
+          .maybeSingle();
+        const enrichRefreshToken = enrichTokenRow?.refresh_token;
+        if (enrichRefreshToken) {
+          const enrichAccessToken = await getAccessToken(enrichRefreshToken);
+          if (enrichAccessToken) {
+            await Promise.all(topHits.map(async (hit) => {
+              const resourceName = (hit.metadata as Record<string, unknown> | undefined)?.resource_name;
+              if (typeof resourceName !== 'string' || !resourceName) return;
+              const facts = await fetchPersonDateFacts(enrichAccessToken, resourceName);
+              if (!facts) return;
+              const { birthday, anniversary } = facts;
+              if (!birthday && !anniversary) return;
+              hit.snippet = [
+                hit.snippet || null,
+                birthday ? `Birthday: ${birthday}` : null,
+                anniversary ? `Anniversary: ${anniversary}` : null,
+              ].filter(Boolean).join(' · ');
+              hit.metadata = { ...(hit.metadata ?? {}), birthday, anniversary };
+            }));
+          }
+        }
+      } catch (err) {
+        console.warn('[contacts-adapter] Phase 1 birthday/anniversary enrichment failed, returning unenriched hits:', err);
+      }
+
+      return topHits;
     }
 
     // ── Phase 2: Google People API (no community match found) ─────────────
@@ -689,10 +766,18 @@ export const contactsAdapter: SearchAdapter = {
       const primaryEmail = emails[0];
       const primaryPhone = phones[0];
       const primaryAddress = addresses[0]?.formattedValue ?? null;
+      const { birthday, anniversary } = contactDateFacts(p);
       // Include org name in snippet when it differs from the display name
       // so Claude can read "RBC — Royal Bank · +1 800-769-2511".
       const orgDisplay = orgName && !nameLower.includes(orgName) ? p.organizations?.[0]?.name : null;
-      const snippetParts = [orgDisplay, primaryEmail, primaryPhone, primaryAddress].filter(Boolean);
+      const snippetParts = [
+        orgDisplay,
+        primaryEmail,
+        primaryPhone,
+        primaryAddress,
+        birthday ? `Birthday: ${birthday}` : null,
+        anniversary ? `Anniversary: ${anniversary}` : null,
+      ].filter(Boolean);
 
       // Give each contact a tap target: tel: to dial, fall back to mailto:.
       // The mobile UI uses Linking.openURL(hit.url), which honors both schemes.
@@ -722,6 +807,8 @@ export const contactsAdapter: SearchAdapter = {
             city: a.city ?? null,
             type: a.type ?? null,
           })).filter(a => a.formatted || a.postal_code),
+          birthday,
+          anniversary,
         },
       });
     }

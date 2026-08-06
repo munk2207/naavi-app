@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-07-18-b10k-production-promotion';
+const PROMPT_VERSION = '2026-08-06-capability-length-cap';
 
 /**
  * Cache-boundary marker.
@@ -233,6 +233,38 @@ On voice: use spoken numbers — "Option one: your Costco alert. Option two: Sat
 
 This rule applies to EVERY context where 2 or more items are presented: entity disambiguation, search results, alert and rule listings, list contents, calendar events, contacts found, any multi-item answer.`;
 
+  // Capability/self-description length cap — applies to both channels.
+  // Wael 2026-08-06, filming "Naavi Answer" YouTube Q&A videos: the mobile
+  // intro's general "under 3 sentences unless he asks for more" rule backs
+  // off for exactly this shape of question — an open-ended "what can you
+  // do" or "how are you different from X" reads as "asking for more",
+  // producing a genuinely good but 3-minute-long answer that can't be used
+  // in a 60-90 second video and can't be cut without breaking voice/text
+  // sync. This rule caps ONLY this narrow question shape — normal answers
+  // (calendar listings, bill totals, alert confirmations, etc.) are
+  // untouched.
+  const capabilityLengthRule = `CAPABILITY / SELF-DESCRIPTION QUESTIONS — LENGTH CAP (Wael 2026-08-06):
+
+When ${userName} asks Naavi to describe itself, its capabilities, what it can do, how it works, or how it compares to another assistant or app — keep the SPOKEN answer ("speech") to roughly 150-200 words (about 60-90 seconds at natural speaking pace). Lead with the 2-3 most distinctive, impressive capabilities rather than trying to list everything. This overrides the general "expand if he's asking for more" allowance specifically for this question shape — these answers must stay short even though they're open-ended.
+
+This does NOT override the existing numbered-list/display formatting rules above — if the answer naturally breaks into 2+ distinct points, still emit a numbered "display" field on the app channel exactly as those rules require. "display" must restate the EXACT SAME points "speech" narrates — same count, same capabilities, in the same order. Do NOT list more points in "display" than are actually narrated in "speech" (e.g. speech covers 2 capabilities but display lists 5) — this breaks voice/text sync when the answer is read aloud alongside the screen. If a point isn't worth saying in speech, it doesn't belong in display either for this question shape.
+
+Trigger phrasing (not exhaustive — match the intent, not just these exact words): "What can you do", "What are your top capabilities", "Tell me about yourself", "How do you work", "What makes you different", "What's the difference between you and ChatGPT" (or Siri, Alexa, Google Assistant, any other named assistant/app), "Why should I use you instead of X", "How are you different from X".
+
+The examples below show STRUCTURE and LENGTH only — never reuse their exact wording. Write fresh wording every time, based on ${userName}'s actual phrasing and whichever capabilities are actually most relevant to what he asked.
+
+SHAPE (app) — 2-4 short sentences in "speech" (one per distinctive capability, plus a brief contrast if comparing to a named competitor); "display" restates the SAME 2-3 capabilities as a numbered list, nothing added (per the numbered-list rule above):
+{
+  "speech": "<one short sentence contrasting with what was asked, if comparing to something named> <one short sentence per capability, ~15-25 words each, 2-3 capabilities total>",
+  "display": "<one-line intro>:\\n\\n1. <the SAME capability 1 speech just narrated, one line>\\n2. <the SAME capability 2 speech just narrated, one line>\\n3. <the SAME capability 3 speech just narrated, one line — omit this line entirely if speech only covered 2 capabilities>"
+}
+
+SHAPE (voice) — same idea, prose only, no "display" field, 2-4 short sentences, ~60-90 seconds spoken.
+
+WRONG — exhaustive feature-by-feature tour, multiple paragraphs, every capability listed with an example for each. Even if every sentence is accurate and well-written, this question shape must stay short. ALSO WRONG — copying any wording from the shape examples above verbatim instead of writing a fresh answer. ALSO WRONG — "display" listing capabilities that "speech" never mentioned (e.g. speech narrates 2 points, display lists 5) — a viewer following text on screen while the audio plays would see points the voice never says.
+
+This rule does NOT apply to normal task answers (what's on my calendar, how much have I been billed, list my alerts, etc.) — only to Naavi describing itself.`;
+
   // Dynamic prefix — changes per request (minute-accurate time, calendar of upcoming days).
   // The body below is the cacheable stable block; the CACHE_BOUNDARY marker separates them.
   return `
@@ -247,6 +279,8 @@ ${correctionRule}
 ${formatRule}
 
 ${choiceFormatRule}
+
+${capabilityLengthRule}
 
 ## MYNAAVI COMMUNITY — ${userName}'s VIP inner circle
 

@@ -110,12 +110,38 @@ export type ContactResult = {
   resourceName?: string;
 };
 
+// B9b (2026-07-09, fixed 2026-08-06) — live repro: "What's Bob's phone
+// number" replied with Bob's EMAIL, not his phone, even though both were
+// on file. Root cause: the single-result branch below hardcoded
+// `c.email || c.phone` with no awareness of which field was actually
+// asked for. This reads the user's own message text to detect an
+// explicit ask for one field over the other; returns null (unchanged
+// email-first default) when the question doesn't specify — e.g. "What's
+// Bob's contact info" is intentionally left ambiguous, per B9b's own
+// note that this phrasing should keep returning email.
+function detectRequestedContactField(userText: string): 'phone' | 'email' | null {
+  const t = (userText || '').toLowerCase();
+  const asksPhone = /\b(phone(\s*number)?|cell(\s*number)?|mobile(\s*number)?|number)\b/.test(t);
+  const asksEmail = /\bemail(\s*address)?\b/.test(t);
+  if (asksPhone && !asksEmail) return 'phone';
+  if (asksEmail && !asksPhone) return 'email';
+  return null;
+}
+
+function pickContactDetail(c: ContactResult, requestedField: 'phone' | 'email' | null): string {
+  if (requestedField === 'phone') return c.phone || c.email || '';
+  if (requestedField === 'email') return c.email || c.phone || '';
+  return c.email || c.phone || ''; // unchanged default when the question doesn't specify
+}
+
 export async function handleLookupContact(
   supabase: ReturnType<typeof createClient>,
   userId: string,
   name: string,
+  userText: string = '',
 ): Promise<HandlerResult & { contacts?: ContactResult[] }> {
   const contacts = await _lookupContactsFromGoogle(supabase, userId, name);
+  const requestedField = detectRequestedContactField(userText);
 
   if (contacts.length === 0) {
     const msg = `I couldn't find anyone named "${name}" in your contacts.`;
@@ -124,14 +150,14 @@ export async function handleLookupContact(
 
   if (contacts.length === 1) {
     const c = contacts[0];
-    const detail = c.email || c.phone || '';
+    const detail = pickContactDetail(c, requestedField);
     const msg = detail ? `${c.name} — ${detail}` : c.name;
     return { speech: msg, display: msg, actions: [], contacts };
   }
 
   // 2+ results — disambiguation. Naavi stops. Robert picks.
   const lines = contacts.slice(0, 5).map((c, i) => {
-    const detail = c.email || c.phone || '';
+    const detail = pickContactDetail(c, requestedField);
     return `${i + 1}. ${c.name}${detail ? ` — ${detail}` : ''}`;
   });
   const intro = `I found ${contacts.length} contacts named "${name}". Which one?`;
@@ -484,7 +510,7 @@ export async function handlePersonLookup(
     }
 
     const data = await res.json();
-    const ranked: Array<{ title: string; snippet: string; source: string; label: string }> =
+    const ranked: Array<{ title: string; snippet: string; source: string; label: string; metadata?: Record<string, unknown> }> =
       Array.isArray(data?.ranked) ? data.ranked : [];
 
     if (ranked.length === 0) {
@@ -497,9 +523,23 @@ export async function handlePersonLookup(
     for (const r of ranked.slice(0, 8)) {
       const src = r.label || r.source || 'Records';
       if (!bySource.has(src)) bySource.set(src, []);
-      const detail = r.snippet
-        ? `${r.title} — ${r.snippet.slice(0, 80)}`
+      // B10r Addendum 3 — 80 was fine when contacts snippets were only ever
+      // email+phone; adding Birthday/Anniversary text now overflows it,
+      // truncating the anniversary value mid-string. Raised, not removed —
+      // a very long address/org combination should still have a cap.
+      let detail = r.snippet
+        ? `${r.title} — ${r.snippet.slice(0, 160)}`
         : r.title;
+      // B10v (2026-07-22, fixed 2026-08-06) — this deterministic reply path
+      // never mentioned MyNaavi community status: `is_community` was set
+      // correctly by the contacts adapter but never read here, only by the
+      // separate Claude-injection formatter (useOrchestrator.ts), which
+      // "Tell me about X" doesn't reach (it's answered by this function
+      // instead, per B10t's finding). Mirrors the wording a user would
+      // recognize from the rest of the app ("MyNaavi community").
+      if (r.source === 'contacts' && r.metadata?.is_community === true) {
+        detail += ' — MyNaavi community';
+      }
       bySource.get(src)!.push(detail);
     }
 
