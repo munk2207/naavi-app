@@ -101,6 +101,7 @@ import { session2026_07_21_b10oLocationReadbackTests } from './catalogue/session
 import { session2026_07_21_b10pLocationNumberedFactsTests } from './catalogue/session-2026-07-21-b10p-location-numbered-facts';
 import { session2026_07_21_b10qEmailAlertValidationTests } from './catalogue/session-2026-07-21-b10q-email-alert-validation';
 import { b10rContactBirthdaysTests } from './catalogue/session-2026-07-22-b10r-contact-birthdays';
+import { b11dContactCrowdoutTests } from './catalogue/session-2026-08-09-b11d-contact-crowdout';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -237,6 +238,7 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_07_21_b10pLocationNumberedFactsTests,
   ...session2026_07_21_b10qEmailAlertValidationTests,
   ...b10rContactBirthdaysTests,
+  ...b11dContactCrowdoutTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────

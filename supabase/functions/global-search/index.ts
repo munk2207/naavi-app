@@ -218,6 +218,31 @@ function mergeAndRank(allResults: SearchResult[]): SearchResult[] {
   });
 }
 
+// B11d (2026-08-09) — every consumer of `ranked` (mobile pre-search, mobile
+// GLOBAL_SEARCH action, voice server) independently truncates it to a small
+// top-N (8) before use. Contacts results carry no `createdAt`, so they
+// always lose the recency tie-break against same-score calendar/rules/email
+// hits — a name that appears on several calendar events (e.g. a recurring
+// birthday, a meeting, a coffee date) can fill all 8 slots before the one
+// contacts hit is reached, even though contacts is often the only source
+// holding the authoritative fact (a verified birthday year, an address).
+// Root-caused live: "Tell me about James" returned 6 calendar + 1 rules + 1
+// email_actions hits and zero contacts, even though contacts had the real
+// birthday year on file. Fixing this once here (order only, no count
+// change) covers every consumer instead of patching three separate
+// client-side slice sites that would drift out of sync.
+const CONTACTS_GUARANTEE_WINDOW = 8;
+function ensureContactSurvives(ranked: SearchResult[]): SearchResult[] {
+  const alreadyInWindow = ranked.slice(0, CONTACTS_GUARANTEE_WINDOW).some(r => r.source === 'contacts');
+  if (alreadyInWindow) return ranked;
+  const idx = ranked.findIndex(r => r.source === 'contacts');
+  if (idx === -1) return ranked; // no contacts hit at all — nothing to promote
+  const out = ranked.slice();
+  const [bestContact] = out.splice(idx, 1);
+  out.splice(CONTACTS_GUARANTEE_WINDOW - 1, 0, bestContact);
+  return out;
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -337,7 +362,7 @@ Deno.serve(async (req) => {
         byGroup[src].results = byGroup[src].results.filter(anchorMatch);
       }
       const filteredFlat = flat.filter(anchorMatch);
-      const ranked = mergeAndRank(filteredFlat);
+      const ranked = ensureContactSurvives(mergeAndRank(filteredFlat));
       const total = Date.now() - t0;
       console.log(
         `[global-search] total=${total}ms hits=${ranked.length} (anchor-filtered by [${anchorWords.join(',')}]) sources=${runs.filter(r => r.results.length > 0).length}`,
@@ -351,7 +376,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const ranked = mergeAndRank(flat);
+    const ranked = ensureContactSurvives(mergeAndRank(flat));
     const total = Date.now() - t0;
     console.log(
       `[global-search] total=${total}ms hits=${ranked.length} sources=${runs.filter(r => r.results.length > 0).length}`,
