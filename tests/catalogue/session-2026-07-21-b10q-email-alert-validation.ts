@@ -130,7 +130,10 @@ export const session2026_07_21_b10qEmailAlertValidationTests: TestCase[] = [
       const src = readFileSync(VOICE_SERVER_PATH, 'utf8');
       const branchIdx = src.indexOf(`action.type === 'SET_EMAIL_ALERT'`);
       expectTruthy(branchIdx > -1, 'an explicit SET_EMAIL_ALERT branch must exist in the primary dispatcher');
-      const nearby = src.slice(branchIdx, branchIdx + 900);
+      // Widened from a fixed 900-char window (2026-08-10) — a later
+      // explanatory comment block pushed the actual code past the old
+      // window even though the behavior it checks was still correct.
+      const nearby = src.slice(branchIdx, branchIdx + 1800);
       expectTruthy(nearby.includes('await executeAction(action, userId)'), 'the branch must await execution, not defer it');
       expectTruthy(
         nearby.includes(`I can't set an alert for every email`),

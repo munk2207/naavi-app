@@ -414,7 +414,13 @@ export const session2026_05_29Tests: TestCase[] = [
       // The communityHits push must set is_community: true.
       const communityPushIdx = src.indexOf('communityHits.push(');
       expectTruthy(communityPushIdx >= 0, 'communityHits.push must exist in Phase 1');
-      const pushBlock = src.slice(communityPushIdx, communityPushIdx + 600);
+      // Widened from a fixed 600-char window (2026-08-10) — later additions
+      // (birthday/anniversary fields in the snippet) pushed is_community
+      // past the old window even though it was still present. Slice to the
+      // object literal's own closing "});" instead of a magic char count.
+      const closeIdx = src.indexOf('});', communityPushIdx);
+      expectTruthy(closeIdx > communityPushIdx, 'communityHits.push(...) call must close with "});"');
+      const pushBlock = src.slice(communityPushIdx, closeIdx);
       expectTruthy(
         pushBlock.includes('is_community: true'),
         'Phase 1 community hits must set is_community: true in metadata',
@@ -478,10 +484,17 @@ export const session2026_05_29Tests: TestCase[] = [
     timeoutMs: 1_000,
     async run() {
       const src = readFileSync(CONTACTS_ADAPTER_PATH, 'utf8');
+      // Extract the actual personFields string and check for a substring,
+      // robust to later fields being appended (birthdays/events) — an
+      // exact-terminated match broke every time the field list grew.
+      const fnIdx = src.indexOf('async function fetchConnections');
+      expectTruthy(fnIdx >= 0, 'fetchConnections function must exist');
+      const fnBody = src.slice(fnIdx, fnIdx + 2000);
+      const personFieldsMatch = fnBody.match(/personFields['"],\s*['"]([^'"]+)['"]/);
+      expectTruthy(personFieldsMatch !== null, 'fetchConnections must call personFields.set(...)');
       expectTruthy(
-        src.includes("'names,emailAddresses,phoneNumbers,addresses,memberships,organizations'") ||
-        src.includes('"names,emailAddresses,phoneNumbers,addresses,memberships,organizations"'),
-        'fetchConnections personFields must include organizations — B-NEW-6 fix',
+        personFieldsMatch![1].includes('organizations'),
+        `fetchConnections personFields must include organizations — B-NEW-6 fix, got "${personFieldsMatch?.[1]}"`,
       );
       expectTruthy(
         src.includes('orgName') && src.includes('organizations?.[0]?.name'),

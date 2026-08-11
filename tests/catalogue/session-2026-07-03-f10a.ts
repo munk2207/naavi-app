@@ -85,16 +85,19 @@ export const session2026_07_03_f10aTests: TestCase[] = [
   {
     id: 'f10a.website-nav-feedback-link-homepage-only',
     category: 'smoke',
-    description: 'mynaavi-website shared.js nav shows Feedback only on the homepage, not other pages',
+    description:
+      'mynaavi-website shared.js nav shows the Feedback link. Originally homepage-only (F10a, ' +
+      '2026-07-03); Wael deliberately expanded it to site-wide on 2026-07-06, same as Blogs/Discover/FAQ ' +
+      '— test updated 2026-08-10 to match that intentional change instead of the superseded original scope.',
     async run() {
       const src = readFileSync(SHARED_JS_PATH, 'utf8');
       expectTruthy(
-        src.includes("isHome ? '<a href=\"/contact\" class=\"nav-cta\">Feedback</a>' : ''"),
-        'shared.js buildNav must conditionally render the Feedback link only when isHome is true',
+        src.includes('var feedbackActive = activeIf('),
+        'shared.js buildNav must compute feedbackActive the same way as the other site-wide nav items',
       );
       expectTruthy(
-        /var isHome = \(path === '\/' \|\| path === '\/index' \|\| path === '\/index\.html'\)/.test(src),
-        'shared.js must define isHome from the current path (homepage-only scope, not site-wide like Blogs/Discover/FAQ)',
+        src.includes('<a href="/contact" class="nav-cta\' + feedbackActive + \'">Feedback</a>'),
+        'shared.js buildNav must render the Feedback link site-wide (same pattern as Blogs/Discover/FAQ)',
       );
     },
   },

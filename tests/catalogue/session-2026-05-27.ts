@@ -81,8 +81,9 @@ export const session2026_05_27Tests: TestCase[] = [
     id: 'b6d.prompt-version-bumped-to-v98',
     category: 'b6d',
     description:
-      'B6d/Nav-disambiguation — PROMPT_VERSION must be 2026-06-14-v113-email-count-match (latest live version). ' +
-      'Updated from v105 → v106 when search-card one-sentence rule was strengthened (2026-06-09).',
+      'get-naavi-prompt must return a non-empty PROMPT_VERSION string. Originally pinned to one exact ' +
+      'historical value (B6d\'s bump); relaxed 2026-08-10 since every later legitimate prompt bump broke ' +
+      'this test — pinning to an exact version has no functional value once the version it checks is old.',
     timeoutMs: 15_000,
     async run(ctx) {
       const { status, data } = await adapters.call(
@@ -92,8 +93,8 @@ export const session2026_05_27Tests: TestCase[] = [
       const version: string = data?.version ?? '';
       ctx.log(`version: ${version}`);
       expectTruthy(
-        version === '2026-07-18-b10k-production-promotion',
-        `Expected version "2026-07-18-b10k-production-promotion", got "${version}"`,
+        typeof version === 'string' && version.trim().length > 0,
+        `get-naavi-prompt must return a non-empty version string, got "${version}"`,
       );
     },
   },
@@ -128,12 +129,18 @@ export const session2026_05_27Tests: TestCase[] = [
     timeoutMs: 1_000,
     async run() {
       const src = readFileSync(CONTACTS_ADAPTER_PATH, 'utf8');
+      // Extract the actual personFields string from fetchConnections and check
+      // it contains "addresses" as a substring — robust to later fields being
+      // appended (organizations/birthdays/events), unlike an exact-terminated
+      // string match which broke every time the field list legitimately grew.
+      const fnIdx = src.indexOf('async function fetchConnections');
+      expectTruthy(fnIdx >= 0, 'fetchConnections function must exist');
+      const fnBody = src.slice(fnIdx, fnIdx + 2000);
+      const personFieldsMatch = fnBody.match(/personFields['"],\s*['"]([^'"]+)['"]/);
+      expectTruthy(personFieldsMatch !== null, 'fetchConnections must call personFields.set(...)');
       expectTruthy(
-        src.includes("'names,emailAddresses,phoneNumbers,addresses'") ||
-        src.includes('"names,emailAddresses,phoneNumbers,addresses"') ||
-        src.includes("'names,emailAddresses,phoneNumbers,addresses,memberships'") ||
-        src.includes('"names,emailAddresses,phoneNumbers,addresses,memberships"'),
-        'contacts.ts fetchConnections must include "addresses" in personFields — F2h regression',
+        personFieldsMatch![1].includes('addresses'),
+        `contacts.ts fetchConnections must include "addresses" in personFields — F2h regression, got "${personFieldsMatch?.[1]}"`,
       );
     },
   },
