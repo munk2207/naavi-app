@@ -8,6 +8,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test:auto": "tsx tests/runner.ts",
+    "test:voice": "tsx tests/runner.ts --voice",
     "test:mobile": "node scripts/run-maestro.js",
     "test:mobile:one": "node scripts/run-maestro.js --one",
     "seed:test-user": "node scripts/seed-test-user.js"

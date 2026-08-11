@@ -124,6 +124,7 @@ export const session2026_06_11Tests: TestCase[] = [
   // ── Voice: update note on already-enabled alert — 2026-06-11 ─────────────
   {
     id: 'note-update.pending-note-update-state-declared',
+    platform: 'voice',
     description: 'Voice server declares pendingNoteUpdate state for updating note on enabled alerts',
     tags: ['note-update', 'voice', 'location'],
     run: async () => {
@@ -143,6 +144,7 @@ export const session2026_06_11Tests: TestCase[] = [
   },
   {
     id: 'note-update.enabled-branch-offers-update',
+    platform: 'voice',
     description: 'Voice server memory-hit enabled branch offers note update when new body differs',
     tags: ['note-update', 'voice', 'location'],
     run: async () => {

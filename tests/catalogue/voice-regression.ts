@@ -67,6 +67,7 @@ export const voiceRegressionTests: TestCase[] = [
 
   {
     id: 'voice.endpoint-reachable',
+    platform: 'voice',
     category: 'smoke',
     description: 'Voice server /test/ask endpoint is reachable and returns speech',
     timeoutMs: 15_000,
@@ -81,6 +82,7 @@ export const voiceRegressionTests: TestCase[] = [
 
   {
     id: 'voice.calendar-today-query',
+    platform: 'voice',
     category: 'calendar',
     description: 'Voice: "What\'s on my calendar today" returns a calendar response',
     timeoutMs: 20_000,
@@ -105,6 +107,7 @@ export const voiceRegressionTests: TestCase[] = [
 
   {
     id: 'voice.contact-lookup-known-name',
+    platform: 'voice',
     category: 'contacts',
     description: 'Voice: "Find contact Hussein" returns contact info or honest-out',
     timeoutMs: 20_000,
@@ -128,6 +131,7 @@ export const voiceRegressionTests: TestCase[] = [
 
   {
     id: 'voice.email-alert-intent',
+    platform: 'voice',
     category: 'rules',
     description: 'Voice: "Alert me when I get an email from Amazon" emits SET_ACTION_RULE or asks to confirm',
     timeoutMs: 20_000,
@@ -152,6 +156,7 @@ export const voiceRegressionTests: TestCase[] = [
 
   {
     id: 'voice.location-alert-arrive-home',
+    platform: 'voice',
     category: 'location',
     description: 'Voice: "Alert me when I arrive home" does NOT say "I didn\'t catch the place"',
     timeoutMs: 20_000,
@@ -178,6 +183,7 @@ export const voiceRegressionTests: TestCase[] = [
 
   {
     id: 'voice.graceful-unknown-intent',
+    platform: 'voice',
     category: 'smoke',
     description: 'Voice: gibberish input returns a graceful fallback, not an error or empty string',
     timeoutMs: 15_000,

@@ -200,6 +200,7 @@ export const session2026_05_27Tests: TestCase[] = [
   // ─── B4s: already ported — close check ────────────────────────────────────
   {
     id: 'b4s.voice-already-has-alerts-context-and-validation',
+    platform: 'voice',
     category: 'b4s',
     description:
       'B4s — code audit 2026-05-27 confirmed alerts context + 3-layer entity-existence ' +
@@ -226,6 +227,7 @@ export const session2026_05_27Tests: TestCase[] = [
   // ─── B4w: postal-code contact bypass in voice server ─────────────────────
   {
     id: 'b4w.voice-server-has-postal-code-bypass',
+    platform: 'voice',
     category: 'b4w',
     description:
       'B4w — voice server must have the B4w postal-code contact bypass. ' +

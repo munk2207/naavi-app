@@ -29,6 +29,17 @@ export interface TestCase {
   /** Stable id like 'location.alert-defaults-to-one-time'. */
   id: string;
   category: TestCategory;
+  /**
+   * Which platform this test actually verifies. Default (omitted) means
+   * Mobile/shared-backend — the surface `npm run test:auto` (Gate 1) gates
+   * for the APK/AAB. Set to 'voice' only for tests that call the live
+   * voice server or read naavi-voice-server/ source directly — those run
+   * under Gate 2 instead and are excluded from the default Gate 1 run.
+   * Added 2026-08-11 after Gate 1 and Gate 2 were discovered to be the
+   * same command with no actual separation — see the corresponding
+   * session's memory for the incident this fixes.
+   */
+  platform?: 'voice';
   /** One-line summary shown in the report. */
   description: string;
   /** Optional setup before the test (e.g. insert fixture row). */

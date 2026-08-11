@@ -28,6 +28,7 @@ const GATE_PATH = join(process.cwd(), 'naavi-voice-server', 'src', 'action_rule_
 export const session2026_07_16_b10bFailSpeechTests: TestCase[] = [
   {
     id: 'b10b.fail-speech-branches-on-ambiguous-error',
+    platform: 'voice',
     category: 'contacts',
     description: 'failSpeechForAction speaks the multi-contact clarification when result.error is "ambiguous", instead of the generic duplicate-alert message',
     async run() {
@@ -41,6 +42,7 @@ export const session2026_07_16_b10bFailSpeechTests: TestCase[] = [
   },
   {
     id: 'b10b.fail-speech-branches-on-not-found-error',
+    platform: 'voice',
     category: 'contacts',
     description: 'failSpeechForAction speaks the no-contact-found message when result.error is "not_found"/"invalid"/"resolve_failed", instead of the generic duplicate-alert message',
     async run() {
@@ -56,6 +58,7 @@ export const session2026_07_16_b10bFailSpeechTests: TestCase[] = [
   },
   {
     id: 'b10b.fail-speech-preserves-original-duplicate-alert-message',
+    platform: 'voice',
     category: 'contacts',
     description: 'the original duplicate-timestamp-conflict message is unchanged and still reachable as the default branch when result has no error field',
     async run() {

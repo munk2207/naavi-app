@@ -155,6 +155,14 @@ const grep = getFlag('--grep') as string | undefined;
 const bail = getFlag('--bail') === true;
 const json = getFlag('--json') === true;
 const list = getFlag('--list') === true;
+// Gate 1 (default) vs Gate 2 (--voice). Added 2026-08-11 — Gate 1 and Gate 2
+// used to be the same command with no actual separation: "Gate 2 skipped"
+// was a bookkeeping label only, and every Gate 1 run silently also ran
+// Voice-only tests. Every TestCase with platform:'voice' is Voice-specific
+// (calls the live voice server, or reads naavi-voice-server/ source
+// directly) — Gate 1 excludes them so "Gate 1 green" means Mobile/APK/AAB
+// only; Gate 2 (`npm run test:voice`) runs ONLY them.
+const voiceOnly = getFlag('--voice') === true;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Suite — flat list of all test cases.
@@ -371,8 +379,10 @@ async function main(): Promise<void> {
   const projectRefMatch = supabaseUrl.match(/https:\/\/([a-z0-9]+)\.supabase\.co/);
   const projectRef = projectRefMatch ? projectRefMatch[1] : '';
   const envLabel = ENV_LABELS[projectRef] ?? 'UNKNOWN';
+  const gateLabel = voiceOnly ? 'GATE 2 — VOICE ONLY' : 'GATE 1 — MOBILE / APK / AAB (Voice excluded)';
   console.log('════════════════════════════════════════════════════════');
   console.log(`  Testing against: ${envLabel}  (${projectRef || supabaseUrl})`);
+  console.log(`  ${gateLabel}`);
   console.log('════════════════════════════════════════════════════════');
 
   const baseCtx: TestContext = {
@@ -390,9 +400,14 @@ async function main(): Promise<void> {
   console.log(`test user: ${testUserId}`);
   console.log(`supabase:  ${supabaseUrl}\n`);
 
-  let candidates = ALL_TESTS;
+  // Gate split: voiceOnly keeps only platform:'voice' tests; default (Gate 1)
+  // excludes them entirely. --grep then further narrows within that gate.
+  let candidates = voiceOnly
+    ? ALL_TESTS.filter(t => t.platform === 'voice')
+    : ALL_TESTS.filter(t => t.platform !== 'voice');
+  console.log(`${gateLabel} → ${candidates.length}/${ALL_TESTS.length} case(s) selected\n`);
   if (grep) {
-    candidates = ALL_TESTS.filter(t => t.id.includes(grep) || t.category === grep);
+    candidates = candidates.filter(t => t.id.includes(grep) || t.category === grep);
     console.log(`grep=${grep} → ${candidates.length} match(es)\n`);
   }
 

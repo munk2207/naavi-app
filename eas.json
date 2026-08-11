@@ -49,7 +49,7 @@
     "production": {
       "android": {
         "serviceAccountKeyPath": "./google-play-key.json",
-        "track": "internal",
+        "track": "beta",
         "releaseStatus": "draft",
         "changesNotSentForReview": false
       }

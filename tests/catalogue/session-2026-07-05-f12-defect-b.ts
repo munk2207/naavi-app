@@ -61,6 +61,7 @@ export const session2026_07_05_f12DefectBTests: TestCase[] = [
   },
   {
     id: 'f12.voice-memory-hit-detects-recipient-change',
+    platform: 'voice',
     category: 'location',
     description: 'voice location memory-hit merge-check treats a changed recipient as new content, not just body',
     async run() {
@@ -77,6 +78,7 @@ export const session2026_07_05_f12DefectBTests: TestCase[] = [
   },
   {
     id: 'f12.voice-pending-note-update-applies-recipient',
+    platform: 'voice',
     category: 'location',
     description: 'voice pendingNoteUpdate consumption actually writes the new recipient fields into action_config, not just body',
     async run() {

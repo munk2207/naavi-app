@@ -155,6 +155,7 @@ export const session2026_06_19Tests: TestCase[] = [
 
   {
     id: 'f8a.voice-test-endpoint-rejects-wrong-secret',
+    platform: 'voice',
     category: 'smoke',
     description: 'Voice server: /test/ask returns 403 for wrong secret',
     timeoutMs: 10_000,

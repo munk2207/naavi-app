@@ -32,6 +32,7 @@ const ORCHESTRATOR_PATH = join(process.cwd(), 'hooks', 'useOrchestrator.ts');
 export const session2026_06_15Tests: TestCase[] = [
   {
     id: 'voice.rearm.no-mobile-app-bail-out',
+    platform: 'voice',
     description: 'Voice server: "Open the mobile app, go to Alerts, and tap Reactivate" bail-out removed from all commitLocationRule paths',
     tags: ['voice', 'rearm', 'parity'],
     run: async () => {
@@ -44,6 +45,7 @@ export const session2026_06_15Tests: TestCase[] = [
   },
   {
     id: 'voice.rearm.pendingRearm-set-on-expired',
+    platform: 'voice',
     description: 'Voice server: pendingRearm is set inline when already_exists_expired fires in commitLocationRule paths',
     tags: ['voice', 'rearm', 'parity'],
     run: async () => {
@@ -64,6 +66,7 @@ export const session2026_06_15Tests: TestCase[] = [
   },
   {
     id: 'voice.parity.log-concern-handler-present',
+    platform: 'voice',
     description: 'Voice server: LOG_CONCERN action handler writes to topics table (parity with mobile)',
     tags: ['voice', 'parity'],
     run: async () => {
@@ -80,6 +83,7 @@ export const session2026_06_15Tests: TestCase[] = [
   },
   {
     id: 'voice.parity.update-profile-handler-present',
+    platform: 'voice',
     description: 'Voice server: UPDATE_PROFILE action handler writes to topics table (parity with mobile)',
     tags: ['voice', 'parity'],
     run: async () => {
@@ -96,6 +100,7 @@ export const session2026_06_15Tests: TestCase[] = [
   },
   {
     id: 'voice.morning-call.brief-windows-patched',
+    platform: 'voice',
     description: 'Voice UPDATE_MORNING_CALL: reads brief_windows, zero-pads time, patches correct window',
     tags: ['voice', 'morning-call', 'brief-windows'],
     run: async () => {
@@ -197,6 +202,7 @@ export const session2026_06_15Tests: TestCase[] = [
   },
   {
     id: 'voice.list-rules.arch1-classifier-alerts-not-list-read',
+    platform: 'voice',
     description: 'ARCH-1 classifier prompt: "alerts"/"notifications" explicitly mapped to LIST_RULES, never LIST_READ',
     tags: ['voice', 'list-rules', 'arch1'],
     run: async () => {
@@ -213,6 +219,7 @@ export const session2026_06_15Tests: TestCase[] = [
   },
   {
     id: 'voice.list-rules.full-claude-path-filters-enabled',
+    platform: 'voice',
     description: 'Full-Claude LIST_RULES path filters enabled===true and skips fired one-shot rules',
     tags: ['voice', 'list-rules'],
     run: async () => {
@@ -245,6 +252,7 @@ export const session2026_06_15Tests: TestCase[] = [
   },
   {
     id: 'voice.multi-action.queue-intercepts-before-dispatch',
+    platform: 'voice',
     description: 'Multi-action queue: when 2+ state-changing actions come from Claude, pendingMultiAction is set and dispatch loop is skipped; user is stepped through one at a time',
     tags: ['voice', 'multi-action'],
     run: async () => {

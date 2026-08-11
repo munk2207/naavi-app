@@ -69,6 +69,7 @@ async function callNoAuth(ctx: TestContext, body: any): Promise<{ status: number
 export const voicePinTests: TestCase[] = [
   {
     id: 'voice-pin.set-with-service-role-succeeds',
+    platform: 'voice',
     category: 'voice-pin',
     description: 'SET — service-role + body.user_id writes the hash',
     timeoutMs: 15_000,
@@ -85,6 +86,7 @@ export const voicePinTests: TestCase[] = [
 
   {
     id: 'voice-pin.set-rejects-non-4-digit-pin',
+    platform: 'voice',
     category: 'voice-pin',
     description: 'SET — rejects PIN that isn\'t exactly 4 digits',
     timeoutMs: 10_000,
@@ -100,6 +102,7 @@ export const voicePinTests: TestCase[] = [
 
   {
     id: 'voice-pin.set-without-auth-returns-401',
+    platform: 'voice',
     category: 'voice-pin',
     description: 'SET — no Authorization header → 401 auth_required',
     timeoutMs: 10_000,
@@ -112,6 +115,7 @@ export const voicePinTests: TestCase[] = [
 
   {
     id: 'voice-pin.verify-correct-pin-returns-match-true',
+    platform: 'voice',
     category: 'voice-pin',
     description: 'VERIFY — correct PIN returns match:true',
     timeoutMs: 15_000,
@@ -130,6 +134,7 @@ export const voicePinTests: TestCase[] = [
 
   {
     id: 'voice-pin.verify-wrong-pin-returns-match-false',
+    platform: 'voice',
     category: 'voice-pin',
     description: 'VERIFY — wrong PIN returns match:false',
     timeoutMs: 15_000,
@@ -148,6 +153,7 @@ export const voicePinTests: TestCase[] = [
 
   {
     id: 'voice-pin.verify-no-pin-set-returns-match-false',
+    platform: 'voice',
     category: 'voice-pin',
     description: 'VERIFY — user with no PIN returns match:false (same shape, no enumeration)',
     timeoutMs: 10_000,
@@ -165,6 +171,7 @@ export const voicePinTests: TestCase[] = [
 
   {
     id: 'voice-pin.verify-without-service-role-returns-401',
+    platform: 'voice',
     category: 'voice-pin',
     description: 'VERIFY — anon-key call → 401 service_role_required (no PIN enumeration via JWT)',
     timeoutMs: 10_000,

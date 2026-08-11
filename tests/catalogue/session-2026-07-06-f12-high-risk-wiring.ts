@@ -60,6 +60,7 @@ export const session2026_07_06_f12HighRiskWiringTests: TestCase[] = [
   },
   {
     id: 'f12.voice-set-action-rule-uses-resolve-recipient-both-paths',
+    platform: 'voice',
     category: 'contacts',
     description: 'voice server calls resolve-recipient in create mode from both the main (non-location) handler and the location branch, fixing the total absence of resolution found in Phase 1 (Evidence A3)',
     async run() {
@@ -70,6 +71,7 @@ export const session2026_07_06_f12HighRiskWiringTests: TestCase[] = [
   },
   {
     id: 'f12.voice-main-handler-fails-closed-on-unresolvable-recipient',
+    platform: 'voice',
     category: 'contacts',
     description: 'voice main (non-location) SET_ACTION_RULE handler returns success:false instead of inserting a row when the recipient does not resolve cleanly',
     async run() {
@@ -82,6 +84,7 @@ export const session2026_07_06_f12HighRiskWiringTests: TestCase[] = [
   },
   {
     id: 'f12.voice-location-branch-blocks-on-unresolvable-recipient',
+    platform: 'voice',
     category: 'location',
     description: 'voice location branch speaks a clarification and continues (skips rule creation) on ambiguous/not_found, mirroring mobile',
     async run() {

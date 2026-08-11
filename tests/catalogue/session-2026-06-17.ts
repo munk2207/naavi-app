@@ -117,6 +117,7 @@ export const session2026_06_17Tests: TestCase[] = [
 
   {
     id: 'voice.calendar-7day-window',
+    platform: 'voice',
     description: 'Voice server: allDayUrl calendar fetch uses a 7-day upper bound (not 2-day)',
     tags: ['voice', 'calendar'],
     run: async () => {

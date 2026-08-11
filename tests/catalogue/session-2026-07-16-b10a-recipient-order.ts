@@ -27,6 +27,7 @@ const VOICE_SERVER_PATH = join(process.cwd(), 'naavi-voice-server', 'src', 'inde
 export const session2026_07_16_b10aRecipientOrderTests: TestCase[] = [
   {
     id: 'b10a.f12-resolution-runs-before-b4y-default',
+    platform: 'voice',
     category: 'contacts',
     description: 'voice general SET_ACTION_RULE handler runs F12 named-recipient resolution before B4y\'s default-to-self block, so B4y can no longer satisfy F12\'s guard condition ahead of time',
     async run() {
@@ -43,6 +44,7 @@ export const session2026_07_16_b10aRecipientOrderTests: TestCase[] = [
   },
   {
     id: 'b10a.resolution-failure-return-precedes-b4y-default',
+    platform: 'voice',
     category: 'contacts',
     description: 'the fail-closed return on an unresolvable/ambiguous recipient is positioned before B4y\'s default, so a real named contact that cannot be resolved never falls through to texting the user instead',
     async run() {
@@ -58,6 +60,7 @@ export const session2026_07_16_b10aRecipientOrderTests: TestCase[] = [
   },
   {
     id: 'b10a.b4y-no-recipient-self-default-preserved',
+    platform: 'voice',
     category: 'contacts',
     description: 'B4y\'s original no-recipient default ("text me... in 3 minutes") is unchanged and still reachable — the reorder only changes when it runs, not its own condition or behavior',
     async run() {

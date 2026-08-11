@@ -110,6 +110,7 @@ export const session2026_07_21_b10qEmailAlertValidationTests: TestCase[] = [
   },
   {
     id: 'b10q.voice-set-email-alert-rejects-unscoped',
+    platform: 'voice',
     category: 'rules',
     description: 'Voice\'s independent SET_EMAIL_ALERT implementation must reject an empty-filter request with the same error code, before ever reaching the raw action_rules insert.',
     async run() {
@@ -124,6 +125,7 @@ export const session2026_07_21_b10qEmailAlertValidationTests: TestCase[] = [
   },
   {
     id: 'b10q.voice-primary-path-awaits-set-email-alert',
+    platform: 'voice',
     category: 'rules',
     description: 'Voice\'s primary single-action dispatcher must await SET_EMAIL_ALERT and speak the decline wording on rejection, rather than falling into the fire-and-forget backgroundActions bucket (which runs after speech is already dispatched to Twilio).',
     async run() {
@@ -143,6 +145,7 @@ export const session2026_07_21_b10qEmailAlertValidationTests: TestCase[] = [
   },
   {
     id: 'b10q.voice-multi-action-queue-specific-decline',
+    platform: 'voice',
     category: 'rules',
     description: 'Voice\'s multi-action queue must give the specific terse decline for email_alert_unscoped, not the generic "That one failed — I\'ll move on" — resolved deferred decision from Phase 3.',
     async run() {

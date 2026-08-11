@@ -57,6 +57,7 @@ export const session20260606Tests: TestCase[] = [
   // ── Test 1: lookup-contact returns a result for Sami ────────────────────────
   {
     id: 's060606.lookup-sami',
+    platform: 'voice',
     category: 'voice-phone-operator',
     description:
       'lookup-contact Edge Function must find Sami Al-Husseini and return phone ' +
@@ -94,6 +95,7 @@ export const session20260606Tests: TestCase[] = [
   // ── Test 2: lookup-contact returns a result for Fatma ───────────────────────
   {
     id: 's060606.lookup-fatma',
+    platform: 'voice',
     category: 'voice-phone-operator',
     description:
       'lookup-contact Edge Function must find Fatma (not normalize to Fatima) ' +
@@ -130,6 +132,7 @@ export const session20260606Tests: TestCase[] = [
   // ── Test 3: lookup-contact unknown name returns found=false ──────────────────
   {
     id: 's060606.lookup-unknown-needsspelling',
+    platform: 'voice',
     category: 'voice-phone-operator',
     description:
       'lookup-contact for a clearly non-existent name must return found=false ' +
@@ -165,6 +168,7 @@ export const session20260606Tests: TestCase[] = [
   // ── Test 4: lookup-contact does NOT normalize unusual names ──────────────────
   {
     id: 's060606.no-name-normalization',
+    platform: 'voice',
     category: 'voice-phone-operator',
     description:
       'lookup-contact must search for the name as given — "fatma" must not be ' +

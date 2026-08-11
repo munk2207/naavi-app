@@ -60,16 +60,34 @@ export const session2026_07_05_f12ResolveRecipientTests: TestCase[] = [
     },
   },
   {
-    id: 'f12.resolve-recipient-wired-to-all-three-callers',
+    // Split 2026-08-11 (Gate 1/Gate 2 separation) — this test originally
+    // checked Mobile, Voice, and shared-backend wiring in one assertion
+    // block. That mixed Mobile-relevant and Voice-only checks in a single
+    // test, making it impossible to cleanly classify into either gate
+    // without either losing coverage or misclassifying it. Split into this
+    // Mobile+backend half (stays in Gate 1 / test:auto) and
+    // 'f12.voice-resolve-recipient-wired-to-voice-server' below (Gate 2 /
+    // voice-only). Both halves together cover exactly what the original
+    // single test covered — no coverage lost, just correctly separated.
+    id: 'f12.resolve-recipient-wired-to-mobile-and-backend',
     category: 'contacts',
-    description: 'successor to the zero-risk guard test: resolve-recipient is now called from useOrchestrator.ts (create mode), the voice server (create mode, 2 call sites), and evaluate-rules (fire mode) — updated 2026-07-06 when the High-risk wiring tier shipped',
+    description: 'resolve-recipient is called from useOrchestrator.ts (Mobile, create mode) and evaluate-rules (shared backend, fire mode) — updated 2026-07-06 when the High-risk wiring tier shipped',
     async run() {
       const orchestratorSrc = readFileSync(join(process.cwd(), 'hooks', 'useOrchestrator.ts'), 'utf8');
-      const voiceSrc        = readFileSync(join(process.cwd(), 'naavi-voice-server', 'src', 'index.js'), 'utf8');
       const evaluateSrc     = readFileSync(join(process.cwd(), 'supabase', 'functions', 'evaluate-rules', 'index.ts'), 'utf8');
       expectTruthy(orchestratorSrc.includes("'resolve-recipient',"), 'useOrchestrator.ts must call resolve-recipient');
-      expectTruthy((voiceSrc.match(/functions\/v1\/resolve-recipient/g) ?? []).length >= 2, 'voice server must call resolve-recipient from both the main handler and the location branch');
       expectTruthy(evaluateSrc.includes('functions/v1/resolve-recipient'), 'evaluate-rules must call resolve-recipient in fire mode');
+    },
+  },
+  {
+    // Voice half of the split described above — Gate 2 only.
+    id: 'f12.voice-resolve-recipient-wired-to-voice-server',
+    platform: 'voice',
+    category: 'contacts',
+    description: 'resolve-recipient is called from the voice server (create mode, 2 call sites: main handler + location branch) — updated 2026-07-06 when the High-risk wiring tier shipped',
+    async run() {
+      const voiceSrc = readFileSync(join(process.cwd(), 'naavi-voice-server', 'src', 'index.js'), 'utf8');
+      expectTruthy((voiceSrc.match(/functions\/v1\/resolve-recipient/g) ?? []).length >= 2, 'voice server must call resolve-recipient from both the main handler and the location branch');
     },
   },
   {
