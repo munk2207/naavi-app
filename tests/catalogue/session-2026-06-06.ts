@@ -22,10 +22,36 @@
  * Run via `npm run test:auto`.
  */
 
-import { expect2xx } from '../lib/assertions';
-import type { TestCase } from '../lib/types';
+import { expect2xx, TestSkippedError } from '../lib/assertions';
+import type { TestCase, TestContext } from '../lib/types';
 
 const WAEL_USER_ID = '788fe85c-b6be-4506-87e8-a8736ec8e1d1';
+
+// These 4 tests hardcode Wael's real production user_id and real Google
+// Contacts (Sami, Fatma) — they were written assuming a production target
+// and always error against any other account (e.g. staging's test user has
+// no user_tokens row for WAEL_USER_ID at all). Rather than erroring, check
+// reachability first and skip cleanly with an explanation when this
+// specific account isn't available in the environment under test — same
+// "skip cleanly, don't fail on an environment mismatch" pattern used
+// elsewhere in this catalogue (e.g. session-2026-07-22-b10r's Fatma test).
+// Added 2026-08-10 after these 4 errored on a staging-only test run.
+let waelAccountReachable: boolean | null = null;
+async function ensureWaelAccountReachable(ctx: TestContext): Promise<void> {
+  if (waelAccountReachable === null) {
+    const res = await fetch(`${ctx.supabaseUrl}/rest/v1/user_tokens?user_id=eq.${WAEL_USER_ID}&provider=eq.google&select=user_id`, {
+      headers: { apikey: ctx.serviceRoleKey, Authorization: `Bearer ${ctx.serviceRoleKey}` },
+    });
+    const rows = res.ok ? await res.json() : [];
+    waelAccountReachable = Array.isArray(rows) && rows.length > 0;
+  }
+  if (!waelAccountReachable) {
+    throw new TestSkippedError(
+      `Wael's real account (${WAEL_USER_ID}) has no Google token in this environment (${ctx.supabaseUrl}) — ` +
+      `these tests require his real production Google Contacts (Sami, Fatma) and only run meaningfully against production.`,
+    );
+  }
+}
 
 export const session20260606Tests: TestCase[] = [
   // ── Test 1: lookup-contact returns a result for Sami ────────────────────────
@@ -37,6 +63,7 @@ export const session20260606Tests: TestCase[] = [
       'number as the first field (phone before email).',
     timeoutMs: 20_000,
     async run(ctx) {
+      await ensureWaelAccountReachable(ctx);
       const res = await fetch(
         `${ctx.supabaseUrl}/functions/v1/lookup-contact`,
         {
@@ -73,6 +100,7 @@ export const session20260606Tests: TestCase[] = [
       'and return at least a phone number.',
     timeoutMs: 20_000,
     async run(ctx) {
+      await ensureWaelAccountReachable(ctx);
       const res = await fetch(
         `${ctx.supabaseUrl}/functions/v1/lookup-contact`,
         {
@@ -108,6 +136,7 @@ export const session20260606Tests: TestCase[] = [
       '(the voice server maps this to needsSpelling=true and prompts to spell).',
     timeoutMs: 20_000,
     async run(ctx) {
+      await ensureWaelAccountReachable(ctx);
       const res = await fetch(
         `${ctx.supabaseUrl}/functions/v1/lookup-contact`,
         {
@@ -143,6 +172,7 @@ export const session20260606Tests: TestCase[] = [
       'only "fatma" returns a result for this user.',
     timeoutMs: 30_000,
     async run(ctx) {
+      await ensureWaelAccountReachable(ctx);
       const headers = {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${ctx.serviceRoleKey}`,
