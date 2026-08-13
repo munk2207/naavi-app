@@ -22,10 +22,23 @@
  * mapping as Path B; the DRAFT_MESSAGE case builds `action.channel` from it
  * (defaulting to 'email' only for genuinely ambiguous phrasing, matching
  * Path B's own default).
+ *
+ * Addendum (same session) — subject-line quality. Once channel resolution
+ * was fixed, Wael's next live test ("Email my wife saying goodnight")
+ * surfaced a second, separate issue: the email arrived at the correct
+ * recipient (verified via sent_messages: to_email matched Linda's real
+ * address), but with subject "Wife Saying Goodnight" — because the
+ * classifier never asked for `subject` at all, so the DRAFT_MESSAGE case's
+ * pre-existing fallback (strip the verb phrase off the raw command text,
+ * title-case whatever's left) always fired for this fast path. Fixed by
+ * adding `subject` to the classifier's DRAFT_MESSAGE param spec (channel="email"
+ * only), matching Path B's own "short natural subject line" instruction —
+ * verified live: 5/5 runs of the same phrase now produce subject:"Goodnight"
+ * instead of the mechanical "Wife Saying Goodnight".
  */
 
 import { adapters } from '../lib/adapters';
-import { expect2xx, expectEqual } from '../lib/assertions';
+import { expect2xx, expectEqual, expectTruthy } from '../lib/assertions';
 import type { TestCase } from '../lib/types';
 
 function extractAction(rawText: string): any {
@@ -73,6 +86,31 @@ export const draftMessageChannelTests: TestCase[] = [
       ctx.log(`action=${JSON.stringify(action)}`);
       expectEqual(action?.type, 'DRAFT_MESSAGE', 'must emit a DRAFT_MESSAGE action');
       expectEqual(action?.channel, 'email', 'channel must be "email"');
+    },
+  },
+  {
+    id: 'session-2026-08-13.draft-message-natural-subject',
+    category: 'chat',
+    description:
+      'DRAFT_MESSAGE email subject must be a natural short phrase from the ' +
+      'classifier, not the mechanical "leftover words title-cased" fallback ' +
+      '("Wife Saying Goodnight" instead of "Goodnight").',
+    timeoutMs: 20_000,
+    async run(ctx) {
+      const chat = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: 'Email my wife saying goodnight' }],
+      });
+      expect2xx(chat.status, 'naavi-chat');
+      const action = extractAction(chat.data?.rawText ?? '{}');
+      ctx.log(`action=${JSON.stringify(action)}`);
+      expectEqual(action?.type, 'DRAFT_MESSAGE', 'must emit a DRAFT_MESSAGE action');
+      expectEqual(action?.channel, 'email', 'channel must be "email"');
+      const subject = String(action?.subject ?? '');
+      expectTruthy(subject.length > 0, 'subject must not be empty');
+      expectTruthy(
+        !/^wife\s+saying/i.test(subject),
+        `subject must not be the mechanical word-strip fallback, got "${subject}"`,
+      );
     },
   },
 ];
