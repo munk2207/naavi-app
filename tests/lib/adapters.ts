@@ -147,12 +147,24 @@ export const adapters = {
     return callEdgeFunction(ctx, 'manage-rules', { ...args, user_id: ctx.testUserId }, opts);
   },
 
-  /** ingest-note — knowledge fragment writer. Takes { text, source, user_id }. */
+  /**
+   * ingest-note — knowledge fragment writer. Takes { text, source, user_id }.
+   *
+   * 2026-08-13 — source was 'auto-tester', which is not a valid value
+   * (lib/knowledge.ts's KnowledgeFragment['source'] type only allows
+   * 'voice_memo'|'notes'|'stated'|'inferred'). Production enforces this
+   * with a CHECK constraint (knowledge_fragments_source_check) that
+   * rejected every write; staging doesn't enforce it, so this silently
+   * "worked" there while writing an invalid value, masking the bug. Every
+   * test using this adapter (not just today's) was failing against
+   * production for this reason. 'stated' matches what the real app sends
+   * for a REMEMBER action (useOrchestrator.ts) — same shape as real usage.
+   */
   async ingestNote(ctx: TestContext, text: string, opts: CallOptions = {}) {
     return callEdgeFunction(ctx, 'ingest-note', {
       user_id: ctx.testUserId,
       text,
-      source: 'auto-tester',
+      source: 'stated',
     }, opts);
   },
 
