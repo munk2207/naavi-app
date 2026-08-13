@@ -44,6 +44,7 @@ import { supabase } from '@/lib/supabase';
 import { queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
 import { remoteLog, newDiagSession } from '@/lib/remoteLog';
 import { getLifecycleSession } from '@/lib/appLifecycle';
+import { ensureBackgroundLocationPermission } from '@/lib/location';
 
 // V57.14.3 — persistent registry of per-rule last-registration time.
 // Replaces the V57.10.3 in-memory Map. The Map was reset to empty on every
@@ -670,14 +671,53 @@ export async function syncGeofencesForUser(userId: string, opts: { force?: boole
       user_id_short: userId.slice(0, 8),
     });
 
+    // 2026-08-13 — load the user's rules FIRST, before touching permissions
+    // at all. A user with zero location rules (e.g. right after sign-in,
+    // before they've ever asked for a location alert) has nothing to sync —
+    // requesting background location for them anyway was the actual gap
+    // behind Google Play's "Missing Prominent Disclosure" rejection: this
+    // function used to run unconditionally on every sign-in and app-
+    // foreground event, showing Android's raw permission dialog with no
+    // MyNaavi explanation, before the user had touched a location feature at
+    // all — the first and unavoidable thing a fresh install (including a
+    // reviewer's own test) would see. Matches the "lazy" intent already
+    // stated in this codebase (see the V57.10.1 comment further down) —
+    // permission is only ever requested once there's an actual reason to.
+    const { data: rules, error } = await queryWithTimeout(
+      supabase
+        .from('action_rules')
+        .select('id, user_id, trigger_type, trigger_config, enabled, created_at')
+        .eq('user_id', userId)
+        .eq('trigger_type', 'location')
+        .eq('enabled', true),
+      15_000,
+      'select-location-rules',
+    );
+
+    if (error) {
+      console.error('[geofence-sync] failed to load rules:', error.message);
+      return 0;
+    }
+
+    if (!rules || rules.length === 0) {
+      remoteLog(getLifecycleSession(), 'syncGeofences-end', {
+        registered: 0,
+        reason: 'no-location-rules — permission never touched',
+      });
+      return 0;
+    }
+
     // Permission check — if not granted, RE-PROMPT before silently bailing.
     // 2026-05-22 — B4l. The prior version silently logged
     // `foreground-not-granted` and exited with 0 fences registered, leaving
-    // the user with no visibility and no path to recovery. Now: if fg
-    // permission isn't granted (e.g., Samsung Sleeping Apps revoked it
-    // overnight, or it's still undetermined from first launch), we actively
-    // call requestForegroundPermissionsAsync to surface the OS prompt. If
-    // user accepts → continue sync. If user denies → record the outcome in
+    // the user with no visibility and no path to recovery. Now: if it isn't
+    // granted (e.g., Samsung Sleeping Apps revoked it overnight, or the user
+    // just created their first location rule and hasn't been asked yet), we
+    // actively re-prompt — via ensureBackgroundLocationPermission, which
+    // shows the in-app prominent-disclosure modal first (Google Play policy)
+    // whenever background isn't already granted, then requests foreground
+    // and background in the required order. If the user accepts → continue
+    // sync. If they decline or Android denies → record the outcome in
     // _lastSyncStatus so the Alerts screen can render the B4n banner.
     let { status: fgStatus } = await Location.getForegroundPermissionsAsync();
     let bgStatus: string | undefined;
@@ -690,26 +730,19 @@ export async function syncGeofencesForUser(userId: string, opts: { force?: boole
       background: bgStatus ?? 'unavailable',
     });
 
-    if (fgStatus !== 'granted') {
-      remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-fg', {
-        prior: fgStatus,
+    if (fgStatus !== 'granted' || (bgStatus !== undefined && bgStatus !== 'granted')) {
+      remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt', {
+        prior_fg: fgStatus,
+        prior_bg: bgStatus ?? 'unavailable',
       });
-      try {
-        const requested = await Promise.race([
-          Location.requestForegroundPermissionsAsync(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('fg-permission-timeout')), 15_000),
-          ),
-        ]);
-        fgStatus = requested.status;
-        remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-fg-result', {
-          status: fgStatus,
-        });
-      } catch (err) {
-        remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-fg-threw', {
-          error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
-        });
-      }
+      const permResult = await ensureBackgroundLocationPermission({ timeoutMs: 15_000 });
+      fgStatus = permResult.foreground;
+      bgStatus = permResult.background;
+      remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-result', {
+        foreground: fgStatus,
+        background: bgStatus,
+        declined: permResult.declined ?? false,
+      });
     }
 
     if (fgStatus !== 'granted') {
@@ -727,31 +760,6 @@ export async function syncGeofencesForUser(userId: string, opts: { force?: boole
       return 0;
     }
 
-    // Foreground granted — also re-prompt for background if still missing.
-    // Background is required for the SDK to deliver ENTER events while the
-    // app isn't open. Silent failure here is the geofence-doesn't-fire bug.
-    if (bgStatus && bgStatus !== 'granted') {
-      remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-bg', {
-        prior: bgStatus,
-      });
-      try {
-        const requested = await Promise.race([
-          Location.requestBackgroundPermissionsAsync(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('bg-permission-timeout')), 15_000),
-          ),
-        ]);
-        bgStatus = requested.status;
-        remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-bg-result', {
-          status: bgStatus,
-        });
-      } catch (err) {
-        remoteLog(getLifecycleSession(), 'syncGeofences-permission-prompt-bg-threw', {
-          error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
-        });
-      }
-    }
-
     // Get user's current position once — used as reference anchor for all
     // resolve-place calls below so ambiguous names ("Costco") resolve to
     // the nearby instance instead of whatever Google picks globally.
@@ -766,23 +774,6 @@ export async function syncGeofencesForUser(userId: string, opts: { force?: boole
       referenceCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
     } catch (err) {
       console.log('[geofence-sync] no GPS available — resolve-place will fall back to home_address');
-    }
-
-    // Load this user's active location rules
-    const { data: rules, error } = await queryWithTimeout(
-      supabase
-        .from('action_rules')
-        .select('id, user_id, trigger_type, trigger_config, enabled, created_at')
-        .eq('user_id', userId)
-        .eq('trigger_type', 'location')
-        .eq('enabled', true),
-      15_000,
-      'select-location-rules',
-    );
-
-    if (error) {
-      console.error('[geofence-sync] failed to load rules:', error.message);
-      return 0;
     }
 
     const regions: ResolvedRegion[] = [];

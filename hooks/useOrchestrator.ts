@@ -16,7 +16,7 @@ import { Platform } from 'react-native';
 import * as Speech from 'expo-speech';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as Location from 'expo-location';
+import { ensureBackgroundLocationPermission } from '@/lib/location';
 import { sendToNaavi, type NaaviMessage, type NaaviAction, type BriefItem, type GlobalSearchResult } from '@/lib/naavi-client';
 import { isVoiceEnabledSync } from '@/lib/voicePref';
 import { saveContact, saveDriveNote, saveConversationTurn, supabase } from '@/lib/supabase';
@@ -1628,18 +1628,16 @@ const oneShot = pending.originalAction?.one_shot ?? true;
         // permission, leaving the user with a silent rule that never fires.
         // Mirror the same check here.
         try {
-          const bgInitial = await Location.getBackgroundPermissionsAsync();
-          if (bgInitial.status !== 'granted') {
-            const fgReq = await Location.requestForegroundPermissionsAsync();
-            if (fgReq.status === 'granted') {
-              await Location.requestBackgroundPermissionsAsync();
-            }
-            const bgFinal = await Location.getBackgroundPermissionsAsync();
-            if (bgFinal.status !== 'granted') {
-              pendingLocationRef.current = null;
-              emitPendingTurn(`Please pick 'Allow all the time' so I can alert you at ${pending.resolved.place_name}.`);
-              return;
-            }
+          const permResult = await ensureBackgroundLocationPermission();
+          if (permResult.declined) {
+            pendingLocationRef.current = null;
+            emitPendingTurn(`No problem — say it again anytime you're ready to turn on location alerts.`);
+            return;
+          }
+          if (permResult.background !== 'granted') {
+            pendingLocationRef.current = null;
+            emitPendingTurn(`Please pick 'Allow all the time' so I can alert you at ${pending.resolved.place_name}.`);
+            return;
           }
         } catch (err) {
           console.error('[orch:loc:pending] permission check threw:', err);
@@ -1754,18 +1752,16 @@ const oneShot = pending.originalAction?.one_shot ?? true;
               // saved silently without "Allow all the time" granted, leaving
               // the user with a rule that never fires.
               try {
-                const bgInitial = await Location.getBackgroundPermissionsAsync();
-                if (bgInitial.status !== 'granted') {
-                  const fgReq = await Location.requestForegroundPermissionsAsync();
-                  if (fgReq.status === 'granted') {
-                    await Location.requestBackgroundPermissionsAsync();
-                  }
-                  const bgFinal = await Location.getBackgroundPermissionsAsync();
-                  if (bgFinal.status !== 'granted') {
-                    pendingLocationRef.current = null;
-                    emitPendingTurn(`Please pick 'Allow all the time' so I can alert you at ${data.place_name}.`);
-                    return;
-                  }
+                const permResult = await ensureBackgroundLocationPermission();
+                if (permResult.declined) {
+                  pendingLocationRef.current = null;
+                  emitPendingTurn(`No problem — say it again anytime you're ready to turn on location alerts.`);
+                  return;
+                }
+                if (permResult.background !== 'granted') {
+                  pendingLocationRef.current = null;
+                  emitPendingTurn(`Please pick 'Allow all the time' so I can alert you at ${data.place_name}.`);
+                  return;
                 }
               } catch (err) {
                 console.error('[orch:loc:clarif-memory] permission check threw:', err);
@@ -3848,19 +3844,18 @@ const oneShot = pending.originalAction?.one_shot ?? true;
                 // background and the request promise can resolve before
                 // the user finishes choosing.
                 try {
-                  const bgInitial = await Location.getBackgroundPermissionsAsync();
-                  if (bgInitial.status !== 'granted') {
-                    const fgReq = await Location.requestForegroundPermissionsAsync();
-                    if (fgReq.status === 'granted') {
-                      await Location.requestBackgroundPermissionsAsync();
-                    }
-                    const bgFinal = await Location.getBackgroundPermissionsAsync();
-                    if (bgFinal.status !== 'granted') {
-                      locationIntercepted = true;
-                      turnSpeechOverride = `Please pick 'Allow all the time' so I can alert you at ${placeName}.`;
-                      console.log('[orch:loc] background permission not granted — aborting rule creation');
-                      continue;
-                    }
+                  const permResult = await ensureBackgroundLocationPermission();
+                  if (permResult.declined) {
+                    locationIntercepted = true;
+                    turnSpeechOverride = `No problem — say it again anytime you're ready to turn on location alerts.`;
+                    console.log('[orch:loc] user declined location disclosure — aborting rule creation');
+                    continue;
+                  }
+                  if (permResult.background !== 'granted') {
+                    locationIntercepted = true;
+                    turnSpeechOverride = `Please pick 'Allow all the time' so I can alert you at ${placeName}.`;
+                    console.log('[orch:loc] background permission not granted — aborting rule creation');
+                    continue;
                   }
                 } catch (err) {
                   console.error('[orch:loc] permission check threw:', err);

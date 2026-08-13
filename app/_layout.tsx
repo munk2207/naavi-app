@@ -21,6 +21,7 @@ import { remoteLog, newDiagSession } from '@/lib/remoteLog';
 import { syncDeviceTimezone } from '@/lib/location';
 import { registerPushNotifications } from '@/lib/push';
 import { useGeofencing } from '@/hooks/useGeofencing';
+import { LocationDisclosureModal } from '@/components/LocationDisclosureModal';
 
 // V57.12.4 Bug H instrumentation — global JS error / unhandled-rejection
 // trap. The crash leaves diagnostic silence — no console.error trail and
@@ -295,6 +296,7 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <InsetDiagnostic />
+      <LocationDisclosureModal />
       <StatusBar style="light" backgroundColor={Colors.bgApp} />
       <Stack
         screenOptions={{

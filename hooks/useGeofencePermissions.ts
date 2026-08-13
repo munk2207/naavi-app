@@ -23,6 +23,7 @@ import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import BackgroundGeolocation from 'react-native-background-geolocation';
 import { newDiagSession, remoteLog, endDiagSession } from '@/lib/remoteLog';
+import { ensureBackgroundLocationPermission } from '@/lib/location';
 
 export type GeofencePermKey = 'notifications' | 'location' | 'activity' | 'battery';
 
@@ -166,11 +167,15 @@ async function fixPermission(key: GeofencePermKey): Promise<void> {
         break;
       }
       case 'location': {
-        // Must request foreground first, then background
-        const { status: fg } = await Location.requestForegroundPermissionsAsync();
-        if (fg !== 'granted') { await openAppSettings(); break; }
-        const { status: bg } = await Location.requestBackgroundPermissionsAsync();
-        if (bg !== 'granted') await openAppSettings();
+        // Prominent disclosure shown first (Google Play policy) — see
+        // lib/location.ts::ensureBackgroundLocationPermission. Declining
+        // just leaves the permission unresolved; the missing-permissions
+        // card stays visible so the user can retry from here anytime.
+        const result = await ensureBackgroundLocationPermission();
+        if (result.declined) break;
+        if (result.foreground !== 'granted' || result.background !== 'granted') {
+          await openAppSettings();
+        }
         break;
       }
       case 'activity': {

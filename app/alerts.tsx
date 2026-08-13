@@ -37,6 +37,7 @@ import { disconnectEntityById } from '@/lib/list_connections';
 import { getLastSyncStatus, subscribeLastSyncStatus, type LastSyncStatus } from '@/hooks/useGeofencing';
 import { Linking, AppState } from 'react-native';
 import * as Location from 'expo-location';
+import { ensureBackgroundLocationPermission } from '@/lib/location';
 
 // V57.10.2 — Wael 2026-05-01 saw "[object Object]" in the orange error
 // banner. Root cause: Supabase / Edge Function error responses are plain
@@ -414,41 +415,14 @@ export default function AlertsScreen() {
     if (isRequestingPermission.current) return;
     isRequestingPermission.current = true;
     try {
-      let fgGranted = false;
-      let bgGranted = false;
+      // Prominent disclosure shown first (Google Play policy) if background
+      // isn't already granted — see lib/location.ts::ensureBackgroundLocationPermission.
+      // 15s timeout preserved on the underlying OS calls only, not the
+      // disclosure modal itself (that's the user's own pace, never timed out).
+      const permResult = await ensureBackgroundLocationPermission({ timeoutMs: 15_000 });
+      if (permResult.declined) return;
 
-      // Foreground permission — 15s timeout as fallback only.
-      try {
-        const fg = await Promise.race([
-          Location.requestForegroundPermissionsAsync(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('fg-permission-timeout')), 15_000),
-          ),
-        ]);
-        fgGranted = fg.status === 'granted';
-      } catch {
-        // Timeout or error — re-check actual status rather than assuming denied.
-        const fg = await Location.getForegroundPermissionsAsync();
-        fgGranted = fg.status === 'granted';
-      }
-
-      // Background permission (Android 11+ opens Settings, not a dialog).
-      if (fgGranted) {
-        try {
-          const bg = await Promise.race([
-            Location.requestBackgroundPermissionsAsync(),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('bg-permission-timeout')), 15_000),
-            ),
-          ]);
-          bgGranted = bg.status === 'granted';
-        } catch {
-          const bg = await Location.getBackgroundPermissionsAsync();
-          bgGranted = bg.status === 'granted';
-        }
-      }
-
-      // Re-check actual status after all flows complete.
+      // Re-check actual status after the flow completes.
       const fgFinal = await Location.getForegroundPermissionsAsync();
       const bgFinal = await Location.getBackgroundPermissionsAsync().catch(() => ({ status: 'unknown' }));
 

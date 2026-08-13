@@ -11,6 +11,7 @@
 import * as Location from 'expo-location';
 import { supabase } from './supabase';
 import { queryWithTimeout } from './invokeWithTimeout';
+import { showLocationDisclosure } from './locationDisclosure';
 
 export type PermissionStatus = 'granted' | 'denied' | 'undetermined';
 
@@ -44,6 +45,72 @@ export async function requestLocationPermissions(): Promise<{
     foreground: fgStatus as PermissionStatus,
     background: bgStatus as PermissionStatus,
   };
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+  ]);
+}
+
+/**
+ * The one entry point every location-permission request should go through.
+ * Shows the in-app prominent-disclosure modal (Google Play policy — must
+ * appear in the normal flow of the feature, right before the OS dialog)
+ * ONLY when background permission isn't already granted; skips it entirely
+ * on repeat requests since there's nothing new to disclose or request.
+ *
+ * 2026-08-13 — replaces direct requestForegroundPermissionsAsync/
+ * requestBackgroundPermissionsAsync calls that were scattered across
+ * useOrchestrator.ts, useGeofencePermissions.ts, and app/alerts.tsx with no
+ * disclosure step before them — the Play Console rejection this fixes
+ * ("Prominent Disclosure and Consent Requirement: Missing Prominent
+ * Disclosure") was because none of those real request moments showed one;
+ * app/permission-location.tsx had the right copy but was only reachable via
+ * Settings, so it never actually intercepted them.
+ */
+export async function ensureBackgroundLocationPermission(opts?: {
+  timeoutMs?: number;
+}): Promise<{ foreground: PermissionStatus; background: PermissionStatus; declined?: boolean }> {
+  const bgInitial = await getBackgroundPermission();
+  if (bgInitial === 'granted') {
+    return { foreground: 'granted', background: 'granted' };
+  }
+
+  const agreed = await showLocationDisclosure();
+  if (!agreed) {
+    return { foreground: 'undetermined', background: 'undetermined', declined: true };
+  }
+
+  const timeoutMs = opts?.timeoutMs;
+  let fgStatus: PermissionStatus = 'undetermined';
+  try {
+    const fgReq = timeoutMs
+      ? await withTimeout(Location.requestForegroundPermissionsAsync(), timeoutMs, 'fg-permission-timeout')
+      : await Location.requestForegroundPermissionsAsync();
+    fgStatus = fgReq.status as PermissionStatus;
+  } catch {
+    fgStatus = await getForegroundPermission();
+  }
+  if (fgStatus !== 'granted') {
+    return { foreground: fgStatus, background: 'denied' };
+  }
+
+  let bgStatus: PermissionStatus = 'undetermined';
+  try {
+    const bgReq = timeoutMs
+      ? await withTimeout(Location.requestBackgroundPermissionsAsync(), timeoutMs, 'bg-permission-timeout')
+      : await Location.requestBackgroundPermissionsAsync();
+    bgStatus = bgReq.status as PermissionStatus;
+  } catch {
+    bgStatus = await getBackgroundPermission();
+  }
+  // Re-check final state — Android 11+ opens Settings for background instead
+  // of a dialog, and the request promise can resolve before the user
+  // finishes choosing there.
+  const bgFinal = await getBackgroundPermission().catch(() => bgStatus);
+  return { foreground: fgStatus, background: bgFinal };
 }
 
 /** Read current GPS coordinates (foreground). Returns null on any failure. */
