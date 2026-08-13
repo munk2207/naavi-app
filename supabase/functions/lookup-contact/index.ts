@@ -9,6 +9,8 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { contactDateFacts } from '../_shared/contact_date_facts.ts';
+import { resolveRelationshipToName } from '../_shared/resolve_relationship_contact.ts';
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const PEOPLE_API       = 'https://people.googleapis.com/v1/people:searchContacts';
@@ -50,7 +52,8 @@ serve(async (req) => {
   // re-resolve against (resolve-recipient's fire-mode, per
   // docs/F12_PHASE2_CHANGE_PLAN_2026-07-05.md §1). Purely additive — existing
   // callers only ever send `name` and are unaffected.
-  const { name, contact_id: bodyContactId, user_id: bodyUserId } = body;
+  const { name: rawName, contact_id: bodyContactId, user_id: bodyUserId } = body;
+  let name = rawName;
 
   if (!name?.trim() && !bodyContactId?.trim()) {
     return new Response(JSON.stringify({ error: 'Missing name or contact_id' }), {
@@ -90,6 +93,20 @@ serve(async (req) => {
 
   const user = { id: userId };
 
+  // 2026-08-13 — "text my wife" never resolved to a real contact: nothing
+  // searched a relationship word against saved facts before hitting the
+  // People API, and no contact is ever literally named "wife". Substitute
+  // the real name from a saved REMEMBER fact ("Linda is my wife") before
+  // running the normal search below — skips cleanly (name unchanged) if
+  // the word isn't a known relationship term or nothing is saved for it.
+  if (!bodyContactId?.trim() && name?.trim()) {
+    const resolved = await resolveRelationshipToName(name.trim(), userId, adminClient);
+    if (resolved) {
+      console.log(`[lookup-contact] relationship word "${name}" resolved to "${resolved}" via knowledge_fragments`);
+      name = resolved;
+    }
+  }
+
   const { data: tokenRow, error: tokenError } = await adminClient
     .from('user_tokens')
     .select('refresh_token')
@@ -116,7 +133,9 @@ serve(async (req) => {
     // silent fallback.
     if (bodyContactId?.trim()) {
       const getUrl = new URL(`https://people.googleapis.com/v1/${bodyContactId.trim()}`);
-      getUrl.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers,addresses,memberships');
+      // B10w — birthdays/events added so this direct-fetch path also carries
+      // birthday/anniversary, same as the name-search path below.
+      getUrl.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers,addresses,memberships,birthdays,events');
       const getRes = await fetch(getUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
       if (!getRes.ok) {
         console.log(`[lookup-contact] contact_id fetch failed (status=${getRes.status}) for "${bodyContactId}" — treating as not found`);
@@ -126,6 +145,7 @@ serve(async (req) => {
       }
       const person = await getRes.json();
       const addrs = Array.isArray(person.addresses) ? person.addresses : [];
+      const { birthday, anniversary } = contactDateFacts(person);
       const singleContact = {
         name:              person.names?.[0]?.displayName ?? name ?? null,
         email:             person.emailAddresses?.[0]?.value ?? null,
@@ -136,6 +156,11 @@ serve(async (req) => {
           type: String(a?.type || a?.formattedType || 'other').toLowerCase(),
           formatted: String(a?.formattedValue || '').trim(),
         })).filter((a: any) => a.formatted.length > 0),
+        // B10w — additive; existing callers reading name/email/phone only
+        // are unaffected (voice's arch1HandleLookupContact is the first
+        // consumer that reads these).
+        birthday,
+        anniversary,
       };
       console.log(`[lookup-contact] contact_id fetch ok: "${singleContact.name}" — ${singleContact.email ?? 'no email'}`);
       return new Response(JSON.stringify({ contact: singleContact, contacts: [singleContact] }), {
@@ -166,7 +191,10 @@ serve(async (req) => {
     const url = new URL(PEOPLE_API);
     url.searchParams.set('query', name.trim());
     // memberships added so we can detect MyNaavi-labeled contacts and sort them first.
-    url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers,addresses,memberships');
+    // birthdays/events added (B10w) — searchContacts's own fields are only a
+    // fallback if the batchGet re-fetch below fails; birthdays/events on the
+    // batchGet call is what actually reaches the response in the common case.
+    url.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers,addresses,memberships,birthdays,events');
     url.searchParams.set('pageSize', '10');
 
     const res = await fetch(url.toString(), {
@@ -243,7 +271,7 @@ serve(async (req) => {
       console.log(`[lookup-contact] No results for "${name}" — retrying with prefix "${prefix}"`);
       const url2 = new URL(PEOPLE_API);
       url2.searchParams.set('query', prefix);
-      url2.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers,addresses,memberships');
+      url2.searchParams.set('readMask', 'names,emailAddresses,phoneNumbers,addresses,memberships,birthdays,events');
       url2.searchParams.set('pageSize', '10');
       const res2 = await fetch(url2.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
       if (res2.ok) {
@@ -269,7 +297,10 @@ serve(async (req) => {
       try {
         const getUrl = new URL('https://people.googleapis.com/v1/people:batchGet');
         for (const rn of resourceNames) getUrl.searchParams.append('resourceNames', rn);
-        getUrl.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers,addresses,memberships');
+        // birthdays/events added (B10w) — this batchGet result is what
+        // actually populates `contacts[]` below (`fullPersonMap`), so this
+        // is the field addition that matters for the common case.
+        getUrl.searchParams.set('personFields', 'names,emailAddresses,phoneNumbers,addresses,memberships,birthdays,events');
         const getRes = await fetch(getUrl.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
         if (getRes.ok) {
           const getData = await getRes.json();
@@ -303,6 +334,7 @@ serve(async (req) => {
             m.contactGroupMembership?.contactGroupResourceName === myNaaviGroupResource
           )
         : false;
+      const { birthday, anniversary } = contactDateFacts(person);
       return {
         name:             person.names?.[0]?.displayName ?? name,
         email:            person.emailAddresses?.[0]?.value ?? null,
@@ -317,6 +349,9 @@ serve(async (req) => {
           type: String(a?.type || a?.formattedType || 'other').toLowerCase(),
           formatted: String(a?.formattedValue || '').trim(),
         })).filter((a: any) => a.formatted.length > 0),
+        // B10w — additive, same reasoning as the direct-fetch path above.
+        birthday,
+        anniversary,
       };
     });
 

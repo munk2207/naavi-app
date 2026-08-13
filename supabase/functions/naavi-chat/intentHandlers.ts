@@ -13,6 +13,7 @@
  */
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { RELATIONSHIP_WORDS } from '../_shared/relationship_words.ts';
 
 export type HandlerResult = {
   speech: string;
@@ -487,6 +488,14 @@ export async function handleGmailSearch(
 // supabaseUrl + serviceKey are passed in from index.ts so this file stays
 // free of Deno.env reads (easier to test).
 
+// 2026-08-13 — bare relationship words ("wife", "boss") are the classifier's
+// extraction for "who is my wife" (the whole point of PERSON_LOOKUP→name),
+// but a single word is too generic for the knowledge adapter's embedding
+// search to clear its 0.5 similarity threshold against a full saved fact
+// like "Linda is my wife". Verified live against staging: query "wife" → 0
+// results; query "who is my wife" → similarity 0.625, correct match. Expand
+// to the natural question so the semantic match has enough content to work.
+
 export async function handlePersonLookup(
   query: string,
   userId: string,
@@ -494,13 +503,16 @@ export async function handlePersonLookup(
   serviceKey: string,
 ): Promise<HandlerResult> {
   try {
+    const searchQuery = RELATIONSHIP_WORDS.has(query.trim().toLowerCase())
+      ? `who is my ${query.trim().toLowerCase()}`
+      : query;
     const res = await fetch(`${supabaseUrl}/functions/v1/global-search`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${serviceKey}`,
       },
-      body: JSON.stringify({ query, user_id: userId, limit: 10 }),
+      body: JSON.stringify({ query: searchQuery, user_id: userId, limit: 10 }),
     });
 
     if (!res.ok) {
