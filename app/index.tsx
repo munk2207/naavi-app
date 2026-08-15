@@ -44,13 +44,12 @@ import { getUserName } from '@/lib/naavi-client';
 import { useOrchestrator, isInputLocked, isSendLocked, isOrangeButtonVisible, orangeButtonLabel } from '@/hooks/useOrchestrator';
 import { useVoice } from '@/hooks/useVoice';
 import { useWhisperMemo } from '@/hooks/useWhisperMemo';
-import { useConversationRecorder } from '@/hooks/useConversationRecorder';
+import { useConversationRecorder, type ConversationAction } from '@/hooks/useConversationRecorder';
 import { useLiveTranscript } from '@/hooks/useLiveTranscript';
 import { VoiceButton } from '@/components/VoiceButton';
 import { BriefCard } from '@/components/BriefCard';
 import { ConversationBubble } from '@/components/ConversationBubble';
 import { isVoiceEnabledSync, hydrateVoicePref, refreshVoicePref } from '@/lib/voicePref';
-import { ConversationActionCard } from '@/components/ConversationActionCard';
 import { TopBarMenu } from '@/components/TopBarMenu';
 import { IconButton } from '@/components/IconButton';
 import { LocationRuleCard } from '@/components/LocationRuleCard';
@@ -64,6 +63,58 @@ import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { BriefItem, GlobalSearchResult } from '@/lib/naavi-client';
 import type { Email } from '@/lib/types';
+
+// ─── Visits compound message builder ──────────────────────────────────────
+//
+// 2026-08-15 — Visits Flow Redesign, governed (see
+// docs/VISITS_PHASE2_CHANGE_PLAN_2026-08-15.md). Visits recordings used to
+// auto-create calendar events directly with no confirmation and no contact
+// resolution (CLAUDE.md Rule 12 violation). This instead builds ONE line
+// per extracted action and hands it to the same send() the chat/voice
+// pipeline uses, so naavi-chat's existing compound-request handling,
+// confirm-before-act gate, and (for email) real contact resolution do the
+// work — unmodified, proven live against staging in Phase 2.
+//
+// naavi-chat's compound-turn detection counts newline-separated lines over
+// 8 characters in the outbound message and requires >=4 to trigger the
+// staggered "Here are your N actions" confirmation UI — so each line must
+// be its own imperative sentence, not a flowing paragraph.
+
+function addDaysToISODate(startISO: string, daysToAdd: number): string {
+  const d = new Date(`${startISO}T00:00:00`);
+  d.setDate(d.getDate() + daysToAdd);
+  return d.toISOString().slice(0, 10);
+}
+
+function buildVisitActionLine(a: ConversationAction): string {
+  if (a.type === 'prescription') {
+    const doseText = a.dose_times && a.dose_times.length > 0 ? a.dose_times.join(' and ') : null;
+    let durationClause = a.timing;
+    if (a.duration_days && a.duration_days > 0) {
+      const start = a.start_date || 'today';
+      // Explicit end date in addition to the day-count — naavi-chat's own
+      // extraction model can undercount duration from vaguer phrasing
+      // alone; this gives it two independent signals.
+      const endDate = a.start_date ? addDaysToISODate(a.start_date, a.duration_days - 1) : null;
+      durationClause = `for the full ${a.duration_days} day${a.duration_days === 1 ? '' : 's'}, starting ${start}${endDate ? ` through ${endDate}` : ''}`;
+    }
+    return `Start me on ${a.title}${doseText ? `, ${doseText}` : ''}, ${durationClause}.`;
+  }
+  if (a.type === 'email') {
+    const body = a.email_draft ?? a.description;
+    return a.recipient_email
+      ? `Draft an email to ${a.recipient_email} about ${a.title}. Body: ${body}`
+      : `Draft an email about ${a.title}. Ask me who to send it to. Body: ${body}`;
+  }
+  const when = a.start_date
+    ? `on ${a.start_date}${a.start_time ? ` at ${a.start_time}` : ''}`
+    : a.timing;
+  return `Schedule ${a.calendar_title || a.title} ${when}.`;
+}
+
+function buildVisitCompoundMessage(actions: ConversationAction[]): string {
+  return actions.map(buildVisitActionLine).join('\n');
+}
 
 function emailToBriefItem(email: Email): BriefItem {
   return {
@@ -1293,6 +1344,26 @@ export default function HomeScreen() {
   // strategic moat. See docs/SESSION_HANDOFF_V57.11.3.md for the rationale.
   const { status, turns, error, send, clearHistory, loadHistory, stopSpeaking, onOrangeButtonPressed, isAudioPlaying, pendingAction, confirmPending, cancelPending, editPending, revealWordCount, currentChunk, compoundProgress, compoundActiveTurnStart } = useOrchestrator('en', brief, avoidHighwaysRef.current, false);
 
+  // 2026-08-15 — shared by both confirmSpeakers call sites (the speaker-
+  // labeling modal's "Done" button, and the single-speaker auto-skip path
+  // below) so the compound-message routing logic exists in exactly one
+  // place. See buildVisitCompoundMessage above and
+  // docs/VISITS_PHASE2_CHANGE_PLAN_2026-08-15.md (Proof 3) — send() is a
+  // silent no-op risk when a DraftCard is already pending confirmation, so
+  // this checks pendingAction first rather than dropping the extracted
+  // items with no feedback.
+  const sendVisitActionsToChat = useCallback((extracted: ConversationAction[]) => {
+    if (extracted.length === 0) return;
+    if (pendingAction) {
+      try { Speech.speak(SPEECH.AWAITING_PRIOR_CONFIRM, { rate: 1.0, pitch: 1.0 }); } catch {}
+      return;
+    }
+    const visitMsg = buildVisitCompoundMessage(extracted);
+    console.log('[Visits] compound message to send():', visitMsg);
+    setInputText('');
+    send(visitMsg);
+  }, [pendingAction, send]);
+
   // In compound mode, only show turns from the current item's start index.
   const visibleTurns = compoundActiveTurnStart >= 0 ? turns.slice(compoundActiveTurnStart) : turns;
   // Offset for isLatest calculation when sliced.
@@ -1589,7 +1660,7 @@ export default function HomeScreen() {
       // Only the user in the recording — skip the modal entirely.
       const names = { [speakers[0]]: savedName };
       committedNamesRef.current = names;
-      confirmSpeakers(names, '').catch(() => {});
+      confirmSpeakers(names, '').then(sendVisitActionsToChat).catch(() => {});
       return;
     }
 
@@ -1968,7 +2039,8 @@ export default function HomeScreen() {
                       console.log('[SpeakerModal] names:', JSON.stringify(names), 'title:', title, 'chips:', finalChips.length);
                       committedNamesRef.current = { ...names };
                       setShowSpeakerModal(false);
-                      await confirmSpeakers(names, title);
+                      const extracted = await confirmSpeakers(names, title);
+                      sendVisitActionsToChat(extracted);
                     }}
                   >
                     {convState === 'extracting'
@@ -2553,56 +2625,25 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {/* Conversation action cards */}
-          {convActions.length > 0 && (
-            <View style={{ marginBottom: 8 }}>
-              <Text style={styles.convActionsHeader}>📋 Actions from your conversation</Text>
-              {convActions.map((action, i) => (
-                <ConversationActionCard
-                  key={i}
-                  action={action}
-                  /* Calendar events for the auto-created types (appointment /
-                     meeting / call / test / prescription / follow_up) are
-                     created during confirmSpeakers, so there's no separate
-                     add-to-calendar prop here — re-firing through Naavi would
-                     produce duplicates. The card opens the real event itself
-                     via action.calendar_html_link (2026-08-15). */
-                  onEmail={(a) => {
-                    // Auto-send the draft request. 2026-08-15 — prefer
-                    // recipient_email (a literal address the transcript
-                    // actually stated) over suggested_by whenever it's
-                    // present: suggested_by is a speaker LABEL (sometimes a
-                    // real name, sometimes a raw diarization fallback like
-                    // "Speaker B"), not a resolvable contact, and using it
-                    // blindly sends Naavi down a doomed lookup-contact
-                    // search for a name that was never a real person. A
-                    // literal spoken address sidesteps that resolution
-                    // entirely. Falls back to suggested_by (if it's a real
-                    // name, not "Unknown") only when no address was stated,
-                    // then to asking who to send it to.
-                    const recipient = a.recipient_email
-                      ? a.recipient_email
-                      : (a.suggested_by && a.suggested_by !== 'Unknown' ? a.suggested_by : null);
-                    const body = a.email_draft ?? a.description;
-                    const msg = recipient
-                      ? `Draft an email to ${recipient} about ${a.title}. Body: ${body}`
-                      : `Draft an email about ${a.title}. Ask me who to send it to. Body: ${body}`;
-                    setInputText('');
-                    send(msg);
-                  }}
-                />
-              ))}
-              {savedDocLink ? (
-                <TouchableOpacity
-                  style={styles.convSavedDoc}
-                  onPress={() => Linking.openURL(savedDocLink)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.convSavedDocText}>📄 Full transcript saved to Google Drive — tap to open</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          )}
+          {/* 2026-08-15 — Visits Flow Redesign (governed, see
+              docs/VISITS_PHASE2_CHANGE_PLAN_2026-08-15.md). The action-card
+              list (ConversationActionCard, one card per extracted item,
+              with its own "In your calendar" badge and "Draft Email"
+              button) is removed — execution now routes through
+              sendVisitActionsToChat()/send(), so results appear as a normal
+              compound chat reply instead. The Drive-transcript link is
+              unrelated to that and stays, now gated on savedDocLink alone
+              rather than nested under a convActions check that no longer
+              applies. */}
+          {savedDocLink ? (
+            <TouchableOpacity
+              style={styles.convSavedDoc}
+              onPress={() => Linking.openURL(savedDocLink)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.convSavedDocText}>📄 Full transcript saved to Google Drive — tap to open</Text>
+            </TouchableOpacity>
+          ) : null}
 
           {/* 2026-08-15 — in-app "Conversation Transcript" display removed.
               Speaker labels can be wrong (voice identification limitation —
@@ -3730,13 +3771,6 @@ const styles = StyleSheet.create({
   memoBtnRecording: {
     backgroundColor: Colors.alert,
     opacity: 0.8,
-  },
-  convActionsHeader: {
-    fontSize: Typography.body,
-    fontWeight: '700',
-    color: Colors.moderate,
-    marginBottom: 8,
-    marginTop: 4,
   },
   convSavedDoc: {
     backgroundColor: Colors.bgCard,

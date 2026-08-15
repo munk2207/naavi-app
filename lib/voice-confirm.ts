@@ -128,4 +128,10 @@ export const SPEECH = {
   TIMEOUT: "I didn't hear a confirmation. The draft is still here when you're ready.",
   GENERIC_ERROR: 'Something went wrong. The draft is still here.',
   SENT: 'Sent.',
+  // 2026-08-15 — Visits Flow Redesign (governed, see
+  // docs/VISITS_PHASE2_CHANGE_PLAN_2026-08-15.md, Proof 3). send() is a
+  // silent no-op risk when a DraftCard is already pending confirmation;
+  // used when a Visits recording finishes while that's the case, so the
+  // extracted items don't just vanish with no feedback.
+  AWAITING_PRIOR_CONFIRM: "I found some items from your conversation, but finish what you're asking me first, then try again.",
 } as const;

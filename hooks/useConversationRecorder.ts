@@ -59,11 +59,6 @@ export interface ConversationAction {
   // instead of a single one. extract-actions Sonnet emits these for type="prescription".
   duration_days?: number;
   dose_times?: string[]; // array of "HH:MM"
-  // 2026-08-15 — set locally after confirmSpeakers auto-creates the calendar
-  // event for this action. Google's own event link — lets the "✓ In your
-  // calendar" badge actually open the event instead of being purely
-  // informational. Undefined until creation succeeds (or if creation fails).
-  calendar_html_link?: string;
 }
 
 export interface UseConversationRecorderResult {
@@ -80,7 +75,7 @@ export interface UseConversationRecorderResult {
   // Actions
   startRecording: (language?: string) => void;
   stopRecording: () => void;
-  confirmSpeakers: (names: Record<string, string>, title: string) => Promise<void>;
+  confirmSpeakers: (names: Record<string, string>, title: string) => Promise<ConversationAction[]>;
   reset: () => void;
   // Result
   utterances: Utterance[];
@@ -347,8 +342,8 @@ export function useConversationRecorder(): UseConversationRecorderResult {
 
   // ── Confirm speakers → extract actions ───────────────────────────────────
 
-  const confirmSpeakers = useCallback(async (names: Record<string, string>, title: string) => {
-    if (!supabase) return;
+  const confirmSpeakers = useCallback(async (names: Record<string, string>, title: string): Promise<ConversationAction[]> => {
+    if (!supabase) return [];
     // Names and title are passed directly as parameters — no closure or ref issues
     const currentNames = names;
     const currentTitle = title;
@@ -370,100 +365,19 @@ export function useConversationRecorder(): UseConversationRecorderResult {
       const extracted: ConversationAction[] = data?.actions ?? [];
       setActions(extracted);
 
-      // Step 1b — auto-create calendar events for appointments, meetings, tests, follow-ups, prescriptions
-      const calendarTypes = ['appointment', 'meeting', 'call', 'test', 'prescription', 'follow_up'];
-      const toLocalISO = (d: Date): string => {
-        const pad = (n: number) => n.toString().padStart(2, '0');
-        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-      };
-      const createdTitles = new Set<string>();
-      for (const action of extracted) {
-        if (calendarTypes.includes(action.type) && (action.calendar_title || action.title)) {
-          const eventTitle = action.calendar_title || action.title;
-          if (createdTitles.has(eventTitle.toLowerCase())) continue; // skip duplicates
-          createdTitles.add(eventTitle.toLowerCase());
-          try {
-            // V57.3 — prescription expansion. When the action is a prescription
-            // with dose_times + duration_days populated, generate one calendar
-            // event per (day, dose_time) instead of a single event. Mirrors the
-            // chat path's SCHEDULE_MEDICATION expansion. Prior behaviour (1
-            // event for a 10-day course) left Robert without 9 days of dose
-            // reminders.
-            const isPrescriptionExpand = action.type === 'prescription'
-              && Array.isArray(action.dose_times)
-              && action.dose_times.length > 0
-              && typeof action.duration_days === 'number'
-              && action.duration_days > 0;
-
-            // Resolve the start date once, used as day-1 anchor for prescription
-            // expansion or as the single event's start for everything else.
-            const baseStart: Date = action.start_date
-              ? new Date(`${action.start_date}T00:00:00`)
-              : (() => {
-                  const d = new Date();
-                  d.setHours(0, 0, 0, 0);
-                  d.setDate(d.getDate() + (isPrescriptionExpand ? 0 : 1));
-                  return d;
-                })();
-
-            if (isPrescriptionExpand) {
-              const doseTimes = action.dose_times!;
-              const durationDays = action.duration_days!;
-              let createdCount = 0;
-              for (let dayOffset = 0; dayOffset < durationDays; dayOffset++) {
-                const dayDate = new Date(baseStart);
-                dayDate.setDate(dayDate.getDate() + dayOffset);
-                for (const timeStr of doseTimes) {
-                  const [hh, mm] = String(timeStr).split(':').map(Number);
-                  const start = new Date(dayDate);
-                  start.setHours(Number.isFinite(hh) ? hh : 9, Number.isFinite(mm) ? mm : 0, 0, 0);
-                  const end = new Date(start.getTime() + 30 * 60 * 1000); // 30 min slot
-                  try {
-                    const created = await registry.calendar.createEvent({
-                      title:       eventTitle,
-                      description: `${action.description}\n\nTiming: ${action.timing} (day ${dayOffset + 1} of ${durationDays})\nSuggested by: ${action.suggested_by}`,
-                      startISO:    toLocalISO(start),
-                      endISO:      toLocalISO(end),
-                      attendees:   [],
-                    });
-                    createdCount++;
-                    // Multi-dose expansion creates N events for one action —
-                    // link the badge to the FIRST one (day 1) as the series'
-                    // entry point, since there's no single "the" event to link.
-                    if (createdCount === 1 && created.htmlLink) {
-                      action.calendar_html_link = created.htmlLink;
-                    }
-                  } catch (err) {
-                    console.error('[ConvRecorder] Prescription dose create failed:', eventTitle, dayOffset, timeStr, err);
-                  }
-                }
-              }
-              console.log(`[ConvRecorder] Auto-created ${createdCount} prescription dose event(s) for "${eventTitle}" — ${durationDays} days × ${doseTimes.length} doses/day`);
-            } else {
-              // Single event for everything that isn't a multi-dose prescription.
-              const [hh, mm] = (action.start_time ?? '09:00').split(':').map(Number);
-              const start = new Date(baseStart);
-              start.setHours(Number.isFinite(hh) ? hh : 9, Number.isFinite(mm) ? mm : 0, 0, 0);
-              const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour
-              const created = await registry.calendar.createEvent({
-                title:       eventTitle,
-                description: `${action.description}\n\nTiming: ${action.timing}\nSuggested by: ${action.suggested_by}`,
-                startISO:    toLocalISO(start),
-                endISO:      toLocalISO(end),
-                attendees:   [],
-              });
-              if (created.htmlLink) action.calendar_html_link = created.htmlLink;
-              console.log('[ConvRecorder] Auto-created calendar event:', eventTitle, 'at', toLocalISO(start));
-            }
-          } catch (err) {
-            console.error('[ConvRecorder] Failed to create event:', eventTitle, err);
-          }
-        }
-      }
-      // Re-render with whichever actions picked up a calendar_html_link
-      // above (mutated in place on the same array setActions already holds
-      // a reference to — a fresh array is needed to trigger React's re-render).
-      setActions([...extracted]);
+      // 2026-08-15 — Visits Flow Redesign (governed, see
+      // docs/VISITS_PHASE2_CHANGE_PLAN_2026-08-15.md). This used to
+      // auto-create calendar events directly here (including a manual
+      // per-dose prescription-expansion loop) with zero confirmation and
+      // zero contact resolution — CLAUDE.md Rule 12 violation, confirmed via
+      // live staging test to be unnecessary duplication: naavi-chat's own
+      // SCHEDULE_MEDICATION tool already expands a prescription into a
+      // proper recurring event, and CREATE_EVENT already goes through
+      // naavi-chat's existing confirm-before-act gate. Execution now happens
+      // by the caller (app/index.tsx) sending the extracted actions through
+      // send(), reusing that already-working pipeline instead of duplicating
+      // it here. This hook's job narrows to recording, transcription, and
+      // extraction only.
 
       // Step 2 — format document content
       const date = new Date().toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -526,6 +440,11 @@ export function useConversationRecorder(): UseConversationRecorderResult {
       // summary plays in the background rather than blocking that
       // transition. No em-dashes in this string — Deepgram TTS mispronounces
       // them as "aura" (see project_naavi_help_narration_no_em_dash).
+      // 2026-08-15 (Visits Flow Redesign) — dropped the "Added to your
+      // calendar" clause: nothing is added yet at this point anymore: the
+      // caller sends these actions through the normal confirm-then-act
+      // pipeline right after this, so claiming completion here would be
+      // false (see docs/VISITS_PHASE2_CHANGE_PLAN_2026-08-15.md).
       const spokenSummary = extracted.length === 0
         ? "I didn't find any action items in that conversation."
         : (() => {
@@ -535,9 +454,7 @@ export function useConversationRecorder(): UseConversationRecorderResult {
               : items.length === 2
                 ? `${items[0]}, and ${items[1]}`
                 : `${items.slice(0, -1).join('; ')}; and ${items[items.length - 1]}`;
-            const anyCalendared = extracted.some(a => calendarTypes.includes(a.type));
-            return `Done. I found ${items.length} action item${items.length === 1 ? '' : 's'}: ${list}.` +
-              (anyCalendared ? ' Added to your calendar.' : '');
+            return `I found ${items.length} action item${items.length === 1 ? '' : 's'}: ${list}.`;
           })();
       speakCue(spokenSummary).catch(e =>
         console.warn('[ConvRecorder] Spoken summary failed:', e)
@@ -545,10 +462,17 @@ export function useConversationRecorder(): UseConversationRecorderResult {
 
       setConvState('done');
       console.log('[ConvRecorder] Extracted', extracted.length, 'actions, speakers:', currentNames);
+      // 2026-08-15 — returned so the caller (app/index.tsx) can build the
+      // compound send() message from fresh data immediately after await,
+      // instead of reading the `actions` state variable, which would still
+      // hold its stale pre-extraction value in the same tick (React state
+      // updates aren't synchronous).
+      return extracted;
 
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Action extraction failed';
       setError(msg);
+      return [];
     }
   }, []); // refs are always current — no deps needed
 
