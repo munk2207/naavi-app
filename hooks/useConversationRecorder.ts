@@ -46,6 +46,12 @@ export interface ConversationAction {
   suggested_by: string;
   calendar_title?: string;
   email_draft?: string;
+  // 2026-08-15 — set only when the transcript explicitly states a literal
+  // email address (e.g. "email my office at x@y.com"). Lets Draft Email
+  // send straight to that address instead of resolving suggested_by (a
+  // speaker label, not a real contact) through lookup-contact — sidesteps
+  // the whole "who is Speaker B" problem for this specific, explicit case.
+  recipient_email?: string;
   // Structured scheduling fields (extract-actions populates when resolvable).
   start_date?: string; // ISO date "YYYY-MM-DD"
   start_time?: string; // "HH:MM" 24h

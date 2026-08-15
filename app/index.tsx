@@ -1228,13 +1228,19 @@ export default function HomeScreen() {
   // 2026-08-15 — Visits flow speaks a summary when extraction finishes
   // (confirmSpeakers), but nothing scrolled the screen to show the new
   // action cards while that summary played — Wael's "the screen does not
-  // move with the voice" report. Mirrors the scrollToEnd pattern used
-  // after every other Naavi reply (see send()/handleVoicePress() above).
+  // move with the voice" report. First attempt watched convActions, but
+  // confirmSpeakers sets that BEFORE the calendar-creation loop and the
+  // Drive save (both real network calls with real latency) — so the
+  // screen was already scrolled to the end well before speakCue() even
+  // fires. convState only becomes 'done' at the very end, right alongside
+  // speakCue() — that's the signal that actually lines up with the voice
+  // starting. Mirrors the scrollToEnd pattern used after every other
+  // Naavi reply (see send()/handleVoicePress() above).
   useEffect(() => {
-    if (convActions.length > 0) {
+    if (convState === 'done' && convActions.length > 0) {
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     }
-  }, [convActions]);
+  }, [convState]);
 
   // Navigation alert timer — checks every 30s if it's time to leave
   useEffect(() => {
@@ -2536,15 +2542,21 @@ export default function HomeScreen() {
                      produce duplicates. The card opens the real event itself
                      via action.calendar_html_link (2026-08-15). */
                   onEmail={(a) => {
-                    // Auto-send the draft request. Use suggested_by (the speaker
-                    // who proposed the action — usually the doctor / professional
-                    // we'd email back) as the explicit recipient, so Claude emits
-                    // a DRAFT_MESSAGE instead of a conversational reply. If
-                    // suggested_by is missing or "Unknown", fall back to asking
-                    // Claude to ask for the recipient.
-                    const recipient = a.suggested_by && a.suggested_by !== 'Unknown'
-                      ? a.suggested_by
-                      : null;
+                    // Auto-send the draft request. 2026-08-15 — prefer
+                    // recipient_email (a literal address the transcript
+                    // actually stated) over suggested_by whenever it's
+                    // present: suggested_by is a speaker LABEL (sometimes a
+                    // real name, sometimes a raw diarization fallback like
+                    // "Speaker B"), not a resolvable contact, and using it
+                    // blindly sends Naavi down a doomed lookup-contact
+                    // search for a name that was never a real person. A
+                    // literal spoken address sidesteps that resolution
+                    // entirely. Falls back to suggested_by (if it's a real
+                    // name, not "Unknown") only when no address was stated,
+                    // then to asking who to send it to.
+                    const recipient = a.recipient_email
+                      ? a.recipient_email
+                      : (a.suggested_by && a.suggested_by !== 'Unknown' ? a.suggested_by : null);
                     const body = a.email_draft ?? a.description;
                     const msg = recipient
                       ? `Draft an email to ${recipient} about ${a.title}. Body: ${body}`

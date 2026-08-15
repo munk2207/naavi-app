@@ -21,6 +21,7 @@ export interface ConversationAction {
   suggested_by: string;     // speaker name e.g. "Dr. Ahmed"
   calendar_title?: string;  // pre-filled calendar event title
   email_draft?: string;     // pre-filled email draft text
+  recipient_email?: string; // 2026-08-15 — literal email address, ONLY when the transcript explicitly states one
   // Structured scheduling fields for the calendar pipeline.
   // start_date + start_time: used for all event-like types (appointment, meeting, call,
   //   test, follow_up, task, reminder, prescription) when the transcript mentions a
@@ -87,6 +88,7 @@ Each object must have:
 - suggested_by: the name of who suggested or committed to it (use "Unknown" if unclear)
 - calendar_title: a ready-to-use calendar event title (for appointments/meetings/calls)
 - email_draft: optional short email text to follow up on this action. ONLY include this field when the transcript explicitly mentions sending an email, contacting someone by email, or mentions a specific email address. Do NOT auto-generate email_draft for general appointments, follow-ups, or scheduling — those go on the calendar, not in an email. Without an explicit "send an email to X" or similar in the transcript, OMIT this field.
+- recipient_email: ONLY include this field when the transcript states a literal, complete email address (e.g. "email my office at jane@clinic.com" → "jane@clinic.com"). Do NOT guess, construct, or infer an email address from a name, business, or domain that wasn't actually spoken — if no literal address was said, OMIT this field entirely, even if suggested_by or the action's context makes an address seem obvious.
 
 Structured scheduling fields — include when the transcript makes them resolvable:
 - start_date: ISO date "YYYY-MM-DD" when the action should happen, resolved against today (${todayISO}). Examples: "today" → ${todayISO}; "tomorrow" → tomorrow's date; "in 3 weeks" → today + 21 days; "next Tuesday" → the upcoming Tuesday. Applies to ALL types. Omit if truly unclear.
