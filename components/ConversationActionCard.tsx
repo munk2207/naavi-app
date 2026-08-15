@@ -72,7 +72,6 @@ export function ConversationActionCard({ action, onEmail }: Props) {
 
       <View style={styles.metaRow}>
         <Text style={styles.timing}>⏱ {action.timing}</Text>
-        <Text style={styles.suggestedBy}>— {action.suggested_by}</Text>
       </View>
 
       <View style={styles.actions}>
@@ -152,10 +151,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.caption,
     color: Colors.textHint,
     fontWeight: '600',
-  },
-  suggestedBy: {
-    fontSize: Typography.caption,
-    color: Colors.textHint,
   },
   actions: {
     flexDirection: 'row',

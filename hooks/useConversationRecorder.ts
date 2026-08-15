@@ -17,6 +17,7 @@ import { saveToDrive } from '@/lib/drive';
 import { saveDriveNote } from '@/lib/supabase';
 import { ingestNote } from '@/lib/knowledge';
 import { registry } from '@/lib/adapters/registry';
+import { speakCue } from '@/lib/tts';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -507,6 +508,30 @@ export function useConversationRecorder(): UseConversationRecorderResult {
       const summaryText = `Conversation titled "${title}" on ${date} with ${participants}. ${actionLines}`;
       ingestNote(summaryText, 'conversation' as never).catch(e =>
         console.warn('[ConvRecorder] Knowledge ingest failed:', e)
+      );
+
+      // Step 5 — spoken confirmation (2026-08-15). This flow was silent
+      // end-to-end — visual cards only, no voice at all, in an otherwise
+      // voice-first app. Names what was actually found, not a generic
+      // "Done" (readback principle — the user can verify the right things
+      // happened without reading every card). Fire-and-forget: the UI
+      // already moves to "done" via setConvState below; the summary plays
+      // in the background rather than blocking that transition.
+      const spokenSummary = extracted.length === 0
+        ? "I didn't find any action items in that conversation."
+        : (() => {
+            const titles = extracted.map(a => a.title);
+            const list = titles.length === 1
+              ? titles[0]
+              : titles.length === 2
+                ? `${titles[0]} and ${titles[1]}`
+                : `${titles.slice(0, -1).join(', ')}, and ${titles[titles.length - 1]}`;
+            const anyCalendared = extracted.some(a => calendarTypes.includes(a.type));
+            return `Done. I found ${titles.length} action item${titles.length === 1 ? '' : 's'}: ${list}.` +
+              (anyCalendared ? ' Added to your calendar.' : '');
+          })();
+      speakCue(spokenSummary).catch(e =>
+        console.warn('[ConvRecorder] Spoken summary failed:', e)
       );
 
       setConvState('done');
