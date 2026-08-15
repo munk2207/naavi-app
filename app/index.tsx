@@ -1225,6 +1225,16 @@ export default function HomeScreen() {
     savedDocLink,
   } = useConversationRecorder();
 
+  // 2026-08-15 — Visits flow speaks a summary when extraction finishes
+  // (confirmSpeakers), but nothing scrolled the screen to show the new
+  // action cards while that summary played — Wael's "the screen does not
+  // move with the voice" report. Mirrors the scrollToEnd pattern used
+  // after every other Naavi reply (see send()/handleVoicePress() above).
+  useEffect(() => {
+    if (convActions.length > 0) {
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }, [convActions]);
 
   // Navigation alert timer — checks every 30s if it's time to leave
   useEffect(() => {

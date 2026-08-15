@@ -514,20 +514,23 @@ export function useConversationRecorder(): UseConversationRecorderResult {
       // end-to-end — visual cards only, no voice at all, in an otherwise
       // voice-first app. Names what was actually found, not a generic
       // "Done" (readback principle — the user can verify the right things
-      // happened without reading every card). Fire-and-forget: the UI
-      // already moves to "done" via setConvState below; the summary plays
-      // in the background rather than blocking that transition.
+      // happened without reading every card). Includes each item's timing
+      // (2026-08-15 follow-up — Wael: important for the demo). Fire-and-
+      // forget: the UI already moves to "done" via setConvState below; the
+      // summary plays in the background rather than blocking that
+      // transition. No em-dashes in this string — Deepgram TTS mispronounces
+      // them as "aura" (see project_naavi_help_narration_no_em_dash).
       const spokenSummary = extracted.length === 0
         ? "I didn't find any action items in that conversation."
         : (() => {
-            const titles = extracted.map(a => a.title);
-            const list = titles.length === 1
-              ? titles[0]
-              : titles.length === 2
-                ? `${titles[0]} and ${titles[1]}`
-                : `${titles.slice(0, -1).join(', ')}, and ${titles[titles.length - 1]}`;
+            const items = extracted.map(a => `${a.title}, ${a.timing}`);
+            const list = items.length === 1
+              ? items[0]
+              : items.length === 2
+                ? `${items[0]}, and ${items[1]}`
+                : `${items.slice(0, -1).join('; ')}; and ${items[items.length - 1]}`;
             const anyCalendared = extracted.some(a => calendarTypes.includes(a.type));
-            return `Done. I found ${titles.length} action item${titles.length === 1 ? '' : 's'}: ${list}.` +
+            return `Done. I found ${items.length} action item${items.length === 1 ? '' : 's'}: ${list}.` +
               (anyCalendared ? ' Added to your calendar.' : '');
           })();
       speakCue(spokenSummary).catch(e =>
