@@ -52,6 +52,11 @@ export interface ConversationAction {
   // instead of a single one. extract-actions Sonnet emits these for type="prescription".
   duration_days?: number;
   dose_times?: string[]; // array of "HH:MM"
+  // 2026-08-15 — set locally after confirmSpeakers auto-creates the calendar
+  // event for this action. Google's own event link — lets the "✓ In your
+  // calendar" badge actually open the event instead of being purely
+  // informational. Undefined until creation succeeds (or if creation fails).
+  calendar_html_link?: string;
 }
 
 export interface UseConversationRecorderResult {
@@ -407,7 +412,7 @@ export function useConversationRecorder(): UseConversationRecorderResult {
                   start.setHours(Number.isFinite(hh) ? hh : 9, Number.isFinite(mm) ? mm : 0, 0, 0);
                   const end = new Date(start.getTime() + 30 * 60 * 1000); // 30 min slot
                   try {
-                    await registry.calendar.createEvent({
+                    const created = await registry.calendar.createEvent({
                       title:       eventTitle,
                       description: `${action.description}\n\nTiming: ${action.timing} (day ${dayOffset + 1} of ${durationDays})\nSuggested by: ${action.suggested_by}`,
                       startISO:    toLocalISO(start),
@@ -415,6 +420,12 @@ export function useConversationRecorder(): UseConversationRecorderResult {
                       attendees:   [],
                     });
                     createdCount++;
+                    // Multi-dose expansion creates N events for one action —
+                    // link the badge to the FIRST one (day 1) as the series'
+                    // entry point, since there's no single "the" event to link.
+                    if (createdCount === 1 && created.htmlLink) {
+                      action.calendar_html_link = created.htmlLink;
+                    }
                   } catch (err) {
                     console.error('[ConvRecorder] Prescription dose create failed:', eventTitle, dayOffset, timeStr, err);
                   }
@@ -427,13 +438,14 @@ export function useConversationRecorder(): UseConversationRecorderResult {
               const start = new Date(baseStart);
               start.setHours(Number.isFinite(hh) ? hh : 9, Number.isFinite(mm) ? mm : 0, 0, 0);
               const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour
-              await registry.calendar.createEvent({
+              const created = await registry.calendar.createEvent({
                 title:       eventTitle,
                 description: `${action.description}\n\nTiming: ${action.timing}\nSuggested by: ${action.suggested_by}`,
                 startISO:    toLocalISO(start),
                 endISO:      toLocalISO(end),
                 attendees:   [],
               });
+              if (created.htmlLink) action.calendar_html_link = created.htmlLink;
               console.log('[ConvRecorder] Auto-created calendar event:', eventTitle, 'at', toLocalISO(start));
             }
           } catch (err) {
@@ -441,6 +453,10 @@ export function useConversationRecorder(): UseConversationRecorderResult {
           }
         }
       }
+      // Re-render with whichever actions picked up a calendar_html_link
+      // above (mutated in place on the same array setActions already holds
+      // a reference to — a fresh array is needed to trigger React's re-render).
+      setActions([...extracted]);
 
       // Step 2 — format document content
       const date = new Date().toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -465,6 +481,8 @@ export function useConversationRecorder(): UseConversationRecorderResult {
         `─────────────────────────────`,
         `TRANSCRIPT`,
         `─────────────────────────────`,
+        `Speaker labels are Naavi's best effort — voice identification isn't always exact.`,
+        ``,
         transcriptLines,
         ``,
         `─────────────────────────────`,

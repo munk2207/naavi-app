@@ -1217,12 +1217,11 @@ export default function HomeScreen() {
 
   const {
     convState, convError, elapsedSeconds,
-    speakers, confirmedNames,
+    speakers,
     startRecording: startConvRecording,
     stopRecording: stopConvRecording,
     confirmSpeakers, reset: resetConv,
     actions: convActions,
-    utterances: convUtterances,
     savedDocLink,
   } = useConversationRecorder();
 
@@ -2520,12 +2519,12 @@ export default function HomeScreen() {
                 <ConversationActionCard
                   key={i}
                   action={action}
-                  /* onCalendar removed in V57.1 — calendar events for the
-                     auto-created types (appointment / meeting / call / test /
-                     prescription / follow_up) are created during
-                     confirmSpeakers, so re-firing through Naavi here would
-                     produce duplicates and a redundant time prompt. The card
-                     now shows a read-only "✓ In your calendar" badge. */
+                  /* Calendar events for the auto-created types (appointment /
+                     meeting / call / test / prescription / follow_up) are
+                     created during confirmSpeakers, so there's no separate
+                     add-to-calendar prop here — re-firing through Naavi would
+                     produce duplicates. The card opens the real event itself
+                     via action.calendar_html_link (2026-08-15). */
                   onEmail={(a) => {
                     // Auto-send the draft request. Use suggested_by (the speaker
                     // who proposed the action — usually the doctor / professional
@@ -2557,27 +2556,11 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {/* Conversation transcript — speaker-labeled utterances */}
-          {convUtterances.length > 0 && (
-            <View style={styles.convTranscript}>
-              <Text style={styles.convActionsHeader}>🎙 Conversation Transcript</Text>
-              {convUtterances.map((u, i) => {
-                // Live preview from the chips Robert is currently typing —
-                // shown before he taps Done so the transcript reflects partial
-                // labeling. After Done, committedNamesRef/confirmedNames take
-                // over.
-                const livePreview = mapChipsToNames(chipNames);
-                const name = committedNamesRef.current[u.speaker] || confirmedNames[u.speaker] || livePreview[u.speaker] || `Speaker ${u.speaker}`;
-                const isFirst = speakers[0] === u.speaker;
-                return (
-                  <View key={i} style={[styles.utteranceRow, isFirst ? styles.utteranceLeft : styles.utteranceRight]}>
-                    <Text style={styles.utteranceSpeaker}>{name}</Text>
-                    <Text style={styles.utteranceText}>{u.text}</Text>
-                  </View>
-                );
-              })}
-            </View>
-          )}
+          {/* 2026-08-15 — in-app "Conversation Transcript" display removed.
+              Speaker labels can be wrong (voice identification limitation —
+              see docContent's disclaimer). The transcript still gets saved
+              to Drive WITH that disclaimer attached; we just don't surface
+              the raw speaker-labeled view inside the app itself. */}
 
           {/* Voice error message */}
           {voiceError ? (
@@ -4237,38 +4220,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.textPrimary,
     marginTop: 2,
-  },
-  convTranscript: {
-    marginBottom: 12,
-  },
-  utteranceRow: {
-    marginBottom: 8,
-    maxWidth: '85%',
-    padding: 10,
-    borderRadius: 12,
-  },
-  utteranceLeft: {
-    alignSelf: 'flex-start',
-    backgroundColor: Colors.bgElevated,
-    borderBottomLeftRadius: 4,
-  },
-  utteranceRight: {
-    alignSelf: 'flex-end',
-    backgroundColor: Colors.bgCard,
-    borderBottomRightRadius: 4,
-  },
-  utteranceSpeaker: {
-    fontSize: Typography.caption,
-    fontWeight: '700',
-    color: Colors.moderate,
-    marginBottom: 3,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  utteranceText: {
-    fontSize: Typography.body,
-    color: Colors.textPrimary,
-    lineHeight: Typography.lineHeightBody,
   },
   convRecordingBanner: {
     flexDirection: 'row',

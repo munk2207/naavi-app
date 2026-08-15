@@ -7,15 +7,25 @@
  * Action items of types appointment / meeting / call / test / prescription /
  * follow_up are AUTO-CREATED as Google Calendar events the moment the user
  * confirms speakers (see useConversationRecorder.confirmSpeakers). The card
- * shows a "✓ In your calendar" badge for those types — tapping it would
- * create duplicates, so there is no add-to-calendar button anymore.
+ * shows a "✓ In your calendar" badge for those types — tapping it opens the
+ * real event in Google Calendar (action.calendar_html_link, set by
+ * confirmSpeakers after creation succeeds). There is no separate "add to
+ * calendar" button — that would create duplicates.
  *
- * The "Draft Email" button is kept — drafting a follow-up email is a
- * deliberate user action, not something we auto-do.
+ * 2026-08-15 fix — the badge used to be purely informational (no onPress at
+ * all, and no field existed to even store the created event's link). Now
+ * tappable whenever calendar_html_link is present; falls back to a plain,
+ * non-tappable badge if creation failed and no link exists.
+ *
+ * The "Draft Email" button only shows when action.email_draft is populated
+ * (2026-08-15 fix — previously shown unconditionally on every card, even
+ * when the transcript never mentioned email at all). extract-actions only
+ * fills email_draft when the transcript explicitly mentions sending one,
+ * so this ties the button's visibility to actual relevance.
  */
 
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
 import { Colors } from '@/constants/Colors';
 import { Typography } from '@/constants/Typography';
 import type { ConversationAction } from '@/hooks/useConversationRecorder';
@@ -35,9 +45,6 @@ const TYPE_CONFIG: Record<string, { icon: string; color: string }> = {
 
 interface Props {
   action: ConversationAction;
-  /** Reserved for future "open this event in Google Calendar" wiring.
-   *  Not currently called — the badge is informational only. */
-  onCalendar?: (action: ConversationAction) => void;
   onEmail?: (action: ConversationAction) => void;
 }
 
@@ -70,11 +77,21 @@ export function ConversationActionCard({ action, onEmail }: Props) {
 
       <View style={styles.actions}>
         {wasAutoAdded && (
-          <View style={styles.calendarBadge}>
-            <Text style={styles.calendarBadgeText}>✓ In your calendar</Text>
-          </View>
+          action.calendar_html_link ? (
+            <TouchableOpacity
+              style={styles.calendarBadge}
+              onPress={() => Linking.openURL(action.calendar_html_link!)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.calendarBadgeText}>✓ In your calendar</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.calendarBadge}>
+              <Text style={styles.calendarBadgeText}>✓ In your calendar</Text>
+            </View>
+          )
         )}
-        {onEmail && (
+        {onEmail && action.email_draft && (
           <TouchableOpacity
             style={styles.btnOutline}
             onPress={() => onEmail(action)}
