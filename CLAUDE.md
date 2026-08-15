@@ -2,7 +2,7 @@
 
 ## ⭐⭐⭐⭐⭐ ENGINEERING PROCESS
 
-All development work must comply with `docs/AI_DEVELOPMENT_GOVERNANCE.md` (Release Gate Workflow v2.1).
+All development work must comply with `docs/AI_DEVELOPMENT_GOVERNANCE.md` (Release Gate Workflow v4.0). Keep this version number in sync with the governance document's own version line whenever it changes.
 
 ---
 
@@ -24,7 +24,7 @@ All development work must comply with `docs/AI_DEVELOPMENT_GOVERNANCE.md` (Relea
 6. Production deploy = standard commands with `--project-ref hhgyppbxgmjrwdpdubcx` and `eas build --profile production`.
 7. **NEVER run `eas build --profile production` or deploy to `hhgyppbxgmjrwdpdubcx` without clear explicit approval from Wael to deploy to production.**
 
-**Why this rule exists:** 2026-06-20 — a small cosmetic change in a stable product broke major functionality. Full environment isolation ensures production is never touched until staging proves the change is safe. Cost of a staging build is nothing; cost of a broken production build is user trust.
+Memory: `feedback_staging_first_discipline.md` (2026-06-20 origin incident).
 
 ---
 
@@ -32,7 +32,7 @@ All development work must comply with `docs/AI_DEVELOPMENT_GOVERNANCE.md` (Relea
 
 When Wael says any of these, drop your current framing and execute the lever's intent. These are corrective signals — he's caught you anchoring on a stale framing, reaching for the easy story, or producing plausible-fluent output instead of investigated output. Do NOT argue. Do NOT defend the prior framing. Execute.
 
-1. **"Investigate before recommending."** Stop the recommendation in flight. Launch an investigator (sub-agent or focused code/web search) and find the technical root cause first. The 2026-05-15 version that worked: *"Go investigate why the APK is failing, irrespective of Transistorsoft."* This single phrase saved $399.
+1. **"Investigate before recommending."** Stop the recommendation in flight. Launch an investigator (sub-agent or focused code/web search) and find the technical root cause first.
 
 2. **"Paste the evidence, not your paraphrase."** Replace every paraphrased claim with the actual source — `file:line`, the literal error message, the doc quote, the log line. If you can't find a source, say so explicitly instead of producing a confident-sounding summary.
 
@@ -46,9 +46,9 @@ When Wael says any of these, drop your current framing and execute the lever's i
 
 **Pattern Wael uses BEFORE any spend or significant time commit:** *"What's the technical root cause we're working around?"* If you can't answer with file paths, line numbers, or specific error messages, you haven't done the investigation — and the spend should not happen yet.
 
-## ⭐⭐⭐ BUILD/DEPLOY DIAGNOSIS RULES — COST DISCIPLINE (Wael 2026-06-11)
+Memory: `feedback_investigate_before_paying.md` (2026-05-15 origin incident, $399 saved).
 
-**Context that earned these rules:** 2026-06-11 — 8 consecutive EAS build failures from one misdiagnosed root cause. Each failed build consumed ~20 min + tokens investigating the wrong hypothesis. Total cost: ~4× what a correct first diagnosis would have cost. Wael pays for every LLM mistake directly.
+## ⭐⭐⭐ BUILD/DEPLOY DIAGNOSIS RULES — COST DISCIPLINE (Wael 2026-06-11)
 
 **Rule A — Mandatory pre-diagnosis checklist before ANY build fix.**
 Before touching any build error, I MUST be able to answer all three:
@@ -64,13 +64,13 @@ If two consecutive fix attempts on the same problem both fail, I MUST stop and e
 - What evidence is still missing
 - What I would need to see to be confident in the next hypothesis
 
-I do NOT attempt a third hypothesis until Wael acknowledges the reframe. "Let me try one more thing" after two failures is the pattern that burned 8 builds. The cap is enforced regardless of how plausible the next hypothesis seems.
+I do NOT attempt a third hypothesis until Wael acknowledges the reframe. The cap is enforced regardless of how plausible the next hypothesis seems.
 
-**Why these rules exist:** Every failed build = ~20 min + real money. An incorrect confident hypothesis costs more than admitting uncertainty and investigating further. Saying "I don't know yet, here's what I need to find out" is always cheaper than a wrong fix.
+Memory: `feedback_build_diagnosis_cost_discipline.md` (2026-06-11 origin incident, 8 failed builds).
 
 ## ⭐⭐⭐⭐ NEVER PUT UNVERIFIED CLAIMS IN ANY OUTBOUND MESSAGE TO A REAL USER (Wael 2026-05-20)
 
-**Context that earned this rule:** 2026-05-20 — I drafted an SMS to Hussein saying *"your Google account got disconnected from Naavi"* based on ONE error message from a single API call plus a 3-day-old log note. I had **zero evidence Hussein took any disconnection action**. He hadn't. I conflated my inference into a confident factual claim about HIS behavior and was about to send it to him. Wael caught it. If he hadn't, Hussein would have read a false accusation about himself signed *"— Wael"*, and trust in Naavi / Wael would have eroded for no good reason. **The damage is reputational, not technical.**
+Memory: `feedback_no_unverified_claims_outbound.md` (2026-05-20 origin incident — a drafted SMS accused Hussein of an action with zero evidence he took it; the damage would have been reputational, not technical).
 
 **The rule:** Every assertion in any outbound message — SMS, email, push notification, voice call body, social post, support reply — must trace to direct, current evidence. If you can't trace it, you can't write it. Default to LESS specificity over MORE when stakes touch a real user's perception of Naavi / Wael / the team.
 
@@ -123,7 +123,7 @@ This rule overrides the environment's automatic worktree assignment. Wael edits 
 - If it's a worktree path under `.claude/worktrees/...`: STOP. Do not edit files there. Use absolute paths to the main repo for every Read / Edit / Write call. Use `git -C "C:\Users\waela\OneDrive\Desktop\Naavi"` for git operations. Commit directly on `main` (no feature branch unless the change is large enough to warrant a PR for review).
 - If it's the main repo path: proceed normally.
 
-**Why this rule exists:** 2026-05-10 session — agent worked the entire session in `.claude/worktrees/busy-wescoff-2718ef`, committed everything to a feature branch, merged via PR. When Wael tried to view a doc edit, the file at the path he expected was unchanged; the rewrite was in the worktree path he didn't know existed. Cleanup required a manual file copy + rebase + push to align local and remote main. Pure waste.
+Memory: `feedback_work_in_main_repo_not_worktree.md` (2026-05-10 origin incident).
 
 **Exception:** if Wael explicitly says "use this worktree" or "branch off main for this work" — follow that. Default is main.
 
@@ -342,6 +342,8 @@ Rules that are already covered elsewhere are NOT duplicated here — see CONFIGU
 
 1. **NO ACTION WITHOUT EXPLICIT APPROVAL.** Do not edit files, run commands, commit, push, build, or take any action until the user says "yes" or "go ahead." Even if the user provides a detailed plan, that is context — NOT permission to execute.
 
+**1a. THIS RULE DOES NOT COVER READ-ONLY ACTIONS (Wael 2026-08-15).** Reading a file, listing a directory, grepping/searching the codebase, checking git status/log, querying a database or API for information, inspecting logs — none of this changes any state, so none of it needs a confirmation step. Investigate as deeply and freely as the task requires without pausing to ask "should I check X?" or "can I read Y?" first. Rule 1 exists for actions that change something (edits, commits, pushes, builds, deploys, sends) — never generalize it onto adjacent read-only steps just because they're part of the same investigation. Origin: a `.claude/settings.json` audit (2026-08-15) found the technical permission system already fully open (`bypassPermissions` + a blanket `Bash(*)` allow) — the friction Wael was hitting wasn't the tool-permission dialogs, it was Claude asking permission for things no rule actually required.
+
 2. **ONE STEP AT A TIME.** Give one command, one change, one instruction. Wait for confirmation before the next.
 
 3. **KEEP IT SHORT.** No technical walkthroughs. No multi-paragraph explanations. One-line description of what something does. The user is non-technical and trusts you to know the details.
@@ -397,7 +399,7 @@ Rules that are already covered elsewhere are NOT duplicated here — see CONFIGU
 
 ### ⭐⭐⭐ CROSS-CUTTING CHANGE PARITY CHECK (Wael 2026-07-20)
 
-**Context that earned this rule:** 2026-07-20 — B10g/B10h/B10j's Edge Function fixes (`naavi-chat`, `evaluate-rules`, `report-location-event`) were deployed to staging and verified there, but a production AAB (build 311) was then built and submitted based on a "green" `npm run test:auto` run — without noticing the auto-tester's `SUPABASE_URL` defaults to **production**, not staging. The auto-tester's pass was testing production's stale, unfixed backend code and happened to pass by non-deterministic luck (documented elsewhere in this file as a known LLM-routing behavior). A live spot-check afterward reproduced the exact bug B10j fixed, live, in production, on a real account — the just-shipped mobile app was assuming a server-side fix that was never actually promoted to production.
+Memory: `feedback_verify_test_env_before_trusting_gate.md` (2026-07-20 origin incident — a production AAB was built on a "green" test run that was actually testing production's stale, unfixed backend, because `test:auto`'s `SUPABASE_URL` defaults to production, not staging).
 
 **The rule:** before building a production AAB (or promoting any client) for a work item that touches **both** Shared Core (Edge Functions) **and** mobile/voice code, explicitly confirm the Shared Core half is deployed to the **same target environment** as the client build — checked directly (deploy timestamps, or a fresh live test call against that specific environment), not inferred from a passing test run whose target environment wasn't verified.
 
@@ -431,7 +433,7 @@ Every production AAB must pass all applicable gates in this exact order. Each co
 
 **Full pre-build gate sequence: (1) auto-tester green → (2) voice regression green → (3) Firebase Test Lab PASSED → (4) production AAB.**
 
-**Test account for all gates:** `mynaavidemo@gmail.com` — no other account.
+**Test account for all gates:** `mynaavi2207@gmail.com` — no other account. (Corrected 2026-07-22 — `mynaavidemo@gmail.com` is a separate demo-only account, not the test account.)
 
 ---
 
@@ -460,7 +462,7 @@ Every production AAB must pass all applicable gates in this exact order. Each co
 
 **⭐ ROBO SCRIPT RULE — WAITS ONLY, NO VIEW_CLICKED (2026-06-24):** `firebase/robo-script-onboarding.json` must contain ONLY `WAIT` actions. Never add `VIEW_CLICKED` or any element-tap action. Reason: scripted taps break every time the app changes (V290 removed the sign-in button; Samsung One UI uses different accessibility labels than Pixel). The script's only job is to pause long enough for auto sign-in to complete — Robo explores freely after that. If you see a `VIEW_CLICKED` in this file, remove it.
 
-**The full pre-build gate sequence is documented in the "FOUR TEST GATES" section above.** Firebase is gate 4 of 4 — do not skip any gate before it.
+**The full pre-build gate sequence is documented in the "THREE TEST GATES" section above.** Firebase is gate 3 of 3 — do not skip any gate before it.
 
 15a. **⭐ EVERY NEW FUNCTIONALITY OR MODIFICATION MUST HAVE AN AUTO-TESTER TEST BEFORE MOVING ON** (Wael 2026-05-24). Sister rule to Rule 15. When Claude ships any new feature, fix, or modification to user-visible behavior or server-side code, Claude MUST add a corresponding regression test to `tests/catalogue/*.ts` and register it in `tests/runner.ts` so it runs as part of `npm run test:auto`. The test must lock in the new behavior (positive control) and/or guard against the prior buggy behavior (negative control), and must pass green before the work is considered done.
 
@@ -547,10 +549,6 @@ All open, closed, and deferred items live there. Do not maintain a duplicate lis
 - Mobile flow: `lib/supabase.ts` line 45
 - If you change one, change both. Build 88-89 failed because mobile was missing scopes.
 
-### IMPORTANT SECURITY NOTE
-
-The old Anthropic API key leaked in session 8 was deleted in session 9. A new key was created and set as Railway env var. No action needed.
-
 ### HOW BUILDS WORK (correct workflow as of build 91)
 
 **NEVER use `cp -f` to sync files between repos.** This caused builds 83-90 to silently diverge from GitHub main because sync-by-copy skipped git entirely. Use git merge instead.
@@ -616,7 +614,7 @@ Naavi uses TWO distinct voices, each with a clear role. This is NOT inconsistenc
 
 **Why two voices:** Wael 2026-05-17 — Aura-1 Hera is great for short conversational replies but rushed on longer narration; an Aura-2 storytelling voice is right for longer narration where pacing matters. Forcing one voice would compromise one role. Two voices, two clear roles, no overlap = no confusion.
 
-**Cora retired 2026-05-19** — the original brand voice (Aura-2 Cora) was rated "too slow, too boring, could not continue listening" by Wael's friend-group A/B test on the homepage hero. Andromeda won the verdict and is now the brand voice across all website narration. The Cora→Andromeda swap covered all 16 site MP3s (home + 9 help-section + 6 blog). Cora stays in the Edge Function allowlist for backwards compatibility but is no longer used. Reference memory: `project_naavi_brand_voice_andromeda.md`.
+**Cora retired 2026-05-19** — replaced by Andromeda as brand voice after a friend-group A/B test. Cora stays in the Edge Function allowlist for backwards compatibility but is no longer used. Memory: `project_naavi_brand_voice_andromeda.md`.
 
 **Rule for any new TTS code:** if it's content the END USER hears INSIDE the app or on a phone call from their own number, use Hera. If it's content explaining what Naavi does to someone evaluating / learning the product, use Andromeda.
 
