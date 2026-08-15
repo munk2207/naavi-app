@@ -129,6 +129,14 @@ Use these types:
 Return only the JSON array. If no action items found, return [].`;
 
     const response = await client.messages.create({
+      // 2026-08-15 — TEMPORARY test swap, staging only, not a decision yet.
+      // Wael: "email is very important" — this session confirmed Haiku
+      // misses email actions on casual phrasing ("just send an email to my
+      // office") 4/5 live runs, on top of the earlier literal-address miss
+      // rate. Testing whether Sonnet actually fixes this specific phrasing
+      // before deciding. Revert to claude-haiku-4-5-20251001 (history below)
+      // if not.
+      //
       // Reverted from Haiku → Sonnet 2026-04-27. Haiku was returning wrong
       // prescription duration_days (e.g. "for 10 days" → 2) and over-emitting
       // email_draft. Per CLAUDE.md "stability over cost" rule, accuracy on
@@ -137,7 +145,7 @@ Return only the JSON array. If no action items found, return [].`;
       // recording. With 2 users this was ~$30/month; at 100 users it
       // would be $1,500/month on Sonnet. Haiku is sufficient for the
       // structured extraction task; revisit if accuracy regresses.
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       system: [
         { type: 'text', text: extractionRules, cache_control: { type: 'ephemeral' } },

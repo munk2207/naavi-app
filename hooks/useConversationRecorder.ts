@@ -430,35 +430,25 @@ export function useConversationRecorder(): UseConversationRecorderResult {
         console.warn('[ConvRecorder] Knowledge ingest failed:', e)
       );
 
-      // Step 5 — spoken confirmation (2026-08-15). This flow was silent
-      // end-to-end — visual cards only, no voice at all, in an otherwise
-      // voice-first app. Names what was actually found, not a generic
-      // "Done" (readback principle — the user can verify the right things
-      // happened without reading every card). Includes each item's timing
-      // (2026-08-15 follow-up — Wael: important for the demo). Fire-and-
-      // forget: the UI already moves to "done" via setConvState below; the
-      // summary plays in the background rather than blocking that
-      // transition. No em-dashes in this string — Deepgram TTS mispronounces
-      // them as "aura" (see project_naavi_help_narration_no_em_dash).
-      // 2026-08-15 (Visits Flow Redesign) — dropped the "Added to your
-      // calendar" clause: nothing is added yet at this point anymore: the
-      // caller sends these actions through the normal confirm-then-act
-      // pipeline right after this, so claiming completion here would be
-      // false (see docs/VISITS_PHASE2_CHANGE_PLAN_2026-08-15.md).
-      const spokenSummary = extracted.length === 0
-        ? "I didn't find any action items in that conversation."
-        : (() => {
-            const items = extracted.map(a => `${a.title}, ${a.timing}`);
-            const list = items.length === 1
-              ? items[0]
-              : items.length === 2
-                ? `${items[0]}, and ${items[1]}`
-                : `${items.slice(0, -1).join('; ')}; and ${items[items.length - 1]}`;
-            return `I found ${items.length} action item${items.length === 1 ? '' : 's'}: ${list}.`;
-          })();
-      speakCue(spokenSummary).catch(e =>
-        console.warn('[ConvRecorder] Spoken summary failed:', e)
-      );
+      // Step 5 — spoken confirmation, zero-actions case only (2026-08-15,
+      // Visits Flow Redesign). This used to speak a summary in every case
+      // ("I found N action items: ..."), but the caller (app/index.tsx) now
+      // sends non-empty results through send(), which triggers naavi-chat's
+      // own spoken reply ("Here are your N actions... say yes") — that
+      // fire-and-forget local speakCue() call and naavi-chat's reply are two
+      // independent audio systems with no coordination between them, so
+      // both played at once for ~2s on real-device testing. When actions
+      // ARE found, the caller's send() is the only spoken feedback now — no
+      // separate one here. When NONE are found, sendVisitActionsToChat
+      // never calls send() at all (nothing to send), so this is the only
+      // feedback the user gets — kept for that case only. No em-dashes in
+      // this string — Deepgram TTS mispronounces them as "aura" (see
+      // project_naavi_help_narration_no_em_dash).
+      if (extracted.length === 0) {
+        speakCue("I didn't find any action items in that conversation.").catch(e =>
+          console.warn('[ConvRecorder] Spoken summary failed:', e)
+        );
+      }
 
       setConvState('done');
       console.log('[ConvRecorder] Extracted', extracted.length, 'actions, speakers:', currentNames);
