@@ -1027,4 +1027,60 @@ export const promptRegressionTests: TestCase[] = [
     },
   },
   // ──────────────────────────────────────────────────────────────────────
+  // COMPARISON QUESTIONS — "what's the difference between you and ChatGPT"
+  // (Wael 2026-08-14, YouTube demo). Went through 4 rounds live: v1 used
+  // "ChatGPT can't do X" (too absolute, easy to disprove) → v2 dropped
+  // negative claims but still described the competitor abstractly → v3
+  // allowed the name in exactly 2 spots (open+close) but Claude still bled
+  // contrastive clauses into the numbered points ("ChatGPT has no access to
+  // your life", "ChatGPT answers one question at a time") → v4 (current)
+  // permits the competitor's name EXACTLY ONCE, in the final sentence only,
+  // and frames the body as pure Naavi specialization, not a rebuttal. This
+  // test locks in v4 so a future prompt edit can't dilute it back to v1-v3.
+  // ──────────────────────────────────────────────────────────────────────
+  {
+    id: 'prompt-regression.comparison-chatgpt-single-mention',
+    category: 'prompt-regression',
+    description: '2026-08-14 — "what\'s the difference between you and ChatGPT" must name the competitor exactly once (closing sentence only), never in the numbered points, and never use a "can\'t" / capability-negation claim.',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const { status, data } = await adapters.naaviChat(ctx, {
+        messages: [{ role: 'user', content: "what's the difference between you and ChatGPT" }],
+        max_tokens: 1024,
+      });
+      expect2xx(status, 'naavi-chat');
+      const rawText = data?.rawText ?? '';
+      ctx.log(`rawText: ${rawText.slice(0, 600)}…`);
+
+      const speech = extractSpeech(rawText);
+      ctx.log(`speech: ${JSON.stringify(speech)}`);
+      expectTruthy(speech.length > 0, 'speech field must be non-empty');
+
+      // Competitor name must appear EXACTLY once — anywhere in the middle
+      // means it leaked into a numbered point (the exact bug fixed live).
+      const mentionCount = (speech.match(/chatgpt/gi) ?? []).length;
+      expectTruthy(
+        mentionCount === 1,
+        `expected "ChatGPT" mentioned exactly once (closing sentence only), got ${mentionCount}. speech: ${JSON.stringify(speech)}`,
+      );
+
+      // The single mention must land in the closing pair ("[Competitor]
+      // answers questions about the world. I answer questions about your
+      // world."), not mid-answer. Check the trailing ~120 chars rather than
+      // splitting into single sentences — the closer is itself two sentences.
+      const tail = speech.trim().slice(-120);
+      expectTruthy(
+        /chatgpt/i.test(tail),
+        `"ChatGPT" mention must land in the closing pair at the very end, not earlier. Tail: ${JSON.stringify(tail)}. Full speech: ${JSON.stringify(speech)}`,
+      );
+
+      // Known-bad capability-negation patterns from earlier live rounds — must never resurface.
+      expectSpeechNotMatch(
+        rawText,
+        /chatgpt\s+(can'?t|cannot|has no access|answers one question at a time|can only describe)/i,
+        'comparison-chatgpt-capability-negation',
+      );
+    },
+  },
+  // ──────────────────────────────────────────────────────────────────────
 ];

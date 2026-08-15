@@ -97,7 +97,7 @@ export const session2026_07_05_f12ResolveRecipientTests: TestCase[] = [
     async run() {
       const src = readFileSync(LOOKUP_CONTACT_PATH, 'utf8');
       expectTruthy(
-        src.includes('const { name, contact_id: bodyContactId, user_id: bodyUserId } = body;'),
+        src.includes('const { name: rawName, contact_id: bodyContactId, user_id: bodyUserId } = body;'),
         'lookup-contact must accept an optional contact_id in the request body',
       );
       expectTruthy(
