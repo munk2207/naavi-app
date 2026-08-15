@@ -806,6 +806,11 @@ export default function HomeScreen() {
   const { t } = useTranslation();
   const router = useRouter();
   const scrollRef = useRef<ScrollView>(null);
+  // 2026-08-15 — diagnostic only, for the Visits auto-scroll investigation
+  // below. Tracks the last known rendered content height so the scroll
+  // effect can log it — if it's 0 or unchanged at scroll time, the content
+  // hadn't rendered yet, which is a different bug than the ref being null.
+  const chatContentHeightRef = useRef(0);
   // B9q fix (2026-07-13) — the TTS chunk-sync scroll effect (below) used to
   // compute its target position as a fraction of the ENTIRE conversation's
   // rendered height (previously tracked via a state variable that has since
@@ -1238,7 +1243,27 @@ export default function HomeScreen() {
   // Naavi reply (see send()/handleVoicePress() above).
   useEffect(() => {
     if (convState === 'done' && convActions.length > 0) {
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+      // 2026-08-15 — Rule B (2-hypothesis cap): builds 321 and 322 both
+      // tried to fix this blind and both failed ("screen didn't move at
+      // all" on 322, despite the voice confirmed playing). Instrumenting
+      // instead of guessing a third time — logs whether this effect even
+      // fires on-device, whether scrollRef is attached at that moment, and
+      // the last known content height, so the next real device test tells
+      // us which of those three is the actual failure point.
+      const diagSession = newDiagSession();
+      remoteLog(diagSession, 'visits-scroll-effect-fired', {
+        convState,
+        convActionsLength: convActions.length,
+        scrollRefNonNull: !!scrollRef.current,
+        contentHeight: chatContentHeightRef.current,
+      });
+      setTimeout(() => {
+        remoteLog(diagSession, 'visits-scroll-attempt', {
+          scrollRefNonNull: !!scrollRef.current,
+          contentHeight: chatContentHeightRef.current,
+        });
+        scrollRef.current?.scrollToEnd({ animated: true });
+      }, 100);
     }
   }, [convState]);
 
@@ -1984,6 +2009,7 @@ export default function HomeScreen() {
           enableOnAndroid={true}
           keyboardShouldPersistTaps="handled"
           extraScrollHeight={20}
+          onContentSizeChange={(_w, h) => { chatContentHeightRef.current = h; }}
         >
         <Pressable
           delayLongPress={300}

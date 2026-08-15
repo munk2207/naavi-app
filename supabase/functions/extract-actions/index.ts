@@ -149,7 +149,14 @@ Return only the JSON array. If no action items found, return [].`;
     });
 
     const raw = response.content[0].type === 'text' ? response.content[0].text : '';
-    console.log('[extract-actions] Claude raw response:', raw.substring(0, 200));
+    // 2026-08-15 — was raw.substring(0, 200), which hid the rest of the
+    // response on every call. That was fine for parse failures (the catch
+    // block below already logs the full `cleaned` string), but it made it
+    // impossible to audit a call that parsed successfully yet came back
+    // semantically incomplete (e.g. email_draft silently omitted) — the
+    // exact failure mode found live-testing build 322. Log the full raw
+    // response so that class of bug is diagnosable from logs alone.
+    console.log('[extract-actions] Claude raw response:', raw);
 
     // Strip any accidental markdown
     const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
@@ -163,7 +170,10 @@ Return only the JSON array. If no action items found, return [].`;
       actions = [];
     }
 
-    console.log('[extract-actions] Extracted', actions.length, 'actions');
+    console.log(
+      '[extract-actions] Extracted', actions.length, 'actions:',
+      actions.map(a => ({ type: a.type, has_email_draft: !!a.email_draft, has_recipient_email: !!a.recipient_email })),
+    );
 
     return new Response(
       JSON.stringify({ actions }),

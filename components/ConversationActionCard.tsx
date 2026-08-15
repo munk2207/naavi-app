@@ -17,11 +17,14 @@
  * tappable whenever calendar_html_link is present; falls back to a plain,
  * non-tappable badge if creation failed and no link exists.
  *
- * The "Draft Email" button only shows when action.email_draft is populated
- * (2026-08-15 fix — previously shown unconditionally on every card, even
- * when the transcript never mentioned email at all). extract-actions only
- * fills email_draft when the transcript explicitly mentions sending one,
- * so this ties the button's visibility to actual relevance.
+ * The "Draft Email" button shows when action.email_draft OR
+ * action.recipient_email is populated (2026-08-15, widened same day as the
+ * original email_draft-only gate — live testing showed extract-actions
+ * reliably captures a literal spoken email address but only fills in
+ * email_draft text intermittently; gating on email_draft alone hid the
+ * button even when Naavi had everything needed to draft something. The
+ * onEmail handler in app/index.tsx already falls back to action.description
+ * when email_draft is missing, so this is safe.
  */
 
 import React from 'react';
@@ -90,7 +93,7 @@ export function ConversationActionCard({ action, onEmail }: Props) {
             </View>
           )
         )}
-        {onEmail && action.email_draft && (
+        {onEmail && (action.email_draft || action.recipient_email) && (
           <TouchableOpacity
             style={styles.btnOutline}
             onPress={() => onEmail(action)}

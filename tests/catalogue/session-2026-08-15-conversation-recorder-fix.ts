@@ -127,4 +127,37 @@ export const session2026_08_15_conversationRecorderFixTests: TestCase[] = [
       );
     },
   },
+  {
+    id: 'conversation-recorder.extract-actions-recipient-email-reliable',
+    category: 'conversation-recorder',
+    description: '2026-08-15 — Draft Email button (ConversationActionCard.tsx) now gates on email_draft OR recipient_email because live testing showed email_draft is filled in inconsistently by Haiku while recipient_email (a literal spoken address) is reliably captured. This locks in that reliability: a transcript with a literal email address must always produce an action with that recipient_email, even though other fields (type classification, email_draft presence) are known to vary between calls.',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      const utterances = [
+        {
+          speaker: 'A',
+          text: "Robert, your test results look good. I want to start you on Amoxicillin — one capsule, twice a day, for 10 days. I'd also like you to get a blood test next Friday, and let's schedule a follow-up in two weeks at 10 AM. If you have any questions, email my office at whwh2207@gmail.com.",
+        },
+        { speaker: 'B', text: 'Perfect, thank you doctor..' },
+      ];
+      const { data } = await adapters.call(ctx, 'extract-actions', {
+        utterances,
+        speaker_names: { A: 'Dr. Ahmed', B: 'Robert' },
+      });
+      ctx.log(`actions: ${JSON.stringify(data?.actions)}`);
+      const actions = data?.actions ?? [];
+      const withRecipient = actions.find((a: any) => a.recipient_email === 'whwh2207@gmail.com');
+      expectTruthy(
+        withRecipient,
+        `expected an action with recipient_email "whwh2207@gmail.com" — a literal address stated in the transcript. Got: ${JSON.stringify(actions)}`,
+      );
+    },
+  },
 ];
+
+// Coverage gap acknowledged: the actual UI fix this session (ConversationActionCard.tsx
+// widening the Draft Email button's gate to `email_draft || recipient_email`) is client-side
+// React Native rendering logic — the auto-tester has no mobile rendering harness to reach it.
+// The test above locks in the server-side precondition the fix depends on (recipient_email
+// reliability); the button-gate change itself can only be verified by tapping the button in
+// the app on a build that produced an action with recipient_email but no email_draft.
