@@ -36,6 +36,7 @@ import { waelTests } from './catalogue/wael-cases';
 import { multiUserTests } from './catalogue/multiuser';
 import { listsTests } from './catalogue/lists';
 import { promptRegressionTests } from './catalogue/prompt-regression';
+import { session2026_08_15_conversationRecorderFixTests } from './catalogue/session-2026-08-15-conversation-recorder-fix';
 import { dataIntegrityTests } from './catalogue/data-integrity';
 import { searchNormalizationTests } from './catalogue/search-normalization';
 import { gmailFreshnessTests } from './catalogue/gmail-freshness';
@@ -184,6 +185,7 @@ const ALL_TESTS: TestCase[] = [
   ...multiUserTests,
   ...listsTests,
   ...promptRegressionTests,
+  ...session2026_08_15_conversationRecorderFixTests,
   ...dataIntegrityTests,
   ...searchNormalizationTests,
   ...gmailFreshnessTests,
