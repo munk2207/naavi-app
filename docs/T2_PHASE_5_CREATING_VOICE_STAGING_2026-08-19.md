@@ -128,6 +128,34 @@ $ npx supabase secrets list --project-ref hhgyppbxgmjrwdpdubcx | grep -E "OUTBOU
 
 Production Edge Functions were not deployed. The production Railway service and the `+12495235394` webhook were not modified — its webhook was confirmed still pointing at `naavi-voice-server-production.up.railway.app` after all work.
 
+### Gate 2 (voice regression) against STAGING — 2026-08-19 09:59 EST
+
+**The first time voice tests have ever run against a staging environment.** Enabled by T2-F1 (§9), which landed after the original draft of this document.
+
+```
+════════════════════════════════════════════════════════
+  Testing against: STAGING  (xugvnfudofuskxoknhve)
+  GATE 2 — VOICE ONLY
+  Voice server:    STAGING  (naavi-voice-staging-production.up.railway.app)
+════════════════════════════════════════════════════════
+GATE 2 — VOICE ONLY → 46/554 case(s) selected
+
+Total: 46   Passed: 42 ✓   Failed: 0 ✗   Errored: 0 ⨯   Timed out: 0 ⧗   Skipped: 4 ○
+Duration: 36.3s     exit 0
+```
+
+Both halves of the banner name STAGING — the split-brain the T2-F1 guard exists to prevent did not occur.
+
+**Real HTTP calls reached the staging voice server** (not source-inspection tests): `voice.endpoint-reachable` PASS 3168ms · `voice.calendar-today-query` PASS 3417ms · `voice.contact-lookup-known-name` PASS 1290ms · `voice.email-alert-intent` PASS 8055ms, plus 7 `voice-pin` cases.
+
+**The 4 skips are correct behaviour, not failures** — `s060606.*` contact-lookup tests require Wael's *production* Google contacts and self-skip with an explicit reason naming the environment they found themselves in.
+
+**Two incidental confirmations from the same run:**
+- `[fixtures] snapshot test-user phones: phone=null numbers=null` — Track C's clearing of `ae1f3438` held; the staging auto-tester account no longer claims `+13433332567`.
+- `[fixtures] teardown(calendar_events) scoped to suite-created rows: or=(title.like.Auto-tester*,title.like.AutoTest*,title.like.multiuser-safety-test*)` — B10y's scoped teardown executed correctly against staging.
+
+**This closes Phase 2 §8.3 Addition 2:** Track C did **not** break the auto-tester via the uniqueness trigger. The concern was raised as a self-reported finding and is now disproven by a live run rather than by reasoning.
+
 ### First live call — 2026-08-19
 
 Wael called `+13435041572`; Naavi answered. Two defects surfaced, recorded as **B11c** (§6). **Neither is in T2's scope, and both were found without production being touched — the environment doing the job it was built for.**
@@ -139,7 +167,9 @@ Wael called `+13435041572`; Naavi answered. Two defects surfaced, recorded as **
 1. **Positive-path outbound** — a staging alert firing to an allowlisted destination and actually arriving. Only the *blocked* path is proven; the allowed path is asserted by unit test, not by a live send.
 2. **Full conversational call** — a staging call exercising alerts, lists, memory, calendar against staging data.
 3. **Cron-fired alert** — create a rule on staging, let `evaluate-rules` fire it, confirm the guard is consulted on the cron path (only the direct HTTP invocation is proven).
-4. **`npm run test:auto` (Gate 1) with `SUPABASE_URL` pointed at staging** — required by Phase 2 §8.3 Addition 2, to confirm Track C did not break the auto-tester via the uniqueness trigger. **Not yet run.**
+4. ~~**`npm run test:auto` (Gate 1) with `SUPABASE_URL` pointed at staging** — required by Phase 2 §8.3 Addition 2, to confirm Track C did not break the auto-tester via the uniqueness trigger.~~ **DONE 2026-08-19 — superseded and exceeded by the Gate 2 staging run above (§3).** Gate 2 exercises the same fixtures *and* the live voice server; the phone snapshot came back `null`, proving Track C held and the uniqueness trigger was not tripped. 42 passed, 0 failed.
+
+**Items 1-3 remain outstanding.** All three need a human on the phone; nothing else blocks them.
 
 ### ⚠️ Correction — an earlier version of this list was wrong
 
@@ -236,13 +266,15 @@ The hostname contains "production" because Railway's *environment* is named that
 
 ## 9. Follow-ups opened by this work item
 
-**T2-F1 — make the test harness environment-aware for Voice.** Raised by Wael 2026-08-19 (§4 correction). Today the harness has exactly one voice URL, hardcoded to production in `tests/.env:9`, so the staging voice environment cannot be reached by any automated test. Until this closes, T2 delivers an environment that only a human can exercise.
+**T2-F1 — make the test harness environment-aware for Voice. ✅ CLOSED 2026-08-19, commit `cced68c`.** Raised by Wael (§4 correction): the harness had exactly one voice URL, hardcoded to production in `tests/.env:9`, so the staging voice environment could not be reached by any automated test.
 
-*Likely shape, not yet designed:* a `STAGING_VOICE_SERVER_URL` in `tests/.env` plus selection logic in `tests/runner.ts` that picks the voice URL from the **same** environment choice already driving `SUPABASE_URL` — so the two can never diverge. The staging service runs identical code and already exposes the endpoint the suite calls (`naavi-voice-server/src/index.js:8520`), so no voice-server change is expected.
+*Shipped:* `tests/lib/voice_env.ts::resolveVoiceTarget` picks the voice URL from the **same** environment label already derived from `SUPABASE_URL`, and `runner.ts` overrides `process.env.VOICE_SERVER_URL` with it — so none of the 14 catalogue files consuming that variable needed changing, and no two suites can disagree. `STAGING_VOICE_SERVER_URL` added to `tests/.env`. No voice-server change was needed; the staging service runs identical code and already exposed the endpoint the suite calls (`naavi-voice-server/src/index.js:8520`).
 
-*Must also address:* the split-brain hazard — the runner should **refuse to run** when `SUPABASE_URL` and the voice URL name different environments, rather than silently testing across both. That failure mode is the same class as the 2026-07-20 incident (`feedback_verify_test_env_before_trusting_gate`).
+*Split-brain hazard closed:* Gate 2 now **refuses to run** when the Supabase project and the voice server name different environments — also on a missing `STAGING_VOICE_SERVER_URL` (which must never silently fall back to production) and on an unrecognised host. Gate 1 is unaffected: it runs no voice tests, so a mismatch there is inert and must not block a mobile run. Verified firing live, and by 7 unit tests.
 
-*Governance:* not Protected Core (test harness), but it gates whether T2's environment is usable, so it should close before T2 is called done.
+*Extracted as a pure function deliberately,* rather than left inline: the runner's fixtures perform live DELETEs before any test executes, so "run it and see" is not a safe verification method here. Probing it through shell env vars is also unreliable — the loader only fills *unset* variables (`runner.ts:142`), so an empty test value is silently replaced by `tests/.env`. That defeated exactly such an attempt and caused an unintended live Gate 2 run against staging.
+
+*Proven by outcome:* the Gate 2 staging run in §3 — 42 passed, 0 failed, both banner halves reading STAGING.
 
 **T3 — separate the Demo line from the Voice platform.** See §6 Finding 6 and the holding list. Out of T2's scope, Full Phase 1-8.
 
