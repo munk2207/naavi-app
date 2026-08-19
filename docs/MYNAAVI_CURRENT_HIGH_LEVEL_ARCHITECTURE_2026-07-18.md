@@ -3,7 +3,7 @@
 **Architecture Version:** 2026.07.18.4 (date-and-revision format: 4th revision recorded on this date — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc). This revision is T1a's Phase 4 output: corrects the "Action Rules — execution/firing" row (§2) to reflect an intra-Shared-Core duplication proven by three incidents, cross-references ADR 0003 from the "Reminders" row, and adds two previously-missing rows to §5a's Duplication Inventory. See `docs/T1A_PHASE2_CHANGE_PLAN_2026-07-18.md` and `docs/T1A_PHASE5_EVIDENCE_2026-07-18.md` for the full audit trail.
 **Diagram Version:** 1 (the Data Flow diagram in §6 — increments independently of the document's overall version when the diagram itself changes)
 **Last Verified:** 2026-07-18
-**Verified Against:** direct code inspection of `munk2207/naavi-app` and `munk2207/naavi-voice-server`, both at their `main` branch HEAD as of the date above
+**Verified Against:** direct code inspection of `munk2207/naavi-app` and `munk2207/naavi-voice-server`, both at their `main` branch HEAD as of the date above. **Note (T2, 2026-08-19):** `naavi-voice-server` now also has a `staging` branch, merged level with `main` at `2124150`. Section 0b describes the topology; this line is retained as written because it records what was verified on 2026-07-18.
 **Repositories:** `munk2207/naavi-app`, `munk2207/naavi-voice-server`
 **Architecture Owner:** Wael. Claude proposes architecture changes and updates to this document; ChatGPT reviews them; only Wael approves an architectural ownership change (per Governance §4's Ownership Change Rule) or a new Architecture Version.
 
@@ -24,6 +24,26 @@ Naavi is not one program — it's three, talking to one shared database:
 3. **Supabase** — the shared Postgres database, Edge Functions, and cron jobs both the mobile backend and the voice server call into.
 
 The mobile app and the voice server **do not call each other**. They are two independent clients of the same backend. Whether a capability is "shared" depends entirely on whether both clients call the *same* Edge Function, or whether each has written its own version of the same logic.
+
+### 0b. Deployment Environments (added by T2, 2026-08-19)
+
+Each codebase has a different number of environments. This asymmetry is load-bearing: it decides where a change can be exercised before it reaches a real user, and it was undocumented until T2.
+
+| Codebase | Environments | How they are separated |
+|---|---|---|
+| Mobile app | 2 | Supabase project `xugvnfudofuskxoknhve` (staging) / `hhgyppbxgmjrwdpdubcx` (production); app packages `ca.naavi.app.staging` / `ca.naavi.app` |
+| Voice server | 2 (since 2026-08-19) | Two Railway services in one project: `naavi-voice-staging` deploying from branch `staging`, and `naavi-voice-server` deploying from `main`. Separated by which Twilio number is dialled: `+13435041572` reaches staging, `+12495235394` reaches production. |
+| Supabase | 2 | The two projects above. |
+
+**Before 2026-08-19 the voice server had ONE environment.** Every voice change for real callers was developed and deployed straight against production. T2 built the staging half; see `docs/T2_PHASE_0_CREATING_VOICE_STAGING_2026-08-19.md` onward for the full governed record.
+
+**The two voice environments share the staging Supabase project with mobile-staging.** This was a deliberate, recorded decision (T2 Phase 0, Option 1 over Option 2) rather than an accident: a third Supabase project would have meant a third copy of the schema, the Edge Functions and the cron jobs to keep in sync forever. The consequence is that voice-staging and mobile-staging are isolated by `user_id` scoping, not by separate databases.
+
+**Outbound containment.** Because staging shares a real Twilio account and real Google credentials, an allowlist guard sits in Shared Core (`supabase/functions/_shared/outbound_guard.ts`) on every send path. It is inert unless the `OUTBOUND_ALLOWLIST` secret is present, which it is only on staging — so production is protected by construction rather than by correct configuration. A second export resolves the outbound voice caller ID the same way, so a staging call never presents as production Naavi.
+
+**⚠️ Invariant this environment depends on.** `DEMO_TWILIO_NUMBER` and `STAGING_DEMO_TWILIO_NUMBER` must remain unset on the `naavi-voice-staging` service. The voice server contains one direct-to-Twilio SMS path (the F2b demo recap, `naavi-voice-server/src/index.js:7224`) that the Shared Core guard cannot see; it is unreachable only because those variables are unset. Setting either makes it reachable and requires a voice-server-side guard first. See [[T3]] for the underlying problem — the demo line and the registered-user voice platform being one process.
+
+**Test harness.** Gate 2 (`npm run test:voice`) selects its voice server from the same environment choice that drives `SUPABASE_URL` and refuses to run if the two disagree (`tests/lib/voice_env.ts`). Before T2 it always tested production.
 
 ### 0a. Ownership Model
 
