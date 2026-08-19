@@ -4,7 +4,7 @@
 **Governance version:** v4.0
 **Phase 3 plan:** `docs/S1_PHASE_3_VOICE_PIN_AUTHENTICATION_2026-08-19.md`
 **Environment:** staging only (Supabase `xugvnfudofuskxoknhve`, Railway `naavi-voice-staging-production`, Twilio `+13435041572`)
-**Status:** Evidence complete; the one defect found in testing is fixed and verified (§7). **Awaiting Wael's go-ahead for the Phase 5 → 6 transition.**
+**Status:** Evidence complete. Phase 5 review returned CHANGES REQUIRED on one item — the 4-digit verify path, which the reviewer declined to waive for an authentication migration. Retested against a real legacy hash and closed (§6.1). The defect found during testing is fixed and verified (§7). **Awaiting Wael's go-ahead for the Phase 5 → 6 transition.**
 
 ---
 
@@ -25,7 +25,7 @@ Build **326** (`versionCode` 326) carries the mobile halves (C5, D6).
 | # | Required evidence | Result | Source |
 |---|---|---|---|
 | 1 | A PIN is **never** matched against a non-claimed account — negative control | ✅ | `s1.pin-result-fails-closed-without-claimed-account` — posts to `/voice/pin-result` with no `?claimed=`, asserts refusal AND the absence of a retry path |
-| 2 | An existing 4-digit PIN still verifies; a 4-digit `set` is refused | ✅ set / ⚠️ verify | `s1.pin-set-requires-six-digits` proves the `set` refusal by shape (`pin_must_be_6_digits`). The 4-digit **verify** path is covered by `PIN_VERIFY_RE` but was not exercised against a live 4-digit hash — no such hash remained on staging by the time Track E ran. See §6.1 |
+| 2 | An existing 4-digit PIN still verifies; a 4-digit `set` is refused | ✅ | Both halves exercised against a real legacy hash on staging — see §6.1, rewritten after Phase 5 review required it |
 | 3 | Successful PIN auth **zeroes** the failure count | ✅ | `s1.failure-count-rises-then-clears-on-a-correct-pin` (0→1→2→0), **and** live: Wael's account read 4 at 5:01 PM EST and 0 after his next successful call |
 | 4 | Failures older than **7 days** do not count | ✅ | `s1.failures-older-than-the-window-restart-the-count` — seeds a count of 2 dated 8 days back, asserts the next failure yields 1, not 3 |
 | 5 | A PIN-authenticated caller **cannot** change the PIN | ⚠️ code-verified only | Track B gate at `index.js` (`callVariant === 'pin'` → refusal). Not exercised on a live call. See §6.2 |
@@ -80,7 +80,21 @@ This is recorded here because **both live outside git** and would otherwise be i
 
 ## 6. Coverage gaps, stated rather than implied
 
-**6.1 — 4-digit verify not exercised live.** `PIN_VERIFY_RE` accepts 4 or 6 digits, but no 4-digit hash remained on staging to test against. The migration window is the reason this matters: any user with an old PIN must keep working. Covered by code read only.
+**6.1 — 4-digit verify — GAP CLOSED 2026-08-19.** Originally recorded here as code-verified only. **The Phase 5 reviewer declined to waive it**, correctly: for an authentication migration, "the old credential still works" is the one property that cannot rest on reading the source. Retested properly.
+
+*Why it needed a manual setup:* C4 means `manage-voice-pin` can no longer **create** a 4-digit PIN, so a legacy hash cannot be produced through the product. One was generated with bcrypt (cost 10, `$2b$`, self-checked to accept `1234` and reject `9999`) and written directly to the **test** account — never the live manual-testing account.
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Function-level `verify`, correct 4-digit | `{"success":true,"match":true}` |
+| 2 | Function-level `verify`, wrong 4-digit | `{"success":true,"match":false}` |
+| 3 | `set` a NEW 4-digit PIN | refused — `pin_must_be_6_digits` |
+| 4 | **Live voice path**, correct 4-digit | authenticated |
+| 5 | **Live voice path**, wrong 4-digit | retry, not accepted |
+
+Check 4 is the one that matters, and it was verified on the returned TwiML rather than by the absence of a retry: the response carries no `/voice/pin?` redirect, no `<Hangup/>`, and proceeds to `/voice/timezone-result?...&variant=pin` with `userName=Robert` resolved. So a caller holding a pre-migration PIN reaches the post-authentication flow exactly as before — which incidentally also confirms Track B's `variant=pin` propagation on a live request.
+
+The test account was restored afterwards and verified clean: `phone: null`, `voice_pin_hash: null`, counters zero.
 
 **6.2 — The set-PIN refusal was not exercised on a live call.** Code-verified.
 
