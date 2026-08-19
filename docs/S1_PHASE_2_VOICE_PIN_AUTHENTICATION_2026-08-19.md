@@ -4,7 +4,7 @@
 **Governance version:** v4.0
 **Phase 1:** APPROVED. **Phase 1A:** PASS WITH CORRECTIONS, approved 2026-08-19.
 **Product decisions recorded:** borrowed-phone path is **kept** (Wael); a PIN-authenticated caller **may not change the PIN** (Wael, option 1).
-**Status:** DRAFT — awaiting Phase 3 external technical review. **No code written.**
+**Status:** REVISED 2026-08-19 following Phase 3 review — see §8 Amendment. **No code written.**
 
 **Risk classification: HIGH.** Justified in §6.
 
@@ -147,4 +147,39 @@ Specific risks:
 
 ---
 
-**No code written. Awaiting Phase 3 external technical review, then Wael's own explicit go-ahead** (governance §3, Phase-Gate Approval Rule).
+## 8. AMENDMENT — 2026-08-19, required by Phase 3 review
+
+**Phase 3 verdict: CHANGES REQUIRED.** One issue, correctly identified:
+
+> *"D2 increments `voice_pin_failed_count`, but the plan never specifies when it resets after a successful authentication. Without this, legitimate mistakes can accumulate indefinitely and eventually trigger alerts."*
+
+The gap is real. As written, the counter meant *"failures since the account was created"* rather than *"failures that suggest something is happening now."* A user who fumbles once every few months would eventually cross any threshold and receive an alert about nothing.
+
+### 8.1 Required change — reset on success
+
+**D2 amended:** a **successful PIN authentication resets that account's `voice_pin_failed_count` to 0 and clears `voice_pin_failed_at`.**
+
+Reset is on **successful PIN authentication specifically**, not on any successful call. A call from the registered phone does not reset the counter: it proves the *person* is present, but says nothing about whether the earlier PIN attempts were theirs. If someone is working through PINs against an account, the owner phoning in from their own handset should not erase that signal.
+
+### 8.2 Same gap, second half — stale failures must decay
+
+The reviewer's finding exposes a second case it does not name: **a user who never succeeds**. Consider three failed attempts in March, abandoned, then two in August. Reset-on-success never fires, so the count reaches five and alerts — describing a five-month-old pattern as though it were an incident.
+
+**D2 further amended:** failures older than a rolling window (**24 hours**, provisional) do not count toward the threshold. `voice_pin_failed_at` — already in D1 — carries the timestamp needed; no schema change.
+
+The counter's meaning becomes **"recent consecutive failures"**, which is what the alert is actually about. Both halves are needed: reset-on-success handles the user who eventually gets in, the window handles the user who does not.
+
+### 8.3 Test coverage added
+
+**E1 gains two cases:**
+- A successful PIN authentication zeroes the count — a subsequent single failure does not alert.
+- Failures older than the window do not count toward the threshold.
+
+### 8.4 Unchanged by this amendment
+
+Risk stays **HIGH**. The Change Impact Matrix (§3) gains no new layer — no schema change is required, since `voice_pin_failed_at` was already in D1. No new file enters the plan. The window value (24 hours) is **provisional**, for the same reason as the alert threshold: there is no usage data to calibrate against, and Phase 1 §6 Q5 records that as a judgement rather than a measurement.
+
+
+---
+
+**No code written. Awaiting Phase 3 RE-review of this amendment, then Wael's own explicit go-ahead** (governance §3, Phase-Gate Approval Rule).
