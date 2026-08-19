@@ -1,3 +1,15 @@
+> # ⛔ SUPERSEDED — 2026-08-19
+>
+> **This document is no longer maintained. Do not read it as current, and do not update it.**
+>
+> Its content was folded into the single architecture reference as **section 2b**:
+> [`docs/MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md`](MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md)
+>
+> Nothing was lost in the move — the two-system split, the shared `PENDING_INTENT` executor, the
+> un-unified recipient resolution, and the self-override contract are all in §2b. Go there.
+>
+> Retained only as the historical record of F16's investigation (2026-07-14).
+
 # Architecture — `naavi-chat`'s Two Action-Generation Systems
 
 **Status: living reference doc.** Written 2026-07-14 (F16), based on direct code reading of `supabase/functions/naavi-chat/index.ts` and `intentHandlers.ts` as they stood that day. Line numbers drift as the file changes — treat them as a starting point for a grep, not a permanent citation. Update this doc whenever either system's routing logic or the recipient-resolution paths change.

@@ -15,6 +15,17 @@
 
 ---
 
+
+> **⭐ This is the ONLY architecture reference document for Naavi.** No other architecture document is
+> current or authoritative. Four earlier ones are marked SUPERSEDED and retained as history only:
+> `ARCHITECTURE.md`, `ARCHITECTURE_2026-05-13.md`, `ARCHITECTURE_OVERVIEW_2026-04-30.md`,
+> `ARCHITECTURE_NAAVI_CHAT_ACTION_SYSTEMS.md`.
+>
+> **Creating a new architecture document is forbidden** (Wael, 2026-08-19). Extend this file instead.
+> Rationale: five parallel architecture documents accumulated, only this one was maintained, and the
+> one believed to be live had a single commit in four months. See CLAUDE.md, ARCHITECTURE DOCUMENTATION.
+
+
 ## 0. The Three Codebases
 
 Naavi is not one program — it's three, talking to one shared database:
@@ -24,6 +35,18 @@ Naavi is not one program — it's three, talking to one shared database:
 3. **Supabase** — the shared Postgres database, Edge Functions, and cron jobs both the mobile backend and the voice server call into.
 
 The mobile app and the voice server **do not call each other**. They are two independent clients of the same backend. Whether a capability is "shared" depends entirely on whether both clients call the *same* Edge Function, or whether each has written its own version of the same logic.
+
+### 0a. Ownership Model
+
+| Component | Owner |
+|---|---|
+| Shared Core (Supabase Edge Functions + Postgres) | The Edge Functions codebase, `munk2207/naavi-app/supabase/functions/*` |
+| Voice | The Voice Server, `munk2207/naavi-voice-server` |
+| Mobile | The React Native App, `munk2207/naavi-app` (client code under `app/`, `hooks/`) |
+
+Each component's owner is the single codebase responsible for that component's correctness. "I thought the other side handled it" is not a valid explanation for a gap — if a capability's owner is genuinely ambiguous, that ambiguity is itself a defect to resolve, not a reason to skip verification.
+
+---
 
 ### 0b. Deployment Environments (added by T2, 2026-08-19)
 
@@ -44,18 +67,6 @@ Each codebase has a different number of environments. This asymmetry is load-bea
 **⚠️ Invariant this environment depends on.** `DEMO_TWILIO_NUMBER` and `STAGING_DEMO_TWILIO_NUMBER` must remain unset on the `naavi-voice-staging` service. The voice server contains one direct-to-Twilio SMS path (the F2b demo recap, `naavi-voice-server/src/index.js:7224`) that the Shared Core guard cannot see; it is unreachable only because those variables are unset. Setting either makes it reachable and requires a voice-server-side guard first. See [[T3]] for the underlying problem — the demo line and the registered-user voice platform being one process.
 
 **Test harness.** Gate 2 (`npm run test:voice`) selects its voice server from the same environment choice that drives `SUPABASE_URL` and refuses to run if the two disagree (`tests/lib/voice_env.ts`). Before T2 it always tested production.
-
-### 0a. Ownership Model
-
-| Component | Owner |
-|---|---|
-| Shared Core (Supabase Edge Functions + Postgres) | The Edge Functions codebase, `munk2207/naavi-app/supabase/functions/*` |
-| Voice | The Voice Server, `munk2207/naavi-voice-server` |
-| Mobile | The React Native App, `munk2207/naavi-app` (client code under `app/`, `hooks/`) |
-
-Each component's owner is the single codebase responsible for that component's correctness. "I thought the other side handled it" is not a valid explanation for a gap — if a capability's owner is genuinely ambiguous, that ambiguity is itself a defect to resolve, not a reason to skip verification.
-
----
 
 ## 1. Architecture Principles
 
@@ -103,6 +114,34 @@ This is the capability most likely to surprise you, and the one that produced th
 **Practical consequence:** a bug fixed in mobile's alert-creation classifier does not fix voice's alert-creation behavior, and vice versa. A fix must be evaluated against both, deliberately, every time — never assumed to transfer.
 
 ---
+
+### 2b. `naavi-chat` runs TWO action-generation systems
+
+*Folded in from `ARCHITECTURE_NAAVI_CHAT_ACTION_SYSTEMS.md` on 2026-08-19, when this document became the single architecture reference. That file is now superseded.*
+
+**Read this before debugging any action or recipient bug.** F15 (2026-07-09) spent substantial diagnostic effort instrumenting the wrong pipeline before discovering the split existed. F16 wrote it down so the next investigation would start from an accurate map.
+
+**The split.** Every user message that is not a fast-path greeting goes first through **Layer 2** — a small, separate, stateless Haiku call (`classifyIntent()`) that sees only the current message text: no conversation history, no tools. If it confidently recognises a single well-known action, it handles the whole thing deterministically with hand-written templates and never invokes Claude tool-use at all. Otherwise the message falls through to **Path B** — a full Claude tool-use call with `NAAVI_TOOLS`, the entire conversation history, and native tool-calling.
+
+**Layer 2's statelessness is structural, not incidental.** `classifyIntent(client, userText)` receives one string, not the conversation array. It therefore cannot resolve a bare follow-up like "Halo" or "3pm" on its own — anything depending on earlier turns falls to Path B by construction, every time, regardless of how long the conversation is.
+
+**Both systems converge on one executor.** When either produces a "here is what I'll do, say yes to confirm" reply, it embeds the same marker (`<!--PENDING_INTENT:{...}-->`). A single shared block — informally "Step 1.4" — is the only place that reads it back on the user's "yes" and performs the write. That marker is the entire contract between the two systems and the database. **If either system produces a confirm-sounding reply without a valid marker, the "yes" turn has nothing to execute and Naavi still says "Done"** — the B9i failure mode.
+
+**⚠️ Recipient resolution is NOT unified.** F12 built `resolve-recipient` as *the* shared resolver. It is shared only for **location** triggers:
+
+| Trigger type | Mechanism | Shared? |
+|---|---|---|
+| Location (third-party or self) | `resolve-recipient` Edge Function | Yes — one function, used by mobile, voice (2 call sites), and `evaluate-rules`' fire-time re-resolution |
+| Time-trigger, third-party by name | **Three separate, independent `lookup-contact` call sites**, sharing no code: Layer 2's own fallthrough branch, Step 1.4's `lookupWithPhone` helper, and a third intercept that resolves Claude's tool output before the marker is embedded | **No** |
+| Self-override, any trigger | None needed — the user gave a literal address directly | N/A |
+
+**Practical consequence:** a third-party time-trigger recipient bug can live in any of those three call sites, and fixing one does not fix the others. That is exactly the shape B9g/B9n turned out to be.
+
+**Self-override contract.** The four fields (`self_override_email` / `_sms` / `_whatsapp` / `_voice`) redirect **one channel** of a self-alert to a literal address the user gave, while every other enabled channel still reaches them normally. Two dispatchers implement the same `override || userDefault` pattern — `report-location-event` (location fires) and `evaluate-rules` (time / email / weather / contact_silence fires). They are duplicated code, so drift is possible if one is edited without the other.
+
+**Never valid:** a `self_override_*` field AND `to`/`to_name` populated on the same `action_config`. That is a third-party recipient colliding with a self-override, and it is the contamination shape of B9g/B9n. `hooks/useOrchestrator.ts` guards against it; **the database does not enforce it**, so any new write path to `action_rules` must carry the same guard.
+
+**Line numbers drift.** Treat any cited line as a starting point for a grep, not a permanent address. The superseded source was written from a single read-through, not an exhaustive per-branch audit — verify specifics against current code before relying on a claim for a fix.
 
 ## 3. Entry Point Responsibilities
 

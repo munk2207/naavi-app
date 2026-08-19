@@ -494,13 +494,31 @@ Each project has its own row for the gates account; `tests/.env` selects between
 
 19. **⭐ KEEP THE PARITY AUDIT LIVE — UPDATE IT WHEN ANY NEW CAPABILITY IS ADDED TO EITHER SURFACE.** The canonical parity doc is `docs/MOBILE_VS_VOICE_PARITY_AUDIT_2026-06-12.md`. Every time a new action, handler, or user-facing capability is added to mobile (`hooks/useOrchestrator.ts`, `app/index.tsx`) OR voice (`naavi-voice-server/src/index.js`), that doc MUST be updated in the same commit or session. Add the new row, set ✅/⚠️/❌ for each surface, and update the gap summary at the bottom. This is not optional — a stale parity doc is worse than no doc because it gives false confidence. If a gap is intentional (voice-only or mobile-only by design), note it in the "intentionally different" section. If it is a real gap, add it to the gap priority table.
 
+### ⭐⭐⭐ ARCHITECTURE DOCUMENTATION — ONE DOCUMENT, AND ONLY ONE (Wael 2026-08-19)
+
+**`docs/MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md` is the ONLY architecture reference document for Naavi.** No other document describing Naavi's architecture is current or authoritative.
+
+**Creating a new architecture document is FORBIDDEN.** If something architectural needs recording — a subsystem map, a newly-understood data flow, a deployment topology — it goes into that file as a new section. Never into a new file, never into a dated snapshot, never into a session handoff as the primary record.
+
+**Four documents were marked SUPERSEDED on 2026-08-19** and are retained as history only. Do not read them as current and do not update them:
+- `docs/ARCHITECTURE.md` (March 2026)
+- `docs/ARCHITECTURE_2026-05-13.md` (May 2026, V57.15.0)
+- `docs/ARCHITECTURE_OVERVIEW_2026-04-30.md` (April 2026, V57.8)
+- `docs/ARCHITECTURE_NAAVI_CHAT_ACTION_SYSTEMS.md` (July 2026 — content folded into the Reference as §2b)
+
+**Why this rule exists.** Five parallel architecture documents accumulated over five months. Only one was ever maintained. The one Wael believed was the live reference (`ARCHITECTURE_OVERVIEW_2026-04-30`) had **exactly one commit** — from the day it was created — and sat unchanged through the T1a architecture audit, the entire B10 series, and T2. He discovered the situation by chance on 2026-08-19 while asking why two architecture documents existed; the answer was that five did.
+
+**The lesson, which generalises beyond architecture docs:** a document stays current only if something *mechanically forces* it to. Intent does not survive four months. The Reference survives because Governance Phase 8 makes updating it a hard merge precondition — a work item cannot close without it. Any future "living document" needs a forcing function of that kind, or it will be stale by the next quarter.
+
+---
+
 ### WHERE TO START
 
 **Read first:** latest handoff in `docs/` (highest date in filename), then `MEMORY.md` index.
 
 **Prompt-regression:** `tests/catalogue/prompt-regression.ts` locks in known-good Claude action emissions. Future prompt edits MUST keep this suite green. Never add a prompt rule without a corresponding regression test.
 
-**⭐ `naavi-chat` has TWO separate action-generation systems — read this before debugging any action/recipient bug.** `docs/ARCHITECTURE_NAAVI_CHAT_ACTION_SYSTEMS.md` maps Layer 2 (deterministic, stateless classifier) vs Path B (Claude tool-use, full history) — which message shapes route to which, the shared PENDING_INTENT executor both rely on, and why recipient resolution is unified for location alerts (`resolve-recipient`) but NOT for time-trigger third-party alerts (3 separate `lookup-contact` call sites). F15 burned significant diagnostic time in 2026-07-09 rediscovering this split from scratch — check this doc first.
+**⭐ `naavi-chat` has TWO separate action-generation systems — read this before debugging any action/recipient bug.** See **§2b of the Architecture Reference** (`docs/MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md`), which maps Layer 2 (deterministic, stateless classifier) vs Path B (Claude tool-use, full history) — which message shapes route to which, the shared PENDING_INTENT executor both rely on, and why recipient resolution is unified for location alerts (`resolve-recipient`) but NOT for time-trigger third-party alerts (3 separate `lookup-contact` call sites). F15 burned significant diagnostic time in 2026-07-09 rediscovering this split from scratch — check this doc first.
 
 **Geofence is production-ready.** `android.permission.ACTIVITY_RECOGNITION` (Motion API) is required and confirmed working — Google's Health apps declaration was submitted and accepted 2026-05-26. Drive-tested daily by Wael with no issues. Promote to testers freely.
 

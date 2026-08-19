@@ -1,3 +1,13 @@
+> # ⛔ SUPERSEDED — 2026-08-19
+>
+> **This document is no longer maintained. Do not read it as current, and do not update it.**
+>
+> The single architecture reference is
+> [`docs/MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md`](MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md).
+>
+> This is a **March 2026** snapshot — five months and a full architecture audit out of date.
+> Retained as historical record only.
+
 # NAAVI
 ## Technical Architecture Document
 **Version:** 2.0 &nbsp;|&nbsp; **Date:** March 19, 2026 &nbsp;|&nbsp; **Status:** Phase 8 — Live

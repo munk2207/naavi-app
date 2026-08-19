@@ -1,3 +1,18 @@
+> # ⛔ SUPERSEDED — 2026-08-19
+>
+> **This document is no longer maintained. Do not read it as current, and do not update it.**
+>
+> The single architecture reference is
+> [`docs/MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md`](MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md).
+>
+> **Why this one is worth a note.** It was created on 2026-04-29 *intending* to be a live reference —
+> and it has exactly **one commit**, from the day it was written. Four months passed, through the T1a
+> architecture audit, the B10 series and T2, with no update. That is not neglect; it is what happens
+> to any document nothing mechanically forces you to update. The reference that replaced it survives
+> because Governance Phase 8 refuses to let a work item close without updating it.
+>
+> Retained as a point-in-time snapshot (V57.8) written for a non-technical audience.
+
 # Naavi — Architecture Overview
 
 **Audience:** non-technical founders, technical advisors, prospective investors, beta partners.

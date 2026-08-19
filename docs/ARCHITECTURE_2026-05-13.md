@@ -1,3 +1,13 @@
+> # ⛔ SUPERSEDED — 2026-08-19
+>
+> **This document is no longer maintained. Do not read it as current, and do not update it.**
+>
+> The single architecture reference is
+> [`docs/MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md`](MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md).
+>
+> This is a **May 2026** snapshot (V57.15.0, build 171), predating the T1a architecture audit.
+> Retained as historical record only.
+
 # MyNaavi — Architecture & Wiring
 
 **Snapshot:** V57.15.0 (build 171) · 2026-05-13
