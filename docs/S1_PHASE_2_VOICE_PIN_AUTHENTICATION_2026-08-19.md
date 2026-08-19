@@ -28,6 +28,8 @@ Everything else in this plan is either a consequence of that change (PIN length,
 
 ## 2. Files that will change
 
+*These tables are **current** — they incorporate the amendments approved at Phase 3 re-review (2026-08-19). §8 records what changed and why; nothing here is superseded by it.*
+
 ### Track A — Identity before credential (the core fix)
 
 | # | File | Class | Change |
@@ -62,7 +64,7 @@ Everything else in this plan is either a consequence of that change (PIN length,
 | # | File | Class | Change |
 |---|---|---|---|
 | D1 | `supabase/migrations/<new>.sql` | **Database** | `user_settings`: add `voice_pin_failed_count int default 0`, `voice_pin_failed_at timestamptz`, `voice_unregistered_blocked boolean default false` |
-| D2 | `index.js` `/voice/pin-result` | Backend | On failure against a **claimed** account, increment that account's counter — now attributable, which it never was before |
+| D2 | `index.js` `/voice/pin-result` | Backend | On failure against a **claimed** account, increment that account's counter — now attributable, which it never was before. **A successful PIN authentication resets the count to 0 and clears `voice_pin_failed_at`**; failures older than a rolling **7 days** do not count toward the threshold. Reset is on successful *PIN* auth only — a call from the registered phone does not clear it. Rationale in §8 |
 | D3 | `index.js` | Backend | At threshold, send an SMS via `send-sms` to the registered number: *"Someone tried your voice PIN. Reply BLOCK to stop calls from unregistered phones."* |
 | D4 | `supabase/functions/receive-sms-reply/index.ts` | Backend | Recognise `BLOCK` from a registered number → set `voice_unregistered_blocked = true` |
 | D5 | `index.js` `/voice` | Backend | If the resolved account is blocked, refuse the PIN path entirely |
@@ -72,7 +74,7 @@ Everything else in this plan is either a consequence of that change (PIN length,
 
 | # | File | Class | Change |
 |---|---|---|---|
-| E1 | `tests/catalogue/s1-voice-pin-scoping.ts` | **NEW** — Tests | Negative control: a PIN is **never** matched against a non-claimed account. Plus collision → asks for more digits; zero match → no account-existence disclosure; 4-digit verify still works, 4-digit `set` refused |
+| E1 | `tests/catalogue/s1-voice-pin-scoping.ts` | **NEW** — Tests | Negative control: a PIN is **never** matched against a non-claimed account. Plus collision → asks for more digits; zero match → no account-existence disclosure; 4-digit verify still works, 4-digit `set` refused; **successful auth zeroes the failure count**; **failures older than 7 days do not count toward the threshold** |
 | E2 | `tests/catalogue/voice-pin.ts` | Tests | Extend for 6-digit and the migration window |
 | E3 | `tests/runner.ts` | Tests | Register |
 
