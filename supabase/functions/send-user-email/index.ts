@@ -18,6 +18,7 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { guardDestination } from '../_shared/outbound_guard.ts';
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GMAIL_API        = 'https://gmail.googleapis.com/gmail/v1/users/me';
@@ -118,6 +119,21 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'No email address for user (checked user_settings.email and auth.users.email)' }), {
         status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // T2 — staging outbound containment. Inert in production. Placed after
+    // recipient resolution (override → user_settings.email → auth.users.email)
+    // so the guard sees the address actually being sent to, not the requested
+    // one. Covers every caller of this function, including
+    // global-search/adapters/contacts.ts, ingest-ticket, send-ticket-reply,
+    // _shared/task_actions.ts, and the three dispatchers (T2 Phase 1A §3).
+    const guard = guardDestination(toEmail, 'email', 'send-user-email');
+    if (!guard.allowed) {
+      // 200 by design — see the equivalent block in send-sms for rationale.
+      return new Response(
+        JSON.stringify({ success: false, blocked: true, reason: guard.reason, to: toEmail }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
     }
 
     const accessToken = await getNewAccessToken(tokenRow.refresh_token);

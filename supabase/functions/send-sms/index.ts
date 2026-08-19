@@ -29,6 +29,7 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { guardDestination } from '../_shared/outbound_guard.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -136,6 +137,25 @@ serve(async (req) => {
     } else {
       // SMS — plain text, no template
       params = new URLSearchParams({ To: twilioTo, From: twilioFrom, Body: body });
+    }
+
+    // T2 — staging outbound containment. Inert in production (the
+    // OUTBOUND_ALLOWLIST secret is set only on staging), so this returns
+    // allowed:true and falls straight through on every production send.
+    // Placed immediately before the Twilio POST so no code path can reach
+    // the network without passing it. Covers all 8 Class A callers of this
+    // function at once (T2 Phase 1A §3).
+    const guard = guardDestination(to, channel, 'send-sms');
+    if (!guard.allowed) {
+      // 200, not an error: callers treat non-2xx as a delivery failure and
+      // some retry. A staging block is a deliberate outcome, not a fault —
+      // surfacing it as `blocked` keeps it visible without triggering retry
+      // storms. (T2 Phase 2 §7 item 2 — left open by Phase 3; this is the
+      // conservative default, revisit if Phase 6 rules otherwise.)
+      return new Response(
+        JSON.stringify({ success: false, blocked: true, reason: guard.reason, channel, to }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
     }
 
     const res = await fetch(

@@ -11,12 +11,16 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
+import { guardDestination, resolveCallerId } from '../_shared/outbound_guard.ts';
 
 const SUPABASE_URL              = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const TWILIO_ACCOUNT_SID        = Deno.env.get('TWILIO_ACCOUNT_SID')!;
 const TWILIO_AUTH_TOKEN         = Deno.env.get('TWILIO_AUTH_TOKEN')!;
-const TWILIO_FROM_NUMBER        = '+12495235394';
+// T2 Track F — was a module-level literal '+12495235394'. Now resolved per
+// call so the staging deployment can override it; unset (production) returns
+// that same number, so behavior is unchanged there. Resolved at use rather
+// than at module load because Deno caches module scope across invocations.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin':  '*',
@@ -56,11 +60,20 @@ serve(async (req) => {
     const safeName = xmlEscape(callerName);
     const twiml = `<Response><Say voice="Polly.Joanna">Hi, this is a message from ${safeName} via Naavi. ${safeBody}</Say></Response>`;
 
+    // T2 — staging outbound containment, direct-to-Twilio path.
+    const voiceGuard = guardDestination(to_phone, 'voice', 'outbound-call');
+    if (!voiceGuard.allowed) {
+      return new Response(
+        JSON.stringify({ success: false, blocked: true, reason: voiceGuard.reason, to: to_phone }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
+
     // Twilio REST API — initiate outbound call with inline TwiML
     const credentials = btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`);
     const formBody = new URLSearchParams();
     formBody.append('To',    to_phone);
-    formBody.append('From',  TWILIO_FROM_NUMBER);
+    formBody.append('From',  resolveCallerId());
     formBody.append('Twiml', twiml);
 
     const callRes = await fetch(

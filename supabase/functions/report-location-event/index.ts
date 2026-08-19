@@ -31,6 +31,7 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { buildAlertBody } from '../_shared/alert_body.ts';
 import { executeTaskActions } from '../_shared/task_actions.ts';
+import { guardDestination, resolveCallerId } from '../_shared/outbound_guard.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -809,7 +810,9 @@ async function fireLocationAction(
     const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID') ?? '';
     const authToken  = Deno.env.get('TWILIO_AUTH_TOKEN')  ?? '';
     const voiceBase  = Deno.env.get('VOICE_SERVER_URL')   ?? '';
-    const twilioFrom = '+12495235394';
+    // T2 Track F — environment-controlled caller ID (see outbound_guard.ts).
+    // Unset in production → unchanged '+12495235394'.
+    const twilioFrom = resolveCallerId();
     // V57.10.5 — diagnostic. Wael 2026-05-03 reported no voice call for a
     // Movati arrival even though SMS + WhatsApp fired. Voice-call rows
     // were ALSO missing from sent_messages because the channel CHECK
@@ -820,6 +823,15 @@ async function fireLocationAction(
     console.log(`[callVoice] entry rule=${rule.id.slice(0,8)} to=${toNumber} accountSid=${accountSid ? 'set' : 'MISSING'} authToken=${authToken ? 'set' : 'MISSING'} voiceBase=${voiceBase ? voiceBase : 'MISSING'}`);
     if (!accountSid || !authToken || !voiceBase) {
       console.error('[report-location-event] callVoice: missing Twilio/voice-server secrets — skipping');
+      return { channel: 'voice-call', ok: false };
+    }
+
+    // T2 — staging outbound containment, direct-to-Twilio path. This dispatcher
+    // fires geofence-arrival alerts, which voice CAN create (voice writes
+    // location rules to action_rules), so a staging test call could otherwise
+    // reach a real phone through here (T2 Phase 1A §3).
+    const voiceGuard = guardDestination(toNumber, 'voice', 'report-location-event.callVoice');
+    if (!voiceGuard.allowed) {
       return { channel: 'voice-call', ok: false };
     }
     try {

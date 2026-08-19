@@ -12,6 +12,7 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { guardDestination, resolveCallerId } from '../_shared/outbound_guard.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -78,7 +79,7 @@ serve(async (req) => {
       // Read user preferences: phone, name, alert_channels_enabled
       const { data: settings } = await adminClient
         .from('user_settings')
-        .select('phone, name, alert_channels_enabled')
+        .select('phone, name, alert_channels_enabled, twilio_from_number')
         .eq('user_id', reminder.user_id)
         .maybeSingle();
 
@@ -122,9 +123,17 @@ serve(async (req) => {
         const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID') ?? '';
         const authToken  = Deno.env.get('TWILIO_AUTH_TOKEN')  ?? '';
         const voiceBase  = Deno.env.get('VOICE_SERVER_URL')   ?? '';
-        const twilioFrom = '+12495235394';
+        // T2 Track F — environment-controlled caller ID (see outbound_guard.ts).
+        // Unset in production → unchanged '+12495235394'.
+        const twilioFrom = resolveCallerId();
         if (!accountSid || !authToken || !voiceBase) {
           console.error('[check-reminders] callVoice: missing Twilio/voice-server secrets');
+          return { channel: 'voice_call', ok: false };
+        }
+
+        // T2 — staging outbound containment, direct-to-Twilio path.
+        const voiceGuard = guardDestination(userPhone, 'voice', 'check-reminders.callVoice');
+        if (!voiceGuard.allowed) {
           return { channel: 'voice_call', ok: false };
         }
         try {
@@ -178,6 +187,7 @@ serve(async (req) => {
           sends.push(fanFetch('SMS', `${supabaseUrl}/functions/v1/send-sms`, {
             to: userPhone, body,
             user_id: reminder.user_id, source: 'reminder',
+            from: settings?.twilio_from_number || undefined,
           }));
         }
         if (channelEnabled('whatsapp')) {

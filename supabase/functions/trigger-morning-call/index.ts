@@ -20,6 +20,7 @@
  */
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { guardDestination, resolveCallerId } from '../_shared/outbound_guard.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -160,8 +161,18 @@ Deno.serve(async (req) => {
         const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID')!;
         const authToken = Deno.env.get('TWILIO_AUTH_TOKEN')!;
         const voiceServerUrl = Deno.env.get('VOICE_SERVER_URL')!;
-        const twilioNumber = '+12495235394';
+        // T2 Track F — environment-controlled caller ID (see outbound_guard.ts).
+        // Unset in production → unchanged '+12495235394'.
+        const twilioNumber = resolveCallerId();
         const credentials = btoa(`${accountSid}:${authToken}`);
+
+        // T2 — staging outbound containment, direct-to-Twilio path. Morning
+        // calls fire on a per-minute cron, so an unguarded staging deployment
+        // would place real calls on a schedule with no user action at all.
+        const voiceGuard = guardDestination(callPhone, 'voice', 'trigger-morning-call');
+        if (!voiceGuard.allowed) {
+          continue;
+        }
 
         const body = new URLSearchParams();
         body.append('To', callPhone);

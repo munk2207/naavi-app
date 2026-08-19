@@ -23,6 +23,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { buildAlertBody } from '../_shared/alert_body.ts';
 import { executeTaskActions } from '../_shared/task_actions.ts';
+import { guardDestination, resolveCallerId } from '../_shared/outbound_guard.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -762,7 +763,7 @@ async function fireAction(
   // Look up the user's own contact info for self-alert detection.
   const { data: settings } = await adminClient
     .from('user_settings')
-    .select('phone, name, alert_channels_enabled')
+    .select('phone, name, alert_channels_enabled, twilio_from_number')
     .eq('user_id', rule.user_id)
     .maybeSingle();
   const userPhone = settings?.phone ?? null;
@@ -839,14 +840,17 @@ async function fireAction(
   // Channel call helpers
   //
   // F2b (2026-07-01) — `config.from_number`, when the rule's action_config
-  // sets it, overrides send-sms's default TWILIO_FROM_NUMBER. Currently
+  // sets it, overrides send-sms's default TWILIO_FROM_NUMBER. Originally
   // only set by create-demo-reminder for demo-line reminders (so they send
   // from the demo line's own number, not the production voice server's
   // number shared with real registered users' alerts — see
-  // docs/F2B_SCENARIO_WALKTHROUGH_PHASE5_EVIDENCE_2026-07-01.md). Every
-  // real-user rule's action_config never sets this field, so `from` is
-  // `undefined` and send-sms behaves exactly as before — zero behavior
-  // change for real alerts.
+  // docs/F2B_SCENARIO_WALKTHROUGH_PHASE5_EVIDENCE_2026-07-01.md).
+  // 2026-07-23 — extended to also fall back to `user_settings.twilio_from_number`
+  // when the rule itself doesn't set one, so a single account (e.g. a demo
+  // account) can have ALL its alerts send from its own dedicated number
+  // without every rule needing to set from_number individually. Column is
+  // NULL for every existing user (Wael, Huss), so `from` stays `undefined`
+  // and send-sms behaves exactly as before — zero behavior change for them.
   // B9k fix (2026-07-13) — the WhatsApp send-sms path uses the approved
   // naavi_message_from_sender template ("Hi {{1}}, {{2}} shared this message
   // with you: {{3}} — Sent via MyNaavi."), which reads fine for third-party
@@ -868,7 +872,7 @@ async function fireAction(
         recipient_name: overrides?.recipientName ?? (toName || userName || undefined),
         sender_name: overrides?.senderName ?? 'Naavi',
         source: 'alert',
-        from: config.from_number || undefined,
+        from: config.from_number || settings?.twilio_from_number || undefined,
       }),
     }).then(res => ({ channel, ok: res.ok }))
       .catch(() => ({ channel, ok: false }));
@@ -901,9 +905,20 @@ async function fireAction(
     const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID') ?? '';
     const authToken  = Deno.env.get('TWILIO_AUTH_TOKEN')  ?? '';
     const voiceBase  = Deno.env.get('VOICE_SERVER_URL')   ?? '';
-    const twilioFrom = '+12495235394';
+    // T2 Track F — environment-controlled caller ID. Staging sets
+    // VOICE_CALL_FROM_NUMBER to its own Twilio number so a staging call never
+    // presents as production Naavi and a callback reaches staging, not
+    // production. Unset (production) → the same '+12495235394' as before.
+    const twilioFrom = resolveCallerId();
     if (!accountSid || !authToken || !voiceBase) {
       console.error('[evaluate-rules] callVoice: missing Twilio/voice-server secrets');
+      return { channel: 'voice-call', ok: false };
+    }
+
+    // T2 — staging outbound containment. Direct-to-Twilio path: no shared
+    // sender sits between this and the network, so the guard must be here.
+    const voiceGuard = guardDestination(toNumber, 'voice', 'evaluate-rules.callVoice');
+    if (!voiceGuard.allowed) {
       return { channel: 'voice-call', ok: false };
     }
     try {

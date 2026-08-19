@@ -14,6 +14,7 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import webPush from 'https://esm.sh/web-push@3.6.7';
+import { guardDestination } from '../_shared/outbound_guard.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin':  '*',
@@ -183,6 +184,37 @@ serve(async (req) => {
     return new Response(JSON.stringify({ sent: 0, message: 'No subscriptions found' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
+  }
+
+  // T2 — staging outbound containment. Push has no phone/email destination of
+  // its own; the identity being reached is the user, so the guard is applied to
+  // that user's registered phone or email — the same values the allowlist
+  // already carries. Either one matching is sufficient.
+  //
+  // Push is the lowest real-world-reach channel here (a device only receives
+  // these if it explicitly subscribed through the app), but it is guarded for
+  // completeness: T2 Phase 2 §2 B4 lists it, and leaving one channel unguarded
+  // would make "staging cannot reach outside the allowlist" untrue as stated.
+  {
+    const { data: idn } = await adminClient
+      .from('user_settings')
+      .select('phone, email')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const phoneGuard = idn?.phone ? guardDestination(idn.phone, 'push', 'send-push-notification') : null;
+    const emailGuard = idn?.email ? guardDestination(idn.email, 'push', 'send-push-notification') : null;
+    const enforced   = Boolean(phoneGuard?.enforced || emailGuard?.enforced);
+    const allowed    = Boolean(phoneGuard?.allowed  || emailGuard?.allowed);
+
+    // Only blocks when the guard is actually enforced (staging) AND neither
+    // identifier is allowlisted. Inert in production regardless.
+    if (enforced && !allowed) {
+      return new Response(
+        JSON.stringify({ sent: 0, blocked: true, reason: 'user not in OUTBOUND_ALLOWLIST' }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
+    }
   }
 
   // Set up web push VAPID
