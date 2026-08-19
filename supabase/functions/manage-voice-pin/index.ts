@@ -47,6 +47,56 @@ const PIN_SET_RE = /^\d{6}$/;
 const PIN_VERIFY_RE = /^\d{4}$|^\d{6}$/;
 const BCRYPT_ROUNDS = 10;
 
+// S1 Phase 6 — moved here from the voice server with the rest of the failure
+// logic. A judgement, not a calibration: Naavi is pre-launch with two PIN
+// holders, so there is no failure-rate data to tune against. Three is low
+// enough to catch a real attempt early and high enough that ordinary
+// mistyping on a phone keypad does not cry wolf.
+const PIN_ALERT_THRESHOLD = 3;
+
+/**
+ * Tells the account owner that someone is failing PIN attempts against them,
+ * and how to stop it. Returns whether the message actually went out.
+ *
+ * Moved out of the voice server at Phase 6: deciding to alert and sending the
+ * alert are security logic, and an entry point should be translating.
+ *
+ * Never throws. An alert that fails to send must not fail the call that
+ * triggered it — the caller is mid-conversation and the counter write has
+ * already succeeded.
+ */
+async function sendPinFailureAlert(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  toPhone: string,
+  count: number,
+): Promise<boolean> {
+  try {
+    const body =
+      `Naavi security: ${count} failed PIN attempts on your account from an unregistered phone. `
+      + `If this wasn't you, reply BLOCK to stop calls from unregistered phones. `
+      + `You can turn it back on in the Naavi app.`;
+
+    const { data, error } = await supabase.functions.invoke('send-sms', {
+      body: { to: toPhone, body, user_id: userId, source: 's1-pin-failure-alert' },
+    });
+    if (error) {
+      console.error('[manage-voice-pin] pin-alert send failed:', error.message);
+      return false;
+    }
+    if ((data as { blocked?: boolean } | null)?.blocked) {
+      // Staging: the T2 outbound allowlist refused it. Expected, not an error.
+      console.log('[manage-voice-pin] pin-alert not sent — outbound guard blocked');
+      return false;
+    }
+    console.log(`[manage-voice-pin] pin-alert sent to owner of user_id=${userId.slice(0, 8)}…`);
+    return true;
+  } catch (err) {
+    console.error('[manage-voice-pin] pin-alert threw:', err instanceof Error ? err.message : String(err));
+    return false;
+  }
+}
+
 function jsonResponse(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -66,6 +116,15 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return jsonResponse({ error: 'invalid JSON' }, 400); }
 
   const op = String(body?.op ?? '').toLowerCase();
+
+  // S1 Phase 6 — the security-state operations below are service-role only.
+  // Same literal comparison the VERIFY path already uses; deliberately NOT
+  // changed here. Phase 3 §4.1 recorded this pattern as a known risk (it is
+  // what broke during the key rotation) and explicitly deferred it — altering
+  // an auth comparison inside a work item that is already changing
+  // authentication multiplies the risk of the failure S1 exists to prevent.
+  const isServiceRole =
+    (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '') === serviceKey;
 
   // ── SET ─────────────────────────────────────────────────────────────────
   // Two auth paths:
@@ -239,6 +298,101 @@ Deno.serve(async (req) => {
     const match = await bcrypt.compare(pin, hash);
     console.log(`[manage-voice-pin] VERIFY ${match ? 'match' : 'no_match'} user_id=${userId.slice(0,8)}…`);
     return jsonResponse({ success: true, match });
+  }
+
+  // ── S1 Phase 6 remediation (2026-08-19) ──────────────────────────────────
+  //
+  // The three operations below moved here from the voice server, which had
+  // been calculating the failure window, mutating the counter, deciding when
+  // to alert, and sending the SMS. That is business and security logic living
+  // in an entry point, and the architecture is explicit that entry points
+  // translate rather than implement. Phase 6 mandatory issue 2.
+  //
+  // Moving them also FIXES the race (mandatory issue 1), because the increment
+  // now happens inside one atomic database operation instead of a
+  // read-calculate-write sequence across the network. The two findings had one
+  // remedy: the operation becomes atomic BY being owned in the right place.
+  //
+  // All three are service-role only — they mutate security state.
+
+  // RECORD_FAILURE — one failed PIN attempt against a known account.
+  if (op === 'record_failure') {
+    if (!isServiceRole) return jsonResponse({ success: false, error: 'service_role_required' }, 401);
+    const userId = String(body?.user_id ?? '').trim();
+    if (!userId) return jsonResponse({ success: false, error: 'user_id_required' }, 400);
+
+    const { data, error } = await supabase.rpc('record_voice_pin_failure', { p_user_id: userId });
+    if (error) {
+      console.error('[manage-voice-pin] RECORD_FAILURE rpc error:', error.message);
+      return jsonResponse({ success: false, error: 'db_update_failed' }, 500);
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) {
+      // No such user. Same shape as success so the caller cannot enumerate.
+      console.warn(`[manage-voice-pin] RECORD_FAILURE no row for user_id=${userId.slice(0,8)}…`);
+      return jsonResponse({ success: true, count: 0, alerted: false });
+    }
+
+    const count = Number(row.failed_count ?? 0);
+    const phone = row.owner_phone as string | null;
+
+    // Alert exactly once, AT the threshold — not on every failure past it,
+    // which would train the owner to ignore it. `count` comes from the atomic
+    // statement itself; re-reading it here would reintroduce the race by the
+    // back door (see the function's COMMENT in the migration).
+    let alerted = false;
+    if (count === PIN_ALERT_THRESHOLD && phone) {
+      alerted = await sendPinFailureAlert(supabase, userId, phone, count);
+    }
+
+    console.log(`[manage-voice-pin] RECORD_FAILURE user_id=${userId.slice(0,8)}… count=${count} alerted=${alerted}`);
+    return jsonResponse({ success: true, count, alerted });
+  }
+
+  // CLEAR_FAILURES — the owner has addressed it (correct PIN, PIN change, or
+  // unblocking). No atomicity concern: setting to zero is idempotent.
+  if (op === 'clear_failures') {
+    if (!isServiceRole) return jsonResponse({ success: false, error: 'service_role_required' }, 401);
+    const userId = String(body?.user_id ?? '').trim();
+    if (!userId) return jsonResponse({ success: false, error: 'user_id_required' }, 400);
+
+    const { error } = await supabase
+      .from('user_settings')
+      .update({ voice_pin_failed_count: 0, voice_pin_failed_at: null })
+      .eq('user_id', userId);
+    if (error) {
+      console.error('[manage-voice-pin] CLEAR_FAILURES error:', error.message);
+      return jsonResponse({ success: false, error: 'db_update_failed' }, 500);
+    }
+    console.log(`[manage-voice-pin] CLEAR_FAILURES user_id=${userId.slice(0,8)}…`);
+    return jsonResponse({ success: true });
+  }
+
+  // SET_BLOCKED — refuse (or re-allow) unregistered-phone access.
+  //
+  // `receive-sms-reply` routes the BLOCK command here rather than mutating the
+  // column itself; Phase 6 accepted that webhook as a command router but not
+  // as the owner of the security state.
+  //
+  // Only `blocked: true` is reachable from the phone channel. Re-enabling is
+  // the mobile app's job — the recovery channel must stay stronger than the
+  // channel under attack, so someone working the phone line cannot undo it.
+  if (op === 'set_blocked') {
+    if (!isServiceRole) return jsonResponse({ success: false, error: 'service_role_required' }, 401);
+    const userId  = String(body?.user_id ?? '').trim();
+    const blocked = body?.blocked === true;
+    if (!userId) return jsonResponse({ success: false, error: 'user_id_required' }, 400);
+
+    const { error } = await supabase
+      .from('user_settings')
+      .update({ voice_unregistered_blocked: blocked })
+      .eq('user_id', userId);
+    if (error) {
+      console.error('[manage-voice-pin] SET_BLOCKED error:', error.message);
+      return jsonResponse({ success: false, error: 'db_update_failed' }, 500);
+    }
+    console.log(`[manage-voice-pin] SET_BLOCKED=${blocked} user_id=${userId.slice(0,8)}…`);
+    return jsonResponse({ success: true, blocked });
   }
 
   return jsonResponse({ success: false, error: `unknown op: ${op}` }, 400);

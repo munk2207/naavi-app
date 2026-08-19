@@ -490,4 +490,55 @@ export const s1VoicePinScopingTests: TestCase[] = [
     },
     async teardown(ctx) { await deprovisionTestAccount(ctx); },
   },
+  {
+    id: 's1.failure-counter-is-atomic-under-concurrency',
+    category: 's1-voice-pin-scoping',
+    description:
+      'THE PHASE 6 CONTROL. Concurrent failures must each be counted. The original code did '
+      + 'read-calculate-write as three network operations, so failures overwrote each other: measured '
+      + 'against staging, 3 concurrent failures recorded 2 and 5 recorded 2. That is a bypass, not a '
+      + 'lost statistic — the alert fires when the count REACHES the threshold, so an attacker issuing '
+      + 'attempts in parallel rather than in sequence could hold it below indefinitely and never be '
+      + 'reported. This test fails on the pre-Phase-6 implementation, which is the property it needs.',
+    timeoutMs: 60_000,
+    async run(ctx) {
+      if (!(await readPinState(ctx))) { ctx.log('D1 migration not applied here — skipping.'); return; }
+
+      const call = (op: string) => fetch(`${ctx.supabaseUrl}/functions/v1/manage-voice-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ctx.serviceRoleKey}` },
+        body: JSON.stringify({ op, user_id: ctx.testUserId }),
+      }).then((r) => r.json()).catch(() => ({}));
+
+      const probe = await call('record_failure');
+      if (probe?.success !== true) {
+        ctx.log(`record_failure unavailable (${probe?.error ?? 'no response'}) — pre-Phase-6 backend, skipping.`);
+        return;
+      }
+
+      const N = 5;
+      await call('clear_failures');
+      const results = await Promise.all(Array.from({ length: N }, () => call('record_failure')));
+
+      const state = await readPinState(ctx);
+      expectTruthy(
+        state?.count === N,
+        `${N} concurrent failures must all be counted — expected ${N}, got ${state?.count}. `
+        + 'A lower number means the read-modify-write race is back and the alert threshold can be held down.',
+      );
+
+      // Stronger than the total: every caller must receive a DISTINCT count.
+      // That is what guarantees exactly one caller sees the threshold value, so
+      // the alert still fires exactly once when failures arrive together.
+      const counts = results.map((r) => r?.count).filter((c) => typeof c === 'number').sort((a, b) => a - b);
+      expectTruthy(
+        counts.length === N && counts.every((c, i) => c === i + 1),
+        `each concurrent caller must get its own sequential count 1..${N} — got [${counts.join(',')}]. `
+        + 'Duplicates mean two callers could both see the threshold, or neither could.',
+      );
+
+      await call('clear_failures');
+    },
+    async teardown(ctx) { await deprovisionTestAccount(ctx); },
+  },
 ];

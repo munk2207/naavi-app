@@ -88,15 +88,43 @@ Deno.serve(async (req) => {
         return twiml();
       }
 
+      // S1 Phase 6 — route the command; do not perform the security mutation.
+      // Phase 6 accepted this webhook as a command router but not as the owner
+      // of the security state: "provided the actual security-state operation
+      // remains Shared Core; currently it performs the security mutation
+      // itself." `manage-voice-pin` owns it now.
+      // Explicit fetch rather than `admin.functions.invoke`: the invoke helper
+      // did not present service-role auth to the target function (verified on
+      // staging — a direct `set_blocked` call succeeded while the same call
+      // through invoke was refused), and this is the pattern the voice server
+      // already uses for the same function. One way of calling Shared Core,
+      // not two.
       const ids = owners.map((o: { user_id: string }) => o.user_id);
-      const { error: uErr } = await admin
-        .from('user_settings')
-        .update({ voice_unregistered_blocked: true })
-        .in('user_id', ids);
+      const results = await Promise.all(ids.map(async (id: string) => {
+        try {
+          const r = await fetch(`${supabaseUrl}/functions/v1/manage-voice-pin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+            body: JSON.stringify({ op: 'set_blocked', user_id: id, blocked: true }),
+          });
+          const d = await r.json().catch(() => ({}));
+          return { ok: r.ok && d?.success !== false, detail: d?.error ?? `status ${r.status}` };
+        } catch (e) {
+          return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+        }
+      }));
 
-      if (uErr) {
-        console.error('[receive-sms-reply] S1 BLOCK — update failed:', uErr.message);
-        return twiml();
+      const failed = results.filter((r) => !r.ok);
+      if (failed.length > 0) {
+        // Rule 21 — never silent here. The owner texted BLOCK because they
+        // believe they are under attack; if it did not take effect they must
+        // not be told it did.
+        console.error(`[receive-sms-reply] S1 BLOCK — ${failed.length}/${ids.length} failed:`,
+          failed.map((r) => r.detail).join('; '));
+        return twiml(
+          200,
+          "Something went wrong and calls are NOT blocked yet. Please open the Naavi app, or reply BLOCK again.",
+        );
       }
 
       console.log(`[receive-sms-reply] S1 BLOCK applied to ${ids.length} account(s) for ${fromPhone}`);
