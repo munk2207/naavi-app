@@ -15,8 +15,16 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
-function twiml(status = 200): Response {
-  return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
+// Empty TwiML acknowledges the webhook without replying. `message` (added by
+// S1 Track D) emits a <Message> so Twilio sends an SMS back — used to confirm
+// a BLOCK instruction so the owner knows it took effect.
+function twiml(status = 200, message?: string): Response {
+  const escaped = message
+    ? message.replace(/[<>&'"]/g, (c) =>
+        ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c] ?? c))
+    : '';
+  const inner = message ? `<Message>${escaped}</Message>` : '';
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response>${inner}</Response>`, {
     status,
     headers: { 'Content-Type': 'text/xml' },
   });
@@ -46,6 +54,58 @@ Deno.serve(async (req) => {
     }
 
     console.log(`[receive-sms-reply] inbound SMS from ${fromPhone}: "${body.slice(0, 80)}"`);
+
+    // ── S1 Track D (2026-08-19) — "BLOCK" stops unregistered-phone access ────
+    //
+    // The bank model: Naavi alerts the owner about failed PIN attempts and the
+    // OWNER decides. Never automatic — auto-blocking would hand an attacker a
+    // denial-of-service against the real owner (Wael, Phase 0).
+    //
+    // Checked BEFORE ticket handling so a security instruction is never
+    // swallowed as a reply to an open support thread. Matched strictly: the
+    // whole message must be the word, so "block" inside ordinary prose in a
+    // ticket reply cannot trigger it.
+    //
+    // Authority comes from the sending number: only the registered owner of an
+    // account can block it, because only they receive SMS at that number.
+    // Re-enabling is deliberately NOT possible here — it requires the mobile
+    // app, so the recovery channel stays stronger than the attacked one and an
+    // attacker working the phone line cannot undo it.
+    if (/^\s*block\s*$/i.test(body)) {
+      const { data: owners, error: oErr } = await admin
+        .from('user_settings')
+        .select('user_id')
+        .eq('phone', fromPhone);
+
+      if (oErr) {
+        console.error('[receive-sms-reply] S1 BLOCK — owner lookup failed:', oErr.message);
+        return twiml();
+      }
+      if (!owners?.length) {
+        // Say nothing useful back: replying "no account" to an arbitrary number
+        // would confirm which numbers are registered.
+        console.warn(`[receive-sms-reply] S1 BLOCK from unrecognised number ${fromPhone} — ignoring`);
+        return twiml();
+      }
+
+      const ids = owners.map((o: { user_id: string }) => o.user_id);
+      const { error: uErr } = await admin
+        .from('user_settings')
+        .update({ voice_unregistered_blocked: true })
+        .in('user_id', ids);
+
+      if (uErr) {
+        console.error('[receive-sms-reply] S1 BLOCK — update failed:', uErr.message);
+        return twiml();
+      }
+
+      console.log(`[receive-sms-reply] S1 BLOCK applied to ${ids.length} account(s) for ${fromPhone}`);
+      return twiml(
+        200,
+        'Done. Calls from unregistered phones are now blocked for your account. '
+        + 'Turn it back on in the Naavi app.',
+      );
+    }
 
     // Find most recent non-closed ticket for this phone number
     const { data: ticket, error: tErr } = await admin
