@@ -42,3 +42,10 @@ firebase/service-account.json
 # - backups holds local SQL/JSON snapshots of action_rules, user_places, etc.
 /naavi-voice-server/
 /backups/
+
+# Local-only Claude Code settings and Supabase CLI scratch state.
+# settings.local.json records approved shell commands VERBATIM, which has
+# included curl calls with live apikey headers (70 such entries found and
+# scrubbed 2026-08-19). It must never be tracked.
+.claude/settings.local.json
+supabase/.temp/

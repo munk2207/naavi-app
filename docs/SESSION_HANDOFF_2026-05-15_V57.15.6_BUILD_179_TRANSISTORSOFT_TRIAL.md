@@ -155,4 +155,4 @@ CLAUDE.md "MUST USE GOOGLE PLAY" section also updated to reference this nuance.
 
 ## Hygiene reminder
 
-Wael pasted the Supabase service_role key (`sb_secret_ExJYK...`) into chat earlier this session for a one-shot read-only query (verified the two phones' geofence rules had identical resolved coords). Standard hygiene: rotate the key from Supabase API Keys page → 3-dot menu → Regenerate. ~30 sec. Not urgent but worth doing.
+Wael pasted the Supabase service_role key (`sb_secret_<REDACTED-2026-08-19>...`) into chat earlier this session for a one-shot read-only query (verified the two phones' geofence rules had identical resolved coords). Standard hygiene: rotate the key from Supabase API Keys page → 3-dot menu → Regenerate. ~30 sec. Not urgent but worth doing.
