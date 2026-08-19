@@ -173,15 +173,27 @@ The hostname contains "production" because Railway's *environment* is named that
 
 **Finding 5 — B11c, two voice defects from the first staging call.** The caller's name is absent from the timezone-ask prompt and from its confirmation. Located (`index.js:6685`, `:6919` — the name is supported, the fallback branch ran, so `userName` was empty) but **deliberately not investigated**, per Wael. Also captures `parseTimezone.js`'s hardcoded vocabulary (5 region aliases + 29 cities). Commit `2df4407`.
 
-**Finding 6 — secret exposure.** Production Railway variables were shared as a screenshot during setup, placing several live keys in the session transcript: Anthropic, Deepgram, Azure Speech, Google client secret, Twilio auth token, and the production Supabase service-role key. Staging's service-role key was subsequently also placed in the transcript. **Recommend rotating all of them.** Not yet done.
+**Finding 6 — the Demo line and the Voice platform are one process, and the coupling produced this phase's only real blocker.** Raised by Wael on reading the B10 analysis: *"One of the big issue is to mix the Demo with the Voice platform, they are different."* The evidence is in §7 item 1 — the sole direct-to-Twilio outbound in the entire voice server belongs to the demo flow, and that is what forced T2 to weigh a duplicate guard implementation at all. A separate demo service would have made the question moot. Two further consequences fall out of the same coupling: `getDemoEnvironment.js`'s `configFor('production')` hardcodes `+18889162284` rather than deriving it, and T2's containment guarantee now depends on a configuration invariant instead of code. **Opened as holding-list item T3, Full Phase 1-8, with an ADR required either way.** Out of T2's scope.
+
+**Finding 7 — secret exposure.** Production Railway variables were shared as a screenshot during setup, placing several live keys in the session transcript: Anthropic, Deepgram, Azure Speech, Google client secret, Twilio auth token, and the production Supabase service-role key. Staging's service-role key was subsequently also placed in the transcript. **Recommend rotating all of them.** Not yet done.
 
 ---
 
 ## 7. Known risks and what is NOT delivered
 
-1. **B10 — the voice server's own outbound SMS is still unguarded** (`naavi-voice-server/src/index.js:7224`). It cannot import the Deno `_shared` module, so it needs a small equivalent check — a second implementation of the same rule. Governance §15 makes unexcepted duplication an automatic rejection, and **Phase 3 has not ruled on whether it warrants an Architecture Exception despite being asked across three exchanges.** Until resolved, "staging cannot reach outside the allowlist" is true of everything routed through Supabase but **not** of the voice server itself.
+1. **B10 — RESOLVED 2026-08-19: not required, and no Architecture Exception is needed.** The voice server's one direct-to-Twilio SMS (`naavi-voice-server/src/index.js:7224`) is **unreachable on the staging service by configuration**. Chain, each link verified by direct read:
 
-2. **Track D is partial.** `resolveProjectRef()` ships inside the guard and logs the resolved project on every guard decision. The voice-server-side `client_diagnostics` stamp sits in B10's held file. The boot-log evidence in §3 currently substitutes for it.
+   - That send is the **F2b demo-line recap SMS**, not a registered-user path. Its only three call sites (`:7719`, `:7842`, `:7955`) are inside the demo walkthrough handlers.
+   - The demo flow has a single entry gate: `/voice` calls `getDemoEnvironment(calledNumber)` (`:6585`), which returns non-null only when the dialed number matches `DEMO_TWILIO_NUMBER` or `STAGING_DEMO_TWILIO_NUMBER`. Otherwise `isDemoCall` is false and the demo branch (`:6593-6596`) never executes.
+   - Both variables are **unset on the staging service**, proven by its own boot log (§3): `DEMO_TWILIO_NUMBER="" (len=0)`, `STAGING_DEMO_TWILIO_NUMBER="" (len=0)`.
+   - A second, independent stop exists even if the first were bypassed: `demoSmsFrom` resolves to `STAGING_DEMO_TWILIO_NUMBER || ''` and the function aborts on empty (`:7213-7216`) — *"will not guess a sender number."*
+   - The voice server's other `api.twilio.com` calls (`:5433`, `:5456`, `:5484`) manage recordings on an already-connected call. Not third-party outbound.
+
+   **Therefore the containment claim holds as stated:** staging cannot reach a non-allowlisted destination. Implementing B10 would introduce a duplicate implementation of the guard rule in order to protect code that cannot execute — precisely what governance §0.4 forbids. **No Architecture Exception is required because no duplication is being introduced.**
+
+   **⚠️ CONFIGURATION INVARIANT — this safety is configuration-dependent, not code-enforced.** If `DEMO_TWILIO_NUMBER` or `STAGING_DEMO_TWILIO_NUMBER` is ever set on the staging service, the path becomes reachable and B10 must be implemented **first**. Worse: `getDemoEnvironment.js`'s `configFor('production')` carries a **hardcoded** `demoSmsFrom: '+18889162284'`, so a production-tagged demo call would send from the real 888 number regardless of which environment it ran in. Recorded here and in the holding list so this cannot be tripped unknowingly.
+
+2. **Track D is partial.** `resolveProjectRef()` ships inside the guard and logs the resolved project on every guard decision. The voice-server-side `client_diagnostics` stamp was scoped alongside B10 and, with B10 closed as unnecessary, has not been built. The boot-log evidence in §3 currently substitutes for it — weaker, because it proves what the process started with rather than what a given transaction reached. Carried forward as a follow-up, not claimed as delivered.
 
 3. **Only the blocked path is live-proven.** A staging send to an *allowlisted* destination has not been demonstrated end to end.
 
