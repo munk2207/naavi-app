@@ -156,6 +156,51 @@ Both halves of the banner name STAGING — the split-brain the T2-F1 guard exist
 
 **This closes Phase 2 §8.3 Addition 2:** Track C did **not** break the auto-tester via the uniqueness trigger. The concern was raised as a self-reported finding and is now disproven by a live run rather than by reasoning.
 
+### ⭐ Live end-to-end verification, and the discovery it produced — 2026-08-19 ~06:08-06:21 EST
+
+Wael called `+13435041572` and worked through the test script. This closed three of the four outstanding manual checks and surfaced the most consequential finding of the work item.
+
+**Test 1-2 — conversational, against staging data.** Passed. Naavi answered from the staging account's data (Blood Test, Amoxicillin schedule, Dr. Sarah follow-up, the `work` list, both alerts reported as disabled). No PIN was requested — the caller was recognised, confirming Track C's identity remediation end to end.
+
+**Test 3 — a reminder, which exposed a silent, total failure of scheduled delivery on staging.**
+
+Wael asked for a reminder 3 minutes out. It was written correctly — `action_rules` row `32dec769`, `trigger_type: time`, `datetime: 2026-08-19T06:09:00-04:00`, `action_type: sms`, `to_phone: +13433332567` (allowlisted), `enabled: true`. **Nothing arrived.** Six minutes past due, `last_fired_at` was still `null` and `sent_messages` was empty.
+
+The chain of elimination, each step verified rather than assumed:
+
+1. **The rule was well-formed** — full row read directly.
+2. **`findTimeTriggers` was not at fault** — `evaluate-rules/index.ts:311` fires whenever `triggerTime <= now`; the rule qualified.
+3. **The function worked** — invoked manually with a current key it returned `{"fired":1,"errors":[]}`, and Wael confirmed **SMS, WhatsApp and voice call all arrived**. That is the positive-path proof §4 item 1 was waiting for.
+4. **The crons were running** — `cron.job_run_details` showed `evaluate-rules-every-minute` and `check-reminders-every-minute` succeeding at 6:14, 6:15, 6:16.
+5. **The cron URLs were correct** — both point at `xugvnfudofuskxoknhve`. No environment leak.
+6. **`net._http_response` gave the answer:**
+
+```
+6:17:00 | HTTP 401 | {"message":"Unregistered API key","hint":"Double check the provided API key..."}
+   (x6, every minute)
+```
+
+**Root cause: the cron definitions carry a hardcoded Bearer token, and staging's service-role key had been rotated out from under them.** `cron.job_run_details` reported "succeeded" because the *SQL statement* ran fine; the HTTP call inside it was being rejected. The only outward symptom was an empty `sent_messages` table.
+
+**Consequence, stated plainly: nothing time-based had been working on staging at all** — no alerts, no reminders, no morning calls — for an unknown period, invisibly. This is the same defect class as `project_naavi_staging_service_role_key_rotation`, which recorded the symptom on production and left it *"flagged, not touched."*
+
+**Audit and repair (staging only).** Of 11 cron jobs, **7 carried the same stale token**; 4 send no Bearer header and were unaffected. Worth noting for the production discussion: sending *no* key passes the gateway, while sending a *stale* one is rejected. All 7 rewritten via `cron.alter_job` with only the token substituted, the rest of each command preserved verbatim. Full before-state snapshotted for rollback.
+
+**Verified live after the fix** — the 6:21:00 tick:
+
+```
+HTTP 200 | {"message":"No active rules","checked_at":"2026-08-19T10:21:00.653Z"}   evaluate-rules
+HTTP 200 | {"message":"No reminders due","checked_at":"2026-08-19T10:21:00.297Z"}  check-reminders
+HTTP 200 | {"triggered":0}                                                          trigger-morning-call
+HTTP 200 | {"processed":0,"candidates":2}
+```
+
+Zero 401s. **This closes §4 item 3 (cron-fired path)** — the scheduled path now reaches the function unaided.
+
+**One unrelated failure remains, noted not chased:** `HTTP 404 {"error":"wael user not found"}` from `geofence-health-check-daily` — a production-shaped assumption baked into a function now running against staging. Harmless here; same family as the other cross-environment leaks in Finding 2.
+
+**Production is NOT fixed.** Wael's response on being shown this: *"production is not working at all, will discuss that after finishing with the staging."* Deliberately out of T2's scope and left untouched.
+
 ### First live call — 2026-08-19
 
 Wael called `+13435041572`; Naavi answered. Two defects surfaced, recorded as **B11c** (§6). **Neither is in T2's scope, and both were found without production being touched — the environment doing the job it was built for.**
@@ -164,12 +209,12 @@ Wael called `+13435041572`; Naavi answered. Two defects surfaced, recorded as **
 
 ## 4. Manual tests required (not yet done)
 
-1. **Positive-path outbound** — a staging alert firing to an allowlisted destination and actually arriving. Only the *blocked* path is proven; the allowed path is asserted by unit test, not by a live send.
-2. **Full conversational call** — a staging call exercising alerts, lists, memory, calendar against staging data.
-3. **Cron-fired alert** — create a rule on staging, let `evaluate-rules` fire it, confirm the guard is consulted on the cron path (only the direct HTTP invocation is proven).
+1. ~~**Positive-path outbound**~~ — **DONE 2026-08-19.** A staging alert fired to an allowlisted destination and Wael confirmed **SMS, WhatsApp and voice call all arrived**. The allowed path is now proven live, not merely unit-asserted.
+2. ~~**Full conversational call**~~ — **DONE 2026-08-19.** Staging call answered from staging data (calendar, memory, lists, alerts), caller recognised without a PIN.
+3. ~~**Cron-fired alert**~~ — **DONE 2026-08-19**, though not as expected: the first attempt exposed that *every* staging cron was failing auth with HTTP 401. Repaired, and the scheduled path verified returning 200s unaided. Full account in §3.
 4. ~~**`npm run test:auto` (Gate 1) with `SUPABASE_URL` pointed at staging** — required by Phase 2 §8.3 Addition 2, to confirm Track C did not break the auto-tester via the uniqueness trigger.~~ **DONE 2026-08-19 — superseded and exceeded by the Gate 2 staging run above (§3).** Gate 2 exercises the same fixtures *and* the live voice server; the phone snapshot came back `null`, proving Track C held and the uniqueness trigger was not tripped. 42 passed, 0 failed.
 
-**Items 1-3 remain outstanding.** All three need a human on the phone; nothing else blocks them.
+**All four manual verifications are now complete.** Items 1-3 were closed by Wael's live call on 2026-08-19 (§3); item 4 was superseded by the Gate 2 staging run.
 
 ### ⚠️ Correction — an earlier version of this list was wrong
 
@@ -219,6 +264,10 @@ The hostname contains "production" because Railway's *environment* is named that
 **Finding 5 — B11c, two voice defects from the first staging call.** The caller's name is absent from the timezone-ask prompt and from its confirmation. Located (`index.js:6685`, `:6919` — the name is supported, the fallback branch ran, so `userName` was empty) but **deliberately not investigated**, per Wael. Also captures `parseTimezone.js`'s hardcoded vocabulary (5 region aliases + 29 cities). Commit `2df4407`.
 
 **Finding 6 — the Demo line and the Voice platform are one process, and the coupling produced this phase's only real blocker.** Raised by Wael on reading the B10 analysis: *"One of the big issue is to mix the Demo with the Voice platform, they are different."* The evidence is in §7 item 1 — the sole direct-to-Twilio outbound in the entire voice server belongs to the demo flow, and that is what forced T2 to weigh a duplicate guard implementation at all. A separate demo service would have made the question moot. Two further consequences fall out of the same coupling: `getDemoEnvironment.js`'s `configFor('production')` hardcodes `+18889162284` rather than deriving it, and T2's containment guarantee now depends on a configuration invariant instead of code. **Opened as holding-list item T3, Full Phase 1-8, with an ADR required either way.** Out of T2's scope.
+
+**Finding 8 — every staging cron was failing authentication, silently, and had been for an unknown period.** Found by testing rather than reading: a reminder created on a live call never arrived. The cron definitions carry a hardcoded Bearer token and staging's service-role key had been rotated; `cron.job_run_details` reported "succeeded" because the SQL ran, while the HTTP call inside returned 401. **Nothing time-based worked on staging at all** — no alerts, reminders or morning calls — with an empty `sent_messages` table as the only symptom. 7 of 11 jobs affected; repaired and verified returning 200s. Full account in §3. **This is the most consequential finding of the work item, and T2 is what surfaced it** — the environment existed for barely an hour before its first real test exposed a defect class that had been invisible. Same class as `project_naavi_staging_service_role_key_rotation`, which recorded the identical symptom on production and left it "flagged, not touched." **Production remains unfixed and out of scope** — Wael: *"production is not working at all, will discuss that after finishing with the staging."*
+
+**Finding 9 — B11c is broader than first recorded.** The original entry covered the name being absent from the timezone-ask prompt and its confirmation. Wael's live call showed **Naavi did not greet him by name at all**, so the defect is not confined to the timezone flow. He also reported the **start of a spoken reply being garbled** — recurring, not new. Both belong to B11c; neither investigated, per the standing instruction to document only.
 
 **Finding 7 — secret exposure.** Production Railway variables were shared as a screenshot during setup, placing several live keys in the session transcript: Anthropic, Deepgram, Azure Speech, Google client secret, Twilio auth token, and the production Supabase service-role key. Staging's service-role key was subsequently also placed in the transcript. **Recommend rotating all of them.** Not yet done.
 
