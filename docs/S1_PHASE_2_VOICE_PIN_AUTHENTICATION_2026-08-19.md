@@ -165,7 +165,27 @@ Reset is on **successful PIN authentication specifically**, not on any successfu
 
 The reviewer's finding exposes a second case it does not name: **a user who never succeeds**. Consider three failed attempts in March, abandoned, then two in August. Reset-on-success never fires, so the count reaches five and alerts — describing a five-month-old pattern as though it were an incident.
 
-**D2 further amended:** failures older than a rolling window (**24 hours**, provisional) do not count toward the threshold. `voice_pin_failed_at` — already in D1 — carries the timestamp needed; no schema change.
+**D2 further amended:** failures older than a rolling window of **7 days** do not count toward the threshold. `voice_pin_failed_at` — already in D1 — carries the timestamp needed; no schema change.
+
+**The window was 24 hours in the first draft of this amendment. Wael rejected it, and was right on two counts.**
+
+**A short window is trivially evadable.** At 24 hours an attacker paces: four attempts, wait a day, four more. The counter resets before any threshold, the alert never fires, and the grind continues indefinitely. A short window does not merely inconvenience the user — it defeats the mechanism it exists to power.
+
+**And it does not survive real reading habits.** Wael: *"24 hours is very short, Robert can check his SMS every two days."* If the owner reads SMS every other day, a 24-hour counter has already zeroed by the time they look — the alert describes something the system no longer believes is happening.
+
+**Why 7 days closes it.** To stay under a 5-in-7-days threshold an attacker manages roughly 5 guesses a week. Against a 6-digit PIN scoped to a single account that is 1,000,000 ÷ 5 ≈ **200,000 weeks**. Paced attack stops being worth attempting.
+
+**And it costs legitimate users nothing**, because reset-on-success (§8.1) already clears anyone who eventually gets in. The only people who accumulate across a week are those who repeatedly fail and *never* succeed — precisely the case worth alerting on. There was no argument for 24 hours beyond caution.
+
+### 8.2a ⚠️ Known limitation — the alert does not stop anything
+
+Recorded plainly because it bears on how much protection Track D actually provides, and because the same observation from Wael produced the window change above.
+
+**Notification is not prevention.** Even at a 7-day window, if the owner takes two days to read the SMS, that is two days in which an attacker continues unimpeded. The alert informs; only the owner's `BLOCK` reply — or the app — stops anything.
+
+This is a **deliberate consequence of the bank model** Wael chose over automatic lockout (Phase 0), and that decision is not reopened here: auto-locking hands an attacker a denial-of-service against the real owner, which is worse. But *"the owner is notified"* is materially weaker protection when the owner may be 48 hours away, and Phase 3 should weigh Track D on that basis rather than on the assumption of a prompt response.
+
+**What actually carries the security load is Track A** — scoping the PIN to one claimed account — and **Track C**, the 6-digit length. Track D is a safety net for the case where someone attacks anyway, not the primary defence. Nothing in this plan depends on the owner reacting quickly.
 
 The counter's meaning becomes **"recent consecutive failures"**, which is what the alert is actually about. Both halves are needed: reset-on-success handles the user who eventually gets in, the window handles the user who does not.
 
@@ -177,7 +197,7 @@ The counter's meaning becomes **"recent consecutive failures"**, which is what t
 
 ### 8.4 Unchanged by this amendment
 
-Risk stays **HIGH**. The Change Impact Matrix (§3) gains no new layer — no schema change is required, since `voice_pin_failed_at` was already in D1. No new file enters the plan. The window value (24 hours) is **provisional**, for the same reason as the alert threshold: there is no usage data to calibrate against, and Phase 1 §6 Q5 records that as a judgement rather than a measurement.
+Risk stays **HIGH**. The Change Impact Matrix (§3) gains no new layer — no schema change is required, since `voice_pin_failed_at` was already in D1. No new file enters the plan. The window value (7 days) remains a **judgement, not a calibration** — there is no usage data to calibrate against, and Phase 1 §6 Q5 records that explicitly. It is, however, a reasoned judgement rather than an arbitrary one: see the pacing arithmetic in §8.2.
 
 
 ---
