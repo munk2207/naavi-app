@@ -50,17 +50,40 @@ Each component's owner is the single codebase responsible for that component's c
 
 ### 0b. Deployment Environments (added by T2, 2026-08-19)
 
-Each codebase has a different number of environments. This asymmetry is load-bearing: it decides where a change can be exercised before it reaches a real user, and it was undocumented until T2.
+Each codebase — and the demo line that rides on one of them — has a different number of environments. This asymmetry is load-bearing: it decides where a change can be exercised before it reaches a real user, and it was undocumented until T2. Note that the row count below is **not** the count of deployable units: the demo line has two numbers but no environment of its own, so there are three Railway services, not four.
 
 | Codebase | Environments | How they are separated |
 |---|---|---|
 | Mobile app | 2 | Supabase project `xugvnfudofuskxoknhve` (staging) / `hhgyppbxgmjrwdpdubcx` (production); app packages `ca.naavi.app.staging` / `ca.naavi.app` |
 | Voice server | 2 (since 2026-08-19) | Two Railway services in one project: `naavi-voice-staging` deploying from branch `staging`, and `naavi-voice-server` deploying from `main`. Separated by which Twilio number is dialled: `+13435041572` reaches staging, `+12495235394` reaches production. |
+| Demo line | 2 numbers, but **0 independent code paths** | Not a platform. A routing mode of the voice server, selected by `DEMO_USER_ID` and by which number is dialled. `+18889162284` (production demo) runs on the **voice production server itself**; `+18734462284` (staging demo) runs on a separate Railway service, `generous-tenderness-production-9235`, which deploys the **same `staging` branch** as voice-staging. |
 | Supabase | 2 | The two projects above. |
 
 **Before 2026-08-19 the voice server had ONE environment.** Every voice change for real callers was developed and deployed straight against production. T2 built the staging half; see `docs/T2_PHASE_0_CREATING_VOICE_STAGING_2026-08-19.md` onward for the full governed record.
 
 **The two voice environments share the staging Supabase project with mobile-staging.** This was a deliberate, recorded decision (T2 Phase 0, Option 1 over Option 2) rather than an accident: a third Supabase project would have meant a third copy of the schema, the Edge Functions and the cron jobs to keep in sync forever. The consequence is that voice-staging and mobile-staging are isolated by `user_id` scoping, not by separate databases.
+
+**⭐ The demo line has two phone numbers and no environment of its own** (established 2026-08-19, by direct query rather than from documentation — Wael asked whether Mobile, Voice and Demo each now had two environments, and the answer turned out to be no).
+
+Three Railway services exist, not six:
+
+| Number | Purpose | Server it actually runs on |
+|---|---|---|
+| `+12495235394` | Voice production | `naavi-voice-server-production` |
+| `+13435041572` | Voice staging | `naavi-voice-staging-production` |
+| `+18889162284` | **Demo production** | `naavi-voice-server-production` — *the voice production server* |
+| `+18734462284` | **Demo staging** | `generous-tenderness-production-9235` |
+
+**How this was established, so a later reader does not have to re-derive it:** the four Twilio numbers' `voice_url` values were read from the Twilio API, and each service was then probed for the S1 `/voice/identify-result` endpoint. Both staging services answered `200`; voice production answered `404`. Since S1 was pushed to the `staging` branch and deployed only to voice-staging, the demo staging service having the same code proves it deploys that same branch. Nobody deployed to it.
+
+**Two consequences that are easy to miss:**
+
+1. **T2's isolation does not cover the demo line.** T2 separated Voice-staging from Voice-production. The public 1-888-91-NAAVI demo line still runs *inside* voice production, so any voice production deploy changes the demo line at the same instant, and any voice production incident is simultaneously a demo outage. A work item that promotes voice changes to production is also, silently, a demo release.
+2. **The two staging services are not isolated from each other.** They deploy the same branch, so a change intended for voice-staging lands on demo-staging too. They differ only by environment variables.
+
+`generous-tenderness-production-9235` is an auto-generated Railway name recorded in exactly one place before this entry — `docs/SESSION_HANDOFF_2026-07-01_F2B_STAGING_LIVE_SCENARIOS_NEXT.md`. Nothing in either codebase refers to it. It is written down here because a service that exists only in someone's memory is a service that gets orphaned.
+
+This is the underlying problem [[T3]] exists to fix. Until T3 lands, treat "the voice platform" and "the demo line" as **one deployable unit** in any release plan.
 
 **Outbound containment.** Because staging shares a real Twilio account and real Google credentials, an allowlist guard sits in Shared Core (`supabase/functions/_shared/outbound_guard.ts`) on every send path. It is inert unless the `OUTBOUND_ALLOWLIST` secret is present, which it is only on staging — so production is protected by construction rather than by correct configuration. A second export resolves the outbound voice caller ID the same way, so a staging call never presents as production Naavi.
 
