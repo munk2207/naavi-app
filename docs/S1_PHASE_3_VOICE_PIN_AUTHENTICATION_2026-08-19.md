@@ -53,6 +53,24 @@ Phase 3 ran over two rounds.
 - **No change to the registered-caller path.** Calling from your own number must behave exactly as it does today.
 - **`token === serviceKey` is NOT authorized for change** — see §4.
 
+## 3a. ⚠️ Deployment sequencing — C4 and C5 must ship together
+
+Surfaced by Wael asking when the APK gets built. It is a deployment-ordering constraint, not a code defect, and it would not have been caught by any test of either change alone.
+
+**C4** makes `manage-voice-pin` require **6 digits** on `set`. **C5** is what allows a user to *type* six digits — `app/settings.tsx` currently has `maxLength={4}`.
+
+**Ship C4 without C5 and PIN-setting breaks completely.** The app can only submit four digits, the function rejects them, and no user can set a PIN at all. Existing PINs would continue to verify, so nothing looks wrong until someone tries to change theirs — a silent break, the failure shape this project keeps meeting.
+
+**Required ordering:**
+
+1. Server-side tracks (A, B, C1-C4, D1-D5) deploy to **staging Supabase and staging Railway**. No build needed.
+2. **Staging APK built and installed** (`eas build --profile staging`) before anyone attempts to set a PIN.
+3. Phase 7 manual validation covers both halves together.
+
+**Do not deploy C4 to production ahead of an APK carrying C5.** Production deployment is outside Phase 8 in any case (governance: *"Production follows the existing release process"*), but the constraint must travel with the change or it will be rediscovered the first time someone cannot set a PIN.
+
+**Where the APK fits overall:** most of S1 needs no build at all — only C5 and D6 touch mobile. The staging APK belongs at the end of Phase 4, because Phase 7's mandatory *Screen behavior* category cannot be validated without one. The production AAB is a separate decision after Phase 8, subject to the three gates.
+
 ## 4. Deferred Architectural Decisions
 
 Recorded separately so a future session recognises these as *considered and set aside*, not as fresh ideas.
@@ -89,4 +107,4 @@ The evidence package must show:
 
 ---
 
-**Awaiting Wael's explicit go-ahead for Phase 4** (governance §3, Phase-Gate Approval Rule). Phase 4 is the first phase in which code changes.
+**Phase 3 APPROVED by review, and Wael's own go-ahead for the Phase 3 → 4 transition given 2026-08-19.** Phase 4 is authorized to begin — the first phase in which code changes.
