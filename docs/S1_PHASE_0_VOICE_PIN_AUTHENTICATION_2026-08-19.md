@@ -116,4 +116,22 @@ Make it impossible for someone calling from an unregistered phone to reach anoth
 
 ---
 
+## Phase 0 Disposition
+
+**Reviewer verdict, 2026-08-19: APPROVED WITH ONE REQUIRED CLARIFICATION for Phase 1.**
+
+Endorsed the core finding — the current PIN is *"effectively a global credential search, because one entered PIN is tested against every PIN-enabled account"* — and the direction: identify the account first, validate the PIN only against it. Explicitly agreed with two rejections: **no automatic lockout** (a denial-of-service mechanism against legitimate users) and **no global throttling** (an attack on one account must not impair unrelated users).
+
+### MANDATORY Phase 1 decision — last-4 collision handling
+
+Phase 0 requires the PIN be checked against "exactly one account" while acknowledging that accounts can share the last four digits. **Phase 1 must resolve this before any implementation is designed, and must not quietly fall back to checking the PIN against every account sharing those four digits.**
+
+**Magnitude, so Phase 1 decides with numbers rather than instinct:** two accounts sharing last-4 doubles the odds — 2 in 1,000,000 rather than 1 in 1,000,000 — still vastly better than today's *user-count* ÷ 10,000. The fallback is not catastrophic in itself.
+
+**Why it is still refused:** the bucket size is bounded by nothing. At 10,000 users some last-4 buckets will hold five or six accounts, and the multiplier grows quietly with the user base. That is exactly the property S1 exists to eliminate — security that degrades as the product succeeds. A silent fallback would be the current defect in miniature, and small-and-growing is precisely how the current one started.
+
+**Migration deferral confirmed correct:** existing 4-digit PIN holders must keep working until they explicitly set a 6-digit one.
+
+---
+
 **Awaiting Wael's explicit Phase 0 approval.** Per governance §3's Phase-Gate Approval Rule, Phase 1 does not begin — including drafting the Phase 1 document — until that approval is given directly for this specific transition.
