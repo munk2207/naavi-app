@@ -5,7 +5,7 @@ Paste everything below the line into ChatGPT, and attach the two diff files:
 - `S1_diff_voice_server.txt` (38 KB)
 - `S1_diff_naavi_app.txt` (40 KB)
 
-Both are in the session scratchpad; paths are given at the end of this document.
+Both sit in `docs/`, alongside this prompt and every other S1 document.
 
 ---
 
@@ -116,9 +116,11 @@ Full diffs are attached.
 
 ## Diff file locations (for attaching)
 
+Both sit in `docs/`, alongside every other S1 document:
+
 ```
-C:\Users\waela\AppData\Local\Temp\claude\C--Users-waela-OneDrive-Desktop-Naavi\01bc859e-ee8a-46c8-b4ca-c1f757cb1845\scratchpad\S1_diff_voice_server.txt
-C:\Users\waela\AppData\Local\Temp\claude\C--Users-waela-OneDrive-Desktop-Naavi\01bc859e-ee8a-46c8-b4ca-c1f757cb1845\scratchpad\S1_diff_naavi_app.txt
+docs\S1_diff_voice_server.txt
+docs\S1_diff_naavi_app.txt
 ```
 
 Supporting documents, if the reviewer asks for them:

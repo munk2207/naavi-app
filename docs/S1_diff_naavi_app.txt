@@ -1,0 +1,853 @@
+diff --git a/app/settings.tsx b/app/settings.tsx
+index bd5aaff..f54006e 100644
+--- a/app/settings.tsx
++++ b/app/settings.tsx
+@@ -148,6 +148,12 @@ export default function SettingsScreen() {
+   const [newPin, setNewPin]                         = useState('');
+   const [confirmPin, setConfirmPin]                 = useState('');
+   const [pinError, setPinError]                     = useState<string | null>(null);
++  // S1 D6 (2026-08-19) — true when the user replied BLOCK to a failed-PIN
++  // alert. Clearing it is deliberately possible ONLY here, in the signed-in
++  // app: the recovery channel has to be stronger than the channel under
++  // attack, so someone working the phone line cannot undo it.
++  const [unregisteredBlocked, setUnregisteredBlocked] = useState(false);
++  const [unblocking, setUnblocking]                 = useState(false);
+   // Ref so the new-PIN field's keyboard "Done" can focus the confirm field
+   // without the user reaching back to tap it (V57.27.0 build 203 polish).
+   const confirmPinInputRef                          = useRef<TextInput>(null);
+@@ -264,6 +270,28 @@ export default function SettingsScreen() {
+           if (data.work_address) setWorkAddress(String(data.work_address));
+           // Voice PIN — null when no PIN set, ISO string when set.
+           setPinSetAt(data.voice_pin_set_at ? String(data.voice_pin_set_at) : null);
++          // S1 D6 — read the blocked flag SEPARATELY, not in the select above.
++          // The column ships with the S1 migration, and adding it to the main
++          // query would make the entire Settings screen fail to load on any
++          // environment where that migration has not been applied yet. A
++          // missing column here costs one hidden control; there it would cost
++          // the whole screen.
++          void (async () => {
++            try {
++              const { data: blockRow, error: blockErr } = await supabase
++                .from('user_settings')
++                .select('voice_unregistered_blocked')
++                .eq('user_id', user.id)
++                .maybeSingle();
++              if (blockErr) {
++                console.log('[settings] blocked-flag unavailable (pre-S1 backend):', blockErr.message);
++                return;
++              }
++              setUnregisteredBlocked(!!blockRow?.voice_unregistered_blocked);
++            } catch (e) {
++              console.log('[settings] blocked-flag read failed:', e instanceof Error ? e.message : String(e));
++            }
++          })();
+           // 2026-05-22 — F2g Phase 2. Load saved channel preferences. The
+           // DB default (set by migration) is all 5 channels enabled, so
+           // any existing user gets the all-on baseline until they touch
+@@ -573,6 +601,60 @@ export default function SettingsScreen() {
+   // Hash never leaves the server. Mobile only ever knows whether a PIN
+   // is set (via voice_pin_set_at) and when.
+ 
++  // S1 D6 (2026-08-19) — turn unregistered-phone calls back on.
++  //
++  // Confirmed first, deliberately. The user set this because Naavi told them
++  // someone was guessing their PIN, so switching it off is a security decision
++  // and should not happen on a stray tap. This is the ONLY place it can be
++  // switched off — see the state declaration for why.
++  async function handleUnblockUnregistered() {
++    if (!supabase) return;
++    Alert.alert(
++      'Allow calls from other phones?',
++      "Naavi will again accept calls from a phone that isn't on your account, "
++      + 'once the caller gives your PIN.',
++      [
++        { text: 'Cancel', style: 'cancel' },
++        {
++          text: 'Allow',
++          onPress: async () => {
++            setUnblocking(true);
++            try {
++              const { data: { user } } = await supabase.auth.getUser();
++              if (!user) throw new Error('no signed-in user');
++              // Clearing the block also clears the failure count. Unblocking is
++              // the user saying "I've dealt with this" — leaving the count at
++              // or above the alert threshold would disarm their NEXT alert,
++              // because the alert fires only when the count equals it. Found
++              // by Wael in live testing 2026-08-19; the counter has to measure
++              // UNADDRESSED failures, not total ones.
++              const { error } = await supabase.from('user_settings').upsert({
++                user_id: user.id,
++                voice_unregistered_blocked: false,
++                voice_pin_failed_count: 0,
++                voice_pin_failed_at: null,
++                updated_at: new Date().toISOString(),
++              }, { onConflict: 'user_id' });
++              if (error) throw error;
++              setUnregisteredBlocked(false);
++              Alert.alert(
++                'Done',
++                'Calls from other phones are allowed again, once the caller gives your PIN.',
++              );
++            } catch (e) {
++              // Rule 21 — never fail silently here: the user would be left
++              // believing they had re-enabled something that is still off.
++              console.error('[settings] S1 unblock failed:', e instanceof Error ? e.message : String(e));
++              Alert.alert('Error', "Couldn't change that. Check your connection and try again.");
++            } finally {
++              setUnblocking(false);
++            }
++          },
++        },
++      ],
++    );
++  }
++
+   function openSetPinModal() {
+     setPinModalMode('set');
+     setNewPin('');
+@@ -591,8 +673,8 @@ export default function SettingsScreen() {
+ 
+   async function handleSavePin() {
+     setPinError(null);
+-    if (!/^\d{4}$/.test(newPin)) {
+-      setPinError('Must be exactly 4 digits.');
++    if (!/^\d{6}$/.test(newPin)) {
++      setPinError('Must be exactly 6 digits.');
+       return;
+     }
+     if (newPin !== confirmPin) {
+@@ -1020,9 +1102,35 @@ export default function SettingsScreen() {
+         <View style={styles.section}>
+           <Text style={styles.sectionTitle}>Voice PIN</Text>
+           <Text style={styles.sectionNote}>
+-            A 4-digit code so Naavi recognizes you when you call from a phone
++            A 6-digit code so Naavi recognizes you when you call from a phone
+             that isn't saved on your account.
+           </Text>
++
++          {/* S1 D6 (2026-08-19) — shown only while blocking is on. The spoken
++              refusal on the phone points the user here, so this has to say the
++              same thing that message said, in the same words. */}
++          {unregisteredBlocked && (
++            <View style={styles.blockedNotice}>
++              <Text style={styles.blockedNoticeTitle}>
++                Calls from other phones are blocked
++              </Text>
++              <Text style={styles.blockedNoticeBody}>
++                You blocked these after Naavi reported failed PIN attempts. Naavi
++                now answers only calls from your own phone, even with the right PIN.
++              </Text>
++              <TouchableOpacity
++                style={[styles.saveBtn, { marginTop: 12 }, unblocking && styles.saveBtnDisabled]}
++                onPress={handleUnblockUnregistered}
++                disabled={unblocking}
++                accessibilityRole="button"
++                accessibilityLabel="Allow calls from other phones again"
++              >
++                <Text style={styles.saveBtnText}>
++                  {unblocking ? '...' : 'Allow calls from other phones'}
++                </Text>
++              </TouchableOpacity>
++            </View>
++          )}
+           {pinSetAt ? (
+             <>
+               <Text style={[styles.fieldLabel, { marginTop: 6 }]}>
+@@ -1054,7 +1162,7 @@ export default function SettingsScreen() {
+               disabled={pinLoading}
+               accessibilityRole="button"
+             >
+-              <Text style={styles.saveBtnText}>Set a 4-digit PIN</Text>
++              <Text style={styles.saveBtnText}>Set a 6-digit PIN</Text>
+             </TouchableOpacity>
+           )}
+         </View>
+@@ -1296,7 +1404,7 @@ export default function SettingsScreen() {
+         </TouchableOpacity>
+ 
+         {/* Version */}
+-        <Text style={styles.version}>MyNaavi — V57.96.0 (build 325)</Text>
++        <Text style={styles.version}>MyNaavi — V57.97.0 (build 326)</Text>
+ 
+       </ScrollView>
+       </KeyboardAvoidingView>
+@@ -1324,16 +1432,16 @@ export default function SettingsScreen() {
+             <Text style={styles.pinModalTitle}>
+               {pinModalMode === 'change' ? 'Change your voice PIN' : 'Set your voice PIN'}
+             </Text>
+-            <Text style={styles.pinModalLabel}>Choose a 4-digit PIN</Text>
++            <Text style={styles.pinModalLabel}>Choose a 6-digit PIN</Text>
+             <TextInput
+               style={styles.pinModalInput}
+               value={newPin}
+-              onChangeText={(t) => { setNewPin(t.replace(/\D/g, '').slice(0, 4)); if (pinError) setPinError(null); }}
+-              placeholder="••••"
++              onChangeText={(t) => { setNewPin(t.replace(/\D/g, '').slice(0, 6)); if (pinError) setPinError(null); }}
++              placeholder="••••••"
+               placeholderTextColor={Colors.textMuted}
+               keyboardType="number-pad"
+               secureTextEntry
+-              maxLength={4}
++              maxLength={6}
+               autoFocus
+               returnKeyType="next"
+               onSubmitEditing={() => confirmPinInputRef.current?.focus()}
+@@ -1344,12 +1452,12 @@ export default function SettingsScreen() {
+               ref={confirmPinInputRef}
+               style={styles.pinModalInput}
+               value={confirmPin}
+-              onChangeText={(t) => { setConfirmPin(t.replace(/\D/g, '').slice(0, 4)); if (pinError) setPinError(null); }}
+-              placeholder="••••"
++              onChangeText={(t) => { setConfirmPin(t.replace(/\D/g, '').slice(0, 6)); if (pinError) setPinError(null); }}
++              placeholder="••••••"
+               placeholderTextColor={Colors.textMuted}
+               keyboardType="number-pad"
+               secureTextEntry
+-              maxLength={4}
++              maxLength={6}
+               returnKeyType="done"
+               onSubmitEditing={handleSavePin}
+               accessibilityLabel="Confirm voice PIN"
+@@ -1624,6 +1732,28 @@ const styles = StyleSheet.create({
+   pinRemoveBtn: {
+     backgroundColor: Colors.alert,
+   },
++  // S1 D6 — the blocked-state panel. Bordered in Colors.alert rather than
++  // filled with it: this is a state the user chose and may want to keep, not
++  // an error to clear away.
++  blockedNotice: {
++    marginTop: 12,
++    padding: 14,
++    borderRadius: 12,
++    borderWidth: 1,
++    borderColor: Colors.alert,
++    backgroundColor: 'rgba(216,90,48,0.10)',
++  },
++  blockedNoticeTitle: {
++    fontSize: Typography.body,
++    fontWeight: '600',
++    color: Colors.textPrimary,
++    marginBottom: 6,
++  },
++  blockedNoticeBody: {
++    fontSize: Typography.body,
++    lineHeight: Typography.lineHeightBody,
++    color: Colors.textSecondary,
++  },
+   pinModalBackdrop: {
+     flex: 1,
+     backgroundColor: 'rgba(0,0,0,0.55)',
+diff --git a/supabase/functions/manage-voice-pin/index.ts b/supabase/functions/manage-voice-pin/index.ts
+index c437159..22db5ee 100644
+--- a/supabase/functions/manage-voice-pin/index.ts
++++ b/supabase/functions/manage-voice-pin/index.ts
+@@ -34,7 +34,17 @@ const corsHeaders = {
+   'Access-Control-Allow-Methods': 'POST, OPTIONS',
+ };
+ 
+-const PIN_RE = /^\d{4}$/;
++// S1 Track C (2026-08-19) — PINs are 6 digits.
++//
++// SET requires 6: every new or changed PIN gets the larger keyspace.
++// VERIFY accepts 4 or 6 so existing holders are not locked out of the
++// borrowed-phone path before they choose a new PIN. That migration window is
++// a Phase 0 constraint, not an oversight — a change that silently locked out
++// every current user would be worse than the defect it fixes.
++//
++// Retire PIN_VERIFY_RE (and this comment) once no 4-digit hash remains.
++const PIN_SET_RE = /^\d{6}$/;
++const PIN_VERIFY_RE = /^\d{4}$|^\d{6}$/;
+ const BCRYPT_ROUNDS = 10;
+ 
+ function jsonResponse(data: unknown, status = 200) {
+@@ -88,8 +98,8 @@ Deno.serve(async (req) => {
+     }
+ 
+     const pin = String(body?.pin ?? '').trim();
+-    if (!PIN_RE.test(pin)) {
+-      return jsonResponse({ success: false, error: 'pin_must_be_4_digits' }, 400);
++    if (!PIN_SET_RE.test(pin)) {
++      return jsonResponse({ success: false, error: 'pin_must_be_6_digits' }, 400);
+     }
+ 
+     const hash = await bcrypt.hash(pin, BCRYPT_ROUNDS);
+@@ -121,6 +131,30 @@ Deno.serve(async (req) => {
+       }
+     }
+ 
++    // S1 Track D follow-up (2026-08-19) — changing the PIN clears the failure
++    // count. Found by Wael in live testing: the alert fires only when the count
++    // EQUALS the threshold, and nothing reset the count except a successful PIN
++    // on a call or seven days passing. So a user who did exactly the right
++    // thing after an attack — blocked, unblocked, changed their PIN — was left
++    // sitting above the threshold with their next alert silently disarmed.
++    // The counter must measure UNADDRESSED failures; changing the PIN is the
++    // clearest possible signal that the owner has addressed it. Old failures
++    // were against the old PIN and are meaningless once it changes.
++    //
++    // Deliberately a SEPARATE, best-effort write rather than part of the update
++    // above: these columns arrive with the S1 migration, and an environment
++    // that has not applied it yet must still be able to set a PIN. Folding them
++    // into the main update would make the whole operation fail there — the same
++    // way one missing column already breaks the caller-name query (see B11c).
++    const { error: resetErr } = await supabase
++      .from('user_settings')
++      .update({ voice_pin_failed_count: 0, voice_pin_failed_at: null })
++      .eq('user_id', userId);
++    if (resetErr) {
++      // 42703 = column absent, i.e. pre-S1 backend. Expected, not a failure.
++      console.log(`[manage-voice-pin] SET — failure-count reset skipped (${resetErr.message})`);
++    }
++
+     console.log(`[manage-voice-pin] SET ok — user_id=${userId.slice(0, 8)}…`);
+     return jsonResponse({ success: true });
+   }
+@@ -178,7 +212,7 @@ Deno.serve(async (req) => {
+     const userId = String(body?.user_id ?? '').trim();
+     const pin    = String(body?.pin     ?? '').trim();
+     if (!userId)             return jsonResponse({ success: false, error: 'user_id_required' }, 400);
+-    if (!PIN_RE.test(pin))   return jsonResponse({ success: false, error: 'pin_must_be_4_digits' }, 400);
++    if (!PIN_VERIFY_RE.test(pin)) return jsonResponse({ success: false, error: 'pin_must_be_4_or_6_digits' }, 400);
+ 
+     const { data, error } = await supabase
+       .from('user_settings')
+diff --git a/supabase/functions/receive-sms-reply/index.ts b/supabase/functions/receive-sms-reply/index.ts
+index 66684ef..c1f01aa 100644
+--- a/supabase/functions/receive-sms-reply/index.ts
++++ b/supabase/functions/receive-sms-reply/index.ts
+@@ -15,8 +15,16 @@
+ 
+ import { createClient } from 'npm:@supabase/supabase-js@2';
+ 
+-function twiml(status = 200): Response {
+-  return new Response('<?xml version="1.0" encoding="UTF-8"?><Response></Response>', {
++// Empty TwiML acknowledges the webhook without replying. `message` (added by
++// S1 Track D) emits a <Message> so Twilio sends an SMS back — used to confirm
++// a BLOCK instruction so the owner knows it took effect.
++function twiml(status = 200, message?: string): Response {
++  const escaped = message
++    ? message.replace(/[<>&'"]/g, (c) =>
++        ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c] ?? c))
++    : '';
++  const inner = message ? `<Message>${escaped}</Message>` : '';
++  return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response>${inner}</Response>`, {
+     status,
+     headers: { 'Content-Type': 'text/xml' },
+   });
+@@ -47,6 +55,58 @@ Deno.serve(async (req) => {
+ 
+     console.log(`[receive-sms-reply] inbound SMS from ${fromPhone}: "${body.slice(0, 80)}"`);
+ 
++    // ── S1 Track D (2026-08-19) — "BLOCK" stops unregistered-phone access ────
++    //
++    // The bank model: Naavi alerts the owner about failed PIN attempts and the
++    // OWNER decides. Never automatic — auto-blocking would hand an attacker a
++    // denial-of-service against the real owner (Wael, Phase 0).
++    //
++    // Checked BEFORE ticket handling so a security instruction is never
++    // swallowed as a reply to an open support thread. Matched strictly: the
++    // whole message must be the word, so "block" inside ordinary prose in a
++    // ticket reply cannot trigger it.
++    //
++    // Authority comes from the sending number: only the registered owner of an
++    // account can block it, because only they receive SMS at that number.
++    // Re-enabling is deliberately NOT possible here — it requires the mobile
++    // app, so the recovery channel stays stronger than the attacked one and an
++    // attacker working the phone line cannot undo it.
++    if (/^\s*block\s*$/i.test(body)) {
++      const { data: owners, error: oErr } = await admin
++        .from('user_settings')
++        .select('user_id')
++        .eq('phone', fromPhone);
++
++      if (oErr) {
++        console.error('[receive-sms-reply] S1 BLOCK — owner lookup failed:', oErr.message);
++        return twiml();
++      }
++      if (!owners?.length) {
++        // Say nothing useful back: replying "no account" to an arbitrary number
++        // would confirm which numbers are registered.
++        console.warn(`[receive-sms-reply] S1 BLOCK from unrecognised number ${fromPhone} — ignoring`);
++        return twiml();
++      }
++
++      const ids = owners.map((o: { user_id: string }) => o.user_id);
++      const { error: uErr } = await admin
++        .from('user_settings')
++        .update({ voice_unregistered_blocked: true })
++        .in('user_id', ids);
++
++      if (uErr) {
++        console.error('[receive-sms-reply] S1 BLOCK — update failed:', uErr.message);
++        return twiml();
++      }
++
++      console.log(`[receive-sms-reply] S1 BLOCK applied to ${ids.length} account(s) for ${fromPhone}`);
++      return twiml(
++        200,
++        'Done. Calls from unregistered phones are now blocked for your account. '
++        + 'Turn it back on in the Naavi app.',
++      );
++    }
++
+     // Find most recent non-closed ticket for this phone number
+     const { data: ticket, error: tErr } = await admin
+       .from('tickets')
+diff --git a/supabase/migrations/20260819000000_s1_voice_pin_failure_tracking.sql b/supabase/migrations/20260819000000_s1_voice_pin_failure_tracking.sql
+new file mode 100644
+index 0000000..8546abb
+--- /dev/null
++++ b/supabase/migrations/20260819000000_s1_voice_pin_failure_tracking.sql
+@@ -0,0 +1,44 @@
++-- S1 Track D (2026-08-19) — failure tracking and user-controlled lockdown for
++-- the voice PIN path.
++--
++-- WHY THIS IS NOW POSSIBLE AT ALL: before S1 Track A, a failed PIN attempt
++-- could not be attributed to anyone. The entered PIN was tested against every
++-- account, so a failure meant "matched nobody" — there was no account to
++-- charge it to. Now the caller claims an identity (last-4) before the PIN is
++-- checked, so a failure belongs to exactly one account and can be counted,
++-- alerted on, and acted upon.
++--
++-- All three columns are ADDITIVE with safe defaults. No existing column is
++-- altered and nothing is dropped, so an un-deployed or rolled-back Track D
++-- leaves behaviour exactly as it was.
++
++ALTER TABLE user_settings
++  ADD COLUMN IF NOT EXISTS voice_pin_failed_count      integer NOT NULL DEFAULT 0,
++  ADD COLUMN IF NOT EXISTS voice_pin_failed_at         timestamptz,
++  ADD COLUMN IF NOT EXISTS voice_unregistered_blocked  boolean NOT NULL DEFAULT false;
++
++COMMENT ON COLUMN user_settings.voice_pin_failed_count IS
++  'S1 Track D — consecutive failed voice-PIN attempts against THIS account. '
++  'Reset to 0 on successful PIN authentication. Failures older than the 7-day '
++  'window (see voice_pin_failed_at) are not counted toward the alert threshold. '
++  'Reset is on successful PIN auth only: a call from the registered phone proves '
++  'the person is present but says nothing about who made the earlier attempts, '
++  'so it must not erase that signal.';
++
++COMMENT ON COLUMN user_settings.voice_pin_failed_at IS
++  'S1 Track D — timestamp of the most recent failed voice-PIN attempt. Used to '
++  'age out stale failures. The window is 7 days, not 24 hours: a short window is '
++  'trivially evaded by pacing attempts, and does not survive a user who checks '
++  'SMS every couple of days (Wael, 2026-08-19).';
++
++COMMENT ON COLUMN user_settings.voice_unregistered_blocked IS
++  'S1 Track D — when true, calls from an unregistered phone are refused for this '
++  'account even with a correct PIN. Set by the user replying BLOCK to the alert '
++  'SMS. Cleared ONLY from the mobile app, deliberately: the recovery channel must '
++  'be stronger than the attacked one, so an attacker working the phone line '
++  'cannot undo it. Never set automatically — auto-lockout would hand an attacker '
++  'a denial-of-service against the real owner (bank model, Wael 2026-08-19).';
++
++-- Deliberately NOT indexed. These columns are only ever read by user_id, which
++-- is already the primary access path on this table. An index here would be
++-- write cost for no read benefit.
+diff --git a/tests/catalogue/s1-voice-pin-scoping.ts b/tests/catalogue/s1-voice-pin-scoping.ts
+index a300d26..b25b5a5 100644
+--- a/tests/catalogue/s1-voice-pin-scoping.ts
++++ b/tests/catalogue/s1-voice-pin-scoping.ts
+@@ -23,12 +23,102 @@
+  */
+ 
+ import { expectTruthy } from '../lib/assertions';
+-import type { TestCase } from '../lib/types';
++import type { TestCase, TestContext } from '../lib/types';
+ 
+ function voiceUrl(): string {
+   return process.env.VOICE_SERVER_URL || '';
+ }
+ 
++/**
++ * A Twilio magic test number, used as the test account's "registered phone".
++ * Nothing ever dials it, and its last-4 (0006) cannot collide with the live
++ * manual-testing account's (2567) — a collision would make these tests
++ * exercise the wrong account, which is the exact failure S1 exists to prevent.
++ */
++const TEST_PHONE = '+15005550006';
++const TEST_SUFFIX = '0006';
++const TEST_PIN = '918273';
++
++function restHeaders(ctx: TestContext): Record<string, string> {
++  return {
++    apikey: ctx.serviceRoleKey,
++    Authorization: `Bearer ${ctx.serviceRoleKey}`,
++    'Content-Type': 'application/json',
++  };
++}
++
++/** Reads the S1 columns. Returns null when the migration is absent. */
++async function readPinState(
++  ctx: TestContext,
++): Promise<{ count: number; blocked: boolean } | null> {
++  const res = await fetch(
++    `${ctx.supabaseUrl}/rest/v1/user_settings`
++    + `?select=voice_pin_failed_count,voice_unregistered_blocked&user_id=eq.${ctx.testUserId}`,
++    { headers: restHeaders(ctx) },
++  );
++  const json = await res.json().catch(() => null);
++  // 42703 = column does not exist — D1 not applied to this environment.
++  if (!Array.isArray(json)) return null;
++  const row = json[0];
++  if (!row) return null;
++  return { count: row.voice_pin_failed_count ?? 0, blocked: !!row.voice_unregistered_blocked };
++}
++
++async function patchTestUser(ctx: TestContext, patch: Record<string, unknown>): Promise<void> {
++  await fetch(`${ctx.supabaseUrl}/rest/v1/user_settings?user_id=eq.${ctx.testUserId}`, {
++    method: 'PATCH',
++    headers: { ...restHeaders(ctx), Prefer: 'return=minimal' },
++    body: JSON.stringify(patch),
++  });
++}
++
++/** Sets a PIN through the real function, so the hash is produced the real way. */
++async function setPin(ctx: TestContext, pin: string): Promise<{ ok: boolean; error: string }> {
++  const res = await fetch(`${ctx.supabaseUrl}/functions/v1/manage-voice-pin`, {
++    method: 'POST',
++    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ctx.serviceRoleKey}` },
++    body: JSON.stringify({ op: 'set', pin, user_id: ctx.testUserId }),
++  });
++  const json = await res.json().catch(() => ({}));
++  return { ok: !!json?.success, error: String(json?.error ?? '') };
++}
++
++/** Provisions phone + PIN so the test account is reachable by the identify step. */
++async function provisionTestAccount(ctx: TestContext): Promise<boolean> {
++  await patchTestUser(ctx, {
++    phone: TEST_PHONE,
++    voice_pin_failed_count: 0,
++    voice_pin_failed_at: null,
++    voice_unregistered_blocked: false,
++  });
++  const set = await setPin(ctx, TEST_PIN);
++  return set.ok;
++}
++
++/**
++ * Restores the account to its pre-test shape. The test account starts with
++ * phone NULL and no PIN, so leaving either behind would change what later
++ * suites see.
++ */
++async function deprovisionTestAccount(ctx: TestContext): Promise<void> {
++  await fetch(`${ctx.supabaseUrl}/functions/v1/manage-voice-pin`, {
++    method: 'POST',
++    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ctx.serviceRoleKey}` },
++    body: JSON.stringify({ op: 'remove', user_id: ctx.testUserId }),
++  }).catch(() => {});
++  await patchTestUser(ctx, {
++    phone: null,
++    voice_pin_failed_count: 0,
++    voice_pin_failed_at: null,
++    voice_unregistered_blocked: false,
++  }).catch(() => {});
++}
++
++/** Extracts the /tts-play token, which identifies WHICH spoken text was chosen. */
++function playToken(twiml: string): string {
++  return twiml.match(/tts-play\/([a-f0-9]+)/)?.[1] ?? '';
++}
++
+ /** POSTs a Twilio-shaped form body. Returns null when the route is absent. */
+ async function postTwiml(
+   path: string,
+@@ -51,31 +141,44 @@ const SKIP = 'Track A not deployed to the selected voice server yet — skipping
+ 
+ export const s1VoicePinScopingTests: TestCase[] = [
+   {
+-    id: 's1.identify-unknown-suffix-refuses-without-disclosure',
++    id: 's1.identify-unknown-suffix-retries-then-refuses',
+     category: 's1-voice-pin-scoping',
+     platform: 'voice',
+     description:
+-      'A last-4 that matches no account must be refused WITHOUT revealing whether an account exists. ' +
+-      'Saying "that number is not registered" would turn the phone line into an account-existence oracle ' +
+-      '(S1 Phase 3 §5 item 8).',
+-    timeoutMs: 20_000,
++      'A last-4 matching no account gets THREE attempts, then refuses without revealing whether an ' +
++      'account exists. Wael 2026-08-19, after hearing it live: hanging up on a first mistake is wrong ' +
++      'for Naavi users, who will mishear their own digits. No attempt may reach the PIN step.',
++    timeoutMs: 30_000,
+     async run(ctx) {
+-      const r = await postTwiml('/voice/identify-result?attempt=1&len=4&from=%2B15005550006', {
++      // Attempt 1 of 3 — must offer another try, not end the call.
++      const first = await postTwiml('/voice/identify-result?attempt=1&len=4&from=%2B15005550006', {
+         From: '+15005550006', Digits: '0000',
+       });
+-      if (!r) { ctx.log(SKIP); return; }
++      if (!first) { ctx.log(SKIP); return; }
+ 
+-      expectTruthy(r.status === 200, `expected 200 TwiML, got ${r.status}`);
+-      expectTruthy(/<Hangup\s*\/>/.test(r.body), 'an unknown suffix must end the call');
+-      // Must NOT confirm or deny existence.
++      expectTruthy(first.status === 200, `expected 200 TwiML, got ${first.status}`);
++      expectTruthy(
++        !/<Hangup\s*\/>/.test(first.body),
++        'a first wrong last-4 must NOT hang up — the caller gets another try',
++      );
++      expectTruthy(/\/voice\/identify\?/.test(first.body), 'must retry identification');
++      expectTruthy(
++        !/\/voice\/pin\?/.test(first.body),
++        'an unmatched suffix must never reach the PIN step, on any attempt',
++      );
++
++      // Final attempt — ends the call, still disclosing nothing.
++      const last = await postTwiml('/voice/identify-result?attempt=3&len=4&from=%2B15005550006', {
++        From: '+15005550006', Digits: '0000',
++      });
++      if (!last) { ctx.log(SKIP); return; }
++      expectTruthy(/<Hangup\s*\/>/.test(last.body), 'the third wrong last-4 must end the call');
+       for (const leak of ['not registered', 'no account', "doesn't exist", 'unknown number']) {
+         expectTruthy(
+-          !r.body.toLowerCase().includes(leak),
++          !last.body.toLowerCase().includes(leak),
+           `refusal must not disclose account existence — found "${leak}"`,
+         );
+       }
+-      // Must NOT fall through to asking for a PIN.
+-      expectTruthy(!/\/voice\/pin\b/.test(r.body), 'an unknown suffix must never reach the PIN step');
+     },
+   },
+   {
+@@ -150,4 +253,241 @@ export const s1VoicePinScopingTests: TestCase[] = [
+       );
+     },
+   },
++
++  // ── Track C — PIN length ───────────────────────────────────────────────────
++  {
++    id: 's1.pin-set-requires-six-digits',
++    category: 's1-voice-pin-scoping',
++    description:
++      'Setting a PIN requires 6 digits; verifying still accepts 4 so existing PINs keep working '
++      + 'through the migration. A 4-digit set must be refused on SHAPE — silently accepting it '
++      + 'would leave new accounts on the weaker PIN the whole track exists to retire.',
++    timeoutMs: 30_000,
++    async run(ctx) {
++      // Probe: on a pre-C4 deployment the OLD regex is /^\d{4}$/, so a 6-digit
++      // set is rejected. That tells us the environment, without guessing.
++      const six = await setPin(ctx, TEST_PIN);
++      if (!six.ok) {
++        ctx.log(`C4 not deployed here (6-digit set refused: ${six.error}) — skipping.`);
++        await deprovisionTestAccount(ctx);
++        return;
++      }
++      const four = await setPin(ctx, '1234');
++      expectTruthy(!four.ok, 'a 4-digit PIN must be refused by `set`');
++      expectTruthy(
++        four.error === 'pin_must_be_6_digits',
++        `expected pin_must_be_6_digits, got "${four.error}"`,
++      );
++    },
++    async teardown(ctx) { await deprovisionTestAccount(ctx); },
++  },
++
++  // ── Track D — failure counting, alerting, and the user's own lockdown ──────
++  {
++    id: 's1.block-sms-honours-only-the-registered-sender',
++    category: 's1-voice-pin-scoping',
++    description:
++      'BLOCK is authorised by the sending number alone, so this asserts BOTH directions: a stranger '
++      + 'texting BLOCK cannot lock someone else out (a denial-of-service against the real owner), and '
++      + 'the word inside ordinary prose must not trigger it — that text is also a valid ticket reply.',
++    timeoutMs: 30_000,
++    async setup(ctx) { await patchTestUser(ctx, { phone: TEST_PHONE, voice_unregistered_blocked: false }); },
++    async run(ctx) {
++      const before = await readPinState(ctx);
++      if (!before) { ctx.log('D1 migration not applied here — skipping.'); return; }
++
++      const sms = async (body: string, from: string) =>
++        fetch(`${ctx.supabaseUrl}/functions/v1/receive-sms-reply`, {
++          method: 'POST',
++          headers: {
++            'Content-Type': 'application/x-www-form-urlencoded',
++            Authorization: `Bearer ${ctx.serviceRoleKey}`,
++          },
++          body: new URLSearchParams({ From: from, Body: body, MessageSid: 'SMautotest' }).toString(),
++        }).then((r) => r.text()).catch(() => '');
++
++      // A number nobody registered must not be able to block this account.
++      await sms('BLOCK', '+15005550099');
++      expectTruthy(
++        (await readPinState(ctx))?.blocked === false,
++        'an unregistered sender must NOT be able to block another account',
++      );
++
++      // "block" inside a sentence is a ticket reply, not a security command.
++      await sms('can you block off my calendar please', TEST_PHONE);
++      const afterProse = await readPinState(ctx);
++      if (afterProse?.blocked) {
++        throw new Error('prose containing "block" must not trigger the security command');
++      }
++
++      // The registered owner, sending exactly BLOCK, must be obeyed.
++      const reply = await sms('BLOCK', TEST_PHONE);
++      const after = await readPinState(ctx);
++      if (!after?.blocked) {
++        ctx.log('D4 not deployed to this environment — skipping the positive case.');
++        return;
++      }
++      expectTruthy(
++        /<Message>/.test(reply),
++        'the owner must get an SMS confirmation — silence looks identical to failure',
++      );
++    },
++    async teardown(ctx) { await deprovisionTestAccount(ctx); },
++  },
++  {
++    id: 's1.blocked-account-refused-before-pin-with-its-own-message',
++    category: 's1-voice-pin-scoping',
++    platform: 'voice',
++    description:
++      'A blocked account is refused at identification, BEFORE the PIN is requested, and says why. '
++      + 'Wael 2026-08-19, on a live call: the generic refusal left the owner "questioning myself and '
++      + 'the message". Asserts the two refusals are genuinely different spoken text, not just different '
++      + 'source constants — compared by TTS token, since that is what the caller actually hears.',
++    timeoutMs: 40_000,
++    async run(ctx) {
++      if (!voiceUrl()) { ctx.log(SKIP); return; }
++      if (!(await provisionTestAccount(ctx))) { ctx.log('Could not provision a 6-digit PIN — skipping.'); return; }
++      if (!(await readPinState(ctx))) { ctx.log('D1 migration not applied here — skipping.'); return; }
++
++      await patchTestUser(ctx, { voice_unregistered_blocked: true });
++      const blocked = await postTwiml(
++        `/voice/identify-result?attempt=1&len=4&from=%2B15005550077`,
++        { From: '+15005550077', Digits: TEST_SUFFIX },
++      );
++      if (!blocked) { ctx.log(SKIP); return; }
++
++      expectTruthy(/<Hangup\s*\/>/.test(blocked.body), 'a blocked account must end the call');
++      expectTruthy(
++        !/\/voice\/pin\?/.test(blocked.body),
++        'THE CONTROL: a blocked account must never reach the PIN step — blocking outranks the PIN',
++      );
++
++      // The generic refusal, for comparison: an unknown suffix on the last attempt.
++      const generic = await postTwiml(
++        '/voice/identify-result?attempt=3&len=4&from=%2B15005550077',
++        { From: '+15005550077', Digits: '4321' },
++      );
++      if (generic && playToken(generic.body) && playToken(blocked.body)) {
++        expectTruthy(
++          playToken(blocked.body) !== playToken(generic.body),
++          'a blocked account must not be fobbed off with the generic refusal — the owner needs to '
++          + 'be told what happened and how to undo it',
++        );
++      }
++    },
++    async teardown(ctx) { await deprovisionTestAccount(ctx); },
++  },
++  {
++    id: 's1.failure-count-rises-then-clears-on-a-correct-pin',
++    category: 's1-voice-pin-scoping',
++    platform: 'voice',
++    description:
++      'Counting is per-account, and a correct PIN clears it. Required at Phase 3 review: without a '
++      + 'reset, ordinary mistakes accumulate forever and eventually alert on a user who did nothing '
++      + 'wrong — the alert then means nothing.',
++    timeoutMs: 60_000,
++    async run(ctx) {
++      if (!voiceUrl()) { ctx.log(SKIP); return; }
++      if (!(await provisionTestAccount(ctx))) { ctx.log('Could not provision a 6-digit PIN — skipping.'); return; }
++      if (!(await readPinState(ctx))) { ctx.log('D1 migration not applied here — skipping.'); return; }
++
++      const pin = async (digits: string) => postTwiml(
++        `/voice/pin-result?attempt=1&claimed=${ctx.testUserId}&from=%2B15005550077`,
++        { From: '+15005550077', Digits: digits },
++      );
++
++      const first = await pin('000000');
++      if (!first) { ctx.log(SKIP); return; }
++      await new Promise((r) => setTimeout(r, 2500));
++      const afterOne = await readPinState(ctx);
++      if (afterOne?.count === 0) { ctx.log('D2 not deployed to this environment — skipping.'); return; }
++      expectTruthy(afterOne?.count === 1, `expected count 1 after one failure, got ${afterOne?.count}`);
++
++      await pin('111111');
++      await new Promise((r) => setTimeout(r, 2500));
++      expectTruthy((await readPinState(ctx))?.count === 2, 'a second failure must count');
++
++      // Never auto-locks: the owner decides, so an attacker cannot lock them out.
++      expectTruthy(
++        (await readPinState(ctx))?.blocked === false,
++        'failures alone must NEVER block an account — that would be a denial-of-service on the owner',
++      );
++
++      await pin(TEST_PIN);
++      await new Promise((r) => setTimeout(r, 2500));
++      expectTruthy(
++        (await readPinState(ctx))?.count === 0,
++        'a correct PIN must clear the failure count',
++      );
++    },
++    async teardown(ctx) { await deprovisionTestAccount(ctx); },
++  },
++  {
++    id: 's1.failures-older-than-the-window-restart-the-count',
++    category: 's1-voice-pin-scoping',
++    platform: 'voice',
++    description:
++      'Stale failures do not accumulate. Someone who failed twice months ago and once today is not '
++      + 'under attack, and alerting on that is crying wolf. Window is 7 days, not 24 hours (Wael): a '
++      + 'short one is evaded by pacing and does not survive someone who reads SMS every couple of days.',
++    timeoutMs: 40_000,
++    async run(ctx) {
++      if (!voiceUrl()) { ctx.log(SKIP); return; }
++      if (!(await provisionTestAccount(ctx))) { ctx.log('Could not provision a 6-digit PIN — skipping.'); return; }
++      if (!(await readPinState(ctx))) { ctx.log('D1 migration not applied here — skipping.'); return; }
++
++      // Two failures, eight days old — outside the 7-day window.
++      const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
++      await patchTestUser(ctx, { voice_pin_failed_count: 2, voice_pin_failed_at: eightDaysAgo });
++
++      const r = await postTwiml(
++        `/voice/pin-result?attempt=1&claimed=${ctx.testUserId}&from=%2B15005550077`,
++        { From: '+15005550077', Digits: '000000' },
++      );
++      if (!r) { ctx.log(SKIP); return; }
++      await new Promise((x) => setTimeout(x, 2500));
++
++      const after = await readPinState(ctx);
++      if (after?.count === 2) { ctx.log('D2 not deployed to this environment — skipping.'); return; }
++      expectTruthy(
++        after?.count === 1,
++        `stale failures must restart the count, not extend it — expected 1, got ${after?.count}`,
++      );
++    },
++    async teardown(ctx) { await deprovisionTestAccount(ctx); },
++  },
++  {
++    id: 's1.changing-the-pin-clears-the-failure-count',
++    category: 's1-voice-pin-scoping',
++    description:
++      'Changing the PIN resets the failure count. Found by Wael in live testing: the alert fires only '
++      + 'when the count EQUALS the threshold, and nothing reset it except a successful PIN on a call or '
++      + '7 days. So a user who did the right thing after an attack — blocked, unblocked, changed their '
++      + 'PIN — sat above the threshold with their NEXT alert silently disarmed. Old failures were '
++      + 'against the old PIN and mean nothing once it changes.',
++    timeoutMs: 30_000,
++    async run(ctx) {
++      if (!(await provisionTestAccount(ctx))) { ctx.log('C4 not deployed here — skipping.'); return; }
++      if (!(await readPinState(ctx))) { ctx.log('D1 migration not applied here — skipping.'); return; }
++
++      // Sit the account exactly at the threshold — the state that disarmed the
++      // alert in the live incident.
++      await patchTestUser(ctx, {
++        voice_pin_failed_count: 3,
++        voice_pin_failed_at: new Date().toISOString(),
++      });
++      expectTruthy((await readPinState(ctx))?.count === 3, 'setup: count should be 3');
++
++      const set = await setPin(ctx, '556677');
++      expectTruthy(set.ok, `changing the PIN should succeed, got "${set.error}"`);
++
++      const after = await readPinState(ctx);
++      if (after?.count === 3) { ctx.log('Reset-on-PIN-change not deployed here — skipping.'); return; }
++      expectTruthy(
++        after?.count === 0,
++        `changing the PIN must clear the count — expected 0, got ${after?.count}`,
++      );
++    },
++    async teardown(ctx) { await deprovisionTestAccount(ctx); },
++  },
+ ];

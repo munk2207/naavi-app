@@ -1,0 +1,655 @@
+diff --git a/src/index.js b/src/index.js
+index 2a1535f..5374706 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -6611,12 +6611,18 @@ app.post('/voice', rejectIfShuttingDown, express.urlencoded({ extended: false })
+     // Inline the Gather TwiML here (instead of an HTTP 307 redirect to
+     // /voice/pin) — Twilio webhooks expect TwiML bodies, not HTTP
+     // redirects; a 307 caused "Sorry, an application error has occurred."
+-    console.log(`[Voice] Unregistered caller ${callerPhone} — sending PIN-gather TwiML (attempt 1)`);
++    // S1 Track A (2026-08-19) — ask WHO before asking for the secret.
++    // Previously this prompted straight for the PIN, which was then tested
++    // against every PIN-holding account. Now the caller first claims an
++    // identity (last 4 digits of their registered number), that resolves to
++    // ONE account, and only then is the PIN checked — against that account
++    // alone. See docs/S1_PHASE_2_VOICE_PIN_AUTHENTICATION_2026-08-19.md.
++    console.log(`[Voice] Unregistered caller ${callerPhone} — sending identify-gather TwiML (attempt 1)`);
+     const host = req.headers.host;
+     const httpProtocol = host?.includes('localhost') ? 'http' : 'https';
+     // XML attribute values must escape & as &amp; — Twilio rejects unescaped & in action / Redirect URLs as invalid TwiML.
+-    const action = `${httpProtocol}://${host}/voice/pin-result?attempt=1&amp;from=${encodeURIComponent(callerPhone)}`;
+-    const retryUrl = `${httpProtocol}://${host}/voice/pin?attempt=2&amp;from=${encodeURIComponent(callerPhone)}`;
++    const action = `${httpProtocol}://${host}/voice/identify-result?attempt=1&amp;len=4&amp;from=${encodeURIComponent(callerPhone)}`;
++    const retryUrl = `${httpProtocol}://${host}/voice/identify?attempt=2&amp;len=4&amp;from=${encodeURIComponent(callerPhone)}`;
+     // Deepgram Aura Hera via <Play>/tts-play — matches the project's
+     // current TwiML voice standard (same path as the registered-caller
+     // greeting). Wael 2026-05-13: standardized on Aura, not Polly.
+@@ -6627,7 +6633,7 @@ app.post('/voice', rejectIfShuttingDown, express.urlencoded({ extended: false })
+     // matches the working registered-greeting pattern at line ~4470. The
+     // trade-off is no barge-in: caller waits ~3 s for the prompt to finish
+     // before speaking/keying. Acceptable for a one-time PIN.
+-    const promptToken = createPlayToken("This phone isn't registered. Say or enter your four digit PIN.");
++    const promptToken = createPlayToken("This phone isn't registered. Say or enter the last four digits of your registered phone number.");
+     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+ <Response>
+   <Play>${httpProtocol}://${host}/tts-play/${promptToken}</Play>
+@@ -6713,9 +6719,14 @@ const SPOKEN_DIGITS = {
+ // Normalize Twilio Gather speech / DTMF to a 4-digit PIN string, or '' if
+ // we can't extract 4 digits cleanly.
+ function extractPinFromTwilioGather(digits, speechResult) {
++  // S1 Track C (2026-08-19) — PINs are 6 digits. 4 is still accepted while
++  // existing holders migrate: `set` requires 6, `verify` accepts either, so
++  // nobody is locked out of the borrowed-phone path before they choose a new
++  // PIN. See S1 Phase 2 "Migration behaviour".
++  //
+   // Prefer DTMF if present — most reliable.
+   const dtmf = String(digits || '').replace(/\D/g, '');
+-  if (/^\d{4}$/.test(dtmf)) return dtmf;
++  if (/^\d{6}$/.test(dtmf) || /^\d{4}$/.test(dtmf)) return dtmf;
+   // Fall back to speech: collect digit tokens (words or numerics).
+   const sr = String(speechResult || '').toLowerCase();
+   const tokens = sr.split(/[\s,.\-]+/).filter(Boolean);
+@@ -6724,7 +6735,8 @@ function extractPinFromTwilioGather(digits, speechResult) {
+     if (/^\d+$/.test(tok)) { for (const ch of tok) out.push(ch); }
+     else if (SPOKEN_DIGITS[tok] && SPOKEN_DIGITS[tok].length === 1) out.push(SPOKEN_DIGITS[tok]);
+   }
+-  if (out.length === 4) return out.join('');
++  // Prefer a 6-digit reading; fall back to 4 for un-migrated PINs.
++  if (out.length === 6 || out.length === 4) return out.join('');
+   return '';
+ }
+ 
+@@ -6747,37 +6759,178 @@ function extractPinFromSentence(text) {
+   s = s.replace(/(\d)[\s\-,.]+(\d)/g, '$1$2');
+   s = s.replace(/(\d)[\s\-,.]+(\d)/g, '$1$2'); // run twice for runs of 4
+   s = s.replace(/(\d)[\s\-,.]+(\d)/g, '$1$2');
+-  // Find first 4-digit run (not embedded in a longer digit string).
+-  const m = s.match(/(?<!\d)(\d{4})(?!\d)/);
+-  return m ? m[1] : '';
++  // S1 Track C — prefer a 6-digit run; a 4-digit run is still recognised so
++  // the spoken flow can tell the user their PIN is too short rather than
++  // silently hearing nothing. `set` validation (manage-voice-pin) is what
++  // enforces 6 — this function only extracts.
++  const six = s.match(/(?<!\d)(\d{6})(?!\d)/);
++  if (six) return six[1];
++  const four = s.match(/(?<!\d)(\d{4})(?!\d)/);
++  return four ? four[1] : '';
+ }
+ 
+ // Fetch all user_ids that have a voice PIN set. Bounded to ~50 — past that
+ // the PIN flow needs name-narrowing first (out of scope for v1).
+-async function getUsersWithVoicePin() {
++// S1 Track A (2026-08-19) — resolve a caller's CLAIMED identity from the last
++// N digits of their registered number, before any PIN is checked.
++//
++// This replaces getUsersWithVoicePin(), which fetched every PIN-holding
++// account so the entered PIN could be tested against all of them. That made a
++// guess succeed if it matched ANYONE, so security degraded as the user count
++// grew (S1 Phase 1 §1, Defect A), and its undocumented limit=50 silently
++// locked out an arbitrary subset past 50 users (Defect B).
++//
++// The last-4 is an IDENTIFIER, not a secret — the same role a username plays.
++// Its only job is to narrow to one account so the PIN is checked against that
++// account alone. Last-4 rather than the full number is deliberate (Wael): a
++// caller speaking a full number and a PIN aloud hands an eavesdropper both.
++//
++// Known limitation, deliberately scoped for Track A: matching is against the
++// primary `phone` column only. A secondary number held in `phone_numbers` is
++// not yet matchable by suffix — PostgREST cannot express "array element ends
++// with" — so a caller registered via a secondary number must use the primary.
++// Recorded in the Phase 5 evidence package as a follow-up, not left silent.
++// S1 Track D (2026-08-19) — failure counting, alerting and lockdown.
++//
++// Only possible because Track A made failures attributable: before it, a wrong
++// PIN "matched nobody" and there was no account to charge it to.
++//
++// Threshold and window are JUDGEMENTS, not calibrations. Naavi is pre-launch
++// with two PIN holders, so there is no failure-rate data to tune against
++// (S1 Phase 1 §6). Both are deliberately conservative and should be revisited
++// once real usage exists.
++const PIN_ALERT_THRESHOLD = 3;                       // failures before the owner is told
++const PIN_FAILURE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — see below
++
++// 7 days rather than 24 hours (Wael, 2026-08-19). A short window is trivially
++// evaded by pacing — four attempts, wait a day, four more, and the counter
++// resets before any threshold is reached. It also does not survive real
++// habits: a user who checks SMS every couple of days would find the counter
++// already zeroed by the time they read the alert.
++
++async function bumpPinFailure(userId) {
+   try {
+-    const res = await fetch(
+-      `${SUPABASE_URL}/rest/v1/user_settings?select=user_id,name&voice_pin_hash=not.is.null&limit=50`,
+-      { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
+-    );
+-    // Temporary diagnostic (2026-08-05) — a live PIN failed to match despite
+-    // verifying correctly outside the call. Neither !res.ok nor an empty
+-    // candidate list was previously logged, so a silent failure here was
+-    // indistinguishable from a genuinely-wrong PIN. Remove once root-caused.
++    const url = `${SUPABASE_URL}/rest/v1/user_settings?select=voice_pin_failed_count,voice_pin_failed_at,phone&user_id=eq.${encodeURIComponent(userId)}&limit=1`;
++    const headers = { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` };
++    const res = await fetch(url, { headers });
++    if (!res.ok) { console.error(`[Voice/pin-fail] read NOT-OK status=${res.status}`); return; }
++    const row = (await res.json())?.[0];
++    if (!row) return;
++
++    // Stale failures do not count. A user who failed twice five months ago and
++    // once today is not under attack, and alerting on that is crying wolf.
++    const last = row.voice_pin_failed_at ? new Date(row.voice_pin_failed_at).getTime() : 0;
++    const withinWindow = last && (Date.now() - last) < PIN_FAILURE_WINDOW_MS;
++    const next = (withinWindow ? (row.voice_pin_failed_count || 0) : 0) + 1;
++
++    await fetch(`${SUPABASE_URL}/rest/v1/user_settings?user_id=eq.${encodeURIComponent(userId)}`, {
++      method: 'PATCH',
++      headers: { ...headers, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
++      body: JSON.stringify({ voice_pin_failed_count: next, voice_pin_failed_at: new Date().toISOString() }),
++    });
++    console.log(`[Voice/pin-fail] user=${String(userId).slice(0,8)}… count=${next}${withinWindow ? '' : ' (window expired, reset)'}`);
++
++    // Alert exactly once, at the threshold — not on every failure past it.
++    // Repeating would train the owner to ignore it.
++    if (next === PIN_ALERT_THRESHOLD && row.phone) {
++      await sendPinFailureAlert(userId, row.phone, next);
++    }
++  } catch (err) {
++    console.error('[Voice/pin-fail] bump failed:', err.message);
++  }
++}
++
++// Reset on SUCCESSFUL PIN AUTH ONLY. Deliberately not on any successful call:
++// a call from the registered phone proves the person is present, but says
++// nothing about who made the earlier attempts. If someone is working through
++// PINs against an account, the owner phoning in must not erase that signal.
++async function clearPinFailures(userId) {
++  try {
++    await fetch(`${SUPABASE_URL}/rest/v1/user_settings?user_id=eq.${encodeURIComponent(userId)}`, {
++      method: 'PATCH',
++      headers: {
++        apikey: SUPABASE_SERVICE_ROLE_KEY,
++        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
++        'Content-Type': 'application/json',
++        Prefer: 'return=minimal',
++      },
++      body: JSON.stringify({ voice_pin_failed_count: 0, voice_pin_failed_at: null }),
++    });
++    console.log(`[Voice/pin-fail] cleared for user=${String(userId).slice(0,8)}… (successful PIN auth)`);
++  } catch (err) {
++    console.error('[Voice/pin-fail] clear failed:', err.message);
++  }
++}
++
++// The bank model: tell the owner, let THEM decide. Never auto-block — that
++// would hand an attacker a denial-of-service against the real owner.
++async function sendPinFailureAlert(userId, toPhone, count) {
++  try {
++    const body = `Naavi security: ${count} failed PIN attempts on your account from an unregistered phone. `
++      + `If this wasn't you, reply BLOCK to stop calls from unregistered phones. `
++      + `You can turn it back on in the Naavi app.`;
++    const r = await fetch(`${SUPABASE_URL}/functions/v1/send-sms`, {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
++      body: JSON.stringify({ to: toPhone, body, user_id: userId, source: 's1-pin-failure-alert' }),
++    });
++    const data = await r.json().catch(() => ({}));
++    if (data?.blocked) {
++      // Staging: the outbound allowlist refused it. Expected, not an error.
++      console.log(`[Voice/pin-alert] not sent — outbound guard blocked (${data.reason})`);
++    } else {
++      console.log(`[Voice/pin-alert] sent to owner of user=${String(userId).slice(0,8)}… status=${r.status}`);
++    }
++  } catch (err) {
++    console.error('[Voice/pin-alert] send failed:', err.message);
++  }
++}
++
++async function findAccountsByPhoneSuffix(suffix) {
++  const digits = String(suffix || '').replace(/\D/g, '');
++  if (digits.length < 4) return [];
++  try {
++    // Bounded server-side query: suffix match on the primary number, and only
++    // among accounts that actually have a PIN. Never fetches "all users".
++    const url = `${SUPABASE_URL}/rest/v1/user_settings`
++      + `?select=user_id,name,phone,voice_unregistered_blocked`
++      + `&voice_pin_hash=not.is.null`
++      + `&phone=like.*${encodeURIComponent(digits)}`;
++    const res = await fetch(url, {
++      headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
++    });
+     if (!res.ok) {
+-      const bodyText = await res.text().catch(() => '<unreadable>');
+-      console.error(`[PIN-DIAG] getUsersWithVoicePin NOT-OK status=${res.status} body="${bodyText.slice(0, 300)}"`);
++      const body = await res.text().catch(() => '<unreadable>');
++      console.error(`[Voice/identify] suffix lookup NOT-OK status=${res.status} body="${body.slice(0, 200)}"`);
+       return [];
+     }
+     const rows = await res.json();
+-    console.log(`[PIN-DIAG] getUsersWithVoicePin ok — candidates=${rows.length}`);
+-    return rows;
++    // Defensive: `like.*NNNN` anchors on suffix, but re-verify in JS so a
++    // malformed filter can never widen the candidate set.
++    const exact = (Array.isArray(rows) ? rows : []).filter(r =>
++      String(r.phone || '').replace(/\D/g, '').endsWith(digits));
++    console.log(`[Voice/identify] suffix=${digits.length}-digit candidates=${exact.length}`);
++    return exact;
+   } catch (err) {
+-    console.error('[Voice/pin] getUsersWithVoicePin error:', err.message);
++    console.error('[Voice/identify] suffix lookup error:', err.message);
+     return [];
+   }
+ }
+ 
++// getUsersWithVoicePin() was DELETED by S1 Track A (2026-08-19).
++//
++// It fetched every PIN-holding account (`voice_pin_hash=not.is.null&limit=50`)
++// so an entered PIN could be tested against all of them. Two defects lived in
++// that one query: a guess succeeded if it matched ANY account, so security
++// degraded as the user count grew; and the undocumented, unordered `limit=50`
++// meant that past 50 PIN holders an arbitrary and unstable subset of users
++// silently lost the feature — their correct PIN returning "no match", with no
++// error and no log. See docs/S1_PHASE_1_VOICE_PIN_AUTHENTICATION_2026-08-19.md.
++//
++// Replaced by findAccountsByPhoneSuffix() above, which resolves a claimed
++// identity BEFORE any PIN is checked. Do not reintroduce a function that
++// searches accounts by credential.
++
+ // Verify a PIN candidate against a single user via the manage-voice-pin
+ // Edge Function. Returns true on match, false on no-match or any error.
+ async function verifyVoicePinForUser(userIdCandidate, pin) {
+@@ -6803,6 +6956,175 @@ async function verifyVoicePinForUser(userIdCandidate, pin) {
+   }
+ }
+ 
++// ── S1 Track A — identity BEFORE credential ─────────────────────────────────
++//
++// /voice/identify        — prompts for the last N digits of the registered number
++// /voice/identify-result — resolves those digits to exactly one account, then
++//                          hands off to /voice/pin carrying that account's id
++//
++// Invariant this pair exists to hold: **a PIN is never checked against more
++// than one account.** If the digits given match several accounts we ask for
++// more digits rather than testing the PIN against the group — checking a
++// group is the original defect in miniature, and the group size is bounded by
++// nothing (S1 Phase 1 §5).
++
++const IDENTIFY_MAX_ATTEMPTS = 3;
++
++// Deliberately identical wording for "no such account" and "wrong PIN" paths.
++// Saying "that number isn't registered" would confirm to a stranger which
++// numbers have Naavi accounts — an account-existence oracle. S1 Phase 3 §5
++// item 8 requires this and Phase 5 must quote the exact text.
++const IDENTIFY_REFUSAL = "I can't verify this call. Please call from your registered phone. Goodbye.";
++
++// A blocked account gets its OWN wording, and is told plainly why and how to
++// undo it. This deliberately discloses that the account exists and is locked.
++//
++// That disclosure was already happening. A blocked account is refused on the
++// FIRST attempt, while a wrong last-4 gets three — so anyone probing tells the
++// two apart from the flow, without reading a word. Identical wording was
++// protecting something the timing already gave away, and the user was paying
++// for it in confusion.
++//
++// Wael, 2026-08-19, hearing the shared wording on a real call: "If I'm Robert
++// and heard this, I'd be questioning myself and the message." The owner who
++// blocked their own account is the person most likely to hit this, and making
++// them decode a conditional to find out what happened is the wrong trade.
++//
++// An attacker learns only that a real account exists and cannot be entered —
++// which no correct PIN would change, since blocking outranks the PIN.
++const BLOCKED_REFUSAL = 'Calls from unregistered phones are blocked on this account. '
++  + 'Please call from your registered phone, or unblock them in the Naavi app. Goodbye.';
++
++function buildIdentifyTwiml(host, httpProtocol, { callerPhone, attempt, len, cause }) {
++  const lenWord = len === 6 ? 'six' : 'four';
++  // Wael 2026-08-19: a caller who mishears their own digits must get three
++  // tries, not a hangup. Naavi's users will fumble this and being cut off is
++  // the wrong response.
++  //
++  // The retry wording is deliberately IDENTICAL for "couldn't make out the
++  // digits" and "those digits match no account". Distinguishing them would
++  // turn the retry into the account-existence oracle that the refusal message
++  // is careful to avoid — a caller could probe suffixes and read the wording
++  // to learn which ones are real. "I didn't get that" covers both truthfully
++  // without disclosing which happened.
++  const promptMsg = cause === 'ambiguous'
++    ? `More than one account matches. Say or enter the last ${lenWord} digits of your registered phone number.`
++    : cause === 'timeout'
++      ? `I didn't hear anything. Say or enter the last ${lenWord} digits of your registered phone number.`
++      : cause === 'wrong'
++        ? `I didn't get that. Say or enter the last ${lenWord} digits of your registered phone number.`
++        : `This phone isn't registered. Say or enter the last ${lenWord} digits of your registered phone number.`;
++
++  const action = `${httpProtocol}://${host}/voice/identify-result?attempt=${attempt}&amp;len=${len}&amp;from=${encodeURIComponent(callerPhone)}`;
++  const next = attempt >= IDENTIFY_MAX_ATTEMPTS
++    ? `${httpProtocol}://${host}/voice/pin-lockout`
++    : `${httpProtocol}://${host}/voice/identify?attempt=${attempt + 1}&amp;len=${len}&amp;cause=timeout&amp;from=${encodeURIComponent(callerPhone)}`;
++
++  const promptToken = createPlayToken(promptMsg);
++  // <Play> stays OUTSIDE <Gather> — nesting it produced silent prompts on
++  // landline calls (see the /voice unregistered branch comment).
++  return `<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Play>${httpProtocol}://${host}/tts-play/${promptToken}</Play>
++  <Gather input="speech dtmf" numDigits="${len}" timeout="8" speechTimeout="2" actionOnEmptyResult="true" action="${action}" speechModel="phone_call" language="en-US"/>
++  <Redirect>${next}</Redirect>
++</Response>`;
++}
++
++app.post('/voice/identify', express.urlencoded({ extended: false }), (req, res) => {
++  const callerPhone = String(req.query.from || req.body.From || '');
++  const attempt = Math.max(1, parseInt(String(req.query.attempt || '1'), 10));
++  const len = String(req.query.len) === '6' ? 6 : 4;
++  const cause = String(req.query.cause || '').toLowerCase();
++  const host = req.headers.host;
++  const httpProtocol = host?.includes('localhost') ? 'http' : 'https';
++  console.log(`[Voice/identify] prompt sent — caller=${callerPhone} attempt=${attempt} len=${len} cause=${cause || '-'}`);
++  res.type('text/xml').send(buildIdentifyTwiml(host, httpProtocol, { callerPhone, attempt, len, cause }));
++});
++
++app.post('/voice/identify-result', express.urlencoded({ extended: false }), async (req, res) => {
++  const callerPhone = String(req.query.from || req.body.From || '');
++  const attempt = Math.max(1, parseInt(String(req.query.attempt || '1'), 10));
++  const len = String(req.query.len) === '6' ? 6 : 4;
++  const host = req.headers.host;
++  const httpProtocol = host?.includes('localhost') ? 'http' : 'https';
++
++  const raw = `${req.body.Digits || ''} ${req.body.SpeechResult || ''}`;
++  const digits = String(raw).replace(/\D/g, '').slice(-len);
++  console.log(`[Voice/identify-result] caller=${callerPhone} attempt=${attempt} len=${len} extracted="${digits}"`);
++
++  const retry = (cause) => {
++    const url = attempt >= IDENTIFY_MAX_ATTEMPTS
++      ? `${httpProtocol}://${host}/voice/pin-lockout`
++      : `${httpProtocol}://${host}/voice/identify?attempt=${attempt + 1}&amp;len=${len}&amp;cause=${cause}&amp;from=${encodeURIComponent(callerPhone)}`;
++    res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Redirect>${url}</Redirect>
++</Response>`);
++  };
++
++  if (digits.length < len) {
++    const empty = !String(req.body.Digits || '').trim() && !String(req.body.SpeechResult || '').trim();
++    return retry(empty ? 'timeout' : 'wrong');
++  }
++
++  const candidates = await findAccountsByPhoneSuffix(digits);
++
++  // Zero matches — retry, with wording that does not reveal whether an account
++  // exists. Only after IDENTIFY_MAX_ATTEMPTS does the call end, and the final
++  // message still discloses nothing.
++  if (candidates.length === 0) {
++    console.log(`[Voice/identify-result] no account for suffix — attempt ${attempt}/${IDENTIFY_MAX_ATTEMPTS} (caller=${callerPhone})`);
++    if (attempt < IDENTIFY_MAX_ATTEMPTS) {
++      return retry('wrong');
++    }
++    const token = createPlayToken(IDENTIFY_REFUSAL);
++    return res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Play>${httpProtocol}://${host}/tts-play/${token}</Play>
++  <Hangup/>
++</Response>`);
++  }
++
++  // More than one — ask for more digits. NEVER test the PIN against a group.
++  if (candidates.length > 1) {
++    if (len >= 6) {
++      console.warn(`[Voice/identify-result] still ambiguous at 6 digits (${candidates.length} accounts) — refusing`);
++      const token = createPlayToken("I can't tell which account this is. Please call from your registered phone. Goodbye.");
++      return res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Play>${httpProtocol}://${host}/tts-play/${token}</Play>
++  <Hangup/>
++</Response>`);
++    }
++    console.log(`[Voice/identify-result] ${candidates.length} accounts share these digits — asking for 6`);
++    return res.type('text/xml').send(
++      buildIdentifyTwiml(host, httpProtocol, { callerPhone, attempt: 1, len: 6, cause: 'ambiguous' }));
++  }
++
++  // Exactly one. Hand off to the PIN step carrying the claimed account.
++  const claimed = candidates[0];
++
++  // S1 Track D — the owner has blocked unregistered access. Refuse before the
++  // PIN is even asked for, and use the SAME wording as every other refusal so
++  // a caller cannot learn that this particular account is in a blocked state.
++  if (claimed.voice_unregistered_blocked) {
++    console.log(`[Voice/identify-result] account is blocked to unregistered callers — refusing (user=${claimed.user_id.slice(0, 8)}…)`);
++    const token = createPlayToken(BLOCKED_REFUSAL);
++    return res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Play>${httpProtocol}://${host}/tts-play/${token}</Play>
++  <Hangup/>
++</Response>`);
++  }
++  console.log(`[Voice/identify-result] resolved to user=${claimed.user_id.slice(0, 8)}… — proceeding to PIN`);
++  const pinUrl = `${httpProtocol}://${host}/voice/pin?attempt=1&amp;claimed=${encodeURIComponent(claimed.user_id)}&amp;from=${encodeURIComponent(callerPhone)}`;
++  res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
++<Response>
++  <Redirect>${pinUrl}</Redirect>
++</Response>`);
++});
++
+ // /voice/pin — TwiML that prompts for the 4-digit PIN, gathering both DTMF
+ // and speech, posts the result back to /voice/pin-result.
+ app.post('/voice/pin', express.urlencoded({ extended: false }), (req, res) => {
+@@ -6818,13 +7140,17 @@ app.post('/voice/pin', express.urlencoded({ extended: false }), (req, res) => {
+   // Reason is passed via ?cause= query param from /voice/pin-result.
+   const cause = String(req.query.cause || '').toLowerCase();
+   const promptMsg = attempt === 1
+-    ? "This phone isn't registered. Say or enter your four digit PIN."
++    ? "Now say or enter your PIN."
+     : cause === 'timeout'
+-      ? "I didn't hear anything. Say or enter your four digit PIN."
+-      : "That didn't match. Say or enter your four digit PIN.";
++      ? "I didn't hear anything. Say or enter your PIN."
++      : "That didn't match. Say or enter your PIN.";
++  // S1 Track A — the account claimed at /voice/identify-result travels with
++  // every PIN prompt and retry. The PIN is only ever checked against it.
++  const claimed = String(req.query.claimed || '');
++  const claimedParam = claimed ? `&amp;claimed=${encodeURIComponent(claimed)}` : '';
+   // & must be &amp; in XML attribute / Redirect text — Twilio rejects unescaped & as invalid TwiML.
+-  const action = `${httpProtocol}://${host}/voice/pin-result?attempt=${attempt}&amp;from=${encodeURIComponent(callerPhone)}`;
+-  const timeoutRedirect = `${httpProtocol}://${host}/voice/pin?attempt=${attempt + 1}&amp;cause=timeout&amp;from=${encodeURIComponent(callerPhone)}`;
++  const action = `${httpProtocol}://${host}/voice/pin-result?attempt=${attempt}${claimedParam}&amp;from=${encodeURIComponent(callerPhone)}`;
++  const timeoutRedirect = `${httpProtocol}://${host}/voice/pin?attempt=${attempt + 1}&amp;cause=timeout${claimedParam}&amp;from=${encodeURIComponent(callerPhone)}`;
+ 
+   // On 3rd failure, the next redirect would attempt=4 — short-circuit to
+   // hangup-message endpoint.
+@@ -6834,10 +7160,16 @@ app.post('/voice/pin', express.urlencoded({ extended: false }), (req, res) => {
+   const promptToken = createPlayToken(promptMsg);
+   // <Play> OUTSIDE <Gather> — nesting it inside Gather caused silent
+   // prompts on landline (see /voice unregistered branch comment above).
++  //
++  // S1 Track C — numDigits is 6, not 4. Left at 4 it would submit after the
++  // first four keys of a 6-digit PIN and the caller would never be able to
++  // enter one over DTMF. A holder of an un-migrated 4-digit PIN submits with
++  // # (Twilio's default finishOnKey) or by letting the 8s timeout fire, which
++  // is why the prompt no longer states a digit count.
+   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+ <Response>
+   <Play>${httpProtocol}://${host}/tts-play/${promptToken}</Play>
+-  <Gather input="speech dtmf" numDigits="4" timeout="8" speechTimeout="2" actionOnEmptyResult="true" action="${action}" speechModel="phone_call" language="en-US"/>
++  <Gather input="speech dtmf" numDigits="6" timeout="8" speechTimeout="2" actionOnEmptyResult="true" action="${action}" speechModel="phone_call" language="en-US"/>
+   <Redirect>${fallbackRedirect}</Redirect>
+ </Response>`;
+   console.log(`[Voice/pin] prompt sent — caller=${callerPhone} attempt=${attempt}`);
+@@ -6872,33 +7204,69 @@ app.post('/voice/pin-result', express.urlencoded({ extended: false }), async (re
+     return;
+   }
+ 
+-  // Iterate all users with PIN set, verify in parallel. With small user
+-  // counts (typical: 2-5 family members) parallelism is fine.
+-  const candidates = await getUsersWithVoicePin();
+-  const verifyResults = await Promise.all(candidates.map(async (u) => ({
+-    user: u,
+-    match: await verifyVoicePinForUser(u.user_id, pin),
+-  })));
+-  const matches = verifyResults.filter(r => r.match);
+-
+-  // Multiple match — ambiguous. Send caller off; admin can investigate.
+-  if (matches.length > 1) {
+-    console.warn(`[Voice/pin-result] AMBIGUOUS — ${matches.length} users matched pin from ${callerPhone}`);
+-    const ambToken = createPlayToken("Hmm, that PIN matches more than one account. Please call from your registered phone, or change one of the PINs in the app. Goodbye.");
++  // S1 Track A (2026-08-19) — verify against the CLAIMED account only.
++  //
++  // This block previously fetched every PIN-holding account and tested the
++  // entered PIN against all of them, so a guess succeeded if it matched
++  // ANYONE. The caller now claims an identity at /voice/identify-result
++  // first, and that account id arrives as ?claimed=. One account, one check.
++  //
++  // Fail closed: no claimed account means the caller reached this endpoint
++  // without passing identification. Refuse rather than fall back to the old
++  // search — a fallback here would silently restore the defect.
++  const claimedUserId = String(req.query.claimed || '');
++  if (!claimedUserId) {
++    console.warn(`[Voice/pin-result] no claimed account — refusing (caller=${callerPhone})`);
++    const token = createPlayToken(IDENTIFY_REFUSAL);
+     res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+ <Response>
+-  <Play>${httpProtocol}://${host}/tts-play/${ambToken}</Play>
++  <Play>${httpProtocol}://${host}/tts-play/${token}</Play>
+   <Hangup/>
+ </Response>`);
+     return;
+   }
+ 
++  const pinMatched = await verifyVoicePinForUser(claimedUserId, pin);
++
++  // Fetch the display name only on success — no reason to query on a failed
++  // attempt, and it keeps the failure path cheap under repeated guessing.
++  let claimedName = '';
++  if (pinMatched) {
++    try {
++      const nameRes = await fetch(
++        `${SUPABASE_URL}/rest/v1/user_settings?select=name&user_id=eq.${encodeURIComponent(claimedUserId)}&limit=1`,
++        { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` } },
++      );
++      if (nameRes.ok) {
++        const rows = await nameRes.json();
++        claimedName = rows?.[0]?.name || '';
++      } else {
++        console.error(`[Voice/pin-result] name lookup NOT-OK status=${nameRes.status} user=${claimedUserId.slice(0, 8)}…`);
++      }
++    } catch (err) {
++      console.error('[Voice/pin-result] name lookup failed:', err.message);
++    }
++  }
++
++  const matches = pinMatched ? [{ user: { user_id: claimedUserId, name: claimedName } }] : [];
++
++  // The old "PIN matched more than one account" branch is deleted along with
++  // the search that produced it: exactly one account is checked, so an
++  // ambiguous PIN match can no longer arise. Ambiguity is now resolved
++  // earlier, at /voice/identify-result, by asking for more digits.
++
+   // No match — retry or lockout (TwiML Redirect, not HTTP 307).
+-  // Cause is 'wrong' here (we DID get a 4-digit PIN, just didn't match anyone).
++  // Cause is 'wrong' here (we DID get a PIN, it just didn't match the
++  // claimed account). The claimed account travels with the retry so the
++  // caller is not asked to identify themselves again.
+   if (matches.length === 0) {
++    // S1 Track D — the failure belongs to a known account now, so record it.
++    // Fire-and-forget: a counter write must never delay or break the call.
++    bumpPinFailure(claimedUserId).catch(() => {});
++    const claimedParam = `&amp;claimed=${encodeURIComponent(claimedUserId)}`;
+     const nextUrl = attempt >= PIN_MAX_ATTEMPTS
+       ? `${httpProtocol}://${host}/voice/pin-lockout`
+-      : `${httpProtocol}://${host}/voice/pin?attempt=${attempt + 1}&amp;cause=wrong&amp;from=${encodeURIComponent(callerPhone)}`;
++      : `${httpProtocol}://${host}/voice/pin?attempt=${attempt + 1}&amp;cause=wrong${claimedParam}&amp;from=${encodeURIComponent(callerPhone)}`;
+     res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+ <Response>
+   <Redirect>${nextUrl}</Redirect>
+@@ -6913,6 +7281,8 @@ app.post('/voice/pin-result', express.urlencoded({ extended: false }), async (re
+   const matched = matches[0].user;
+   const userId = matched.user_id;
+   const userName = matched.name || '';
++  // S1 Track D — a correct PIN clears the failure count for this account.
++  clearPinFailures(userId).catch(() => {});
+   console.log(`[Voice/pin-result] MATCH — user=${userId.slice(0,8)}… name=${userName} caller=${callerPhone}`);
+ 
+   const pinCallSid = req.body.CallSid || '';
+@@ -7018,6 +7388,7 @@ async function finishTimezoneCaptureAndConnect(req, res, { userId, userName, cal
+       <Parameter name="callerPhone" value="${callerPhone}" />
+       <Parameter name="userName" value="${userName}" />
+       <Parameter name="userId" value="${userId}" />
++      <Parameter name="variant" value="${variant || 'primary'}" />
+     </Stream>
+   </Connect>
+ </Response>`);
+@@ -7177,6 +7548,7 @@ function buildDemoConnectTwiml(host, callerPhone, inboundCallSid, callerName) {
+       <Parameter name="callerPhone" value="${callerPhone}" />
+       <Parameter name="userName" value="${safeName}" />
+       <Parameter name="userId" value="${userId}" />
++      <Parameter name="variant" value="demo" />
+     </Stream>
+   </Connect>
+ </Response>`;
+@@ -8602,6 +8974,9 @@ wss.on('connection', (twilioWs) => {
+   let streamSid = null;
+   let callSid = null;
+   let callerPhone = null;  // Caller's phone number for user resolution
++  // S1 Track B — 'pin' | 'primary' | 'demo'. How this caller proved identity.
++  // A PIN-authenticated caller may not change credentials (see set-PIN gate).
++  let callVariant = 'primary';
+   let userId = null;       // Resolved per-call, not cached globally
+   let userName = '';       // User's name from user_settings
+   let pendingText = '';
+@@ -10411,10 +10786,31 @@ wss.on('connection', (twilioWs) => {
+       const setPinIntentRe = /\b(?:set|change|update|make|create|reset)\b.*?\b(?:pin|password|code|secret\s+code|access\s+code)\b/i;
+       const myPinIntentRe  = /\b(?:my|the|a)\s+(?:new\s+)?(?:voice\s+)?(?:pin|password|code)\s+(?:is|to|equals)\b/i;
+       if (userId && (setPinIntentRe.test(text) || myPinIntentRe.test(text))) {
++        // S1 Track B (2026-08-19) — a caller who got in BY PIN may not change
++        // the PIN. Previously they could, which turned a guessed PIN into
++        // permanent account takeover: the real owner's PIN silently stopped
++        // working and they had no way to tell a lockout from a memory lapse.
++        // Changing a credential is reserved for the strong channels - the
++        // mobile app, or a call from the registered number.
++        // Wael's decision, S1 Phase 3 boundaries (option 1 of 2).
++        if (callVariant === 'pin') {
++          console.warn(`[Voice/set-pin] REFUSED — PIN-authenticated session cannot change the PIN (user=${String(userId).slice(0,8)}…)`);
++          const speech = "For your security I can't change your PIN on this call. Change it in the Naavi app, or call from your own phone.";
++          conversationHistory.push({ role: 'user', content: text });
++          conversationHistory.push({ role: 'assistant', content: JSON.stringify({ speech, actions: [], pendingThreads: [] }) });
++          if (conversationHistory.length > 20) conversationHistory = conversationHistory.slice(-20);
++          stopMusic();
++          isSpeaking = true;
++          if (idleTimer) clearTimeout(idleTimer);
++          audioDispatchedAt = Date.now();
++          await streamTTSToTwilio(speech, twilioWs, streamSid);
++          isProcessing = false;
++          return;
++        }
+         const pin = extractPinFromSentence(text);
+         if (!pin) {
+           console.log(`[Voice/set-pin] intent matched but no 4-digit PIN found in: "${text}"`);
+-          const speech = "Tell me your four digit PIN. Say it as four digits, like one two three four.";
++          const speech = "Tell me your six digit PIN. Say it as six digits, one at a time.";
+           conversationHistory.push({ role: 'user', content: text });
+           conversationHistory.push({ role: 'assistant', content: JSON.stringify({ speech, actions: [], pendingThreads: [] }) });
+           if (conversationHistory.length > 20) conversationHistory = conversationHistory.slice(-20);
+@@ -10434,9 +10830,12 @@ wss.on('connection', (twilioWs) => {
+             body: JSON.stringify({ op: 'set', user_id: userId, pin }),
+           });
+           const data = await r.json();
+-          const spacedPin = pin.split('').join(' ');
+           const speech = data?.success
+-            ? `Done. Your PIN is ${spacedPin}. Use it when calling from another phone.`
++            // S1 Track B — do NOT recite the PIN. On a borrowed handset or
++            // speakerphone, saying it aloud hands it to anyone in the room —
++            // the same exposure that made last-4 preferable to the full
++            // number at the identify step.
++            ? `Done. Your new PIN is saved. Use it when calling from another phone.`
+             : "Sorry, I couldn't save your PIN. Try again in a moment.";
+           conversationHistory.push({ role: 'user', content: text });
+           conversationHistory.push({ role: 'assistant', content: JSON.stringify({ speech, actions: [], pendingThreads: [] }) });
+@@ -12946,6 +13345,11 @@ ${briefContext}`.trim();
+           callSid = msg.start?.callSid;
+           callerPhone = msg.start?.customParameters?.callerPhone || null;
+           userName = msg.start?.customParameters?.userName || '';
++          // S1 Track B (2026-08-19) — how this caller proved who they are.
++          // 'pin' = authenticated by PIN from an unregistered phone.
++          // 'primary' = calling from their own registered number.
++          // Used to refuse credential changes over a PIN-authenticated call.
++          callVariant = msg.start?.customParameters?.variant || 'primary';
+           const callType = msg.start?.customParameters?.callType;
+           // userId may be passed explicitly by outbound calls (morning brief)
+           // so we don't have to guess from user_tokens. Inbound calls don't
