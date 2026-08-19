@@ -139,7 +139,22 @@ Wael called `+13435041572`; Naavi answered. Two defects surfaced, recorded as **
 1. **Positive-path outbound** — a staging alert firing to an allowlisted destination and actually arriving. Only the *blocked* path is proven; the allowed path is asserted by unit test, not by a live send.
 2. **Full conversational call** — a staging call exercising alerts, lists, memory, calendar against staging data.
 3. **Cron-fired alert** — create a rule on staging, let `evaluate-rules` fire it, confirm the guard is consulted on the cron path (only the direct HTTP invocation is proven).
-4. **`npm run test:auto` against staging** — required by Phase 2 §8.3 Addition 2, to confirm Track C did not break the auto-tester via the uniqueness trigger. **Not yet run.**
+4. **`npm run test:auto` (Gate 1) with `SUPABASE_URL` pointed at staging** — required by Phase 2 §8.3 Addition 2, to confirm Track C did not break the auto-tester via the uniqueness trigger. **Not yet run.**
+
+### ⚠️ Correction — an earlier version of this list was wrong
+
+Item 4 originally read *"`npm run test:auto` against staging"* as though it would verify the new environment. **It does not, and cannot.** Raised by Wael 2026-08-19; verified by direct inspection:
+
+- **46 tests carry `platform: 'voice'`** across 14 catalogue files (`voice-regression.ts`, `voice-pin.ts`, and 12 session files), so voice coverage does exist — but it is **Gate 2** (`npm run test:voice`), and **Gate 1 (`test:auto`) excludes it entirely** (`tests/runner.ts:163-170`).
+- Those voice tests make **live calls** — `fetch(\`${url}/test/ask\`)` (`tests/catalogue/voice-regression.ts:45`) — against `process.env.VOICE_SERVER_URL`, which is `https://naavi-voice-server-production.up.railway.app` (`tests/.env:9`).
+- A search of all of `tests/` for `naavi-voice-staging` or `STAGING_VOICE` returns **zero matches**. There is no staging-voice configuration in the harness.
+
+**Consequences, stated plainly:**
+- Item 4 verifies only the *database* side of Track C. It exercises nothing in the new voice environment.
+- **The auto-tester has never tested a voice staging environment, and cannot today** — none existed before this work item.
+- Running `npm run test:voice` with `SUPABASE_URL` pointed at staging would produce a **split-brain**: DB fixtures against staging, live voice calls against **production**. This must not be done until the harness is environment-aware.
+
+**Therefore T2 is not fully delivered.** The environment exists and is contained, but nothing automated can reach it — it is verifiable only by Wael dialling it manually. Tracked as **T2-F1** (§9).
 
 ---
 
@@ -216,6 +231,22 @@ The hostname contains "production" because Railway's *environment* is named that
 | Twilio webhook | Reset `+13435041572` to `https://demo.twilio.com/welcome/voice/` |
 
 **Production requires no rollback** — it was not deployed to and its configuration was not changed.
+
+---
+
+## 9. Follow-ups opened by this work item
+
+**T2-F1 — make the test harness environment-aware for Voice.** Raised by Wael 2026-08-19 (§4 correction). Today the harness has exactly one voice URL, hardcoded to production in `tests/.env:9`, so the staging voice environment cannot be reached by any automated test. Until this closes, T2 delivers an environment that only a human can exercise.
+
+*Likely shape, not yet designed:* a `STAGING_VOICE_SERVER_URL` in `tests/.env` plus selection logic in `tests/runner.ts` that picks the voice URL from the **same** environment choice already driving `SUPABASE_URL` — so the two can never diverge. The staging service runs identical code and already exposes the endpoint the suite calls (`naavi-voice-server/src/index.js:8520`), so no voice-server change is expected.
+
+*Must also address:* the split-brain hazard — the runner should **refuse to run** when `SUPABASE_URL` and the voice URL name different environments, rather than silently testing across both. That failure mode is the same class as the 2026-07-20 incident (`feedback_verify_test_env_before_trusting_gate`).
+
+*Governance:* not Protected Core (test harness), but it gates whether T2's environment is usable, so it should close before T2 is called done.
+
+**T3 — separate the Demo line from the Voice platform.** See §6 Finding 6 and the holding list. Out of T2's scope, Full Phase 1-8.
+
+**Secret rotation.** §6 Finding 7. Not started.
 
 ---
 
