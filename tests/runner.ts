@@ -37,8 +37,10 @@ import { multiUserTests } from './catalogue/multiuser';
 import { listsTests } from './catalogue/lists';
 import { promptRegressionTests } from './catalogue/prompt-regression';
 import { session2026_08_15_conversationRecorderFixTests } from './catalogue/session-2026-08-15-conversation-recorder-fix';
+import { resolveVoiceTarget } from './lib/voice_env';
 import { session2026_08_19_b10yTeardownScopeTests } from './catalogue/session-2026-08-19-b10y-teardown-scope';
 import { t2OutboundGuardTests } from './catalogue/t2-outbound-guard';
+import { t2VoiceEnvTests } from './catalogue/t2-voice-env';
 import { dataIntegrityTests } from './catalogue/data-integrity';
 import { searchNormalizationTests } from './catalogue/search-normalization';
 import { gmailFreshnessTests } from './catalogue/gmail-freshness';
@@ -190,6 +192,7 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_08_15_conversationRecorderFixTests,
   ...session2026_08_19_b10yTeardownScopeTests,
   ...t2OutboundGuardTests,
+  ...t2VoiceEnvTests,
   ...dataIntegrityTests,
   ...searchNormalizationTests,
   ...gmailFreshnessTests,
@@ -392,10 +395,46 @@ async function main(): Promise<void> {
   const projectRef = projectRefMatch ? projectRefMatch[1] : '';
   const envLabel = ENV_LABELS[projectRef] ?? 'UNKNOWN';
   const gateLabel = voiceOnly ? 'GATE 2 — VOICE ONLY' : 'GATE 1 — MOBILE / APK / AAB (Voice excluded)';
+
+  // ── T2-F1 (2026-08-19) — Voice environment selection ────────────────────
+  // Until T2 there was only one voice server, so VOICE_SERVER_URL was a
+  // single hardcoded production value and Gate 2 always tested production no
+  // matter which Supabase project the run targeted. With a staging voice
+  // server now live, that becomes a split-brain hazard: DB fixtures against
+  // staging while live voice calls hit production. Same failure class as the
+  // 2026-07-20 incident that produced the environment banner above.
+  //
+  // Resolution is centralized here rather than in the 14 catalogue files that
+  // consume it: every voice test reads process.env.VOICE_SERVER_URL, so
+  // overriding it once means no test file changes and no way for one suite to
+  // disagree with another.
+  const voiceTarget = resolveVoiceTarget({
+    envLabel,
+    prodUrl:    process.env.VOICE_SERVER_URL ?? '',
+    stagingUrl: process.env.STAGING_VOICE_SERVER_URL ?? '',
+  });
+
+  // Make every voice test use the selected server, whatever tests/.env said.
+  if (voiceTarget.url) process.env.VOICE_SERVER_URL = voiceTarget.url;
+
   console.log('════════════════════════════════════════════════════════');
   console.log(`  Testing against: ${envLabel}  (${projectRef || supabaseUrl})`);
   console.log(`  ${gateLabel}`);
+  if (voiceOnly) {
+    console.log(`  Voice server:    ${voiceTarget.label}  (${voiceTarget.host || '(not set)'})`);
+  }
   console.log('════════════════════════════════════════════════════════');
+
+  // Hard refusal — Gate 2 only. Gate 1 excludes every platform:'voice' test,
+  // so a mismatch there is inert and must not block a mobile run.
+  if (voiceOnly && voiceTarget.refusal) {
+    console.error('════════════════════════════════════════════════════════');
+    console.error('  REFUSING TO RUN — Gate 2');
+    console.error('  ' + voiceTarget.refusal);
+    console.error('  Point both at the same environment, then re-run.');
+    console.error('════════════════════════════════════════════════════════');
+    process.exit(2);
+  }
 
   const baseCtx: TestContext = {
     supabaseUrl,

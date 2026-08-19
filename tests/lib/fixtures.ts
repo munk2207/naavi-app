@@ -69,7 +69,7 @@ const OWNED_TABLES = [
  * analysis): `documents`, `email_actions`, `knowledge_fragments`, and
  * `sent_messages` are also deleted unscoped and can likewise hold real data
  * on a Gmail/Drive-connected account. Tracked as a follow-up to B10y.
- */
+ *
  * Markers must cover EVERY title convention the suite creates, or those rows
  * stop being cleaned and accumulate — the exact failure
  * `session-2026-05-29.calendar-events-in-owned-tables` guards against. Three
