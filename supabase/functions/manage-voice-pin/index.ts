@@ -34,7 +34,17 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PIN_RE = /^\d{4}$/;
+// S1 Track C (2026-08-19) — PINs are 6 digits.
+//
+// SET requires 6: every new or changed PIN gets the larger keyspace.
+// VERIFY accepts 4 or 6 so existing holders are not locked out of the
+// borrowed-phone path before they choose a new PIN. That migration window is
+// a Phase 0 constraint, not an oversight — a change that silently locked out
+// every current user would be worse than the defect it fixes.
+//
+// Retire PIN_VERIFY_RE (and this comment) once no 4-digit hash remains.
+const PIN_SET_RE = /^\d{6}$/;
+const PIN_VERIFY_RE = /^\d{4}$|^\d{6}$/;
 const BCRYPT_ROUNDS = 10;
 
 function jsonResponse(data: unknown, status = 200) {
@@ -88,8 +98,8 @@ Deno.serve(async (req) => {
     }
 
     const pin = String(body?.pin ?? '').trim();
-    if (!PIN_RE.test(pin)) {
-      return jsonResponse({ success: false, error: 'pin_must_be_4_digits' }, 400);
+    if (!PIN_SET_RE.test(pin)) {
+      return jsonResponse({ success: false, error: 'pin_must_be_6_digits' }, 400);
     }
 
     const hash = await bcrypt.hash(pin, BCRYPT_ROUNDS);
@@ -178,7 +188,7 @@ Deno.serve(async (req) => {
     const userId = String(body?.user_id ?? '').trim();
     const pin    = String(body?.pin     ?? '').trim();
     if (!userId)             return jsonResponse({ success: false, error: 'user_id_required' }, 400);
-    if (!PIN_RE.test(pin))   return jsonResponse({ success: false, error: 'pin_must_be_4_digits' }, 400);
+    if (!PIN_VERIFY_RE.test(pin)) return jsonResponse({ success: false, error: 'pin_must_be_4_or_6_digits' }, 400);
 
     const { data, error } = await supabase
       .from('user_settings')
