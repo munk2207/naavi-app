@@ -106,11 +106,15 @@ Required by the Phase 0 review. **Recommendation, for Phase 2 to design against:
 
 ## 6. What is NOT established — open for Phase 2
 
-1. **Does the borrowed-phone path have real usage?** No usage telemetry exists. `voice_pin_set_at` shows 2 production PINs set (2026-06-07, 2026-08-19 — the latter is Wael's test today). **Whether anyone has ever completed a call through this path is unknown.** If the answer is "never," removing the feature is stronger than any authentication design, and this becomes a much smaller item. **This should be answered before Phase 2 designs anything.**
+1. **Is a borrowed-phone path something Naavi should have?** ⚠️ **Reframed 2026-08-19 — the original wording was a badly-formed question.** It asked whether the path "has real usage," which cannot be answered: Naavi is pre-launch, and the only two accounts with a PIN are Wael (`788fe85c`, set today during testing) and Huss (`381b0833`, 2026-06-07). **The feature's entire population is the two founders.** There is also no telemetry for the path — 1.25M `client_diagnostics` rows contain zero PIN references, and `first_call_completed_at` cannot distinguish a PIN-authenticated call from a normal one off a registered number. Confirmed by direct query, not assumed.
+
+   Wael's correction, recorded because it applies well beyond this item: *"this is a new system, we do not have any real statistics about anything. it is all analysis."*
+
+   **So this is a product decision, not a measurement.** If the capability is not wanted, removing it is strictly stronger than any authentication design and S1 collapses to a much smaller item. If it is wanted, the design in Phase 0 stands. **Wael decides; Phase 2 must not begin until he has.**
 2. **Migration.** What happens on the first call by a holder of an existing 4-digit PIN? Not designed.
 3. **Failure threshold** before the SMS alert fires; one alert per incident or per attempt.
 4. **Lockdown storage.** No schema exists for it — `20260513000002_user_settings_voice_pin.sql` adds only `voice_pin_hash` and `voice_pin_set_at`. A new column and a migration will be needed.
-5. **Rate of legitimate PIN failure** — unmeasured, so alert thresholds would be guesswork today.
+5. **Alert threshold** — originally framed as needing the "rate of legitimate PIN failure." Same flaw as Q1: there is no population to measure. With two founder accounts, any threshold is a **choice made from judgement**, not a calibration from data. Phase 2 should pick a deliberately conservative starting value and state it as provisional, revisited once real users exist.
 
 ## 7. Architecture Reference — ownership and classification
 
