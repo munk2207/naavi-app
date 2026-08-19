@@ -37,6 +37,7 @@ import { multiUserTests } from './catalogue/multiuser';
 import { listsTests } from './catalogue/lists';
 import { promptRegressionTests } from './catalogue/prompt-regression';
 import { session2026_08_15_conversationRecorderFixTests } from './catalogue/session-2026-08-15-conversation-recorder-fix';
+import { session2026_08_19_b10yTeardownScopeTests } from './catalogue/session-2026-08-19-b10y-teardown-scope';
 import { dataIntegrityTests } from './catalogue/data-integrity';
 import { searchNormalizationTests } from './catalogue/search-normalization';
 import { gmailFreshnessTests } from './catalogue/gmail-freshness';
@@ -186,6 +187,7 @@ const ALL_TESTS: TestCase[] = [
   ...listsTests,
   ...promptRegressionTests,
   ...session2026_08_15_conversationRecorderFixTests,
+  ...session2026_08_19_b10yTeardownScopeTests,
   ...dataIntegrityTests,
   ...searchNormalizationTests,
   ...gmailFreshnessTests,

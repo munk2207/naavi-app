@@ -37,6 +37,52 @@ const OWNED_TABLES = [
   'calendar_events',
 ];
 
+/**
+ * B10y root fix (2026-08-19) — per-table row scoping for teardown.
+ *
+ * `OWNED_TABLES` above is deleted with `user_id=eq.<test user>` and nothing
+ * else. For tables whose rows are genuinely created by the suite, that's
+ * correct. For `calendar_events` it was not: that table holds REAL rows
+ * synced from the user's live Google Calendar, so the unscoped delete wiped
+ * actual user data on every run — the B10y incident (2026-08-03), which
+ * emptied robert.esm.2207@gmail.com's calendar and surfaced as the mobile
+ * Brief truthfully reporting "your day is clear."
+ *
+ * The prior mitigations (a dedicated staging test account + the
+ * PROTECTED_ACCOUNT_IDS hard guard below) stopped that ONE account from
+ * being hit again. Neither fixed the delete itself — it would still wipe
+ * real calendar data on whatever account the suite is pointed at. This is
+ * the root fix.
+ *
+ * Scope is by title marker, matching the convention the calendar tests
+ * already use ('Auto-tester …' / 'multiuser-safety-test', see
+ * tests/catalogue/calendar.ts and the Google-side cleanup at the bottom of
+ * teardownSuite). Rows the suite did not create are now left alone.
+ *
+ * This preserves the original intent of
+ * `session-2026-05-29.calendar-events-in-owned-tables` — "teardown clears
+ * DB rows each run, without which stale rows accumulate indefinitely" —
+ * which was always about SUITE-CREATED rows. Intent and implementation had
+ * diverged; this reconciles them.
+ *
+ * NOT fixed here, deliberately (minimal-change; each needs its own
+ * analysis): `documents`, `email_actions`, `knowledge_fragments`, and
+ * `sent_messages` are also deleted unscoped and can likewise hold real data
+ * on a Gmail/Drive-connected account. Tracked as a follow-up to B10y.
+ */
+ * Markers must cover EVERY title convention the suite creates, or those rows
+ * stop being cleaned and accumulate — the exact failure
+ * `session-2026-05-29.calendar-events-in-owned-tables` guards against. Three
+ * conventions are in use and all three are listed below; a first pass covering
+ * only 'Auto-tester*' left 'AutoTest …' rows behind (observed live on the
+ * production test account 2026-08-19). If a new test creates calendar events
+ * under a new title prefix, add it here in the same commit.
+ */
+const TEARDOWN_ROW_SCOPE: Record<string, string> = {
+  calendar_events:
+    'or=(title.like.Auto-tester*,title.like.AutoTest*,title.like.multiuser-safety-test*)',
+};
+
 // V57.16 — multi-phone tests in the suite mutate user_settings.phone and
 // user_settings.phone_numbers on the test user. They were calling
 // clearTestUserPhones(ctx) → null in finally blocks, which nuked the real
@@ -124,7 +170,17 @@ export async function teardownSuite(ctx: TestContext): Promise<void> {
   assertNotProtectedAccount(ctx);
   for (const table of OWNED_TABLES) {
     try {
-      await db.delete(ctx, table, `user_id=eq.${ctx.testUserId}`);
+      // B10y — tables listed in TEARDOWN_ROW_SCOPE get an additional filter
+      // so only suite-created rows are deleted. Everything else keeps the
+      // original user-scoped delete.
+      const rowScope = TEARDOWN_ROW_SCOPE[table];
+      const filter = rowScope
+        ? `user_id=eq.${ctx.testUserId}&${rowScope}`
+        : `user_id=eq.${ctx.testUserId}`;
+      if (rowScope) {
+        ctx.log(`[fixtures] teardown(${table}) scoped to suite-created rows: ${rowScope}`);
+      }
+      await db.delete(ctx, table, filter);
     } catch (err) {
       // Some tables may not have user_id, or may not exist in this env.
       // Log and continue — best-effort cleanup.
