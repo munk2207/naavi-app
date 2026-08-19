@@ -148,6 +148,12 @@ export default function SettingsScreen() {
   const [newPin, setNewPin]                         = useState('');
   const [confirmPin, setConfirmPin]                 = useState('');
   const [pinError, setPinError]                     = useState<string | null>(null);
+  // S1 D6 (2026-08-19) — true when the user replied BLOCK to a failed-PIN
+  // alert. Clearing it is deliberately possible ONLY here, in the signed-in
+  // app: the recovery channel has to be stronger than the channel under
+  // attack, so someone working the phone line cannot undo it.
+  const [unregisteredBlocked, setUnregisteredBlocked] = useState(false);
+  const [unblocking, setUnblocking]                 = useState(false);
   // Ref so the new-PIN field's keyboard "Done" can focus the confirm field
   // without the user reaching back to tap it (V57.27.0 build 203 polish).
   const confirmPinInputRef                          = useRef<TextInput>(null);
@@ -264,6 +270,28 @@ export default function SettingsScreen() {
           if (data.work_address) setWorkAddress(String(data.work_address));
           // Voice PIN — null when no PIN set, ISO string when set.
           setPinSetAt(data.voice_pin_set_at ? String(data.voice_pin_set_at) : null);
+          // S1 D6 — read the blocked flag SEPARATELY, not in the select above.
+          // The column ships with the S1 migration, and adding it to the main
+          // query would make the entire Settings screen fail to load on any
+          // environment where that migration has not been applied yet. A
+          // missing column here costs one hidden control; there it would cost
+          // the whole screen.
+          void (async () => {
+            try {
+              const { data: blockRow, error: blockErr } = await supabase
+                .from('user_settings')
+                .select('voice_unregistered_blocked')
+                .eq('user_id', user.id)
+                .maybeSingle();
+              if (blockErr) {
+                console.log('[settings] blocked-flag unavailable (pre-S1 backend):', blockErr.message);
+                return;
+              }
+              setUnregisteredBlocked(!!blockRow?.voice_unregistered_blocked);
+            } catch (e) {
+              console.log('[settings] blocked-flag read failed:', e instanceof Error ? e.message : String(e));
+            }
+          })();
           // 2026-05-22 — F2g Phase 2. Load saved channel preferences. The
           // DB default (set by migration) is all 5 channels enabled, so
           // any existing user gets the all-on baseline until they touch
@@ -573,6 +601,52 @@ export default function SettingsScreen() {
   // Hash never leaves the server. Mobile only ever knows whether a PIN
   // is set (via voice_pin_set_at) and when.
 
+  // S1 D6 (2026-08-19) — turn unregistered-phone calls back on.
+  //
+  // Confirmed first, deliberately. The user set this because Naavi told them
+  // someone was guessing their PIN, so switching it off is a security decision
+  // and should not happen on a stray tap. This is the ONLY place it can be
+  // switched off — see the state declaration for why.
+  async function handleUnblockUnregistered() {
+    if (!supabase) return;
+    Alert.alert(
+      'Allow calls from other phones?',
+      "Naavi will again accept calls from a phone that isn't on your account, "
+      + 'once the caller gives your PIN.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Allow',
+          onPress: async () => {
+            setUnblocking(true);
+            try {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) throw new Error('no signed-in user');
+              const { error } = await supabase.from('user_settings').upsert({
+                user_id: user.id,
+                voice_unregistered_blocked: false,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'user_id' });
+              if (error) throw error;
+              setUnregisteredBlocked(false);
+              Alert.alert(
+                'Done',
+                'Calls from other phones are allowed again, once the caller gives your PIN.',
+              );
+            } catch (e) {
+              // Rule 21 — never fail silently here: the user would be left
+              // believing they had re-enabled something that is still off.
+              console.error('[settings] S1 unblock failed:', e instanceof Error ? e.message : String(e));
+              Alert.alert('Error', "Couldn't change that. Check your connection and try again.");
+            } finally {
+              setUnblocking(false);
+            }
+          },
+        },
+      ],
+    );
+  }
+
   function openSetPinModal() {
     setPinModalMode('set');
     setNewPin('');
@@ -591,8 +665,8 @@ export default function SettingsScreen() {
 
   async function handleSavePin() {
     setPinError(null);
-    if (!/^\d{4}$/.test(newPin)) {
-      setPinError('Must be exactly 4 digits.');
+    if (!/^\d{6}$/.test(newPin)) {
+      setPinError('Must be exactly 6 digits.');
       return;
     }
     if (newPin !== confirmPin) {
@@ -1020,9 +1094,35 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Voice PIN</Text>
           <Text style={styles.sectionNote}>
-            A 4-digit code so Naavi recognizes you when you call from a phone
+            A 6-digit code so Naavi recognizes you when you call from a phone
             that isn't saved on your account.
           </Text>
+
+          {/* S1 D6 (2026-08-19) — shown only while blocking is on. The spoken
+              refusal on the phone points the user here, so this has to say the
+              same thing that message said, in the same words. */}
+          {unregisteredBlocked && (
+            <View style={styles.blockedNotice}>
+              <Text style={styles.blockedNoticeTitle}>
+                Calls from other phones are blocked
+              </Text>
+              <Text style={styles.blockedNoticeBody}>
+                You blocked these after Naavi reported failed PIN attempts. Naavi
+                now answers only calls from your own phone, even with the right PIN.
+              </Text>
+              <TouchableOpacity
+                style={[styles.saveBtn, { marginTop: 12 }, unblocking && styles.saveBtnDisabled]}
+                onPress={handleUnblockUnregistered}
+                disabled={unblocking}
+                accessibilityRole="button"
+                accessibilityLabel="Allow calls from other phones again"
+              >
+                <Text style={styles.saveBtnText}>
+                  {unblocking ? '...' : 'Allow calls from other phones'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
           {pinSetAt ? (
             <>
               <Text style={[styles.fieldLabel, { marginTop: 6 }]}>
@@ -1054,7 +1154,7 @@ export default function SettingsScreen() {
               disabled={pinLoading}
               accessibilityRole="button"
             >
-              <Text style={styles.saveBtnText}>Set a 4-digit PIN</Text>
+              <Text style={styles.saveBtnText}>Set a 6-digit PIN</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -1324,16 +1424,16 @@ export default function SettingsScreen() {
             <Text style={styles.pinModalTitle}>
               {pinModalMode === 'change' ? 'Change your voice PIN' : 'Set your voice PIN'}
             </Text>
-            <Text style={styles.pinModalLabel}>Choose a 4-digit PIN</Text>
+            <Text style={styles.pinModalLabel}>Choose a 6-digit PIN</Text>
             <TextInput
               style={styles.pinModalInput}
               value={newPin}
-              onChangeText={(t) => { setNewPin(t.replace(/\D/g, '').slice(0, 4)); if (pinError) setPinError(null); }}
-              placeholder="••••"
+              onChangeText={(t) => { setNewPin(t.replace(/\D/g, '').slice(0, 6)); if (pinError) setPinError(null); }}
+              placeholder="••••••"
               placeholderTextColor={Colors.textMuted}
               keyboardType="number-pad"
               secureTextEntry
-              maxLength={4}
+              maxLength={6}
               autoFocus
               returnKeyType="next"
               onSubmitEditing={() => confirmPinInputRef.current?.focus()}
@@ -1344,12 +1444,12 @@ export default function SettingsScreen() {
               ref={confirmPinInputRef}
               style={styles.pinModalInput}
               value={confirmPin}
-              onChangeText={(t) => { setConfirmPin(t.replace(/\D/g, '').slice(0, 4)); if (pinError) setPinError(null); }}
-              placeholder="••••"
+              onChangeText={(t) => { setConfirmPin(t.replace(/\D/g, '').slice(0, 6)); if (pinError) setPinError(null); }}
+              placeholder="••••••"
               placeholderTextColor={Colors.textMuted}
               keyboardType="number-pad"
               secureTextEntry
-              maxLength={4}
+              maxLength={6}
               returnKeyType="done"
               onSubmitEditing={handleSavePin}
               accessibilityLabel="Confirm voice PIN"
@@ -1623,6 +1723,28 @@ const styles = StyleSheet.create({
   // ── Voice PIN section + modal (V57.15.5) ─────────────────────────────────
   pinRemoveBtn: {
     backgroundColor: Colors.alert,
+  },
+  // S1 D6 — the blocked-state panel. Bordered in Colors.alert rather than
+  // filled with it: this is a state the user chose and may want to keep, not
+  // an error to clear away.
+  blockedNotice: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.alert,
+    backgroundColor: 'rgba(216,90,48,0.10)',
+  },
+  blockedNoticeTitle: {
+    fontSize: Typography.body,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+    marginBottom: 6,
+  },
+  blockedNoticeBody: {
+    fontSize: Typography.body,
+    lineHeight: Typography.lineHeightBody,
+    color: Colors.textSecondary,
   },
   pinModalBackdrop: {
     flex: 1,
