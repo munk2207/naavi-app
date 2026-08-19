@@ -4,7 +4,7 @@ Sources: `hooks/useOrchestrator.ts`, `naavi-voice-server/src/index.js`, `app/ind
 
 Legend: ✅ = fully working · ⚠️ = partial · ❌ = not implemented
 
-Last updated: 2026-08-19 — noted mobile-has-staging / voice-is-production-only environment asymmetry (see "What's intentionally different").
+Last updated: 2026-08-19 — (a) opened **B11d** for the stop-word interrupt and corrected this doc's dead cross-reference to it (it previously pointed at holding-list item 7, which is an unrelated bug); (b) noted the mobile-has-staging / voice-is-production-only environment asymmetry (see "What's intentionally different").
 
 Previously: 2026-07-16 — B9z. Confirm-then-execute behavior for time-trigger `SET_ACTION_RULE` is now voice-only; mobile's equivalent path unverified against the same defect class. See row below and Voice-gaps table.
 
@@ -64,7 +64,7 @@ Previously: 2026-07-16 — B9z. Confirm-then-execute behavior for time-trigger `
 | **VOICE / AUDIO** | | | |
 | TTS playback | ✅ | ✅ | Parity (both Deepgram Hera) |
 | Hands-free mode | ❌ | ✅ | By design — phone call IS hands-free |
-| Stop-word interrupt ("Naavi stop") | ❌ | ⚠️ | Known voice regression — holding list item 7 |
+| Stop-word interrupt ("Naavi stop") | ❌ | ❌ | **Reference corrected 2026-08-19.** Previously cited "holding list item 7", which is [[B9m]] (contact search collision) — an unrelated bug. The real entry is **B11d**, opened 2026-08-19 after Wael reproduced it on a live production call. Voice mark changed ⚠️ -> ❌: it does not partially work, it does not register at all. |
 | Caller PIN | ❌ | ⚠️ | Voice gap — designed, not yet shipped |
 
 ---
