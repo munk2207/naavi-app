@@ -4,7 +4,9 @@ Sources: `hooks/useOrchestrator.ts`, `naavi-voice-server/src/index.js`, `app/ind
 
 Legend: ✅ = fully working · ⚠️ = partial · ❌ = not implemented
 
-Last updated: 2026-07-16 — B9z. Confirm-then-execute behavior for time-trigger `SET_ACTION_RULE` is now voice-only; mobile's equivalent path unverified against the same defect class. See row below and Voice-gaps table.
+Last updated: 2026-08-19 — noted mobile-has-staging / voice-is-production-only environment asymmetry (see "What's intentionally different").
+
+Previously: 2026-07-16 — B9z. Confirm-then-execute behavior for time-trigger `SET_ACTION_RULE` is now voice-only; mobile's equivalent path unverified against the same defect class. See row below and Voice-gaps table.
 
 ---
 
@@ -105,3 +107,4 @@ Last updated: 2026-07-16 — B9z. Confirm-then-execute behavior for time-trigger
 - Email address reconstruction from spoken "@" — voice STT only, not needed on typed mobile
 - Caller PIN — voice-only (mobile uses Google auth)
 - Mute — phone keypad handles mute; no mobile equivalent needed
+- **Staging environment (2026-08-19)** — Mobile has a real second environment: separate Supabase project (`xugvnfudofuskxoknhve`), separate app package (`ca.naavi.app.staging`), full staging-first workflow (`CLAUDE.md` "STAGING-FIRST" section). Voice has none of that: one Railway service, one branch (`main`), auto-deploying straight to `naavi-voice-server-production.up.railway.app` (`CLAUDE.md:187,514`). The only carve-out is the F2b "staging demo line" — a second Twilio number that, within that same production process, routes to staging Supabase for demo-account traffic only (`naavi-voice-server/src/voice/getDemoEnvironment.js:37-45`). A real separated staging Railway service + branch was proposed (`docs/F2B_STAGING_INFRA_PROPOSAL_2026-07-01.md`) but explicitly never executed ("Nothing in this document has been executed," line 4) and no later doc confirms it was built. **Practical implication:** every voice-side fix for real registered users is developed and deployed straight against production — there is no staging voice environment to validate a fix against before it reaches live callers. Not a capability gap, but a real asymmetry worth keeping in mind when triaging voice-only bugs (e.g. the open phone-registration bug, see `MEMORY.md` current priority).
