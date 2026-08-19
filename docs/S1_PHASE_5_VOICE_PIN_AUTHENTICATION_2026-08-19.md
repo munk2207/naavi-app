@@ -4,7 +4,7 @@
 **Governance version:** v4.0
 **Phase 3 plan:** `docs/S1_PHASE_3_VOICE_PIN_AUTHENTICATION_2026-08-19.md`
 **Environment:** staging only (Supabase `xugvnfudofuskxoknhve`, Railway `naavi-voice-staging-production`, Twilio `+13435041572`)
-**Status:** Evidence complete. **Awaiting Wael's go-ahead for the Phase 5 → 6 transition.** One open decision, §7.
+**Status:** Evidence complete; the one defect found in testing is fixed and verified (§7). **Awaiting Wael's go-ahead for the Phase 5 → 6 transition.**
 
 ---
 
@@ -90,7 +90,7 @@ This is recorded here because **both live outside git** and would otherwise be i
 
 **6.5 — `tsc` is not a usable gate in this repository.** A bad `Colors.text` reference in `app/settings.tsx` produced no error, because pre-existing **syntax** errors in `web/app/page.tsx` stop the compiler before semantic analysis. Caught by inspection; flagged as separate work. The APK is unaffected — Metro bundles the app and never reads that file.
 
-## 7. ⚠️ Open defect — decision required before Phase 6
+## 7. Defect found in testing — RESOLVED 2026-08-19
 
 **Found by Wael's testing, not by mine.** He entered a wrong PIN and received no alert. The counter had gone **3 → 4**, and the alert fires only when the count *equals* the threshold of 3, exactly once, so it was skipped.
 
@@ -104,7 +104,14 @@ The user doing exactly the right thing is what disables the alert. The counter i
 
 **Considered and not recommended:** re-alerting at every further multiple of the threshold. It partly reinstates what was rejected at Phase 0 — training the owner to ignore the alert — and it is unnecessary, because once the 7-day window lapses a continuing attack re-alerts on its own.
 
-**Phase 6 should not begin until this is decided**, since it changes behaviour the reviewer would be assessing.
+**Decision (Wael, 2026-08-19): fix it before Phase 6.** Implemented in commit `6bbc09b`:
+
+- `manage-voice-pin` (`op: set`) clears the count after a successful PIN change. Written as a **separate best-effort update**, not folded into the PIN write, so an environment without the S1 migration can still set a PIN — folding it in would break PIN-setting there, which is exactly how one missing column already breaks the caller-name query (§4.1).
+- `app/settings.tsx` clears the count alongside the block when the user unblocks.
+
+**Verified against staging directly, not only through the test:** count set to 3 → PIN changed → count read back as 0. Regression test `s1.changing-the-pin-clears-the-failure-count` seeds the account at exactly the threshold — the state that disarmed the alert in the live incident — and asserts the reset. Gate 1 3/3 green.
+
+**⚠️ Build 326 predates the mobile half of this fix.** The APK Wael has installed contains D6 but not the counter reset on unblock, because it was built before this defect was found. The server half (PIN change) *is* live, so the disarm scenario is covered — a user who changes their PIN gets the reset regardless of app version. The unblock-only path will not reset until a new build. Not urgent; it should ride the next staging APK rather than trigger one.
 
 ## 8. Process failures during Phase 4, recorded
 
