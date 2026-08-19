@@ -51,31 +51,44 @@ const SKIP = 'Track A not deployed to the selected voice server yet — skipping
 
 export const s1VoicePinScopingTests: TestCase[] = [
   {
-    id: 's1.identify-unknown-suffix-refuses-without-disclosure',
+    id: 's1.identify-unknown-suffix-retries-then-refuses',
     category: 's1-voice-pin-scoping',
     platform: 'voice',
     description:
-      'A last-4 that matches no account must be refused WITHOUT revealing whether an account exists. ' +
-      'Saying "that number is not registered" would turn the phone line into an account-existence oracle ' +
-      '(S1 Phase 3 §5 item 8).',
-    timeoutMs: 20_000,
+      'A last-4 matching no account gets THREE attempts, then refuses without revealing whether an ' +
+      'account exists. Wael 2026-08-19, after hearing it live: hanging up on a first mistake is wrong ' +
+      'for Naavi users, who will mishear their own digits. No attempt may reach the PIN step.',
+    timeoutMs: 30_000,
     async run(ctx) {
-      const r = await postTwiml('/voice/identify-result?attempt=1&len=4&from=%2B15005550006', {
+      // Attempt 1 of 3 — must offer another try, not end the call.
+      const first = await postTwiml('/voice/identify-result?attempt=1&len=4&from=%2B15005550006', {
         From: '+15005550006', Digits: '0000',
       });
-      if (!r) { ctx.log(SKIP); return; }
+      if (!first) { ctx.log(SKIP); return; }
 
-      expectTruthy(r.status === 200, `expected 200 TwiML, got ${r.status}`);
-      expectTruthy(/<Hangup\s*\/>/.test(r.body), 'an unknown suffix must end the call');
-      // Must NOT confirm or deny existence.
+      expectTruthy(first.status === 200, `expected 200 TwiML, got ${first.status}`);
+      expectTruthy(
+        !/<Hangup\s*\/>/.test(first.body),
+        'a first wrong last-4 must NOT hang up — the caller gets another try',
+      );
+      expectTruthy(/\/voice\/identify\?/.test(first.body), 'must retry identification');
+      expectTruthy(
+        !/\/voice\/pin\?/.test(first.body),
+        'an unmatched suffix must never reach the PIN step, on any attempt',
+      );
+
+      // Final attempt — ends the call, still disclosing nothing.
+      const last = await postTwiml('/voice/identify-result?attempt=3&len=4&from=%2B15005550006', {
+        From: '+15005550006', Digits: '0000',
+      });
+      if (!last) { ctx.log(SKIP); return; }
+      expectTruthy(/<Hangup\s*\/>/.test(last.body), 'the third wrong last-4 must end the call');
       for (const leak of ['not registered', 'no account', "doesn't exist", 'unknown number']) {
         expectTruthy(
-          !r.body.toLowerCase().includes(leak),
+          !last.body.toLowerCase().includes(leak),
           `refusal must not disclose account existence — found "${leak}"`,
         );
       }
-      // Must NOT fall through to asking for a PIN.
-      expectTruthy(!/\/voice\/pin\b/.test(r.body), 'an unknown suffix must never reach the PIN step');
     },
   },
   {
