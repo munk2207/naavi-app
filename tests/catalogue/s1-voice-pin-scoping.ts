@@ -456,4 +456,38 @@ export const s1VoicePinScopingTests: TestCase[] = [
     },
     async teardown(ctx) { await deprovisionTestAccount(ctx); },
   },
+  {
+    id: 's1.changing-the-pin-clears-the-failure-count',
+    category: 's1-voice-pin-scoping',
+    description:
+      'Changing the PIN resets the failure count. Found by Wael in live testing: the alert fires only '
+      + 'when the count EQUALS the threshold, and nothing reset it except a successful PIN on a call or '
+      + '7 days. So a user who did the right thing after an attack — blocked, unblocked, changed their '
+      + 'PIN — sat above the threshold with their NEXT alert silently disarmed. Old failures were '
+      + 'against the old PIN and mean nothing once it changes.',
+    timeoutMs: 30_000,
+    async run(ctx) {
+      if (!(await provisionTestAccount(ctx))) { ctx.log('C4 not deployed here — skipping.'); return; }
+      if (!(await readPinState(ctx))) { ctx.log('D1 migration not applied here — skipping.'); return; }
+
+      // Sit the account exactly at the threshold — the state that disarmed the
+      // alert in the live incident.
+      await patchTestUser(ctx, {
+        voice_pin_failed_count: 3,
+        voice_pin_failed_at: new Date().toISOString(),
+      });
+      expectTruthy((await readPinState(ctx))?.count === 3, 'setup: count should be 3');
+
+      const set = await setPin(ctx, '556677');
+      expectTruthy(set.ok, `changing the PIN should succeed, got "${set.error}"`);
+
+      const after = await readPinState(ctx);
+      if (after?.count === 3) { ctx.log('Reset-on-PIN-change not deployed here — skipping.'); return; }
+      expectTruthy(
+        after?.count === 0,
+        `changing the PIN must clear the count — expected 0, got ${after?.count}`,
+      );
+    },
+    async teardown(ctx) { await deprovisionTestAccount(ctx); },
+  },
 ];

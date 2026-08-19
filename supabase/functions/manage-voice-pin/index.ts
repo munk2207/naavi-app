@@ -131,6 +131,30 @@ Deno.serve(async (req) => {
       }
     }
 
+    // S1 Track D follow-up (2026-08-19) — changing the PIN clears the failure
+    // count. Found by Wael in live testing: the alert fires only when the count
+    // EQUALS the threshold, and nothing reset the count except a successful PIN
+    // on a call or seven days passing. So a user who did exactly the right
+    // thing after an attack — blocked, unblocked, changed their PIN — was left
+    // sitting above the threshold with their next alert silently disarmed.
+    // The counter must measure UNADDRESSED failures; changing the PIN is the
+    // clearest possible signal that the owner has addressed it. Old failures
+    // were against the old PIN and are meaningless once it changes.
+    //
+    // Deliberately a SEPARATE, best-effort write rather than part of the update
+    // above: these columns arrive with the S1 migration, and an environment
+    // that has not applied it yet must still be able to set a PIN. Folding them
+    // into the main update would make the whole operation fail there — the same
+    // way one missing column already breaks the caller-name query (see B11c).
+    const { error: resetErr } = await supabase
+      .from('user_settings')
+      .update({ voice_pin_failed_count: 0, voice_pin_failed_at: null })
+      .eq('user_id', userId);
+    if (resetErr) {
+      // 42703 = column absent, i.e. pre-S1 backend. Expected, not a failure.
+      console.log(`[manage-voice-pin] SET — failure-count reset skipped (${resetErr.message})`);
+    }
+
     console.log(`[manage-voice-pin] SET ok — user_id=${userId.slice(0, 8)}…`);
     return jsonResponse({ success: true });
   }

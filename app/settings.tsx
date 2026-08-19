@@ -622,9 +622,17 @@ export default function SettingsScreen() {
             try {
               const { data: { user } } = await supabase.auth.getUser();
               if (!user) throw new Error('no signed-in user');
+              // Clearing the block also clears the failure count. Unblocking is
+              // the user saying "I've dealt with this" — leaving the count at
+              // or above the alert threshold would disarm their NEXT alert,
+              // because the alert fires only when the count equals it. Found
+              // by Wael in live testing 2026-08-19; the counter has to measure
+              // UNADDRESSED failures, not total ones.
               const { error } = await supabase.from('user_settings').upsert({
                 user_id: user.id,
                 voice_unregistered_blocked: false,
+                voice_pin_failed_count: 0,
+                voice_pin_failed_at: null,
                 updated_at: new Date().toISOString(),
               }, { onConflict: 'user_id' });
               if (error) throw error;
