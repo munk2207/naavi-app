@@ -14,7 +14,27 @@ import { supabase } from './supabase';
 import { invokeWithTimeout } from './invokeWithTimeout';
 import { remoteLog, newDiagSession } from './remoteLog';
 
-const VAPID_PUBLIC_KEY = 'BLFs0BQ3pY83UL4XsckjlG3CUDJEVuN8c2H1g5hRIf-lp_5rpn2Cj0LfOCTCWHrCdZrueFldikCuFUZm862niW0';
+// Web Push pairs one public key with one private key. The phone subscribes
+// using the public key below; only the matching private key, held by
+// send-push-notification, can then send to that subscription. So this value
+// has to match the environment the app is talking to.
+//
+// It was a single hardcoded constant until 2026-08-20, which meant staging
+// could never have its own push identity — it would have had to borrow
+// production's private key. That is a parity gap in the client rather than in
+// the database, and it is why push was the one T4 secret that could not be
+// fixed by copying a value across.
+//
+// Production sets no variable and falls through to the literal, so production
+// behaviour is unchanged by construction. Staging sets
+// EXPO_PUBLIC_VAPID_PUBLIC_KEY in its eas.json build profile, alongside the
+// Supabase URL and key it already overrides there.
+//
+// The public key is not a secret — it ships inside the app either way. The
+// private half lives only in each project's Edge Function secrets.
+const VAPID_PUBLIC_KEY =
+  process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY ??
+  'BLFs0BQ3pY83UL4XsckjlG3CUDJEVuN8c2H1g5hRIf-lp_5rpn2Cj0LfOCTCWHrCdZrueFldikCuFUZm862niW0';
 
 // ---------------------------------------------------------------------------
 // Foreground notification behaviour (Android/iOS)

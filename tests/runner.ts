@@ -42,6 +42,7 @@ import { session2026_08_19_b10yTeardownScopeTests } from './catalogue/session-20
 import { t2OutboundGuardTests } from './catalogue/t2-outbound-guard';
 import { t2VoiceEnvTests } from './catalogue/t2-voice-env';
 import { s1VoicePinScopingTests } from './catalogue/s1-voice-pin-scoping';
+import { pushVapidPerEnvironmentTests } from './catalogue/push-vapid-per-environment';
 import { dataIntegrityTests } from './catalogue/data-integrity';
 import { searchNormalizationTests } from './catalogue/search-normalization';
 import { gmailFreshnessTests } from './catalogue/gmail-freshness';
@@ -195,6 +196,7 @@ const ALL_TESTS: TestCase[] = [
   ...t2OutboundGuardTests,
   ...t2VoiceEnvTests,
   ...s1VoicePinScopingTests,
+  ...pushVapidPerEnvironmentTests,
   ...dataIntegrityTests,
   ...searchNormalizationTests,
   ...gmailFreshnessTests,
