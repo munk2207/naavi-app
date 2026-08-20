@@ -112,7 +112,19 @@ SELECT jsonb_pretty(jsonb_build_object(
     SELECT COALESCE(jsonb_object_agg(k, v), '{}'::jsonb) FROM (
       SELECT jobname AS k,
              jsonb_build_object('schedule', schedule, 'active', active,
-                                'command', left(command, 400)) AS v
+                                -- Redact the service key BEFORE truncating.
+                                -- Production's key is a long eyJ… JWT and staging's
+                                -- is the short sb_secret_ format, so a plain
+                                -- left(command,400) cut production off mid-key and
+                                -- threw away the rest of the statement. The two were
+                                -- then compared against different amounts of text, and
+                                -- four cron jobs reported as drift for having the
+                                -- correct key in the correct environment.
+                                'command', left(
+                                  regexp_replace(
+                                    regexp_replace(command, 'eyJ[A-Za-z0-9_.-]{20,}', 'SERVICE_KEY', 'g'),
+                                    'sb_secret_[A-Za-z0-9_-]+', 'SERVICE_KEY', 'g'
+                                  ), 400)) AS v
       FROM cron.job
     ) s
   )

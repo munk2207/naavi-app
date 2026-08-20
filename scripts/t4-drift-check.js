@@ -87,8 +87,14 @@ const PROJECT_REFS = /hhgyppbxgmjrwdpdubcx|xugvnfudofuskxoknhve/g;
 function normalise(v) {
   return JSON.stringify(v)
     .replace(PROJECT_REFS, 'PROJECT_REF')
-    .replace(/eyJ[A-Za-z0-9_.\-]{20,}/g, 'JWT')
-    .replace(/sb_secret_[A-Za-z0-9_\-]+/g, 'SB_KEY')
+    // Both key formats collapse to ONE placeholder. A service-role key differs
+    // between environments by design, and the FORMAT differs too: Supabase
+    // rotated staging's to the new sb_secret_ style while production still
+    // carries the old eyJ… JWT. Mapping them to different placeholders made
+    // four cron jobs report as drift for having the right key in the right
+    // environment.
+    .replace(/eyJ[A-Za-z0-9_.\-]{20,}/g, 'SERVICE_KEY')
+    .replace(/sb_secret_[A-Za-z0-9_\-]+/g, 'SERVICE_KEY')
     // Escaped line breaks INSIDE the stringified value. Production's cron
     // commands carry \r\n and staging's carry \n — identical instructions typed
     // on different machines. Collapsing \s+ does not touch these, because after
@@ -106,6 +112,9 @@ function normalise(v) {
     // real findings underneath it. The point of this check is that a failure
     // means something; noise of this kind is what turns a gate into wallpaper.
     .replace(/\s*([(),;])\s*/g, '$1')
+    // A trailing semicolon on a SQL statement changes nothing. cleanup-old-emails
+    // differed between the environments on exactly that, and nothing else.
+    .replace(/;+(["'\\]*)\s*$/, '$1')
     .trim();
 }
 
