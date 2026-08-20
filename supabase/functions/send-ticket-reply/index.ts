@@ -16,6 +16,7 @@
  */
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { guardDestination } from '../_shared/outbound_guard.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -75,6 +76,23 @@ Deno.serve(async (req) => {
     const cleanBody    = reply_body.trim().replace(/\s*—\s*MyNaavi Team\s*$/i, '').trim();
     const textBody     = `${cleanBody}\n\n— MyNaavi Team`;
     const htmlBody     = `<p>${cleanBody.replace(/\n/g, '<br>')}</p><p>— MyNaavi Team</p>`;
+
+    // Outbound containment (added 2026-08-20). This is the send that reaches an
+    // actual customer with an actual reply, and it was outside the guard — the
+    // whole ticket pipeline was, despite Architecture Reference §0b claiming a
+    // guard sits on "every send path". On staging, approving a draft would have
+    // emailed whoever the reporter address belonged to.
+    //
+    // Blocked here returns an explicit error rather than silently succeeding.
+    // That differs from ingest-ticket, where a blocked acknowledgement must not
+    // fail ticket creation: here, sending the reply IS the operation, so
+    // reporting success when nothing was sent would tell a staff member their
+    // customer had been answered when they had not.
+    const guard = guardDestination(ticket.reporter_email, 'email', 'send-ticket-reply');
+    if (!guard.allowed) {
+      console.warn(`[send-ticket-reply] blocked — ${guard.reason} (${ticket.reporter_email})`);
+      return json({ error: 'outbound_blocked', reason: guard.reason, destination: ticket.reporter_email }, 403);
+    }
 
     const pmRes = await fetch(`${POSTMARK_API}/email`, {
       method: 'POST',

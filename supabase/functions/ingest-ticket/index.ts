@@ -15,6 +15,7 @@
 
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { guardDestination } from '../_shared/outbound_guard.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -61,6 +62,29 @@ async function sendEmail(pmToken: string, opts: {
   subject: string; textBody: string; htmlBody?: string;
   replyTo?: string; tag?: string;
 }): Promise<void> {
+  // Outbound containment (added 2026-08-20). This function was NOT covered by
+  // the guard, despite the Architecture Reference §0b claiming one "sits in
+  // Shared Core on every send path". It does not: the guard covered the eight
+  // alert-channel senders and none of the ticket pipeline. So on staging, a
+  // test ticket emailed the real support@mynaavi.com inbox with nothing in the
+  // way — staging appeared contained rather than being contained.
+  //
+  // Found by trying to test the ticket pipeline on staging and checking what
+  // would actually be sent before sending it.
+  //
+  // The guard is inert unless OUTBOUND_ALLOWLIST is set, which it is on staging
+  // only — so production behaviour is unchanged by construction, exactly as for
+  // the eight senders that already used it.
+  //
+  // Blocked sends return rather than throw. A blocked acknowledgement email must
+  // not fail ticket creation: the ticket row is the point, the email is a
+  // courtesy, and on staging the courtesy is deliberately undeliverable.
+  const guard = guardDestination(opts.to, 'email', 'ingest-ticket');
+  if (!guard.allowed) {
+    console.warn(`[ingest-ticket] email to ${opts.to} not sent — ${guard.reason}`);
+    return;
+  }
+
   const res = await fetch(`${POSTMARK_API}/email`, {
     method: 'POST',
     headers: {
