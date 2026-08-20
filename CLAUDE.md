@@ -184,7 +184,11 @@ Apply this rule retroactively when editing existing code, prompts, docs, or memo
 
 **Build clone:** `C:\Users\waela\naavi-mobile` (branch: `main`) — **DO NOT EDIT CODE HERE.** Exists only for `eas build`. Sync via `git fetch origin && git merge origin/main`. Never `cp -f`.
 
-**Voice server repo:** `C:\Users\waela\OneDrive\Desktop\Naavi\naavi-voice-server` (separate GitHub repo `munk2207/naavi-voice-server`, branch: `main`). Single-branch, no worktrees.
+**Voice server repo:** `C:\Users\waela\OneDrive\Desktop\Naavi\naavi-voice-server` (separate GitHub repo `munk2207/naavi-voice-server`). **Two branches, no worktrees** (corrected 2026-08-20 — the old "single-branch, `main`" note was stale):
+- `staging` — where all voice dev work goes. Deploys to Railway service `naavi-voice-staging`. S1 and B11f landed here 2026-08-19.
+- `main` — production only. Deploys to Railway service `naavi-voice-server`. Promote by merging `staging` → `main` only when Wael says so.
+
+Staging-first applies to the voice server exactly as it does to Supabase: default branch for any change is `staging`.
 
 **Web marketing site:** `C:\Users\waela\OneDrive\Desktop\Naavi\mynaavi-website` (separate GitHub repo `munk2207/mynaavi-website`, branch: `main`). Vercel auto-deploys `origin/main` root files to https://mynaavi.com. Static HTML only — no Supabase, no auth, no API. Rules 1-6 of "CONFIGURATION DISCIPLINE" do NOT apply (no crons, no Edge Functions, no user sessions). Only relevant rule: 7 (sync via `git pull origin main`, never `cp -f`). **Known legacy duplicate:** the repo has an old `my-naavi-site/` subfolder committed alongside the newer root files. Vercel only serves the root. Do not edit the subfolder — edit files at the repo root.
 
@@ -543,7 +547,10 @@ All open, closed, and deferred items live there. Do not maintain a duplicate lis
 - Node.js server on Railway
 - Code: `C:\Users\waela\OneDrive\Desktop\Naavi\naavi-voice-server`
 - GitHub: github.com/munk2207/naavi-voice-server (private, separate repo from mobile)
-- Railway: naavi-voice-server-production.up.railway.app (auto-deploys from main branch)
+- Railway — TWO services, both inside the Railway environment named "production" (the environment name does NOT indicate staging vs production; the service name does):
+  - `naavi-voice-staging` → naavi-voice-staging-production.up.railway.app — auto-deploys from branch `staging`. **Dev work goes here.**
+  - `naavi-voice-server` → naavi-voice-server-production.up.railway.app — auto-deploys from branch `main`. **Production.**
+- Read either service's logs with: `railway logs --service <name>` (Railway CLI, installed 2026-08-20)
 - Twilio number: +1 249 523 5394
 - Stack: Phone → Twilio → Deepgram STT → Claude → Deepgram TTS → Phone
 - Railway env vars required: ANTHROPIC_API_KEY, DEEPGRAM_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN
