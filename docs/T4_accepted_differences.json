@@ -1,6 +1,6 @@
 {
   "note": "Differences known and accepted as of the capture below. The check fails on anything NEW. Regenerate with: npm run drift:check -- --write-baseline",
-  "captured": "2026-08-20, 3:41:06 p.m. EST",
+  "captured": "2026-08-20, 4:33:40 p.m. EST",
   "accepted": {
     "columns": {
       "missing": [],
@@ -125,12 +125,14 @@
         "user_tokens.Users can read own tokens"
       ],
       "extra": [
+        "calendar_events.Users can manage their own calendar events",
         "contacts.Users can manage their own contacts",
         "email_alert_log.Users read own alert logs",
         "epic_appointments.Users can read own Epic appointments",
         "epic_conditions.Users can read own Epic conditions",
         "epic_medications.Users can read own Epic medications",
         "epic_observations.Users can read own Epic observations",
+        "gmail_messages.Users can manage their own gmail messages",
         "knowledge_fragments.Users can manage their own knowledge",
         "push_subscriptions.Users can manage their own push subscriptions",
         "support_staff.staff_read_own",
