@@ -1,149 +1,129 @@
-# Phase 3 — Technical Review (Before Coding) — B11f — The Stop Control on Voice
+# Phase 3 — Technical Review (Before Coding) — B11f — Pause and Resume on Voice
 
 **Date:** 2026-08-19
 **Governance version:** v4.0
 **Reviewer:** ChatGPT (External Technical Reviewer, governance §1)
-**Plan reviewed:** `docs/B11F_PHASE_2_VOICE_STOP_CONTROL_2026-08-19.md`
-**Status:** Review complete, both mandatory changes incorporated below. **Awaiting Wael's explicit go-ahead for the Phase 3 → 4 transition.**
+**Revision 2** — this record covers the **re-review at the pause/resume scope** and supersedes the first Phase 3 (cancel scope), which is in git history.
+**Plan reviewed:** `docs/B11F_PHASE_2_VOICE_STOP_CONTROL_2026-08-19.md` Revision 2
+**Status:** Both mandatory changes incorporated below. **Awaiting Wael's explicit go-ahead for the Phase 3 → 4 transition.**
 
 ---
 
 ## 1. Decision
 
-**APPROVED WITH MANDATORY CHANGES.** Changes 1–4 approved conceptually, including explicit-keyword-only stopping and deferring ordinary speech rather than discarding it. The per-connection generation counter was accepted as appropriate, and keeping `sendAudioToTwilio` out of scope was upheld on the producer-behaviour argument.
+**APPROVED WITH MANDATORY CHANGES.**
 
-## 2. Mandatory Change 1 — conversation history: reversed in our favour
+Carried over unchanged and re-confirmed at the new scope: the root cause, the two-sender analysis, the per-connection generation counter, generation-tagged state sequencing, and full-text/interrupted history.
 
-> *"I reverse my Phase 2 decision. Do not estimate what the caller heard. The argument is correct: bytes cannot faithfully identify spoken words, and transmitted audio is not equivalent to heard audio because Twilio may discard buffered audio on `clear`. Use the proposed approach: store the full assistant response marked explicitly as interrupted."*
+**The resume estimate was explicitly approved**, and the reasoning is worth preserving because I could not judge it myself, having argued both sides:
 
-**Resolution:** a cancelled utterance is recorded in `conversationHistory` **in full**, with an explicit interrupted marker. No truncation, no estimated cut point.
+> *"Using `bytesSent` to assert what Robert heard would create false history. Using it only to select a conservative resume point is different: uncertainty results in repetition, not false stored information or skipped content."*
 
-Worth stating plainly because it is the whole reason this was escalated rather than implemented: the decided version would have written a *guess* into history and presented it as what the caller heard. The rule against that (CLAUDE.md Rule 18) exists because of a real incident, and it applied here even though nothing about this work item looked like a calendar bug.
+Sentence-by-sentence TTS was rejected for the reason Phase 2 gave: a permanent gap and round-trip cost on **every** answer, to serve a relatively uncommon event.
 
-## 3. Mandatory Change 2 — state sequencing, designed here as required
+**Pause-during-thinking (§4.7) approved**, with processing still completing — only playback is suppressed.
 
-> *"`response_end`, `isSpeaking`, `isProcessing`, and `deferredText` are coupled state. Phase 4 must ensure an old/cancelled utterance's completion cannot incorrectly alter the state of a newer utterance, and deferred input is released exactly once when the system is actually ready."*
+## 2. Mandatory Change 1 — remove `wait` and `hold on` from the pause vocabulary
 
-The reviewer required this be settled **before** Phase 4, not during it. It is settled below.
+> *"They are too easily part of a new request: 'wait, what about Tuesday?' or 'hold on, change that to Friday.'"*
 
-### 3.1 The hazard, concretely
+**Accepted.** This is the same conservative principle already applied to `ok`, `thanks`, `got it` and `next` — and I had flagged these two in the review prompt for exactly this reason.
 
-`response_end` is a Twilio **mark** — the server sends it, Twilio echoes it back after playing preceding audio, and the handler at `:13498` reacts. **That round trip is the problem.**
+**Final vocabularies:**
 
-1. Utterance **A** plays. `isSpeaking = true`, `ttsGen = 1`.
-2. Caller says "stop" → `cancelTTS()` → `ttsGen = 2`. A's loop bails.
-3. Caller immediately asks something else → utterance **B** starts. `isSpeaking = true`, `ttsGen = 3`.
-4. **A's `response_end` mark now arrives**, late.
-5. The handler runs unconditionally: `isSpeaking = false`, cooldown set, idle timer started — **while B is still speaking.**
-
-The result is a call whose state says nothing is playing while audio is playing: barge-in checks misfire, the echo cooldown swallows real speech, and the idle timer may hang up on a caller who is being talked to. **A dead utterance reaches out and corrupts a live one.**
-
-### 3.2 Resolution — generation-tagged marks
-
-The mark name carries the generation that produced it:
-
-```js
-mark: { name: `response_end:${myGen}` }
-```
-
-The handler acts **only** when the tag matches the current generation:
-
-```js
-const gen = Number(String(msg.mark?.name).split(':')[1]);
-if (!Number.isNaN(gen) && gen !== ttsGen) {
-  console.log(`[Mark] stale response_end gen=${gen} (current=${ttsGen}) — ignoring`);
-  return;                       // a dead utterance may not touch live state
-}
-```
-
-A stale mark is discarded. `response_end` remains what Q2 required — a real state transition — but only for the utterance that owns it.
-
-**Backwards compatibility:** marks with no `:gen` suffix (sent by the 43 untouched `sendAudioToTwilio` sites) parse to `NaN` and are handled exactly as today. Those call sites are not modified, which is what the boundary requires.
-
-### 3.3 Resolution — one funnel for ending speech
-
-Cancellation must not wait for a network round trip to update state, and two paths must not both run it. Both call sites funnel into one function:
-
-```js
-function endSpeech(reason) {
-  if (!isSpeaking) return;                  // idempotent
-  isSpeaking = false;
-  speechCooldownUntil = Date.now() + 1000;
-  startIdleTimer();
-  maybeReleaseDeferred();
-}
-```
-
-Called from exactly two places:
-
-| Caller | When |
+| Intent | Words |
 |---|---|
-| `cancelTTS()` | **synchronously**, at the moment of cancellation — not on the returning mark, which may never come |
-| the `response_end` handler | only after the generation check in §3.2 passes |
+| **Pause** | `stop`, `naavi stop`, `pause`, `enough`, `that's enough` |
+| **Resume** | `continue`, `go ahead`, `carry on`, `keep going`, `resume`, `you were saying` |
+| **Cancel** | `cancel`, `forget it`, `never mind`, `drop it` |
 
-The `if (!isSpeaking) return;` guard makes it idempotent, so a cancel followed by a matching mark cannot double-fire.
+**The asymmetry is deliberate.** Pause words must be unambiguous, because a false pause silences Naavi when the caller wanted an answer. Resume and cancel words can be looser, because **they are only recognised while an answer is held** — outside that state they fall through as ordinary speech and reach Claude normally.
 
-### 3.4 Resolution — deferred input released exactly once, and only when ready
+## 3. Mandatory Change 2 — the three races, guarded explicitly
+
+> *"`heldAnswer` / `holdNextReply` must be consumed or cleared before starting the corresponding transition so stale timers/events cannot resurrect it."*
+
+**One principle covers all three: consume, then act.** Never act on a piece of state that is still readable by something else. This is the same rule that makes `maybeReleaseDeferred()` exactly-once — clear `deferredText` *before* processing it — so the file gains a consistent discipline rather than three ad-hoc guards.
+
+### 3.1 Race A — a pause arriving between processing finishing and playback starting
+
+**The hazard.** `isProcessing` goes false, then a few lines later `isSpeaking = true` and audio begins. **In that window neither flag is set.** Phase 2 §4.7 keyed the hold on `isProcessing && !isSpeaking`, so a pause word landing in the gap sets nothing, finds no audio to cancel — and Naavi speaks. **That is the privacy criterion failing in the exact scenario the feature exists for**, and it would have been very hard to reproduce deliberately.
+
+**Guard — bind the hold to the turn, not to a flag.**
 
 ```js
-function maybeReleaseDeferred() {
-  if (isProcessing || isSpeaking) return;   // "actually ready", per the reviewer
-  if (!deferredText.trim()) return;
-  const text = deferredText;
-  deferredText = '';                        // clear BEFORE processing — this is what makes it exactly-once
-  processUserMessage(text);
+let currentTurnId  = 0;      // ++ on entering processUserMessage
+let holdReplyForTurn = null; // set by a pause word
+
+// pause word, at ANY time:
+holdReplyForTurn = currentTurnId;     // covers the gap — no state check at all
+
+// at the speak site:
+if (holdReplyForTurn === thisTurnId) {
+  holdReplyForTurn = null;            // consume FIRST
+  heldAnswer = { text: speech, bytesSent: 0, at: Date.now() };
+  // no audio
 }
 ```
 
-Called from `releaseProcessing()` (existing) and from `endSpeech()` (new). Both may fire in either order; whichever arrives second finds `deferredText` empty and does nothing.
+Because the flag records *which turn* was paused, the gap disappears — there is no moment in the turn where a pause word is not attributable. And a pause word said while idle attaches to the **completed** turn, so the caller's *next* question is not silently swallowed.
 
-**Why clearing first matters:** `processUserMessage` is async. Clearing after it would leave a window in which the other release point sees the same text and processes it twice — the caller's question answered twice over. This mirrors the existing `releaseProcessing` pattern (`:10257-10258`), which already clears before processing; the change is to route both paths through one function instead of duplicating the sequence.
+### 3.2 Race B — a resume arriving while another answer is already playing
 
-### 3.5 The ordering rule, stated once
+**Largely closed by design**: any non-resume, non-cancel utterance discards the held answer, so once a new question is accepted there is nothing to resume. **The residual risk is timing** — the discard must happen when the new utterance is *accepted for processing*, not when its answer begins, or a resume word could arrive in between and revive an answer the caller has moved on from.
 
-**`cancelTTS()` increments the generation FIRST, before anything else.**
+**Guard:** discard at acceptance, and consume atomically on resume.
 
 ```js
-function cancelTTS(reason) {
-  ttsGen++;                                  // 1. invalidate in-flight loop
-  if (twilioWs.readyState === WebSocket.OPEN && streamSid) {
-    twilioWs.send(JSON.stringify({ event: 'clear', streamSid }));   // 2. drain buffer
-  }
-  stopMusic();
-  endSpeech(reason);                         // 3. state transition + deferred release
-}
+const held = heldAnswer;
+heldAnswer = null;            // consume FIRST
+clearTimeout(heldExpiryTimer);
+if (held) speakRemainderOf(held);
 ```
 
-This is the mobile `B-NEW-4` hazard transposed (`useOrchestrator.ts:5071`): there, teardown nulled the sound handle before the stop path read it, so playback never actually halted. Incrementing first means an in-flight loop bails at its next check **regardless** of what any later step does or fails to do.
+### 3.3 Race C — expiry firing during a resume
+
+**The hazard.** The five-minute timer fires while a resume is already in flight: it clears state and amends history to "interrupted" for an answer currently being delivered. History would then contradict what the caller actually heard.
+
+**Guard:** the consume-first pattern in §3.2 already closes it — the expiry timer is cleared and `heldAnswer` nulled *before* playback starts, so a late-firing timer finds `null` and no-ops. The timer callback must also re-check rather than assume:
+
+```js
+heldExpiryTimer = setTimeout(() => {
+  if (!heldAnswer) return;            // already consumed — do nothing
+  const expired = heldAnswer;
+  heldAnswer = null;
+  markInterruptedInHistory(expired);
+}, HELD_ANSWER_TTL_MS);
+```
+
+### 3.4 The rule Phase 4 implements against
+
+**Every transition out of a held or pending state must null the state before performing the transition.** Any timer or event arriving late then finds `null` and does nothing. Stated once here so Phase 6 has a single sentence to audit against.
 
 ## 4. ⭐ Implementation Boundaries Confirmed
 
-**These files, and no others, are authorized for Phase 4.**
+**Authorized:**
 
 | File | Authorized change |
 |---|---|
-| `naavi-voice-server/src/index.js` | Per-connection TTS generation cancellation; explicit-keyword-only stopping; non-stop speech deferral and release; stop-word list pruning; interrupted-response history handling; the state sequencing in §3 |
-| `tests/catalogue/b11f-voice-stop.ts` (new) | Regression tests for reachable B11f behaviour |
+| `naavi-voice-server/src/index.js` | Cancellable streaming TTS; state sequencing; pause/resume/cancel recognition; per-connection held-answer state and expiry; silent-pause behaviour (idle timer and thinking music suppressed); history resolution; conservative resume positioning; `holdNextReply` / `holdReplyForTurn` handling for pause-during-processing; the three race guards in §3 |
+| `tests/catalogue/b11f-voice-stop.ts` (new) | Regression coverage for reachable behaviour — vocabulary, state transitions, privacy cases |
 | `tests/runner.ts` | Register the suite |
 
-**Explicitly NOT authorized:**
+**NOT authorized:** `sendAudioToTwilio` and its 43 call sites; any mobile file; any Shared Core / Edge Function; database; configuration; any other production file. **No opportunistic refactoring** in `index.js` — Protected Core, No Extra Changes Rule; anything noticed goes in the Phase 5 evidence package.
 
-- **No mobile files.** Its Stop already works and is the *model*, not a target.
-- **No Shared Core / Edge Functions.** `streamTTSToTwilio` calls Deepgram directly.
-- **No database, no migration, no configuration.**
-- **No change to `sendAudioToTwilio` or any of its 43 call sites.**
-- **No opportunistic refactoring** in `index.js` — Protected Core, No Extra Changes Rule. Anything noticed goes in the Phase 5 evidence package.
+## 5. Decisions carried into Phase 4, not to be revisited
 
-## 5. Decisions carried into Phase 4, so they are not revisited
-
-1. Explicit keywords only — background noise and other voices must never stop Naavi.
-2. Final list: `stop`, `naavi stop`, `enough`, `that's enough`, `cancel`, `next`.
-3. `response_end` remains a real state transition — now generation-scoped (§3.2).
-4. Non-stop speech is deferred, never discarded.
-5. Rule 15a exception accepted for cancellation itself; reachable logic automated, cancellation validated live at Phase 7.
-6. The ≤4-word heuristic stays, with false-positive phrases tested at Phase 7.
-7. Cancelled responses are recorded **in full**, marked interrupted (§2).
+1. Pause is **silent** — no confirmation, no question.
+2. Final vocabularies per §2; resume and cancel recognised **only** while an answer is held.
+3. Held answers expire after **5 minutes**, silently, and die with the call.
+4. Any other utterance while paused is a **new question**, and discards the held answer.
+5. Resume **repeats deliberately**, opening with "as I was saying".
+6. Resume position is estimated from `bytesSent`, always **backing up**, and used for **nothing else** — never written to history, never spoken, never a claim about what was heard.
+7. Pause during thinking → the answer is **born held**; processing still completes.
+8. `response_end` remains a real state transition, generation-scoped.
+9. Cancelled, expired and discarded answers are recorded **in full**, marked interrupted — never truncated.
 
 ## 6. What this review does not authorize
 
-Per the Phase-Gate Approval Rule, this document is not authorization to begin Phase 4. That needs Wael's own explicit go-ahead. Nothing here authorizes production; B11f is staging-only, as S1 was.
+Not authorization to begin Phase 4 — that needs Wael's own explicit go-ahead (Phase-Gate Approval Rule). Nothing here authorizes production; B11f is staging-only.
