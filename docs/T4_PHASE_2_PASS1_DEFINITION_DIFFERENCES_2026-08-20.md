@@ -4,7 +4,7 @@
 **Governance version:** v4.0
 **Phase 1:** `docs/T4_PHASE_1_MEASUREMENT_2026-08-20.md` — approved
 **Scope of this pass:** the **42 columns that exist in both environments with different definitions**. The remaining differences (missing tables, indexes, constraints, policies, secrets, crons) are Pass 2.
-**Status:** Plan complete. **Awaiting Wael's go-ahead for Phase 2 → 3.**
+**Status:** **APPROVED WITH REQUIRED CORRECTION** at Phase 2 review — the correction is incorporated in §3.1a and the Change Impact Matrix. **Awaiting Wael's go-ahead for Phase 2 → 3.**
 
 **Why this pass is split off:** it is the set actively undermining every test run on staging, and it is self-contained — it does not depend on resolving what the staging-only cron or trigger were for.
 
@@ -84,6 +84,16 @@ Flagged as high priority by the Phase 1 reviewer, and it deserves it: **any stag
 
 **No-op on production by construction:** every target already has the intended definition there, so each statement is a redundant restatement rather than a change. That satisfies Phase 0's Success Criterion 3 as tightened — equivalence by *definition*, not by `IF NOT EXISTS`.
 
+### 3.1a ⚠️ Applied to BOTH environments — corrected at Phase 2 review
+
+Pass 1 originally said *"staging only"*. **That was wrong, and the reason is the point of this entire work item.**
+
+Applying a migration to staging alone makes the **migration history itself** diverge: staging would carry a migration production has never seen. That is a *new* parity problem, created by the work meant to remove parity problems — and it is precisely how the current situation arose.
+
+**The migration goes to both, through the normal path.** It changes staging, and on production every statement restates a definition that already holds, so nothing changes there. That is what makes it safe to apply to both, and applying it to both is what makes the files finally describe production truthfully.
+
+**The distinction worth keeping:** the goal was never "make staging look like production." It is **make the migrations describe production, then let both environments follow from the migrations.** A staging-only fix would have achieved the first and abandoned the second.
+
 ### 3.2 ⚠️ Guard: `SET NOT NULL` fails on existing NULLs
 
 A hard failure is the *safe* outcome — it stops rather than mangles. But a migration that dies halfway leaves the schema part-applied.
@@ -115,7 +125,7 @@ Re-run `T4_SCHEMA_FINGERPRINT.sql` on both. The 42 becomes **12** — Bucket B, 
 | **Mobile** | **No** | No app file changes |
 | **Voice** | **No** | No voice-server changes |
 | **Shared Core** | **No** | No Edge Function changes |
-| **Database** | **Yes** | One migration, staging only. Constraints and defaults; no data written, no column dropped |
+| **Database** | **Yes** | **One migration applied through the normal migration path to BOTH environments.** It *changes* staging; it is definition-equivalent — a no-op — on production. Constraints and defaults only; no data written, no column dropped |
 | **Cron** | **No** | Pass 2 |
 | **API contracts** | **No** | No request/response shape changes |
 | **Tests** | **No** *(this pass)* | The parity drift-check is Pass 3 |
@@ -130,11 +140,11 @@ Re-run `T4_SCHEMA_FINGERPRINT.sql` on both. The 42 becomes **12** — Bucket B, 
 | Applied to production by accident | **Low, high impact** | Every statement is a no-op there — verified against the fingerprint, not assumed |
 | Bucket B silently loosened | **None** | Not in the migration at all |
 
-## 6. Open for Phase 3
+## 6. Phase 2 review decisions — settled
 
-1. **Bucket B** — is leaving 12 differences unresolved acceptable, or should production be tightened in its own item?
-2. **The NULL-row guard** — abort-and-report is proposed. If staging holds orphan rows, does Wael want them listed, deleted, or assigned?
-3. **Ordering** — should this land before B11f finishes, given both touch staging?
+1. **Bucket B** — may remain unresolved in this pass, but **must be explicitly tracked** for a separate production-tightening decision. Logged as its own holding-list item rather than left as a paragraph in this document, since a finding that lives only inside a phase document is a finding that expires with it.
+2. **NULL rows** — abort and report. **Never delete or assign automatically.** If staging holds orphan rows, the evidence comes back for a data decision.
+3. **B11f coupling** — **not coupled.** B11f changes voice-server JavaScript only; it touches no database definition and no migration. The two are independent and neither blocks the other.
 
 ## 7. Not authorized
 
