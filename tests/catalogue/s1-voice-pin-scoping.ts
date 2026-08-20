@@ -541,4 +541,54 @@ export const s1VoicePinScopingTests: TestCase[] = [
     },
     async teardown(ctx) { await deprovisionTestAccount(ctx); },
   },
+  {
+    id: 's1.partial-pin-entry-counts-and-keeps-identity',
+    category: 's1-voice-pin-scoping',
+    platform: 'voice',
+    description:
+      'Found by Wael in Phase 7, on a real keypad. Digits that arrive but do not parse — 3 of them, or '
+      + '5 — are a failed attempt and count exactly like a wrong 6-digit PIN, and the retry must keep the '
+      + 'claimed account. Before this, a partial entry counted for nothing AND dropped `claimed`, so one '
+      + 'mistyped entry cost the rest of the call and three wrong attempts raised no alert. Silence still '
+      + 'does not count: nobody tried, and counting it would let a flaky line cry wolf.',
+    timeoutMs: 60_000,
+    async run(ctx) {
+      if (!voiceUrl()) { ctx.log(SKIP); return; }
+      if (!(await provisionTestAccount(ctx))) { ctx.log('Could not provision a PIN — skipping.'); return; }
+      if (!(await readPinState(ctx))) { ctx.log('D1 migration not applied here — skipping.'); return; }
+
+      const attempt = (digits: string) => postTwiml(
+        `/voice/pin-result?attempt=1&claimed=${ctx.testUserId}&from=%2B15005550077`,
+        { From: '+15005550077', Digits: digits },
+      );
+
+      // A 5-digit entry: counted, and identity survives the retry.
+      const partial = await attempt('12345');
+      if (!partial) { ctx.log(SKIP); return; }
+      await new Promise((r) => setTimeout(r, 2500));
+
+      const afterPartial = await readPinState(ctx);
+      if (afterPartial?.count === 0) { ctx.log('Phase 7 fix not deployed here — skipping.'); return; }
+      expectTruthy(
+        afterPartial?.count === 1,
+        `a partial PIN entry must count as one failure — got ${afterPartial?.count}`,
+      );
+      expectTruthy(
+        /claimed=/.test(partial.body),
+        'the retry must carry the claimed account — without it the next attempt fails closed, so one '
+        + 'mistyped entry refuses the caller for the rest of the call',
+      );
+
+      // Silence: not an attempt.
+      const before = (await readPinState(ctx))?.count ?? 0;
+      await attempt('');
+      await new Promise((r) => setTimeout(r, 2500));
+      expectTruthy(
+        (await readPinState(ctx))?.count === before,
+        'silence must NOT count — nobody tried anything, and counting it would let a dropped call '
+        + 'raise an alert about an attack that never happened',
+      );
+    },
+    async teardown(ctx) { await deprovisionTestAccount(ctx); },
+  },
 ];
