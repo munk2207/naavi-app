@@ -1,6 +1,8 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.07.18.5 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+**Architecture Version:** 2026.07.18.6 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+
+**Revision 6 (2026-08-20, T4):** adds §0c — the two Supabase environments are not equal, why they never were, the three categories of difference and why they must not be collapsed, and the drift check that now measures them. Bumped in the same commit as the edit, which is what revision 5's own note asked of whoever came next.
 
 **Revision 5** is [[S1]]'s Phase 8 output (2026-08-19): adds **§2c** — voice-PIN security state (failure counting, alerting, lockdown) moved from the voice server into Shared Core — plus the two voice-PIN rows in §2.
 
@@ -96,6 +98,80 @@ This is the underlying problem [[T3]] exists to fix. Until T3 lands, treat "the 
 **⚠️ Invariant this environment depends on.** `DEMO_TWILIO_NUMBER` and `STAGING_DEMO_TWILIO_NUMBER` must remain unset on the `naavi-voice-staging` service. The voice server contains one direct-to-Twilio SMS path (the F2b demo recap, `naavi-voice-server/src/index.js:7224`) that the Shared Core guard cannot see; it is unreachable only because those variables are unset. Setting either makes it reachable and requires a voice-server-side guard first. See [[T3]] for the underlying problem — the demo line and the registered-user voice platform being one process.
 
 **Test harness.** Gate 2 (`npm run test:voice`) selects its voice server from the same environment choice that drives `SUPABASE_URL` and refuses to run if the two disagree (`tests/lib/voice_env.ts`). Before T2 it always tested production.
+
+### 0c. The two Supabase environments are not equal (added by T4, 2026-08-20)
+
+§0b says there are two Supabase projects. It does not say they hold the same schema, and they do
+not.
+
+**Staging is a reconstruction from the migration files, not a copy of production.** It contains
+what those files describe and nothing else. Production holds objects the files never captured —
+created by hand, or by code since deleted — and staging has objects production never received,
+because work is deployed there first and not always promoted. Neither drifted from the other;
+they were never the same.
+
+**How this surfaces:** Wael called both lines within a minute of each other and got different
+behaviour. That is the only reason it was found.
+
+**Measured at definition level, not name level.** A name-level comparison reported 14
+differences. Comparing types, defaults, nullability, index and constraint definitions, policy
+expressions, function bodies and cron schedules reported **184**. An object can exist in both
+environments, under the same name, and behave differently — that category is invisible to any
+comparison that only checks whether a name is present, and it is where the real defects were.
+
+**Three categories, which must not be collapsed into one number:**
+
+| Category | Meaning |
+|---|---|
+| **Missing from staging** | The real gap — the reconstruction is incomplete |
+| **Staging-only** | Almost always work not yet promoted. **Not debris.** S1 is exactly this and is correct |
+| **Defined differently** | The dangerous one. Identical to any name-level check, different at runtime |
+
+Collapsing these loses the signal: the first is a defect, the second is a promotion queue, and
+the third is what actually breaks.
+
+**Examples of the third category, all found 2026-08-20 and all real:** staging rejected the
+`calendar` document type this document's own product spec lists as valid, and every ticket
+raised from the website; staging granted write access to `calendar_events` and `gmail_messages`
+where production grants read only; production allows a blank value in 12 columns where staging
+does not.
+
+**The mechanism that keeps this from recurring: `npm run drift:check`.** It reads staging live,
+compares against a captured production fingerprint, and exits non-zero on any difference NEW
+since the recorded baseline. Known differences live in `docs/T4_accepted_differences.json` and
+are not failures; the check is about the two environments separating *further*.
+
+**What it cannot see, and this is load-bearing:**
+
+- It compares staging **live** against a production **snapshot**. Production changing is
+  invisible until the snapshot is recaptured by running `docs/T4_SCHEMA_FINGERPRINT.sql` in
+  production's SQL editor. That is deliberate — it means no production database credentials need
+  to exist anywhere — and it is sound only because production changes solely by deliberate act
+  under the staging-first rule. Supabase upgrading an extension underneath is the one exception.
+- It compares **schema**, not data, and not Edge Function code. A function deployed to one
+  project and not the other is invisible to it.
+
+**Its own measurements have been wrong, three times, in ways worth remembering.** Function bodies
+were hashed raw, so one extra space made two identical functions look different. Cron commands
+were truncated before the service key was redacted, so production's longer key pushed the tail of
+the statement out of the comparison. Extensions recorded name and version but not schema —
+pgvector lives in `extensions` on staging and is reachable from `public` on production, which is
+why a function pinning `search_path` to `public` alone works on one and cannot find the `<=>`
+operator on the other. **Each was found only when something failed, never by inspection**, and
+each had been quietly inflating the difference count. A parity check's own defects present
+exactly like real drift.
+
+**Direction of travel, decided by Wael 2026-08-20:** where the two differ and staging is ahead,
+the answer is to **promote to production, never to delete from staging**. Parity is about
+capability — *"functions not data that belong to the individual testing each system"* — so rows
+belonging to whoever tests an environment are out of scope entirely.
+
+**And parity is not always the goal.** Production's Epic policies use `using = true`, letting any
+authenticated user read every user's rows; staging scopes them per user. Staging is correct.
+Copying production would have imported the weaker rule. **A difference is a question, not
+automatically a defect on the staging side.**
+
+Full record: `docs/T4_PHASE_5_EVIDENCE_ALL_PASSES_2026-08-20.md`.
 
 ## 1. Architecture Principles
 
