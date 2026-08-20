@@ -3,7 +3,7 @@
 **Date:** 2026-08-20
 **Governance version:** v4.0
 **Governance level:** Full Phase 0–8 — touches Shared Core, the database, and both environments.
-**Status:** Draft, with the first measurement already done (§3). **Awaiting Wael's approval.**
+**Status:** **APPROVED WITH REQUIRED CLARIFICATION** at Phase 0 review, 2026-08-20 — incorporated in Success Criterion 3 and §3.4a. **Awaiting Wael's go-ahead for Phase 0 → 1, and a read-only production database connection string.**
 
 ---
 
@@ -57,6 +57,17 @@ Read-only, performed 2026-08-19/20. **This is the substance: an unbounded worry 
 
 Production 75, staging 82. **Staging is ahead, not behind.** Of the 7 staging-only functions, **5 are referenced by no code at all** (`delete-contact`, `patch-calendar-event`, `seed-demo-email-james`, `sync-active-email-alerts`, `whoami-google-diag`) — dead deployments, not capability production lacks.
 
+### 3.4a ⚠️ The measurement above is NAME-level, not definition-level
+
+Surfaced by the Phase 0 review's point about `IF NOT EXISTS`, and it applies backwards to §3.1-3.4 as much as forwards.
+
+The comparison used PostgREST's OpenAPI schema, which lists **table and column names**. It does **not** compare types, defaults, nullability, constraints or index definitions. So:
+
+- The **14 gaps found are real** — those objects are genuinely absent.
+- **The absence of further gaps is not proven.** Roughly 300 columns exist in both environments and have been compared only by name. Any of them could differ in type, default or nullability, and this measurement would report them as matching.
+
+**Phase 1 must re-run the whole comparison at definition level**, not extend it from here. The counts in §3 are a floor, not a total.
+
 ### 3.5 ⭐ What the gaps actually mean — the answer to Wael's question
 
 The gaps are not scattered. They cluster, and each cluster is a **feature that cannot work on staging**:
@@ -90,7 +101,7 @@ The gaps are not scattered. They cluster, and each cluster is a **feature that c
 
 1. Every category in §3 and §4 measured, both directions, with the result written down.
 2. Every genuine gap closed **by a migration or a documented configuration step** — not by hand-editing staging, which would leave the files still untruthful.
-3. Applying the catch-up migrations to **production is a no-op** (`IF NOT EXISTS`). Production behaviour must not change.
+3. **Production already contains the intended equivalent DEFINITION**, so applying the catch-up migrations there produces no functional or schema change. **`IF NOT EXISTS` is not sufficient proof** and must not be treated as such (Phase 0 review, 2026-08-20): an object can exist in both environments with a different type, default, nullability, index column set, RLS `USING` clause, or trigger body. Equivalence is verified by comparing **definitions**, not existence.
 4. Re-running the measurement returns **empty**. That is the proof — not the intention.
 5. **A check exists that fails when they drift apart again.**
 
