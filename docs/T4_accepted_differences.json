@@ -1,36 +1,9 @@
 {
   "note": "Differences known and accepted as of the capture below. The check fails on anything NEW. Regenerate with: npm run drift:check -- --write-baseline",
-  "captured": "2026-08-20, 2:48:51 p.m. EST",
+  "captured": "2026-08-20, 2:51:14 p.m. EST",
   "accepted": {
     "columns": {
-      "missing": [
-        "conversations.id",
-        "conversations.session_date",
-        "conversations.turns",
-        "conversations.updated_at",
-        "conversations.user_id",
-        "pending_disambig.action",
-        "pending_disambig.expires_at",
-        "pending_disambig.id",
-        "pending_disambig.payload",
-        "pending_disambig.user_id",
-        "people.created_at",
-        "people.email",
-        "people.id",
-        "people.name",
-        "people.notes",
-        "people.phone",
-        "people.relationship",
-        "people.updated_at",
-        "people.user_id",
-        "waitlist_signups.comments",
-        "waitlist_signups.created_at",
-        "waitlist_signups.email",
-        "waitlist_signups.id",
-        "waitlist_signups.invited_at",
-        "waitlist_signups.source",
-        "waitlist_signups.status"
-      ],
+      "missing": [],
       "extra": [
         "email_alert_log.gmail_message_id",
         "email_alert_log.id",
@@ -63,19 +36,12 @@
     "constraints": {
       "missing": [
         "contacts.contacts_user_name_email_unique",
-        "conversations.conversations_pkey",
-        "conversations.conversations_user_id_fkey",
         "documents.documents_user_message_filename_unique",
         "epic_tokens.epic_tokens_patient_id_unique",
         "gmail_messages.gmail_messages_signal_strength_check",
         "knowledge_fragments.knowledge_fragments_classification_check",
         "knowledge_fragments.knowledge_fragments_source_check",
-        "knowledge_fragments.knowledge_fragments_type_check",
-        "pending_disambig.pending_disambig_pkey",
-        "people.people_pkey",
-        "people.people_user_id_fkey",
-        "waitlist_signups.waitlist_email_unique",
-        "waitlist_signups.waitlist_signups_pkey"
+        "knowledge_fragments.knowledge_fragments_type_check"
       ],
       "extra": [
         "email_alert_log.email_alert_log_pkey",
@@ -139,18 +105,11 @@
     "indexes": {
       "missing": [
         "contacts_user_name_email_unique",
-        "conversations_pkey",
         "documents_user_message_filename_unique",
         "epic_tokens_patient_id_unique",
-        "idx_conversations_user_date",
         "knowledge_fragments_embedding_idx",
         "knowledge_fragments_user_content_unique",
-        "pending_disambig_pkey",
-        "people_pkey",
-        "reminders_user_title_datetime_unique",
-        "waitlist_email_unique",
-        "waitlist_signups_pkey",
-        "waitlist_status_idx"
+        "reminders_user_title_datetime_unique"
       ],
       "extra": [
         "email_alert_log_pkey",
@@ -166,7 +125,6 @@
       "missing": [
         "calendar_events.Users can read own events",
         "contacts.Users manage own contacts",
-        "conversations.Users manage own conversations",
         "epic_appointments.Read Epic appointments",
         "epic_conditions.Read Epic conditions",
         "epic_medications.Read Epic medications",
@@ -175,10 +133,6 @@
         "knowledge_fragments.Users can read their own fragments",
         "knowledge_fragments.Users manage own fragments",
         "pending_actions.pending_actions_service_role",
-        "people.Users can delete own people",
-        "people.Users can insert own people",
-        "people.Users can read own people",
-        "people.Users can update own people",
         "push_subscriptions.Users manage own push subscriptions",
         "reminders.Users can insert own reminders",
         "reminders.Users can read own reminders",
@@ -205,12 +159,7 @@
       "differing": []
     },
     "rls_enabled": {
-      "missing": [
-        "conversations",
-        "pending_disambig",
-        "people",
-        "waitlist_signups"
-      ],
+      "missing": [],
       "extra": [
         "email_alert_log"
       ],
