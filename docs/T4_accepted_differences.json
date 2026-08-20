@@ -1,6 +1,6 @@
 {
   "note": "Differences known and accepted as of the capture below. The check fails on anything NEW. Regenerate with: npm run drift:check -- --write-baseline",
-  "captured": "2026-08-20, 1:09:39 p.m. EST",
+  "captured": "2026-08-20, 2:48:51 p.m. EST",
   "accepted": {
     "columns": {
       "missing": [
@@ -95,10 +95,7 @@
       ]
     },
     "cron_jobs": {
-      "missing": [
-        "cleanup-old-emails",
-        "sync-calendar-every-6h"
-      ],
+      "missing": [],
       "extra": [
         "sync-active-email-alerts-every-5-minutes"
       ],
@@ -106,9 +103,11 @@
         "analyze-new-tickets-every-minute",
         "check-reminders-every-minute",
         "check-ticket-replies-every-minute",
+        "cleanup-old-emails",
         "evaluate-rules-every-minute",
         "geofence-health-check-daily",
         "reanalyze-on-reply-every-minute",
+        "sync-calendar-every-6h",
         "trigger-morning-call-every-minute"
       ]
     },
