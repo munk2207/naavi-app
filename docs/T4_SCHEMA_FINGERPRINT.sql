@@ -105,7 +105,15 @@ SELECT jsonb_pretty(jsonb_build_object(
   ),
 
   'extensions', (
-    SELECT jsonb_object_agg(extname, extversion) FROM pg_extension
+    -- Version AND schema. An extension's SCHEMA is part of how the database
+    -- behaves, not decoration: pgvector lives in `extensions` on staging and
+    -- is reachable from `public` on production, so a function pinning
+    -- search_path to public alone works on one and cannot find the <=>
+    -- operator on the other. That difference was invisible to every
+    -- comparison run on 2026-08-20 and only surfaced when a migration copied
+    -- production's search_path across and failed.
+    SELECT jsonb_object_agg(e.extname, e.extversion || ' @' || n.nspname)
+    FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace
   ),
 
   'cron_jobs', (

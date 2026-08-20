@@ -1,6 +1,6 @@
 {
   "note": "Differences known and accepted as of the capture below. The check fails on anything NEW. Regenerate with: npm run drift:check -- --write-baseline",
-  "captured": "2026-08-20, 5:02:53 p.m. EST",
+  "captured": "2026-08-20, 7:11:38 p.m. EST",
   "accepted": {
     "columns": {
       "missing": [],
@@ -76,7 +76,15 @@
       "missing": [],
       "extra": [],
       "differing": [
-        "pg_net"
+        "pg_cron",
+        "pg_net",
+        "pg_stat_statements",
+        "pg_trgm",
+        "pgcrypto",
+        "plpgsql",
+        "supabase_vault",
+        "uuid-ossp",
+        "vector"
       ]
     },
     "functions": {
