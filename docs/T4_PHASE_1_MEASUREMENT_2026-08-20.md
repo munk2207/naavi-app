@@ -103,7 +103,7 @@ A table with RLS enabled and **no** policy denies everything to non-service-role
 | **Calendar sync** | `sync-calendar-every-6h` cron missing — `calendar_events` is never populated |
 | **Morning call** | 3 state columns missing |
 | **Push notifications** | all 3 VAPID secrets + Firebase account missing |
-| **WhatsApp reminders / tasks** | both template SIDs missing |
+| ~~WhatsApp reminders / tasks~~ | **⚠️ CORRECTED 2026-08-20 — this was WRONG.** The two production-only SIDs (`REMINDER`, `TASK`) are referenced by **no code at all**; the only one in use is `TWILIO_WHATSAPP_TEMPLATE_MESSAGE_SID`, which **staging already has**. WhatsApp works on staging. Claimed here on the basis that a secret was missing, without checking whether anything read it |
 | **OCR / document extraction** | Vision API key + 2 `documents` columns missing |
 | **Inbound email** | both Postmark secrets missing |
 | **Name recognition accuracy** | `voice_keyterms` missing |
