@@ -1,6 +1,6 @@
 {
   "note": "Differences known and accepted as of the capture below. The check fails on anything NEW. Regenerate with: npm run drift:check -- --write-baseline",
-  "captured": "2026-08-20, 3:10:40 p.m. EST",
+  "captured": "2026-08-20, 3:26:30 p.m. EST",
   "accepted": {
     "columns": {
       "missing": [],
@@ -34,11 +34,7 @@
       ]
     },
     "constraints": {
-      "missing": [
-        "knowledge_fragments.knowledge_fragments_classification_check",
-        "knowledge_fragments.knowledge_fragments_source_check",
-        "knowledge_fragments.knowledge_fragments_type_check"
-      ],
+      "missing": [],
       "extra": [
         "email_alert_log.email_alert_log_pkey",
         "email_alert_log.email_alert_log_rule_id_gmail_message_id_key",
@@ -53,6 +49,9 @@
       "differing": [
         "calendar_events.calendar_events_user_id_fkey",
         "gmail_messages.gmail_messages_user_id_fkey",
+        "knowledge_fragments.knowledge_fragments_classification_check",
+        "knowledge_fragments.knowledge_fragments_source_check",
+        "knowledge_fragments.knowledge_fragments_type_check",
         "user_tokens.user_tokens_user_id_fkey"
       ]
     },
