@@ -15,7 +15,9 @@ This change added no feature and no screen. Governance's mandatory manual catego
 
 Staging now **rejects** rows it used to accept: 19 columns became `NOT NULL`, six of them `user_id`. If any code path has been quietly saving a row without one of those values, **it will now fail** — and Gate 1's 512 tests did not catch it, because they passed with zero failures.
 
-**The valuable inversion:** production has enforced these constraints all along. So if something breaks on staging now, **it has been broken on production the whole time** and nobody knew. A failure here is not a regression caused by this work — it is a pre-existing production bug this work made visible.
+**What a failure would mean — stated carefully, because the obvious reading is too strong.** Production has enforced these constraints all along, so a staging failure means a write path that production would also reject *as exercised on staging*. It does **not** automatically follow that the same thing is broken in production: production may take a different code path, or its data may always happen to supply the value.
+
+**So a failure is a newly exposed write-path defect, to be investigated — not a proven production bug.** (Phase 7 review correction, 2026-08-20; the original wording here claimed the stronger version.)
 
 That is what Phase 7 is looking for.
 
@@ -45,7 +47,7 @@ Every test writes to a table this migration tightened. **Passing means it saves 
 
 **You would see:** Naavi saying she could not save something, an error in the app, or an action that silently does not appear afterwards.
 
-**If that happens, do not work around it — tell me what you did.** It is likely a genuine defect in a write path that has been failing on production all along, and finding it is worth more than this migration was.
+**If that happens, do not work around it — tell me what you did.** It is a genuine write-path defect worth more than this migration was. Whether it also affects production is the *first thing to investigate*, not the conclusion to start from.
 
 **It is not:** something to be fixed by loosening the constraint back. Production enforces it; staging matching production is the correct state.
 
