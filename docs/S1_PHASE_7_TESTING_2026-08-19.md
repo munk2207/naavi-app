@@ -3,7 +3,7 @@
 **Date:** 2026-08-19
 **Governance version:** v4.0
 **Environment:** staging only — voice line **+1 343 504 1572**, Naavi Staging app
-**Status:** Plan written. Awaiting the staging APK decision (§1), then Wael's testing.
+**Status:** **COMPLETE — all 12 tests PASS** on build 327, plus one extra test Wael added. Two defects were found on the first run, fixed, and re-tested. Awaiting Wael's go-ahead for Phase 8.
 
 ---
 
@@ -97,22 +97,55 @@ Report it and stop that thread — do not work around it. Two specifically must 
 
 ## 5. Results
 
-*(Filled in as testing proceeds.)*
+**Build 327, staging, 2026-08-19. All 12 pass.**
 
 | Test | Result | Notes |
 |---|---|---|
-| T1 | | |
-| T2 | | |
-| T3 | | |
-| T4 | | |
-| T5 | | |
-| T6 | | |
-| T7 | | |
-| T8 | | |
-| T9 | | |
-| T10 | | |
-| T11 | | |
-| T12 | | |
+| T1 | ✅ PASS | Never asked to identify. Naavi re-ran onboarding every call and could not be interrupted — [[B11c]] and [[B11f]], both pre-existing, both logged |
+| T2 | ✅ PASS | Name spoken after PIN |
+| T3 | ✅ PASS | Three attempts, no disclosure |
+| T4 | ✅ PASS | Alert SMS delivered — **on the second run**. Failed first time; see §5a |
+| T5 | ✅ PASS | PIN change refused on a PIN-authenticated call. **Closes the gap Phase 5 recorded as code-verified only** |
+| T6 | ✅ PASS | BLOCK confirmed |
+| T7 | ✅ PASS | Refused before the PIN prompt, with the blocked-specific wording |
+| T8 | ✅ PASS | Blocked panel visible |
+| T9 | ✅ PASS | Confirmation asked, panel cleared |
+| T10 | ✅ PASS | Access restored |
+| T11 | ✅ PASS | Alert arrived on the third failure. Alerts at 9:35 and 9:41 PM EST — the six-minute gap spans a block, an unblock, and three fresh failures, which is the counter-reset fix working |
+| T12 | ✅ PASS | Six digits accepted |
+| **T13** | ✅ PASS | **Wael's own addition:** added the second phone as a backup number, then called from it — treated as registered, exactly like T1 |
+
+### 5a. Two defects found on the first run, fixed, re-tested
+
+The first attempt failed at T4 — three wrong PINs produced no alert. Root-caused to the
+unparseable-input branch of `/voice/pin-result`, which predated Track A and was never updated when
+`claimed` was introduced:
+
+1. **A partial entry dropped the claimed account on retry.** A wrong-but-complete PIN retried with
+   `&claimed=`; an incomplete one did not, so the next attempt hit the fail-closed guard and refused
+   the caller outright. **One mistyped entry cost the rest of the call.**
+2. **Partial entries were never counted**, so no alert fired however many were made. Measured: 3
+   partial attempts recorded 0, while 3 complete wrong attempts recorded 3.
+
+**Wael's ruling**, which corrected the line originally proposed: *"if naavi listen to 3 or 5 it does
+not matter, it is a failure and should be counted exactly as if the PIN was 6."* The counter measures
+whether someone **tried**, not whether their input parsed — and a fumbled entry is indistinguishable
+from a probe. Silence still does not count, by his decision: nobody tried, and counting it would let a
+flaky line raise an alert about an attack that never happened.
+
+**Why automation missed it.** All eight regression tests posted clean six-digit values. Wael used a
+keypad, and keys pressed while the prompt is still playing do not register ([[B11g]]) — so what reached
+the Gather was the tail of what he typed. **Eight automated tests and a Phase 6 review passed over a
+defect a real handset found in ninety seconds.** That is the argument for this phase existing.
+
+Regression test added: `s1.partial-pin-entry-counts-and-keeps-identity`. Gate 2 8/8, Gate 1 4/4.
+
+### 5b. First-run results that were void, not failed
+
+T5 through T11 on the first run were recorded as failures but were not: the second phone had been
+added to `phone_numbers`, making it a **registered** number. A registered caller never reaches the
+identification or PIN path, so the unregistered-phone block cannot apply to it — by design. The number
+was removed and those tests re-run properly.
 
 ## 6. Not authorized by this phase
 
