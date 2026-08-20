@@ -57,13 +57,13 @@ This uses the same bytes-to-words estimate I argued against in Revision 1 §6a. 
 
 | File | Classification | Change | Risk |
 |---|---|---|---|
-| `naavi-voice-server/src/index.js` | **Backend / Protected Core** | Six changes — §4 | **Medium-High** |
+| `naavi-voice-server/src/index.js` | **Backend / Protected Core** | Seven changes — §4 | **Medium-High** |
 | `tests/catalogue/b11f-voice-stop.ts` (new) | Tests | Regression suite | Low |
 | `tests/runner.ts` | Tests | Register the suite | Low |
 
 **No other file.** No mobile, no Edge Function, no migration, no configuration, and nothing in `sendAudioToTwilio` or its 43 call sites.
 
-## 4. The six changes
+## 4. The seven changes
 
 ### 4.1 Cancellable TTS — unchanged from Revision 1
 
@@ -114,6 +114,30 @@ Today the assistant turn is pushed into `conversationHistory` **before** speakin
 | **Cancelled** or **expired** | Amend the entry with an interrupted marker — Phase 3 Mandatory Change 1: full text, marked, never truncated |
 | **Discarded by a new question** | Same as cancelled |
 
+### 4.7 Pause during thinking — the answer is born held
+
+**Approved as a required inclusion at the Phase 2 Revision 2 review.**
+
+Without it, Phase 0 criterion 6 ("she says nothing at all until spoken to") fails in exactly the scenario the feature exists for: the caller says "stop" while Naavi is still composing, so there is no audio to cancel, and seconds later she begins announcing private information to a room that now has someone else in it.
+
+```js
+let holdNextReply = false;      // per connection
+
+// a pause word arriving while isProcessing:
+if (isProcessing && !isSpeaking) { holdNextReply = true; }
+
+// at the speak site, before streamTTSToTwilio:
+if (holdNextReply) {
+  heldAnswer = { text: speech, bytesSent: 0, at: Date.now() };
+  holdNextReply = false;
+  // no audio is sent
+}
+```
+
+`bytesSent: 0` is the whole trick: the held answer resumes **from the beginning**, because nothing was heard. It needs no special case — it is the same held state entered one step earlier, and resume, cancel, expiry and discard-on-new-question all apply unchanged.
+
+**Processing is not cancelled.** The reviewer was explicit, and it matches the mobile model: Stop has never meant "abandon the task". Any actions the turn performs still happen; only the speaking is withheld.
+
 ## 5. The four Phase 0 questions, answered
 
 **Q1 — How long does a paused answer live?**
@@ -133,7 +157,7 @@ It is already there (§4.6). The rule is that it is amended **when it resolves**
 | Layer | Affected? | Details |
 |---|---|---|
 | **Mobile** | **No** | No mobile file changes. Mobile keeps its Stop button; pause/resume is not proposed there. Its generation counter is the *model* for §4.1, not a target |
-| **Voice** | **Yes** | `naavi-voice-server/src/index.js` — the six changes in §4. Protected Core |
+| **Voice** | **Yes** | `naavi-voice-server/src/index.js` — the seven changes in §4. Protected Core |
 | **Shared Core** | **No** | `streamTTSToTwilio` calls Deepgram directly (`:5740`); the `text-to-speech` Edge Function is not on this path |
 | **Database** | **No** | The held answer is per-connection memory. Nothing persists — a dropped call loses it, which is correct |
 | **Cron** | **No** | No scheduled job involved |
@@ -154,15 +178,13 @@ It is already there (§4.6). The rule is that it is amended **when it resolves**
 | One caller's pause affects another | Very low, severe | Everything per-connection (Rule 10) |
 | `sendAudioToTwilio` regresses | **None** | Not modified |
 
-## 8. Known limitation, stated not buried
+## 8. Limitation resolved
 
-**Saying "stop" while Naavi is still thinking does not suppress the answer that follows.** The speak path is unconditional (`:10758-10761`) and cancellation only cancels audio already playing.
+Revision 2 originally flagged, as a limitation outside the authorized boundary, that a pause word arriving while Naavi was still *thinking* would not stop the answer that followed.
 
-Wael's own privacy scenario reaches it: someone walks in, he says "stop" while she is mid-thought, and seconds later she announces his schedule to the room.
+**The Phase 2 review approved including it**, on the grounds that it is not scope expansion but a precondition of an already-approved requirement: after a pause, Naavi says nothing until spoken to. It is now §4.7 and part of the authorized design.
 
-**Proposed for inclusion**, since Phase 0 Amendment 1's criterion 6 ("she says nothing at all until spoken to") cannot be met without it: a pause word during `isProcessing` sets the pending reply to arrive **held** rather than spoken. Same state, entered one step earlier.
-
-**Flagged for Phase 3 to rule on explicitly** — it was not in Revision 1's authorized boundary, and widening scope on my own judgement is what that boundary exists to prevent.
+**Recorded because the sequence matters:** it was flagged rather than fixed quietly, and the reviewer — not I — decided it was in scope. That is the boundary working as intended.
 
 ## 9. What this phase does not authorize
 
