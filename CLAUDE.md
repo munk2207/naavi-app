@@ -427,9 +427,27 @@ Every production AAB must pass all applicable gates in this exact order. Each co
 
 | Gate | Platform | What it tests | How to run |
 |------|----------|---------------|------------|
-| 1 | **Auto-tester** | Business logic, Edge Function behavior, prompt emissions, data integrity | `npm run test:auto` — must be 100% green |
+| 1 | **Auto-tester** | Business logic, Edge Function behavior, prompt emissions, data integrity — **and, since 2026-08-20, staging/production schema parity** | `npm run test:auto` — must be 100% green |
 | 2 | **Voice regression** | Voice server call flows, STT/TTS pipeline, Twilio webhook behavior | Run voice regression suite — all tests must pass |
 | 3 | **Firebase Test Lab** | Hardware/OS compatibility on real physical devices (Pixel 6 Android 13, Samsung Galaxy S22 Android 14) | `node scripts/submit-firebase-test.js <apk-url>` — all devices must show ✅ in console |
+
+**⭐ Gate 1 now runs the drift check first (2026-08-20).** `npm run test:auto` is
+`node scripts/t4-drift-check.js && tsx tests/runner.ts`, so **the suite cannot run at all while
+staging and production have separated** beyond the recorded baseline. Since a green `test:auto`
+is a hard prerequisite for every production AAB (Rule 15), schema drift now blocks a production
+build rather than being noticed later — or not at all.
+
+- **It fails closed.** If `STAGING_DB_URL` is missing from `tests/.env`, the check exits non-zero
+  and the suite never runs. That is deliberate: a gate that skips itself when unconfigured is not
+  a gate, and this whole class of failure — knowledge recorded with nothing enforcing it — is
+  what T4 was opened to fix.
+- **When a difference is intentional** (work on staging not yet promoted), record it rather than
+  reverting it: `npm run drift:check -- --write-baseline`.
+- **Escape hatch, for when staging is deliberately mid-change:** `npm run test:auto:nodrift` runs
+  the suite alone. It does NOT satisfy Gate 1 for a production build.
+
+Verified in both directions on the day it landed: clean at the baseline, and exit 1 — with the
+suite never starting — when a single accepted difference was removed.
 
 **Maestro (dropped 2026-06-25):** Removed as a mandatory gate. Maintenance cost (emulator instability, YAML churn on every UI change, hours of debugging) exceeded the value. Firebase Test Lab on real hardware covers device compatibility better. e2e YAML files remain in `e2e/` for reference but are not part of the gate sequence.
 

@@ -7,12 +7,13 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "test:auto": "tsx tests/runner.ts",
+    "test:auto": "node scripts/t4-drift-check.js && tsx tests/runner.ts",
     "test:voice": "tsx tests/runner.ts --voice",
     "test:mobile": "node scripts/run-maestro.js",
     "test:mobile:one": "node scripts/run-maestro.js --one",
     "seed:test-user": "node scripts/seed-test-user.js",
-    "drift:check": "node scripts/t4-drift-check.js"
+    "drift:check": "node scripts/t4-drift-check.js",
+    "test:auto:nodrift": "tsx tests/runner.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",
