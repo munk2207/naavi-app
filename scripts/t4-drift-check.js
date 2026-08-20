@@ -75,7 +75,12 @@ const ENV_FILE = path.join(REPO, 'tests', '.env');
 // pgvector and pg_trgm ship hundreds of functions. 118 of an apparent 207
 // "missing" functions were exactly this on 2026-08-20. Real project functions
 // missing: zero. Excluded so the number means something.
-const EXTENSION_FN = /^(vector|halfvec|sparsevec|ivfflat|hnsw|l2_|inner_|cosine_|binary_quantize|subvector|array_to_|avg|sum|similarity|show_trgm|word_similarity|strict_word|set_limit|show_limit|gtrgm|gin_|gbt_|uuid_|pgp_|armor|dearmor|crypt|gen_salt|digest|hmac|encrypt|decrypt|pg_stat|algorithm_sign|sign|try_cast|url_|verify|http)/i;
+// l1_distance / hamming_distance / jaccard_distance were added 2026-08-20:
+// they are pgvector's, not ours, and were sitting in "missing from staging"
+// looking like five of our own functions had gone astray. Only NINE
+// non-extension functions exist at all, so five of them being noise was most
+// of the category.
+const EXTENSION_FN = /^(vector|halfvec|sparsevec|ivfflat|hnsw|l1_distance|l2_|hamming_distance|jaccard_distance|inner_|cosine_|binary_quantize|subvector|array_to_|avg|sum|similarity|show_trgm|word_similarity|strict_word|set_limit|show_limit|gtrgm|gin_|gbt_|uuid_|pgp_|armor|dearmor|crypt|gen_salt|digest|hmac|encrypt|decrypt|pg_stat|algorithm_sign|sign|try_cast|url_|verify|http)/i;
 
 const PROJECT_REFS = /hhgyppbxgmjrwdpdubcx|xugvnfudofuskxoknhve/g;
 
@@ -91,7 +96,17 @@ function normalise(v) {
     // whitespace. Ten cron jobs looked like drift until this line existed,
     // which is precisely how a real difference gets buried.
     .replace(/\\r\\n|\\r|\\n|\\t/g, ' ')
-    .replace(/\s+/g, ' ');
+    .replace(/\s+/g, ' ')
+    // Spacing around punctuation. Postgres stores a function or constraint
+    // exactly as it was typed, so "AND (x IS NULL" and "AND ( x IS NULL" are
+    // reported as different definitions while being the same instruction.
+    // try_enter_geofence — the geofence dwell logic — sat in the differences
+    // list all day on the strength of ONE space after a bracket. Four separate
+    // false alarms came from formatting on 2026-08-20, and each one buried the
+    // real findings underneath it. The point of this check is that a failure
+    // means something; noise of this kind is what turns a gate into wallpaper.
+    .replace(/\s*([(),;])\s*/g, '$1')
+    .trim();
 }
 
 // ── Loading ────────────────────────────────────────────────────────────────

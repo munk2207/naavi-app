@@ -1,6 +1,6 @@
 {
   "note": "Differences known and accepted as of the capture below. The check fails on anything NEW. Regenerate with: npm run drift:check -- --write-baseline",
-  "captured": "2026-08-20, 4:33:40 p.m. EST",
+  "captured": "2026-08-20, 5:02:53 p.m. EST",
   "accepted": {
     "columns": {
       "missing": [],
@@ -80,18 +80,13 @@
       ]
     },
     "functions": {
-      "missing": [
-        "hamming_distance(bit, bit)",
-        "jaccard_distance(bit, bit)",
-        "l1_distance(halfvec, halfvec)",
-        "l1_distance(sparsevec, sparsevec)",
-        "l1_distance(vector, vector)"
-      ],
+      "missing": [],
       "extra": [
         "check_phone_numbers_unique()",
         "record_voice_pin_failure(p_user_id uuid, p_window interval)"
       ],
       "differing": [
+        "match_knowledge_for_dedup(p_user_id uuid, p_embedding vector, p_limit integer)",
         "search_knowledge_fragments(query_embedding vector, match_count integer, p_user_id uuid)",
         "tickets_set_updated_at()",
         "try_enter_geofence(p_rule_id uuid, p_ttl_hours integer)"

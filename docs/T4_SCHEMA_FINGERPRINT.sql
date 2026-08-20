@@ -74,7 +74,18 @@ SELECT jsonb_pretty(jsonb_build_object(
     SELECT jsonb_object_agg(k, v) FROM (
       SELECT p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' AS k,
              CASE p.prokind
-               WHEN 'f' THEN 'f:' || md5(pg_get_functiondef(p.oid))  -- hash: body may be large
+               -- Hash the NORMALISED body, not the raw text. Postgres stores a function
+               -- exactly as typed, so one extra space produces a completely different
+               -- hash and two identical functions look like a real difference. On
+               -- 2026-08-20 try_enter_geofence and tickets_set_updated_at sat in the
+               -- differences list all day on the strength of a space after a bracket
+               -- and some indentation, and a hash cannot be un-normalised afterwards.
+               WHEN 'f' THEN 'f:' || md5(
+                 regexp_replace(
+                   regexp_replace(pg_get_functiondef(p.oid), '\s+', ' ', 'g'),
+                   '\s*([(),;])\s*', '\1', 'g'
+                 )
+               )
                ELSE p.prokind::text || ':' || COALESCE(p.prosrc, '')
              END AS v
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
