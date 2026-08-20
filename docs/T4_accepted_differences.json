@@ -1,6 +1,6 @@
 {
   "note": "Differences known and accepted as of the capture below. The check fails on anything NEW. Regenerate with: npm run drift:check -- --write-baseline",
-  "captured": "2026-08-20, 2:51:14 p.m. EST",
+  "captured": "2026-08-20, 3:10:40 p.m. EST",
   "accepted": {
     "columns": {
       "missing": [],
@@ -35,10 +35,6 @@
     },
     "constraints": {
       "missing": [
-        "contacts.contacts_user_name_email_unique",
-        "documents.documents_user_message_filename_unique",
-        "epic_tokens.epic_tokens_patient_id_unique",
-        "gmail_messages.gmail_messages_signal_strength_check",
         "knowledge_fragments.knowledge_fragments_classification_check",
         "knowledge_fragments.knowledge_fragments_source_check",
         "knowledge_fragments.knowledge_fragments_type_check"
@@ -103,14 +99,7 @@
       ]
     },
     "indexes": {
-      "missing": [
-        "contacts_user_name_email_unique",
-        "documents_user_message_filename_unique",
-        "epic_tokens_patient_id_unique",
-        "knowledge_fragments_embedding_idx",
-        "knowledge_fragments_user_content_unique",
-        "reminders_user_title_datetime_unique"
-      ],
+      "missing": [],
       "extra": [
         "email_alert_log_pkey",
         "email_alert_log_rule_id_gmail_message_id_key",
