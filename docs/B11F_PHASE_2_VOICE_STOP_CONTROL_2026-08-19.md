@@ -149,17 +149,34 @@ Every row stated explicitly.
 | Deferred text produces a delayed, confusing reply | Medium | Release on speech-end, so the gap is one sentence rather than an unbounded wait |
 | The 43 `sendAudioToTwilio` sites regress | **None** | Not modified. Phase 1A established they have no post-`clear` production window |
 
-## 6. Open questions — must be resolved before or during Phase 3
+## 6. Open questions — ALL DECIDED at Phase 2 review (2026-08-19)
 
-**Q1 — Keep or drop `got it` / `i got it` as stop words?** Genuinely ambiguous, and the two readings point opposite ways. **Recommend dropping**, consistent with the reasoning that removed `ok` and `thanks`: a false stop is more damaging than a missed one, because the user can always say "stop".
+| # | Question | Decision |
+|---|---|---|
+| Q1 | Keep `got it` / `i got it`? | **Drop.** Too ambiguous. Final list: `stop`, `naavi stop`, `enough`, `that's enough`, `cancel`, `next` |
+| Q2 | Send `response_end` after cancellation? | **Yes.** Preserve the state transition, or `isSpeaking` and the idle timer become inconsistent |
+| Q3 | Record a cancelled response in history? | **Record only what was actually sent/heard** — ⚠️ **see §6a: this is not achievable as written** |
+| Q4 | How is cancellation tested? | **Rule 15a exception accepted** — automate the reachable logic, mandatory live staging verification for cancellation itself |
+| Q5 | Keep the ≤4-word heuristic? | **Keep**, and explicitly test false-positive phrases at Phase 7 |
 
-**Q2 — Must a cancelled utterance still send the `response_end` mark?** `:13500` sets `isSpeaking = false`, sets the echo cooldown, and starts the idle timer. **Recommend yes** — the mark is a state transition, not a claim that audio finished. Skipping it risks a call that never re-arms its idle timer.
+## 6a. ⚠️ Q3 cannot be implemented as decided — and the simpler option is the truthful one
 
-**Q3 — Should a cancelled response be recorded in the conversation history?** Naavi said part of an answer. If history records the whole thing, she believes she said more than the caller heard; if it records nothing, she may repeat herself. **Recommend recording what was actually sent**, truncated at the cancellation point, so her next turn matches what the caller heard. This is a truth-at-the-user-layer question (CLAUDE.md Rule 18), not a bookkeeping one.
+The reviewer asked Phase 3 to verify that Q3 "can be implemented reliably without widening Protected Core changes unnecessarily." Checking it first, before sending it onward: **it cannot be implemented faithfully at all**, for two independent reasons.
 
-**Q4 — How is this tested from the auto-tester?** The defect lives in a WebSocket audio loop that the harness cannot drive. **Likely a Rule 15a exception path** — assert what *is* reachable (keyword classification, the pruned list, the deferral condition) and validate cancellation itself manually at Phase 7. To be stated honestly rather than papered over.
+**1. Bytes are not words.** The only thing recoverable at cancellation is `totalBytes` (`:5760`) — a count of mulaw bytes. Converting that to "how much of the sentence was spoken" means bytes → seconds (8000 bytes/sec at 8 kHz) → words, and that last step requires *assuming a speaking rate*. The result is an estimate presented as a fact.
 
-**Q5 — Does the ≤4-word heuristic now over-trigger?** With a shorter list, `startsWithStop` / `endsWithStop` carry more weight. "Stop by the shop on the way" is 7 words and safe, but "stop that" is 2 and would match. **Recommend keeping as-is** and revisiting only if Phase 7 shows a false stop.
+**2. Sent is not heard.** `clear` discards audio Twilio had buffered but not yet played. So the caller heard **strictly less** than was sent, by an unknown amount. Even a perfect bytes-to-words conversion would overstate what reached them.
+
+**This is precisely the pattern CLAUDE.md Rule 18 forbids** — reshaping a fact to fit the data model. Writing an estimated truncation into conversation history *as if it were what the caller heard* is the Victoria Day bug in a different costume: the system inventing a precise-looking value because its storage shape demanded one.
+
+**Recommended instead:** record the **full text, explicitly marked as interrupted** — e.g. appending a marker such as `[interrupted by caller]` to the assistant turn. This:
+
+- is **true** — Naavi did begin that answer and was cut off;
+- requires **no estimation** and no byte-to-text mapping;
+- gives Claude what it actually needs for the next turn — that the answer did not land — without pretending to know which word it stopped on;
+- is **smaller** than the decided option, which directly answers the reviewer's scope-creep concern.
+
+**This overturns a decision the reviewer just made, so it goes to Phase 3 explicitly rather than being applied quietly.** If the reviewer prefers estimation despite the above, that is their call to make with the limitation in front of them.
 
 ## 7. What this phase does not authorize
 
