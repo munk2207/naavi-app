@@ -75,7 +75,7 @@ The Phase 2 review required evidence that each secret is actually referenced bef
 | `VAPID_PRIVATE_KEY` / `PUBLIC_KEY` / `SUBJECT` | `send-push-notification`, `lib/push.ts` | **replicate** |
 | `GOOGLE_VISION_API_KEY` | `extract-document-text` | **replicate** |
 | `POSTMARK_SERVER_TOKEN` | `check-ticket-replies`, inbound email | **replicate** |
-| `NAAVI_ANON_KEY` | `evaluate-rules`, `fire-pending-dwells` | **replicate** — ⚠️ see below |
+| `NAAVI_ANON_KEY` | `evaluate-rules`, `fire-pending-dwells` | **not required** — both read it as `NAAVI_ANON_KEY ?? SUPABASE_ANON_KEY`, and staging has the fallback. No functional gap |
 | `GOOGLE_CLOUD_STT_KEY` | **nothing** | **debris** |
 | `POSTMARK_INBOUND_ADDRESS` | **nothing** | **debris** |
 | `TWILIO_WHATSAPP_TEMPLATE_REMINDER_SID` | **nothing** | **debris** |
@@ -86,9 +86,9 @@ The Phase 2 review required evidence that each secret is actually referenced bef
 
 **⚠️ This also corrects an earlier claim of mine.** Phase 1 listed *"WhatsApp reminders / tasks"* among the features that cannot work on staging. **That was wrong.** The only WhatsApp template secret in use is `TWILIO_WHATSAPP_TEMPLATE_MESSAGE_SID`, which staging has. I inferred a broken feature from a missing secret without checking whether any code read it. Corrected in the Phase 1 document.
 
-**⚠️ `NAAVI_ANON_KEY` deserves its own attention.** It is read by `evaluate-rules` and `fire-pending-dwells` — the alert-firing path — and is **missing on staging**. Phase 3 should establish what those functions do when it is absent, because it may mean alert evaluation has been partially degraded on staging without anything reporting it.
+**⚠️ And a worry of mine that turned out to be unfounded — recorded because I nearly passed it to the reviewer as a finding.** I flagged `NAAVI_ANON_KEY` as possibly degrading alert firing on staging, since it is read by `evaluate-rules` and `fire-pending-dwells` and is missing there. **It does not.** Both read it as `Deno.env.get('NAAVI_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY')`, and staging has the fallback. Checking took one grep; not checking would have sent an alarm about the alert system into a review on no evidence.
 
-**Proposed: replicate 7, delete the 5 from production** rather than copying them onward.
+**Revised proposal: replicate 6, skip 1 (covered by a fallback), delete the 5 from production** rather than copying them onward. The six that matter: `FIREBASE_SERVICE_ACCOUNT_JSON`, the three `VAPID_*`, `GOOGLE_VISION_API_KEY`, `POSTMARK_SERVER_TOKEN` — push notifications, OCR, and inbound email.
 
 **⚠️ A real question, not a copying exercise:** several of these are *live third-party credentials*. Should staging get the **same** keys as production, or its **own**? Sharing means staging can send real push notifications and real WhatsApp messages, and consume production's quota. **Recommend separate staging credentials wherever the vendor allows**, but this is Wael's decision and it is a cost and safety question, not a technical one.
 
