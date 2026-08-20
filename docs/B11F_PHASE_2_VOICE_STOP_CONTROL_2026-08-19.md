@@ -1,183 +1,169 @@
-# Phase 2 — Change Plan — B11f — The Stop Control on Voice
+# Phase 2 — Change Plan — B11f — Pause and Resume on Voice
 
 **Date:** 2026-08-19
 **Governance version:** v4.0
-**Phase 1A:** approved — Architecture Reference `2026.07.18.5`
-**Status:** Plan complete. **Awaiting Wael's go-ahead for Phase 2 → 3 (external technical review).**
+**Revision 2** — rewritten in full for Phase 0 Amendment 1 (*stop = pause*, not cancel). Revision 1 is in git history; it is not read alongside this, because a half-superseded plan is harder to read than a rewritten one.
+**Phase 1 / 1A:** unchanged and still valid — the reviewer confirmed neither needs repeating.
+**Architecture Reference version used:** `2026.07.18.5`
+**Status:** Plan complete. **Awaiting Wael's go-ahead for Phase 2 → 3 (re-review at the new scope).**
 
 ---
 
-## 1. Boundary inherited from Phase 1A review
+## 1. What changed from Revision 1
 
-1. The change belongs **inside `streamTTSToTwilio`**.
-2. **Do not modify `sendAudioToTwilio`** or its 43 call sites.
-3. Use the **generation-counter** pattern proven on mobile.
-4. Ordinary/background speech must **not** stop Naavi; explicit stop keywords must.
-5. Phase 2 must resolve what happens when Robert speaks during playback **without** a stop keyword.
+| | Revision 1 | Revision 2 |
+|---|---|---|
+| "Stop" means | Cancel — answer discarded | **Pause — answer held** |
+| After stopping | Ask again from scratch | **"Continue" resumes it** |
+| Cancel | The only outcome | A separate, explicit word |
+| Vocabularies | One | **Three** — pause / resume / cancel |
 
-## 2. Files that will change
+**The cancellation primitive is unchanged.** Pause *is* cancellation plus retained state, so Phase 1's root cause and Phase 1A's two-sender analysis carry over exactly.
+
+## 2. ⭐ The resume design — and why it needs no sentence chunking
+
+I previewed a trade between resume precision and latency. **Looking at the code, that trade is avoidable.**
+
+**The obvious design — speak sentence by sentence, remember the index —** would mean a separate Deepgram request per sentence. Time-to-first-word would actually improve (a short first sentence arrives sooner), but there would be an audible **gap between every sentence** while the next request round-trips. That is a permanent cost paid on every answer, to serve an event that happens rarely.
+
+**The design chosen instead:** keep one TTS request per answer, exactly as today, and work out where to resume *only when a resume actually happens*.
+
+```
+On pause:   remember  { fullText, bytesSent }
+On resume:  spokenSeconds ≈ bytesSent / 8000          (mulaw, 8 kHz)
+            spokenChars   ≈ spokenSeconds × ~14        (Aura Hera, ≈150 wpm)
+            resumeAt      = start of the sentence containing spokenChars,
+                            then back up one more sentence
+            speak("As I was saying — " + fullText.slice(resumeAt))
+```
+
+**Zero cost on the normal path.** No extra requests, no gaps, no latency change. One additional TTS request only when someone actually resumes.
+
+### 2.1 Why an estimate is legitimate here, having argued it was not for history
+
+This uses the same bytes-to-words estimate I argued against in Revision 1 §6a. The distinction is not convenience, and it matters:
+
+| | Conversation history | Resume point |
+|---|---|---|
+| The estimate would be | **Presented as fact** — "this is what the caller heard" | **Used to choose an action** — where to start speaking |
+| Being wrong means | Naavi believes something false about the caller | She repeats a sentence |
+| Erring safely | Impossible — wrong in either direction is a false claim | **Yes — always back up** |
+
+**Backing up guarantees the failure mode is repetition, never omission.** Deliberately backing up an extra sentence means even a 30% error still overlaps. And Wael has explicitly blessed repetition: *"as I was saying, then repetition is not an issue."*
+
+**The rule that follows:** this estimate may be used to decide **where to resume** and nowhere else. It must never be written into history, spoken to the caller, or used to claim what was heard.
+
+## 3. Files that will change
 
 | File | Classification | Change | Risk |
 |---|---|---|---|
-| `naavi-voice-server/src/index.js` | **Backend / Protected Core** | Four changes — §3.1 to §3.4 | **Medium-High** |
+| `naavi-voice-server/src/index.js` | **Backend / Protected Core** | Six changes — §4 | **Medium-High** |
 | `tests/catalogue/b11f-voice-stop.ts` (new) | Tests | Regression suite | Low |
 | `tests/runner.ts` | Tests | Register the suite | Low |
 
-**No other file.** No mobile file, no Edge Function, no migration, no config.
+**No other file.** No mobile, no Edge Function, no migration, no configuration, and nothing in `sendAudioToTwilio` or its 43 call sites.
 
-## 3. The four changes
+## 4. The six changes
 
-### 3.1 Make `streamTTSToTwilio` cancellable — the actual fix
+### 4.1 Cancellable TTS — unchanged from Revision 1
 
-**Why:** `:5763-5779` exits only when Deepgram's stream ends or the socket closes. `clear` drains Twilio's buffer but cannot address a producer that is still producing, so the buffer refills on the next `reader.read()`.
+Per-connection generation counter; two staleness checks (outer loop can block on `reader.read()` for a whole chunk, inner loop drains one already in memory); `cancelTTS()` increments **first**, before any `clear` or flag reset, per mobile's `B-NEW-4` ordering hazard.
 
-**How** — mobile's pattern (`useOrchestrator.ts:5048/5148/5149`), transposed to the WebSocket transport:
+### 4.2 State sequencing — unchanged, from Phase 3 Mandatory Change 2
 
-```js
-let ttsGen = 0;                       // per-connection, inside the WS handler scope
-function cancelTTS() { ttsGen++; }    // invalidates any in-flight stream
+Generation-tagged `response_end` marks so a dead utterance cannot alter a live one; one idempotent `endSpeech()` funnel called synchronously by `cancelTTS()`; `maybeReleaseDeferred()` clearing `deferredText` **before** processing, for exactly-once release. Full design in `docs/B11F_PHASE_3_TECHNICAL_REVIEW_2026-08-19.md` §3.
 
-// inside streamTTSToTwilio:
-const myGen = ++ttsGen;
-const isStale = () => ttsGen !== myGen;
+**This becomes more important under pause**, not less — there is now a fourth piece of state (the held answer) that must not leak between utterances.
 
-while (true) {
-  if (isStale()) { await reader.cancel().catch(() => {}); break; }   // ← new
-  const { done, value } = await reader.read();
-  if (done) break;
-  ...
-  while (pending.length >= SEND_CHUNK) {
-    if (isStale()) { await reader.cancel().catch(() => {}); return totalBytes; }  // ← new
-    ...
-  }
-}
-```
+### 4.3 Three vocabularies
 
-**Two checks, not one.** The outer loop can block on `reader.read()` for a whole network chunk; the inner loop drains a chunk that is already in memory. A single check in the outer loop would keep flushing the current chunk after cancellation — audible as Naavi finishing her sentence.
+| Intent | Words | Effect |
+|---|---|---|
+| **Pause** | `stop`, `naavi stop`, `pause`, `wait`, `hold on`, `enough`, `that's enough` | Silence + hold |
+| **Resume** | `continue`, `go ahead`, `carry on`, `keep going`, `resume`, `you were saying` | Speak the remainder |
+| **Cancel** | `cancel`, `forget it`, `never mind`, `drop it` | Discard the held answer |
 
-**Ordering hazard, carried from mobile's own `B-NEW-4` bug** (`useOrchestrator.ts:5071`): there, cleanup nulled the sound handle before the stop path read it, so playback never actually halted. The equivalent here is incrementing the counter *after* something else has already reset state. **`cancelTTS()` must increment first, before any `clear` or flag reset**, so an in-flight loop bails at its next check regardless of what teardown does afterwards.
+**Resume and cancel words only match while an answer is held.** Otherwise "go ahead" mid-conversation would be swallowed instead of reaching Claude. Outside the paused state they fall through as ordinary speech.
 
-**Scope of the counter: per-connection**, declared inside the `wss.on('connection')` scope alongside `isSpeaking`. A module-level counter would let one caller's stop command cancel another caller's audio — a multi-user safety break (CLAUDE.md Rule 10).
+Removed from Revision 1's list and not reinstated: `ok`, `okay`, `thanks`, `thank you`, `got it`, `i got it` — acknowledgements a listener makes while agreeing.
 
-### 3.2 Stop keywords become the only thing that stops her
-
-**Why:** Phase 0 §8 as revised, and the Phase 1A review: ordinary and background speech must not stop Naavi.
-
-The barge-in block at `:9953` currently does **two** jobs on any transcript. They are separated:
-
-| Today, on any transcript | After |
-|---|---|
-| `twilioWs.send({event:'clear'})` — stops TTS | **Removed.** Only a stop keyword stops TTS |
-| `isSpeaking = false` | **Removed** — it was making the flag lie while audio was still being produced |
-| `stopMusic()` | **Kept.** Thinking music should stop when the caller speaks; it is a hold tone, not an answer |
-| `resetIdleTimer()` | **Kept** — the caller is present |
-
-The stop-keyword handler at `:10125` gains `cancelTTS()` alongside the `clear` it already sends. **That single addition is what makes it work** — it already sends `clear`, which has been draining a buffer that instantly refilled.
-
-### 3.3 Non-stop-word speech during playback — the fifth question, answered
-
-**The problem this creates.** Today, speech during playback triggers barge-in, which stops her, and the message is then processed normally. Remove that, and the message is still processed immediately (`:10226`: `if (pendingText.trim() && !isProcessing) processUserMessage(...)`) — **while she is still talking.** Two responses would overlap.
-
-**The answer uses machinery that already exists.** The server already defers input that arrives while it is busy:
+### 4.4 The paused state
 
 ```js
-} else if (pendingText.trim() && isProcessing) {
-  deferredText = (deferredText ? deferredText + ' ' : '') + pendingText.trim();   // :10229
-}
-function releaseProcessing() {          // :10254
-  isProcessing = false;
-  if (deferredText) { ...; processUserMessage(deferred); }
-}
+let heldAnswer = null;   // { text, bytesSent, at }  — per connection
 ```
 
-**The change is to extend that condition from `isProcessing` to `isProcessing || isSpeaking`**, and to release on speech-end as well as on processing-end. The `response_end` mark handler (`:13500`) already sets `isSpeaking = false` and is the natural release point.
+Set by a pause word, consumed by resume, cleared by cancel, expiry, or an unrelated question.
 
-**Behaviour:** Robert speaks mid-answer without a stop word → Naavi finishes her sentence → then answers what he said. He is heard, not ignored, and not talked over.
+### 4.5 Absolute silence while paused
 
-**Rejected alternative — discard it.** Simpler, and wrong: a user who answers a question slightly early would be silently dropped, which is worse than the defect being fixed.
+**Phase 0 §A1.4 criterion 6.** From the pause word until the caller speaks again, Naavi says nothing: no confirmation, no question, no prompt.
 
-### 3.4 Prune the stop-keyword list
+Two things must be suppressed that would otherwise break this:
 
-**Current list** (`:10126`) — 10 entries:
+- **The idle timer.** It exists to notice a caller has gone quiet; a paused call is quiet *on purpose*. It must not prompt or hang up during a pause.
+- **Thinking music.** The stop-word handler currently calls `startMusic()` after stopping (`:10143`). Under pause that would replace speech with ticking — not silence.
 
-```
-stop · enough · got it · ok · okay · thanks · thank you · next · that's enough · i got it
-```
+### 4.6 Answer resolution and conversation history
 
-**Proposed** — 6 entries:
+Today the assistant turn is pushed into `conversationHistory` **before** speaking (`:10754-10755`), so a held answer is already recorded as if fully delivered.
 
-```
-stop · naavi stop · enough · that's enough · cancel · next
-```
-
-| Removed | Reason |
+| Outcome | History |
 |---|---|
-| `ok`, `okay`, `thanks`, `thank you` | Flagged by both Wael and the reviewer. These are what a listener says while *agreeing* — a user saying "ok" as Naavi explains something would be cut off mid-answer. This is the accidental stopping the whole keyword decision exists to prevent |
-| `got it`, `i got it` | ⚠️ **Borderline — see §6 Q1.** Genuinely ambiguous: can mean "I have what I need, stop" or simply "I follow you" |
+| **Resumed** | Leave as-is — it was delivered, just in two parts |
+| **Cancelled** or **expired** | Amend the entry with an interrupted marker — Phase 3 Mandatory Change 1: full text, marked, never truncated |
+| **Discarded by a new question** | Same as cancelled |
 
-| Added | Reason |
-|---|---|
-| `cancel` | Requested by Wael |
-| `naavi stop` | Already matched by the regex; listed explicitly so the intended vocabulary is visible in one place |
+## 5. The four Phase 0 questions, answered
 
-**Unchanged:** the `naaviStopRe` regex covering Deepgram's spellings of the wake word, and the ≤4-word starts-with/ends-with heuristic. Both exist because Deepgram appends hallucinated words to short utterances — removing them would reintroduce a solved problem.
+**Q1 — How long does a paused answer live?**
+**Five minutes, and it dies at the end of the call.** A judgement, not a calibration — stated as such. The scenario is someone stepping into the room, which is minutes. Beyond that, resuming a schedule from before a long meeting would be exactly the stale-state surprise the timeout exists to prevent. **Silent expiry** — she does not announce it.
 
-## 4. Change Impact Matrix
+**Q2 — What happens if the caller says something unrelated while paused?**
+**The held answer is discarded and the new question is answered.** Designed explicitly, per the reviewer. Anything that is not a resume or cancel word, while paused, is a new question — the caller has moved on.
 
-Every row stated explicitly.
+**Q3 — Does a paused answer go into history?**
+It is already there (§4.6). The rule is that it is amended **when it resolves**, not while it is pending. Recording it as interrupted while it may still be delivered would be untrue.
+
+**Q4 — Sentence-level resume, or restart from the beginning?**
+**Neither** — §2. Back-up-and-resume, which costs nothing on the normal path and never skips content.
+
+## 6. Change Impact Matrix
 
 | Layer | Affected? | Details |
 |---|---|---|
-| **Mobile** | **No** | No mobile file changes. Mobile's Stop already works and its generation-counter pattern is the *model* for this fix, not a target of it. Phase 1A confirmed the capability is Voice-only by nature, not duplicated |
-| **Voice** | **Yes** | `naavi-voice-server/src/index.js` — the four changes in §3. Protected Core |
-| **Shared Core** | **No** | `streamTTSToTwilio` calls Deepgram directly (`:5740`); the `text-to-speech` Edge Function is not on this path and is untouched |
-| **Database** | **No** | No schema change, no new column, no data written |
+| **Mobile** | **No** | No mobile file changes. Mobile keeps its Stop button; pause/resume is not proposed there. Its generation counter is the *model* for §4.1, not a target |
+| **Voice** | **Yes** | `naavi-voice-server/src/index.js` — the six changes in §4. Protected Core |
+| **Shared Core** | **No** | `streamTTSToTwilio` calls Deepgram directly (`:5740`); the `text-to-speech` Edge Function is not on this path |
+| **Database** | **No** | The held answer is per-connection memory. Nothing persists — a dropped call loses it, which is correct |
 | **Cron** | **No** | No scheduled job involved |
-| **API contracts** | **No** | No request or response shape changes. `streamTTSToTwilio`'s signature and return value are unchanged; cancellation is internal |
-| **Tests** | **Yes** | New suite `tests/catalogue/b11f-voice-stop.ts`, registered in `tests/runner.ts` |
+| **API contracts** | **No** | No request or response shape changes; cancellation and hold are internal |
+| **Tests** | **Yes** | New suite, registered in `tests/runner.ts` |
 
-## 5. Risk assessment
+## 7. Risk assessment
 
-**Overall: Medium-High.** Protected Core, and the audio path every caller hears.
+**Overall: Medium-High.** Protected Core, the audio path every caller hears, and now a stateful one.
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| A caller is cut off mid-answer by accident | Low | The pruned keyword list removes every pure acknowledgement. Regression bar: an uninterrupted answer must play to completion — tested explicitly |
-| Cancellation leaves the call in a broken state | **Medium** | §6 Q2 must be settled before coding. `response_end` drives `isSpeaking = false` and the idle timer (`:13500`); a loop that breaks without it could leave the call unable to speak again |
-| The Deepgram HTTP stream leaks after cancellation | Low | `reader.cancel()` on both bail paths |
-| One caller's stop cancels another caller's audio | **Very low, severe if wrong** | Counter scoped per-connection, not module-level (§3.1). CLAUDE.md Rule 10 |
-| Deferred text produces a delayed, confusing reply | Medium | Release on speech-end, so the gap is one sentence rather than an unbounded wait |
-| The 43 `sendAudioToTwilio` sites regress | **None** | Not modified. Phase 1A established they have no post-`clear` production window |
+| A held answer resurfaces out of context | **Medium** | 5-minute expiry, discard on an unrelated question, never persisted (§5 Q1/Q2) |
+| Resume skips content | Low | Always back up, plus one extra sentence (§2) |
+| Resume/cancel words swallowed in normal conversation | Medium | They only match while an answer is held (§4.3) |
+| Naavi speaks during a pause, defeating the privacy case | **Medium** | Idle timer and thinking music both suppressed (§4.5). **Tested explicitly at Phase 7** |
+| Stale state leaks across utterances | Medium | Phase 3 §3 sequencing, now covering a fourth piece of state |
+| One caller's pause affects another | Very low, severe | Everything per-connection (Rule 10) |
+| `sendAudioToTwilio` regresses | **None** | Not modified |
 
-## 6. Open questions — ALL DECIDED at Phase 2 review (2026-08-19)
+## 8. Known limitation, stated not buried
 
-| # | Question | Decision |
-|---|---|---|
-| Q1 | Keep `got it` / `i got it`? | **Drop.** Too ambiguous. Final list: `stop`, `naavi stop`, `enough`, `that's enough`, `cancel`, `next` |
-| Q2 | Send `response_end` after cancellation? | **Yes.** Preserve the state transition, or `isSpeaking` and the idle timer become inconsistent |
-| Q3 | Record a cancelled response in history? | **Record only what was actually sent/heard** — ⚠️ **see §6a: this is not achievable as written** |
-| Q4 | How is cancellation tested? | **Rule 15a exception accepted** — automate the reachable logic, mandatory live staging verification for cancellation itself |
-| Q5 | Keep the ≤4-word heuristic? | **Keep**, and explicitly test false-positive phrases at Phase 7 |
+**Saying "stop" while Naavi is still thinking does not suppress the answer that follows.** The speak path is unconditional (`:10758-10761`) and cancellation only cancels audio already playing.
 
-## 6a. ⚠️ Q3 cannot be implemented as decided — and the simpler option is the truthful one
+Wael's own privacy scenario reaches it: someone walks in, he says "stop" while she is mid-thought, and seconds later she announces his schedule to the room.
 
-The reviewer asked Phase 3 to verify that Q3 "can be implemented reliably without widening Protected Core changes unnecessarily." Checking it first, before sending it onward: **it cannot be implemented faithfully at all**, for two independent reasons.
+**Proposed for inclusion**, since Phase 0 Amendment 1's criterion 6 ("she says nothing at all until spoken to") cannot be met without it: a pause word during `isProcessing` sets the pending reply to arrive **held** rather than spoken. Same state, entered one step earlier.
 
-**1. Bytes are not words.** The only thing recoverable at cancellation is `totalBytes` (`:5760`) — a count of mulaw bytes. Converting that to "how much of the sentence was spoken" means bytes → seconds (8000 bytes/sec at 8 kHz) → words, and that last step requires *assuming a speaking rate*. The result is an estimate presented as a fact.
+**Flagged for Phase 3 to rule on explicitly** — it was not in Revision 1's authorized boundary, and widening scope on my own judgement is what that boundary exists to prevent.
 
-**2. Sent is not heard.** `clear` discards audio Twilio had buffered but not yet played. So the caller heard **strictly less** than was sent, by an unknown amount. Even a perfect bytes-to-words conversion would overstate what reached them.
+## 9. What this phase does not authorize
 
-**This is precisely the pattern CLAUDE.md Rule 18 forbids** — reshaping a fact to fit the data model. Writing an estimated truncation into conversation history *as if it were what the caller heard* is the Victoria Day bug in a different costume: the system inventing a precise-looking value because its storage shape demanded one.
-
-**Recommended instead:** record the **full text, explicitly marked as interrupted** — e.g. appending a marker such as `[interrupted by caller]` to the assistant turn. This:
-
-- is **true** — Naavi did begin that answer and was cut off;
-- requires **no estimation** and no byte-to-text mapping;
-- gives Claude what it actually needs for the next turn — that the answer did not land — without pretending to know which word it stopped on;
-- is **smaller** than the decided option, which directly answers the reviewer's scope-creep concern.
-
-**This overturns a decision the reviewer just made, so it goes to Phase 3 explicitly rather than being applied quietly.** If the reviewer prefers estimation despite the above, that is their call to make with the limitation in front of them.
-
-## 7. What this phase does not authorize
-
-No code. Phase 3 is the mandatory external technical review before implementation, and Phase 4 begins only after Wael's explicit go-ahead following it.
+No code. Phase 3 re-review at the new scope, then Phase 4 on Wael's explicit go-ahead.
