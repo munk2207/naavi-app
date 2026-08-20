@@ -1,6 +1,6 @@
 # MyNaavi AI Development Governance — Release Gate Workflow
 
-Version 3.6 — 2026-07-21. See §13 Changelog for the full version history.
+Version 4.0 — 2026-07-28. See §16 Changelog for the full version history.
 
 ## Purpose
 
@@ -18,6 +18,64 @@ This document applies to every contributor, including AI coding assistants.
 1. **Development Governance** (this document) — how changes are allowed to happen.
 2. **Architecture Reference** — what the system actually is, right now, verified.
 3. **Architecture Integrity Audit** (T1a, triggered per §5) — verifies reality still matches the Architecture Reference, and catches the two from drifting apart from each other.
+
+---
+
+## 0. Guiding Principles
+
+These six principles are the spirit the rest of this document implements. Each is enforced by a specific, concrete mechanism elsewhere in this document — they are stated here as a preamble so the *reasoning* behind the mechanisms is visible in one place, not just the mechanisms themselves.
+
+### Rule 0.1 – User Intent Is the Highest Authority
+
+Every project begins with a **User Intent** statement, captured formally in Phase 0 (§3).
+
+The User Intent is the governing authority for the entire project.
+
+Technical improvements, refactoring, or architectural ideas must never override the approved intent.
+
+If implementation deviates from the approved intent, the work is rejected.
+
+### Rule 0.2 – Scope Is Locked
+
+Before implementation begins, every project must define, in Phase 0 (§3): User Intent, Success Criteria, In Scope, Out of Scope, Constraints, Completion Criteria.
+
+Anything not explicitly listed as **In Scope** is considered **Out of Scope**.
+
+No assumptions are permitted.
+
+Enforced downstream by Phase 2's Change Impact Matrix, Phase 3's Implementation Boundaries Confirmed, and Gate 1 of §13's Mandatory Review Gates.
+
+### Rule 0.3 – Minimal Change Principle
+
+Implement the smallest safe change that satisfies the approved scope.
+
+Do not: refactor unrelated code, improve unrelated features, clean up unrelated files, or "fix while I'm here."
+
+This is the governing principle behind Phase 4's **No Extra Changes Rule** — see §3, Phase 4, for the operative rule and its exceptions (reporting improvement ideas separately rather than implementing them silently).
+
+### Rule 0.4 – Architecture Integrity
+
+Changes must not: duplicate business logic, create parallel execution paths, bypass existing architecture, introduce temporary shortcuts, or weaken the single source of truth.
+
+Architecture consistency has priority over implementation convenience.
+
+Operationalized by §4 Protected Core, the Architecture Reference, and the Cross-Repository Verification Rule (Phase 1A, §3) — a principle with no named protected surface is a slogan, not a gate.
+
+### Rule 0.5 – Regression Protection
+
+Every implementation must preserve existing behaviour unless the approved scope explicitly changes it.
+
+Regression testing and evidence are mandatory.
+
+Enforced by Phase 2's Regression Impact checklist and Regression Matrix (per-change consumer trace), and Phase 7 Testing.
+
+### Rule 0.6 – Evidence Before Approval
+
+Claims are not accepted without evidence.
+
+Approval requires objective evidence.
+
+See §8 Evidence Before Assumptions and Phase 5's Evidence Package for what counts as evidence and what doesn't.
 
 ---
 
@@ -63,6 +121,8 @@ Responsible for:
 
 The reviewer does not replace Claude. The reviewer provides an independent engineering opinion.
 
+See §14 for how this role operates under cost-aware collaboration (concise handoffs rather than full re-transmission of context).
+
 ---
 
 ## 2. Development Philosophy
@@ -83,9 +143,28 @@ A feature that breaks an existing feature is considered incomplete.
 
 **A reviewer's verdict of "Approved" is never, by itself, authorization to proceed.** ChatGPT's review is one input Wael weighs — it is not a substitute for Wael's own decision, and it does not carry implied authorization with it. When a phase document comes back "Approved," Claude must stop, present that verdict to Wael, and wait for Wael's own separate, explicit go-ahead before starting the next phase's work — including drafting the next phase's document. Silence, a prior general instruction, or the reviewer's approval are all insufficient; only Wael's own word for that specific transition counts.
 
-This applies to every phase transition without exception: Phase 1→1A, 1A→2, 2→3, 3→4, 4→5, 5→6, 6→7, 7→8, and promotion to production after Phase 8. It also applies to closing a phase on alternative evidence instead of a live test that proved impractical (e.g. accepting simulation + automated tests in place of an unreproducible manual test) — that is itself a phase-gate decision and needs Wael's explicit sign-off, not Claude's own judgment call.
+This applies to every phase transition without exception: **Phase 0→1**, Phase 1→1A, 1A→2, 2→3, 3→4, 4→5, 5→6, 6→7, 7→8, and promotion to production after Phase 8. It also applies to closing a phase on alternative evidence instead of a live test that proved impractical (e.g. accepting simulation + automated tests in place of an unreproducible manual test) — that is itself a phase-gate decision and needs Wael's explicit sign-off, not Claude's own judgment call.
 
 **Why this rule exists:** violated twice in the same session (2026-07-17, F5c) before being made explicit here — Claude opened the next phase's document on the strength of the reviewer's "Approved" verdict alone, without first getting Wael's own separate word. Reviewer approval answers "is this technically sound?" — only Wael answers "do we proceed?" Conflating the two lets review quality substitute for product ownership, which defeats the entire purpose of Section 1's role split. See `feedback_governance_phase_gate_wait` in memory for the incident record.
+
+---
+
+### Phase 0 — Intent Approval (Mandatory)
+
+**No implementation may begin until Phase 0 is approved.** This phase precedes Phase 1's technical investigation — it establishes *what the user wants* before any investigation into *how to deliver it* begins.
+
+**Required Content**
+
+- **User Intent** — one or two sentences describing exactly what the user wants.
+- **Success Criteria** — what success looks like.
+- **In Scope** — everything explicitly approved.
+- **Out of Scope** — everything explicitly prohibited.
+- **Constraints** — e.g. Voice only / No mobile / No UI / No schema changes / No architecture changes.
+- **Completion Criteria** — the measurable completion conditions.
+
+Phase 0 becomes the contract for the rest of the project. Gate 1 of §13's Mandatory Review Gates checks every later proposal against this contract.
+
+**Note for bug fixes:** Success Criteria does not require the root cause to already be known — "the reported symptom no longer reproduces, per the reproduction steps recorded here" is a valid, definable Success Criterion before Phase 1's investigation finds *why* the symptom occurs. Phase 0 fixes what "done" means; Phase 1 finds out how to get there.
 
 ---
 
@@ -143,6 +222,17 @@ Before any implementation is approved, Claude must verify whether equivalent log
 
 If duplicated implementations exist: identify them, state whether they require matching changes, and if not, state why not. Silence is not acceptable, in either direction.
 
+**Verification Provenance Rule (added v3.7, 2026-07-22)**
+
+Every bullet produced under the Architecture Scope Rule / Cross-Repository Verification Rule above must be explicitly tagged as one of the following, so a reviewer can check compliance by inspection rather than by noticing an inferential leap buried in prose:
+
+- **"Freshly verified this session — evidence: `file:line`, ..."** — a direct grep/read was performed specifically to produce this claim.
+- **"Relying on Architecture Reference classification, not re-checked this session."** — no fresh check was done; the claim rests on the Reference's existing, dated classification.
+
+Neither tag is itself a failure. Citing the Reference is acceptable when nothing suggests it has gone stale — this rule does not require re-grepping facts that have not changed, and it does not extend beyond Phase 1A's own verification requirement to a general instruction to distrust the Architecture Reference. What is not acceptable is a claim that reads as freshly verified when it is actually only cited — the tag exists to make that distinction visible, not to force unnecessary re-work.
+
+**Why this exists:** during B10r's Phase 1A (2026-07-22), an initial draft's mobile-verification bullet cited the Architecture Reference's "genuinely shared" classification as if that satisfied the Cross-Repository Verification Rule. It did not — no fresh check had been run. The gap surfaced only because an external reviewer flagged it as a rigor suggestion, not because the process itself would have caught it. Re-running the check found a real, previously undocumented mobile-only implementation (`lib/calendar.ts`'s `fetchUpcomingBirthdays`) that neither the Architecture Reference nor the uncorrected draft had captured. See `docs/B10R_PHASE1A_ARCHITECTURE_COMPLETENESS_2026-07-22.md` for the corrected version.
+
 **Independent Review Rule**
 
 Phase 1 now has two independent reviews:
@@ -154,7 +244,7 @@ Passing one review does not imply passing the other.
 
 A Phase 1 document cannot receive an overall approval recommendation until both reviews pass.
 
-**Known limitation, accepted rather than solved:** ChatGPT has no direct access to the codebase and reviews only what Claude presents. This phase raises the bar on what Claude must explicitly report — silence about an unchecked implementation is itself a violation — but it cannot force the underlying verification to have actually happened. The remaining safeguards are Wael's own spot-checks, the working trust between Product Owner and Implementation Engineer, and — at a longer time horizon — the Architecture Audit Trigger (§5): a periodic, forced re-validation of the Architecture Reference against the real codebase is the actual mechanism that compensates for this limitation over time, rather than trusting per-change self-reports indefinitely. This is accepted as a structural limit of the current process, not something this rule is believed to fully close on its own.
+**Known limitation, accepted rather than solved:** ChatGPT has no direct access to the codebase and reviews only what Claude presents. This phase raises the bar on what Claude must explicitly report — silence about an unchecked implementation is itself a violation — but it cannot force the underlying verification to have actually happened. The Verification Provenance Rule above narrows this limitation without solving it: it makes the citation-vs-verification choice visible for an external reviewer to catch, but it still cannot force Claude to have actually run the check a "freshly verified" tag claims. The remaining safeguards are Wael's own spot-checks, the working trust between Product Owner and Implementation Engineer, and — at a longer time horizon — the Architecture Audit Trigger (§5): a periodic, forced re-validation of the Architecture Reference against the real codebase is the actual mechanism that compensates for this limitation over time, rather than trusting per-change self-reports indefinitely. This is accepted as a structural limit of the current process, not something this rule is believed to fully close on its own.
 
 ---
 
@@ -234,6 +324,8 @@ The reviewer evaluates:
 - Implementation strategy
 
 The objective is to prevent incorrect solutions before code exists.
+
+Every Phase 3 review concludes with a decision per §13's Mandatory Review Gates (Approved / Approved with Mandatory Changes / Rejected), delivered to Claude via §14's Claude Implementation Handoff format.
 
 **Implementation Boundaries Confirmed**
 
@@ -320,7 +412,7 @@ The reviewer must issue four independent verdicts:
 - Technical Review: PASS / FAIL
 - **Architecture Completeness: PASS / FAIL** — did the implementation increase duplication, reduce duplication, bypass Shared Core, introduce another independent implementation, violate entry-point responsibilities (an entry point implementing business logic instead of translating), change an API contract, change a capability's ownership (per the Ownership Change Rule, §4), or expand what counts as Protected Core? Any of these must be named explicitly, not left for the reviewer to infer from the diff.
 - Governance Compliance: PASS / FAIL
-- Overall Recommendation: APPROVE / REVISE / REJECT
+- **Overall Recommendation: Approved / Approved with Mandatory Changes / Rejected** (terminology aligned with §13's Mandatory Review Gates as of v4.0 — previously worded APPROVE / REVISE / REJECT; "REVISE" maps to "Approved with Mandatory Changes" when the required fix is narrow and listable, or to "Rejected" — return to the appropriate phase — when it is not.)
 
 Numeric scores (for example 9.8/10 or 10/10) are not used because they can hide failures in individual review dimensions.
 
@@ -486,7 +578,16 @@ Wael decides whether to adopt them.
 4. External review (ChatGPT).
 5. Wael's explicit approval — the same Phase-Gate discipline this document requires of code applies to changing the document itself.
 6. A version increment.
-7. A changelog entry (§13).
+7. A changelog entry (§16).
+
+**Rule-Removal Requirement (added v4.0, 2026-07-28).** Removing an existing rule from this document requires the same rigor as adding a new one — steps 1–7 above apply identically — plus the removal must additionally record:
+
+- The original rule's text, preserved verbatim in the changelog entry (not summarized) — the historical record must show what the rule actually said, not a paraphrase of it.
+- The specific incident or evidence showing the rule is no longer needed, or is actively counterproductive — the same evidentiary bar Rule 0.6 requires for adding a rule.
+- Any replacement mechanism, if the rule is being superseded rather than dropped outright.
+- Wael's approval reasoning for the removal specifically, not just approval of the document version as a whole.
+
+A rule is never simply deleted from this document — it is superseded, with the supersession recorded. **Why this exists:** during the 2026-07-28 reconciliation between Wael's independently-drafted "Governance V2" simplification and this document (v3.7 at the time), Claude's Phase 3 review found that a from-scratch simplification had silently dropped several rules that had each been added after a specific, expensive, documented incident (Protected Core, Cross-Repository Verification, Verification Provenance, Non-Determinism, Phase-Gate Approval, Ownership Change, ADRs, Architecture Audit Trigger — see the v4.0 changelog entry below). None of those removals were identified as removals, justified, or approved as such — they were simply absent from the rewrite. ChatGPT's Phase 3 review of that finding proposed this rule as the generalized lesson: *a mature governance document evolves by preserving validated protections and adding new capabilities; removing an existing protection requires the same level of justification as adding a new one.*
 
 This exists so the document itself doesn't accumulate contradictory or redundant rules the way any of the systems it governs could — the same discipline, turned on itself.
 
@@ -518,6 +619,8 @@ The Product Owner makes the final decision.
 - Verify every shared implementation against the current Architecture Reference
 - Every duplicated capability must be evaluated on every change, not just the side you're already looking at
 - Architecture evidence overrides assumptions
+- Anything not explicitly In Scope in Phase 0 is Out of Scope — no assumptions
+- Removing a governance rule requires the same evidence as adding one
 
 ---
 
@@ -533,7 +636,101 @@ The purpose of this process is to build an engineering culture where:
 
 ---
 
-## 13. Changelog
+## 13. Mandatory Review Gates
+
+Added v4.0 (2026-07-28). Every review — Phase 3 (before coding) and Phase 6 (after coding) — is evaluated in this order. This formalizes an ordering both phases already implied (scope and governance checks are cheap and should fail fast; architecture and technical correctness are only worth evaluating once scope and governance are settled; evidence sufficiency is the final gate before a decision is issued) into one explicit sequence, so a reviewer always knows which question to ask first.
+
+### Gate 1 — Scope Compliance
+
+Question: Does the proposal remain completely inside the approved Phase 0 scope?
+
+Failure: Immediate rejection. No further review.
+
+### Gate 2 — Governance Compliance
+
+Question: Does the proposal comply with this governance document?
+
+Failure: Reject.
+
+### Gate 3 — Architecture Compliance
+
+Question: Does the proposal preserve architecture integrity (§0.4, §4, Phase 1A's Cross-Repository Verification Rule)?
+
+Failure: Reject.
+
+### Gate 4 — Technical Correctness
+
+Only evaluated after passing Gates 1–3. This is where Phase 6's Technical Review and Architecture Completeness verdicts, and Phase 3's assumption/architecture/isolation/coupling evaluation, are actually applied.
+
+### Gate 5 — Evidence Sufficiency
+
+Question: Does the evidence prove compliance (§8, Phase 5's Evidence Package, the Non-Determinism Rule's trial-distribution requirement where applicable)?
+
+Failure: Reject.
+
+### Review Decisions
+
+Only three decisions are permitted, for both Phase 3 and Phase 6 reviews:
+
+- **Approved** — proceed (subject to the Phase-Gate Approval Rule — Wael's own separate word is still required before the next phase starts).
+- **Approved with Mandatory Changes** — only the listed mandatory changes may be performed; nothing else.
+- **Rejected** — implementation stops immediately. Return to the appropriate phase.
+
+---
+
+## 14. Cost-Aware AI Collaboration
+
+Added v4.0 (2026-07-28).
+
+### Cost Awareness
+
+Minimize repeated AI context.
+
+Avoid repeatedly sending:
+- Full governance documents
+- Previous review narratives
+- Unnecessary conversation history
+
+Prefer concise implementation handoffs (below) over re-transmitting full review text.
+
+### Claude Implementation Handoff
+
+Every external review that results in an Approved or Approved with Mandatory Changes decision must conclude with a compact handoff, in addition to (not instead of) the full phase document required for the historical record. The full narrative stays in the phase document; the handoff is what actually gets passed to Claude to act on:
+
+- **Decision** — Approved / Approved with Mandatory Changes / Rejected.
+- **Mandatory Changes** — the specific, listed changes required, if any. Nothing beyond this list may be performed under this authorization.
+- **Architecture Requirements** — what §4/§0.4 compliance requires for this change, specifically.
+- **Regression Requirements** — what §0.5/Phase 2's Regression Matrix requires to be traced for this change, specifically.
+- **Scope Restrictions** — the Phase 0 boundary this work must stay inside (cross-reference, not restate).
+- **Verification Checklist** — what evidence Phase 5 must produce to close this out.
+
+Do not provide lengthy review text to Claude when a concise implementation handoff is sufficient.
+
+---
+
+## 15. Automatic Rejection Conditions
+
+Added v4.0 (2026-07-28) — consolidates rejection triggers that were previously scattered across individual phase rules into one list. The underlying rules (cross-referenced below) remain the operative source; this is a scannable index, not a replacement.
+
+Reject immediately if:
+
+- Scope expanded without approval (Gate 1, §13).
+- User intent changed without a new or amended Phase 0 approval (§0.1, §3 Phase 0).
+- An out-of-scope platform or file was modified (§0.2, Phase 3's Implementation Boundaries Confirmed).
+- A duplicate implementation was introduced without an Architecture Exception (§0.4, §5a).
+- An architecture bypass was created, or the Protected Core was modified without the required review (§4).
+- Unapproved refactoring, cleanup, renaming, optimization, or unrelated bug fixes were performed (§0.3, Phase 4's No Extra Changes Rule).
+- Regression protection is missing — no Regression Matrix / consumer trace for a changed shared function (§0.5, Phase 2).
+- Evidence is missing or insufficient (Gate 5, §13; §8).
+- A reviewer's "Approved" verdict was treated as Wael's own authorization to proceed (Phase-Gate Approval Rule, §3).
+- The Cross-Repository Verification Rule was skipped, or left unclear, for a capability the Architecture Reference documents as duplicated (Phase 1A).
+- The Non-Determinism Rule was not followed for a classifier/prompt change — single-trial evidence presented as sufficient (Phase 3).
+- The Architecture Reference was not updated in the same work item as an approved architectural change (Phase 8).
+- A rule was removed from this governance document without following the Rule-Removal Requirement (§9).
+
+---
+
+## 16. Changelog
 
 Every governance change is recorded here, per §9's Governance Change Approval Process.
 
@@ -541,7 +738,9 @@ Every governance change is recorded here, per §9's Governance Change Approval P
 - **v3.0 → v3.1 (2026-07-18):** merged two independently-evolved v3.0 drafts into one canonical file. Added: Architecture Reference companion-document link, Phase 1A Architecture Completeness Review with Architecture Scope Rule, Non-Determinism Rule (Phase 3), Phase 2 Change Impact Matrix, Phase 6 four-verdict structure (numeric scores removed).
 - **v3.1 → v3.2 (2026-07-18):** capability-owner question in Phase 1, Mandatory Architecture Impact Checklist (Phase 2), Phase 6 architecture-drift check, Architecture Reference update as a Phase 8 merge precondition.
 - **v3.2 → v3.3 (2026-07-18):** per-change Regression Matrix (Phase 2), Phase 6 drift check escalated to a three-outcome rule with a hard stop for unapproved drift, new §5 Architecture Audit Trigger, Cross-Repository Verification Rule named alongside the Architecture Scope Rule.
-- **v3.3 → v3.4 (2026-07-18):** Architecture Reference Version Verification (Phase 1A + Phase 8), Ownership Change Rule (§4), Architecture Exception format (§5a), new §6 Architectural Decision Records (ADRs), explicit Governance Change Approval Process checklist (§9), this Changelog (§13).
+- **v3.3 → v3.4 (2026-07-18):** Architecture Reference Version Verification (Phase 1A + Phase 8), Ownership Change Rule (§4), Architecture Exception format (§5a), new §6 Architectural Decision Records (ADRs), explicit Governance Change Approval Process checklist (§9), this Changelog (§13, renumbered to §16 in v4.0).
 - **v3.4 → v3.5 (2026-07-18):** Phase 6's Architecture Completeness checklist gained an explicit "ownership changed?" item; ADR Lifecycle rule added (annual review or next Audit Trigger, whichever first); the Phase 1A known-limitation note now explicitly names the Architecture Audit Trigger as the long-horizon compensating mechanism. Companion edits in the Architecture Reference: formal dated version identifier, Diagram Version label, explicit Architecture Owner statement, and four backfilled ADRs (`docs/adr/0001`-`0004`) linked from the Reference instead of embedding rationale inline.
 - **v3.5 (2026-07-18):** finalized as the project's canonical governance document, replacing the prior `docs/AI_DEVELOPMENT_GOVERNANCE.md` (v2.2).
 - **v3.5 → v3.6 (2026-07-21):** Phase 6 gained the Invalidated Planning Assumption Rule — when Phase 4 finds a Phase 2 plan can't be carried out exactly as written, without that being an implementation error, Phase 6 must record it as an invalidated planning assumption, distinct from an omitted feature or a deliberate scope cut. Per §9's Governance Change Approval Process: problem/benefit/example stated, external review done, Wael's explicit approval given, this changelog entry. Originating example: `docs/B10O_PHASE6_TECHNICAL_REVIEW_2026-07-21.md`.
+- **v3.6 → v3.7 (2026-07-22):** Phase 1A gained the Verification Provenance Rule — every Architecture Scope Rule / Cross-Repository Verification Rule bullet must be tagged as either freshly verified this session (with `file:line` evidence) or explicitly relying on the Architecture Reference without a fresh check, so a reviewer can catch an unverified claim by inspection instead of by noticing an inferential leap in prose. Per §9's Governance Change Approval Process: problem stated (Phase 1A's existing verification requirement was satisfied in writing by citation rather than fresh evidence, and nothing caught it until an external reviewer happened to notice), benefit stated (makes the gap machine-checkable), concrete example given (`docs/B10R_PHASE1A_ARCHITECTURE_COMPLETENESS_2026-07-22.md`'s correction). External review: the underlying principle was raised directly by ChatGPT during the 2026-07-22 side discussion that prompted this change (not a separate formal pass over this exact wording). Wael's explicit final approval given 2026-07-22.
+- **v3.7 → v4.0 (2026-07-28):** reconciled Wael's independently-drafted "Governance V2" simplification with this document. **Problem:** the V2 draft was a genuine, valuable simplification (a locked Phase 0 intent contract, cost-conscious AI collaboration, a consolidated rejection-conditions list) — but as a from-scratch rewrite it silently dropped the Protected Core (§4), the Architecture Reference companion-document concept, the Cross-Repository Verification Rule, the Verification Provenance Rule, the Non-Determinism Rule, the Phase-Gate Approval Rule, the Ownership Change Rule, ADRs (§6), and the Architecture Audit Trigger (§5) — every one of them added after a specific, documented incident (see the preceding changelog entries). **Benefit:** gain V2's scope/cost discipline without losing any rule that has already caught a real bug. **Resolution:** per ChatGPT's Phase 3 review (2026-07-28, decision: Approved with Mandatory Changes) and Claude's Phase 3 findings, this document (v3.7) remains the baseline; V2's validated new capabilities are added on top rather than substituted in. **Added:** §0 Guiding Principles (preamble restating the six governing rules, each cross-referenced to its existing operative mechanism); Phase 0 — Intent Approval (new mandatory phase preceding Phase 1; Phase-Gate Approval Rule's transition list updated to include 0→1); §13 Mandatory Review Gates (five ordered gates — Scope Compliance, Governance Compliance, Architecture Compliance, Technical Correctness, Evidence Sufficiency — governing both Phase 3 and Phase 6; Phase 6's Overall Recommendation field terminology aligned to Approved / Approved with Mandatory Changes / Rejected); §14 Cost-Aware AI Collaboration (cost-awareness principle plus the Claude Implementation Handoff format); §15 Automatic Rejection Conditions (consolidated index, cross-referencing the operative rules). §9 gained the **Rule-Removal Requirement** — proposed by ChatGPT as the meta-lesson of this same reconciliation: removing an existing rule requires the same rigor as adding one, including the original rule's verbatim text, justification, supporting incident, replacement (if any), and Wael's specific approval of the removal. **Every rule present in v3.7 is preserved unchanged in v4.0 — nothing was removed by this version.** **External review:** ChatGPT's Phase 3 review, 2026-07-28 (Approved with Mandatory Changes on all 11 of Claude's individual findings; redirected the implementation approach from "merge into V2" to "evolve from v3.7," which this changelog entry and the surrounding document structure implement). **Wael's explicit approval:** 2026-07-28, direct instruction to produce and share this document.

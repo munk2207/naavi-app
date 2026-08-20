@@ -1,6 +1,12 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.07.18.4 (date-and-revision format: 4th revision recorded on this date — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc). This revision is T1a's Phase 4 output: corrects the "Action Rules — execution/firing" row (§2) to reflect an intra-Shared-Core duplication proven by three incidents, cross-references ADR 0003 from the "Reminders" row, and adds two previously-missing rows to §5a's Duplication Inventory. See `docs/T1A_PHASE2_CHANGE_PLAN_2026-07-18.md` and `docs/T1A_PHASE5_EVIDENCE_2026-07-18.md` for the full audit trail.
+**Architecture Version:** 2026.07.18.5 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+
+**Revision 5** is [[S1]]'s Phase 8 output (2026-08-19): adds **§2c** — voice-PIN security state (failure counting, alerting, lockdown) moved from the voice server into Shared Core — plus the two voice-PIN rows in §2.
+
+⚠️ **Revision 4's description below does not cover everything in the document, because three sets of edits landed between revisions 4 and 5 without the version being bumped:** T2's §0b (deployment environments), the 2026-08-19 consolidation that folded in §2b and superseded four older architecture documents, and the 2026-08-19 §0b entry recording that the demo line has two numbers and no environment of its own. None of them altered any claim [[S1]] relied on — all three concern deployment topology, not Shared Core boundaries — so no re-evaluation was required at S1's Phase 8 version check. **The lesson is the version line's own: a revision number only means something if bumping it is part of editing.** Whoever next edits this document should bump it in the same commit.
+
+**Revision 4** was T1a's Phase 4 output: corrects the "Action Rules — execution/firing" row (§2) to reflect an intra-Shared-Core duplication proven by three incidents, cross-references ADR 0003 from the "Reminders" row, and adds two previously-missing rows to §5a's Duplication Inventory. See `docs/T1A_PHASE2_CHANGE_PLAN_2026-07-18.md` and `docs/T1A_PHASE5_EVIDENCE_2026-07-18.md` for the full audit trail.
 **Diagram Version:** 1 (the Data Flow diagram in §6 — increments independently of the document's overall version when the diagram itself changes)
 **Last Verified:** 2026-07-18
 **Verified Against:** direct code inspection of `munk2207/naavi-app` and `munk2207/naavi-voice-server`, both at their `main` branch HEAD as of the date above. **Note (T2, 2026-08-19):** `naavi-voice-server` now also has a `staging` branch, merged level with `main` at `2124150`. Section 0b describes the topology; this line is retained as written because it records what was verified on 2026-07-18.
@@ -129,6 +135,8 @@ For each capability, where the authoritative implementation actually lives — v
 | **Action Rules — creation (the classifier)** | **Duplicated, two independent implementations** | The single most important duplication in the system — see §2a below |
 | Conversation/turn state (pending confirmations) | Duplicated, two independent state machines | Mobile and voice each track "what are we in the middle of" separately; neither reads the other's state |
 | Authentication / user identity | Two genuinely different mechanisms, not a duplication | Mobile identifies the user via login (JWT). Voice identifies the user via caller phone number lookup. Different problems, correctly solved differently — both ultimately read the same `user_settings` table |
+| **Voice PIN — authentication of a caller on an unregistered phone** | `manage-voice-pin` (Shared Core) | Genuinely shared. The caller claims an identity (last 4 digits of their registered number), which resolves to **one** account, and the PIN is verified against that account alone. Before [[S1]] (2026-08-19) the voice server tested an entered PIN against **every** account holding one, so a guess succeeded if it matched anyone and the odds worsened as the user base grew |
+| **Voice PIN — failure counting, alerting, and lockdown state** | `manage-voice-pin` (Shared Core), atop the `record_voice_pin_failure()` Postgres function | **Ownership moved out of the voice server at S1 Phase 6** (2026-08-19) — see §2c |
 
 ### 2a. Why "Action Rules creation" is the important one
 
@@ -165,6 +173,25 @@ This is the capability most likely to surprise you, and the one that produced th
 **Never valid:** a `self_override_*` field AND `to`/`to_name` populated on the same `action_config`. That is a third-party recipient colliding with a self-override, and it is the contamination shape of B9g/B9n. `hooks/useOrchestrator.ts` guards against it; **the database does not enforce it**, so any new write path to `action_rules` must carry the same guard.
 
 **Line numbers drift.** Treat any cited line as a starting point for a grep, not a permanent address. The superseded source was written from a single read-through, not an exhaustive per-branch audit — verify specifics against current code before relying on a claim for a fix.
+
+### 2c. Voice-PIN security state moved into Shared Core (S1, 2026-08-19)
+
+**What changed.** The voice server used to own the whole of voice-PIN failure handling: it read the failure count, computed the 7-day window, wrote the new value, decided whether the alert threshold had been crossed, and sent the alert SMS. `receive-sms-reply` separately mutated the lockdown flag itself. Both now **translate**: the voice server reports "a PIN attempt failed for this account", and `receive-sms-reply` routes the `BLOCK` command. `manage-voice-pin` owns the state.
+
+**Why it is recorded here rather than left in the work item.** This is an intentional architectural change, so under the Architecture Drift Rule the Reference update is a hard merge precondition, not a follow-up.
+
+**The two reasons it moved, which are the same reason.** S1's Phase 6 review returned FAIL on both Technical Review and Architecture Completeness:
+
+1. *Architecture* — failure-window calculation, counter mutation and alert triggering are business and security logic, and §3 states that entry points translate rather than implement.
+2. *Correctness* — the counter did read → calculate → write as three separate network operations, so concurrent failures overwrote each other. Measured against staging **before** the fix: 3 concurrent failures recorded 2, and 5 recorded 2. That is not a lost statistic — the alert fires when the count *reaches* the threshold, so an attacker issuing attempts in parallel rather than in sequence could hold it below indefinitely and never be reported.
+
+**The remedy was one design, because the operation became atomic *by* moving to where it belonged.** `record_voice_pin_failure()` collapses the window decision and the increment into a single `UPDATE` under one row lock, and returns the resulting count — so "did this attempt cross the threshold" is answered by the same atomic statement that produced the count, rather than by a second read that could itself race. After the fix, 3/5/10 concurrent failures record 3/5/10, and each caller receives a **distinct sequential** value, which is what guarantees exactly one caller sees the threshold and the alert still fires exactly once.
+
+**The generalisable lesson.** The race was not a coding slip that happened to sit in the wrong layer — it was *available* because the logic sat in the wrong layer. An entry point talking to the database across the network cannot make a read-modify-write atomic; only the owner of the data can. When correctness requires atomicity, that is itself evidence about where the logic belongs.
+
+**Extended rather than added.** `manage-voice-pin` already existed in Shared Core and already owned the PIN, so it gained `record_failure` / `clear_failures` / `set_blocked` instead of a fifth function being created (AI Coding Discipline #19, refactor over layer).
+
+**Reachability.** `record_voice_pin_failure()` is revoked from `PUBLIC`, `anon` and `authenticated`, and granted only to `service_role`. Postgres makes functions executable by everyone by default; without the revoke, any signed-in client could inflate another user's failure count and trigger alerts on their account.
 
 ## 3. Entry Point Responsibilities
 

@@ -67,7 +67,7 @@ Office arrival triggers the work list — real walk/drive to office, or a contro
 
 ---
 
-## Demo 2 — "Location + Intelligent Actions"
+## Demo 2 — "Location + Intelligent Actions" - When I Arrive
 
 **What it proves:** Naavi takes one natural request, correctly splits it into a reminder for *you* and a separate message to *someone else*, and delivers both independently — without you managing two separate alerts.
 
@@ -119,7 +119,7 @@ Callout text to overlay: *"Two people. Two different messages. One sentence."*
 
 ---
 
-## Demo 3 — "Leave-by / Travel Assistant"
+## Demo 3 — "Leave-by / Travel Assistant" - When Should I Leave?
 
 **What it proves:** Naavi doesn't guess travel time — it pulls real Google Maps data and calculates exactly when you need to leave, before you ask twice.
 
@@ -149,7 +149,7 @@ Callout text to overlay: *"Not an estimate. Real Google Maps traffic, calculated
 
 ---
 
-## Demo 4 — "Reminder Delivery"
+## Demo 4 — "Reminder Delivery" - Remind Me Everywhere
 
 **What it proves:** one time trigger splits into a multi-channel self-reminder (SMS, WhatsApp, Email, Push, Voice Call all firing at once) and a separate message to someone else — same "one trigger, two actions" shape as Demo 2, but time-based instead of location-based.
 
@@ -190,7 +190,7 @@ Callout text to overlay: *"One reminder. Every channel. Automatically."*
 
 ---
 
-## Demo 5 — "One Question, Five Systems"
+## Demo 5 — "One Question, Five Systems" 
 
 **What it proves:** ask about a person, and Naavi pulls their calendar events, recent emails, saved notes, and contact info together automatically — no switching between apps.
 
@@ -217,7 +217,7 @@ Callout text to overlay, timed to when each piece appears in the answer: *"Calen
 
 ---
 
-## Demo 6 — "Bill Total"
+## Demo 6 — "Bill Total" - How Much Did I Spend?
 
 **What it proves:** ask how much a vendor has billed you, and Naavi returns one number — not a list to scroll through, not a guess. A server-side SUM over the real invoice records.
 
@@ -249,7 +249,7 @@ Callout text to overlay: *"Not a guess. A real sum, calculated server-side."*
 
 ---
 
-## Demo 7 — "Email-Arrival Alert"
+## Demo 7 — "Email-Arrival Alert" -Watch My Email
 
 **What it proves:** set a rule once, and Naavi watches for a specific person's emails — no re-checking, no re-asking. The moment they email, you're texted.
 

@@ -8,7 +8,7 @@
         "type": "tabs",
         "children": [
           {
-            "id": "60b17251a71cab74",
+            "id": "3ddab51905a03f1d",
             "type": "leaf",
             "state": {
               "type": "markdown",
@@ -20,8 +20,51 @@
               "icon": "lucide-file",
               "title": "HOLDING_LIST_CLASSIFICATION_2026-06-11"
             }
+          },
+          {
+            "id": "2b155c54c12dc407",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "F2B_SCENARIO_WALKTHROUGH_SCRIPT_2026-07-01.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "F2B_SCENARIO_WALKTHROUGH_SCRIPT_2026-07-01"
+            }
+          },
+          {
+            "id": "beed757845311438",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "YOUTUBE_DEMO_SEED_DATA_2026-07-23.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "YOUTUBE_DEMO_SEED_DATA_2026-07-23"
+            }
+          },
+          {
+            "id": "fb57c37279f2d3d8",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18"
+            }
           }
-        ]
+        ],
+        "currentTab": 3
       }
     ],
     "direction": "vertical"
@@ -40,8 +83,10 @@
             "state": {
               "type": "file-explorer",
               "state": {
-                "sortOrder": "alphabetical",
-                "autoReveal": false
+                "sortOrder": "byModifiedTime",
+                "autoReveal": false,
+                "showSearch": false,
+                "searchQuery": ""
               },
               "icon": "lucide-folder-closed",
               "title": "Files"
@@ -53,7 +98,7 @@
             "state": {
               "type": "search",
               "state": {
-                "query": "b7d",
+                "query": "roste",
                 "matchingCase": false,
                 "explainSearch": false,
                 "collapseAll": false,
@@ -74,12 +119,11 @@
               "title": "Bookmarks"
             }
           }
-        ],
-        "currentTab": 1
+        ]
       }
     ],
     "direction": "horizontal",
-    "width": 200
+    "width": 505.5
   },
   "right": {
     "id": "3840bf85089f6851",
@@ -181,43 +225,49 @@
       "bases:Create new base": false
     }
   },
-  "active": "60b17251a71cab74",
+  "active": "fb57c37279f2d3d8",
   "lastOpenFiles": [
-    "SESSION_HANDOFF_2026-06-21_COMPOUND_DEBUG_OPEN.md",
-    "SESSION_HANDOFF_2026-06-21_COMPOUND_DEBUG_OPEN.md.tmp.144008.610bcad8c986",
-    "SESSION_HANDOFF_2026-06-20_V276_STAGING_FIXES.md",
-    "SESSION_HANDOFF_2026-06-20_V276_STAGING_FIXES.md.tmp.129300.b9e5f860d2e9",
-    "SESSION_HANDOFF_2026-06-20_BUILD274_COMPOUND_DEBUG.md",
-    "SESSION_HANDOFF_2026-06-20_BUILD274_COMPOUND_DEBUG.md.tmp.129236.9ad710540305",
-    "SESSION_HANDOFF_2026-06-20_COMPOUND_BUG_OPEN.md",
-    "SESSION_HANDOFF_2026-06-20_V269_COMPOUND_QUEUE_MAESTRO.md",
-    "SESSION_HANDOFF_2026-06-20_V269_COMPOUND_QUEUE_MAESTRO.md.tmp.123372.4c3c6e9ae934",
-    "SESSION_HANDOFF_2026-06-19_F8C_BUILD267.md",
-    "HOLDING_LIST_CLASSIFICATION_2026-06-11.md.tmp.118544.c3d7034d7ed0",
-    "HOLDING_LIST_CLASSIFICATION_2026-06-11.md.tmp.113828.40f6622adfaf",
-    "HOLDING_LIST_CLASSIFICATION_2026-06-11.md.tmp.113828.1725f82d291d",
-    "HOLDING_LIST_CLASSIFICATION_2026-06-11.md.tmp.111416.2fe440e46bc7",
-    "HOLDING_LIST_CLASSIFICATION_2026-06-11.md.tmp.111416.1a4ab4cdcf8e",
-    "HOLDING_LIST_CLASSIFICATION_2026-06-11.md.tmp.111416.bad24a48c2a9",
-    "SESSION_HANDOFF_2026-06-18_LOCATION_ALERT_REGRESSION.md",
-    "SESSION_HANDOFF_2026-06-17_BUILD261_COMPOUND_QUEUE_VIMEO_HOLDING_LIST.md",
-    "SESSION_HANDOFF_2026-06-16_BUILD261_COMPOUND_QUEUE_PAST_TIME.md",
-    "SESSION_HANDOFF_2026-06-16_BUILD260_PROMPT_REGRESSION.md",
-    "SESSION_HANDOFF_2026-06-16_WEBSITE_BROKEN.md",
-    "SESSION_HANDOFF_2026-06-16_COMPOUND_QUEUE_WIP.md",
-    "SESSION_HANDOFF_2026-06-15_BUILD255_F5B_DEDUP.md",
-    "SESSION_HANDOFF_2026-06-14_V115_AAB_NEXT.md",
-    "SESSION_HANDOFF_2026-06-14_ARCH1_TIME_ALERT_FIX.md",
-    "SESSION_HANDOFF_2026-06-14_SARAH_DISAMBIG_ARCH1_TEST.md",
-    "SESSION_HANDOFF_2026-06-13_BUILD252_ARCH1_EMAIL_FIXES.md",
-    "SESSION_HANDOFF_2026-06-13_MAESTRO_TRIAGE_COMPLETE.md",
-    "SESSION_HANDOFF_2026-06-12_BUILD249_MAESTRO_DIAGNOSIS.md",
-    "SESSION_HANDOFF_2026-06-12_BUILD249_MAESTRO_FOCUS.md",
-    "MOBILE_VS_VOICE_PARITY_AUDIT_2026-06-12.md",
-    "SESSION_HANDOFF_2026-06-12_BUILD246_APK_HOLDINGLIST.md",
-    "SESSION_HANDOFF_2026-06-12_BUILD246_ICON_SHRINK.md",
-    "SESSION_HANDOFF_2026-06-11_B6A_B6G_REARM_NOTE.md",
-    "SESSION_HANDOFF_2026-06-11_B4W_CLOSED.md",
-    "SESSION_HANDOFF_2026-06-11_B4W_POSTAL_NORMALIZATION_CONT.md"
+    "S1_PHASE_8_MERGE_2026-08-19.md",
+    "S1_PHASE_8_MERGE_2026-08-19.md.tmp.32368.fe3478d07046",
+    "MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md.tmp.32368.36bd63efe377",
+    "MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md.tmp.32368.39a8e6cdeca7",
+    "MYNAAVI_CURRENT_HIGH_LEVEL_ARCHITECTURE_2026-07-18.md.tmp.32368.ab9b51d1b0c3",
+    "S1_PHASE_7_TESTING_2026-08-19.md",
+    "S1_PHASE_7_TESTING_2026-08-19.md.tmp.34436.7369956c8365",
+    "S1_PHASE_6_TECHNICAL_REVIEW_2026-08-19.md",
+    "S1_PHASE_6_TECHNICAL_REVIEW_2026-08-19.md.tmp.34436.5664e5899cea",
+    "S1_diff_naavi_app.txt",
+    "S1_diff_voice_server.txt",
+    "S1_PHASE_6_REVIEW_PROMPT_2026-08-19.md",
+    "S1_PHASE_6_REVIEW_PROMPT_2026-08-19.md.tmp.34436.0cef4e743c1a",
+    "S1_PHASE_5_VOICE_PIN_AUTHENTICATION_2026-08-19.md.tmp.34436.23558838d17f",
+    "S1_PHASE_5_VOICE_PIN_AUTHENTICATION_2026-08-19.md",
+    "S1_PHASE_3_VOICE_PIN_AUTHENTICATION_2026-08-19.md",
+    "ARCHITECTURE.md",
+    "SESSION_HANDOFF_2026-08-02_YOUTUBE_DEMO_SEED_AND_BUILD314_INCIDENT.md",
+    "S1_PHASE_2_VOICE_PIN_AUTHENTICATION_2026-08-19.md",
+    "S1_PHASE_1A_VOICE_PIN_AUTHENTICATION_2026-08-19.md",
+    "S1_PHASE_1_VOICE_PIN_AUTHENTICATION_2026-08-19.md",
+    "S1_PHASE_0_VOICE_PIN_AUTHENTICATION_2026-08-19.md",
+    "T2_PHASE_8_CREATING_VOICE_STAGING_2026-08-19.md",
+    "T2_PHASE_7_CREATING_VOICE_STAGING_2026-08-19.md",
+    "T2_PHASE_5_CREATING_VOICE_STAGING_2026-08-19.md",
+    "VISITS_PHASE7_MANUAL_VERIFICATION_2026-08-17.md",
+    "SESSION_HANDOFF_2026-08-16_VISITS_REDESIGN_SHIPPED_BUILD325_PLAUD_BLOCKED_ON_SUPPORT.md",
+    "VISITS_PHASE5_EVIDENCE_2026-08-15.md",
+    "VISITS_PHASE2_CHANGE_PLAN_2026-08-15.md",
+    "VISITS_PHASE1A_ARCHITECTURE_COMPLETENESS_2026-08-15.md",
+    "VISITS_PHASE1_PROBLEM_DEFINITION_2026-08-15.md",
+    "YOUTUBE_DEMO_ROSTER_2026-08-01.md",
+    "SESSION_HANDOFF_2026-08-13_LOCATION_DISCLOSURE_SHIPPED_V318_DRAFT_SMS_FORWARD_MYSTERY_OPEN.md",
+    "SESSION_HANDOFF_2026-08-06_B10X_SHIPPED_YOUTUBE_DEMO_PREP_CAPABILITY_JSON_BREAK_OPEN.md",
+    "B10X_TRACK2_PHASE3_TECHNICAL_REVIEW_2026-08-05.md",
+    "B10X_TRACK1_PHASE3_TECHNICAL_REVIEW_2026-08-05.md",
+    "Pasted image 20260804004128.png",
+    "Screenshot 2026-07-15 233222.png",
+    "Screenshot 2026-07-15 233215.png",
+    "Screenshot 2026-07-15 233159.png",
+    "Screenshot 2026-07-15 233152.png",
+    "Screenshot 2026-07-15 233229.png"
   ]
 }
