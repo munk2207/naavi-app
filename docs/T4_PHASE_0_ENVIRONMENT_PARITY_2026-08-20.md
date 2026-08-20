@@ -134,6 +134,7 @@ Twilio numbers, Railway services, Supabase project refs, API key *values*, test 
 3. Migrations written, applied to staging, verified no-op on production.
 4. Re-measurement returns empty for everything classified "replicate".
 5. The drift check runs automatically and fails on divergence.
+7. **[[T5]] is resolved** — added as a MANDATORY DEPENDENCY at the Phase 3 review, 2026-08-20. Each of the 12 columns where staging is stricter than production must be either tightened in production or shown **by evidence** to be an intentional environment difference. **T4 cannot be closed as "parity achieved" while T5 is open.** Rationale: *deferred* and *accepted* are different states, and a work item that closes while declaring twelve known differences acceptable has quietly redefined its own success criterion. Every artefact in this project that decayed did so by being technically recorded and practically forgotten — a tracked-but-unblocking item is that same shape.
 6. Architecture Reference §0b updated: it currently presents the two projects as the environments and **does not say staging is migration-built and may therefore differ** — precisely the false confidence that document exists to prevent.
 
 ## 10. What Phase 0 does not authorize
