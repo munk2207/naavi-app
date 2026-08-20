@@ -1,0 +1,228 @@
+{
+  "note": "Differences known and accepted as of the capture below. The check fails on anything NEW. Regenerate with: npm run drift:check -- --write-baseline",
+  "captured": "2026-08-20, 1:09:39 p.m. EST",
+  "accepted": {
+    "columns": {
+      "missing": [
+        "conversations.id",
+        "conversations.session_date",
+        "conversations.turns",
+        "conversations.updated_at",
+        "conversations.user_id",
+        "pending_disambig.action",
+        "pending_disambig.expires_at",
+        "pending_disambig.id",
+        "pending_disambig.payload",
+        "pending_disambig.user_id",
+        "people.created_at",
+        "people.email",
+        "people.id",
+        "people.name",
+        "people.notes",
+        "people.phone",
+        "people.relationship",
+        "people.updated_at",
+        "people.user_id",
+        "waitlist_signups.comments",
+        "waitlist_signups.created_at",
+        "waitlist_signups.email",
+        "waitlist_signups.id",
+        "waitlist_signups.invited_at",
+        "waitlist_signups.source",
+        "waitlist_signups.status"
+      ],
+      "extra": [
+        "email_alert_log.gmail_message_id",
+        "email_alert_log.id",
+        "email_alert_log.rule_id",
+        "email_alert_log.sent_at",
+        "email_alert_log.user_id",
+        "knowledge_fragments.updated_at",
+        "user_settings.azure_voice_offered_at",
+        "user_settings.azure_voice_profile_id",
+        "user_settings.twilio_from_number",
+        "user_settings.voice_pin_failed_at",
+        "user_settings.voice_pin_failed_count",
+        "user_settings.voice_unregistered_blocked"
+      ],
+      "differing": [
+        "calendar_events.is_priority",
+        "calendar_events.updated_at",
+        "contacts.created_at",
+        "gmail_messages.is_important",
+        "gmail_messages.is_tier1",
+        "gmail_messages.is_unread",
+        "gmail_messages.updated_at",
+        "knowledge_fragments.created_at",
+        "knowledge_fragments.is_priority",
+        "naavi_notes.created_at",
+        "push_subscriptions.created_at",
+        "user_tokens.updated_at"
+      ]
+    },
+    "constraints": {
+      "missing": [
+        "contacts.contacts_user_name_email_unique",
+        "conversations.conversations_pkey",
+        "conversations.conversations_user_id_fkey",
+        "documents.documents_user_message_filename_unique",
+        "epic_tokens.epic_tokens_patient_id_unique",
+        "gmail_messages.gmail_messages_signal_strength_check",
+        "knowledge_fragments.knowledge_fragments_classification_check",
+        "knowledge_fragments.knowledge_fragments_source_check",
+        "knowledge_fragments.knowledge_fragments_type_check",
+        "pending_disambig.pending_disambig_pkey",
+        "people.people_pkey",
+        "people.people_user_id_fkey",
+        "waitlist_signups.waitlist_email_unique",
+        "waitlist_signups.waitlist_signups_pkey"
+      ],
+      "extra": [
+        "email_alert_log.email_alert_log_pkey",
+        "email_alert_log.email_alert_log_rule_id_gmail_message_id_key",
+        "email_alert_log.email_alert_log_user_id_fkey",
+        "epic_appointments.epic_appointments_user_id_fkey",
+        "epic_conditions.epic_conditions_user_id_fkey",
+        "epic_medications.epic_medications_user_id_fkey",
+        "epic_observations.epic_observations_user_id_fkey",
+        "epic_tokens.epic_tokens_user_id_fkey",
+        "epic_tokens.epic_tokens_user_id_unique"
+      ],
+      "differing": [
+        "calendar_events.calendar_events_user_id_fkey",
+        "gmail_messages.gmail_messages_user_id_fkey",
+        "user_tokens.user_tokens_user_id_fkey"
+      ]
+    },
+    "cron_jobs": {
+      "missing": [
+        "cleanup-old-emails",
+        "sync-calendar-every-6h"
+      ],
+      "extra": [
+        "sync-active-email-alerts-every-5-minutes"
+      ],
+      "differing": [
+        "analyze-new-tickets-every-minute",
+        "check-reminders-every-minute",
+        "check-ticket-replies-every-minute",
+        "evaluate-rules-every-minute",
+        "geofence-health-check-daily",
+        "reanalyze-on-reply-every-minute",
+        "trigger-morning-call-every-minute"
+      ]
+    },
+    "extensions": {
+      "missing": [],
+      "extra": [],
+      "differing": [
+        "pg_net"
+      ]
+    },
+    "functions": {
+      "missing": [
+        "hamming_distance(bit, bit)",
+        "jaccard_distance(bit, bit)",
+        "l1_distance(halfvec, halfvec)",
+        "l1_distance(sparsevec, sparsevec)",
+        "l1_distance(vector, vector)"
+      ],
+      "extra": [
+        "check_phone_numbers_unique()",
+        "record_voice_pin_failure(p_user_id uuid, p_window interval)"
+      ],
+      "differing": [
+        "search_knowledge_fragments(query_embedding vector, match_count integer, p_user_id uuid)",
+        "tickets_set_updated_at()",
+        "try_enter_geofence(p_rule_id uuid, p_ttl_hours integer)"
+      ]
+    },
+    "indexes": {
+      "missing": [
+        "contacts_user_name_email_unique",
+        "conversations_pkey",
+        "documents_user_message_filename_unique",
+        "epic_tokens_patient_id_unique",
+        "idx_conversations_user_date",
+        "knowledge_fragments_embedding_idx",
+        "knowledge_fragments_user_content_unique",
+        "pending_disambig_pkey",
+        "people_pkey",
+        "reminders_user_title_datetime_unique",
+        "waitlist_email_unique",
+        "waitlist_signups_pkey",
+        "waitlist_status_idx"
+      ],
+      "extra": [
+        "email_alert_log_pkey",
+        "email_alert_log_rule_id_gmail_message_id_key",
+        "epic_tokens_user_id_unique",
+        "idx_push_subscriptions_user_platform",
+        "idx_user_settings_phone_numbers",
+        "naavi_notes_is_deleted_idx"
+      ],
+      "differing": []
+    },
+    "policies": {
+      "missing": [
+        "calendar_events.Users can read own events",
+        "contacts.Users manage own contacts",
+        "conversations.Users manage own conversations",
+        "epic_appointments.Read Epic appointments",
+        "epic_conditions.Read Epic conditions",
+        "epic_medications.Read Epic medications",
+        "epic_observations.Read Epic observations",
+        "gmail_messages.Users can read own messages",
+        "knowledge_fragments.Users can read their own fragments",
+        "knowledge_fragments.Users manage own fragments",
+        "pending_actions.pending_actions_service_role",
+        "people.Users can delete own people",
+        "people.Users can insert own people",
+        "people.Users can read own people",
+        "people.Users can update own people",
+        "push_subscriptions.Users manage own push subscriptions",
+        "reminders.Users can insert own reminders",
+        "reminders.Users can read own reminders",
+        "tickets.tickets_staff_select",
+        "tickets.tickets_staff_update",
+        "user_tokens.Users can delete own tokens",
+        "user_tokens.Users can read own tokens"
+      ],
+      "extra": [
+        "calendar_events.Users can manage their own calendar events",
+        "contacts.Users can manage their own contacts",
+        "email_alert_log.Users read own alert logs",
+        "epic_appointments.Users can read own Epic appointments",
+        "epic_conditions.Users can read own Epic conditions",
+        "epic_medications.Users can read own Epic medications",
+        "epic_observations.Users can read own Epic observations",
+        "gmail_messages.Users can manage their own gmail messages",
+        "knowledge_fragments.Users can manage their own knowledge",
+        "push_subscriptions.Users can manage their own push subscriptions",
+        "support_staff.staff_read_own",
+        "user_tokens.service role only",
+        "user_tokens.users can read own tokens"
+      ],
+      "differing": []
+    },
+    "rls_enabled": {
+      "missing": [
+        "conversations",
+        "pending_disambig",
+        "people",
+        "waitlist_signups"
+      ],
+      "extra": [
+        "email_alert_log"
+      ],
+      "differing": []
+    },
+    "triggers": {
+      "missing": [],
+      "extra": [
+        "user_settings.trg_user_settings_phone_numbers_unique"
+      ],
+      "differing": []
+    }
+  }
+}
