@@ -2125,6 +2125,20 @@ Deno.serve(async (req) => {
     }
 
     if (userId) {
+      // ⛔ NOTE (T10, 2026-08-21): this read is VALID — `expires_at` does exist
+      // on this table — but NOTHING EVER WRITES `pending_disambig`. Searched
+      // the whole repo: this file reads it and deletes from it, and there is no
+      // insert anywhere. So `pending` is always null and the branch below has
+      // never run. Production holds a single row that expired on 1 April.
+      //
+      // This file's own header still describes the intended flow — "2+ contacts
+      // match → ask Robert which one, save pending_disambig, resolve on next
+      // message". The save step was never built.
+      //
+      // Left in place deliberately, not deleted. The live mechanism for
+      // multi-turn clarification is PENDING_INTENT / awaitingField, which is
+      // unaffected. See the longer note on the pending_actions block further
+      // down this file for the full picture and the reasoning.
       const { data: pending } = await supabase
         .from('pending_disambig')
         .select('*')
@@ -4555,6 +4569,46 @@ Deno.serve(async (req) => {
     // than the conversation history suggests were requested (multi-action turn).
     // Retrieval: on the NEXT turn, if speech resolves the clarification and
     // new actions arrive, merge the stored deferred actions.
+    //
+    // ========================================================================
+    // ⛔ THE BLOCK BELOW HAS NEVER WORKED. Read this before spending time on it.
+    // ========================================================================
+    //
+    // Both halves reference columns that DO NOT EXIST on `pending_actions`,
+    // on either environment. Verified 2026-08-21 (T10):
+    //
+    //   READ   .gt('expires_at', …)          → no `expires_at` column
+    //   WRITE  upsert({ actions, context,
+    //                   expires_at })        → none of those three exist,
+    //                                          and `type` is NOT NULL and is
+    //                                          never supplied
+    //
+    // PostgREST rejects the WHOLE statement when one column is missing (42703),
+    // so the read always fails, `pendingRow` is always null, and the write
+    // always fails. The `catch` below turns all of it into a console.warn, which
+    // is why nothing ever surfaced. Cost of leaving it: one failed round-trip
+    // per chat turn. That is all.
+    //
+    // ⚠️ DO NOT "FIX" THIS BY DROPPING THE TABLE. `pending_actions` IS LIVE —
+    // the voice server writes `type: 'conversation_labeling'` rows to it
+    // (naavi-voice-server/src/index.js:6318) so a recorded call can have its
+    // speakers labelled afterwards. That path uses the REAL columns and works.
+    // The table is fine; only this block is wrong.
+    //
+    // WHAT ACTUALLY DELIVERS MULTI-TURN CLARIFICATION TODAY, and is unaffected:
+    //   - PENDING_INTENT / awaitingField (B9i-followup, 2026-07-14) — the
+    //     deterministic path; see the comments at the Step 1.4 handler.
+    //   - V282's compound handling (2026-06-17) — tool_choice:'none' plus
+    //     isCompoundTurn / isCompoundConfirmTurn, which explicitly REPLACED the
+    //     pending_actions queue. See tests/catalogue/session-2026-06-17.ts.
+    //
+    // Left in place deliberately, not deleted — Wael, 2026-08-21, after three
+    // successive misreadings of this area in fifteen minutes, including a
+    // recommendation to drop a table that turned out to be in active use:
+    // "I do not like to delete anything, because we do not know everything."
+    // The cost of leaving a silent, bounded, non-user-facing inefficiency is
+    // small and known. The cost of removing something misread is neither.
+    // ========================================================================
     if (userId && supabase) {
       try {
         const parsedRaw = JSON.parse(rawText);

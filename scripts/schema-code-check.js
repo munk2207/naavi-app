@@ -280,7 +280,14 @@ function check(label, schema, refs, baseline, out) {
 // A baseline entry is NOT a dismissal. Every line in it is a real defect with
 // a real consequence — see the work item recorded alongside it.
 const BASELINE_FILE = path.join(REPO, 'docs', 'schema_code_known_findings.json');
-const keyOf = (m) => `${m.table}.${m.col}@${m.file}:${m.line}`;
+// Deliberately WITHOUT the line number. The first version keyed on file:line
+// and went red the moment a comment was added above a known finding — 54 lines
+// of explanation shifted every entry and the gate reported them all as new.
+// A finding is "this file references this missing column", which does not stop
+// being true because something moved. Keying on the line number made the
+// baseline decay on every unrelated edit, which is the cry-wolf failure this
+// check was explicitly built to avoid.
+const keyOf = (m) => `${m.table}.${m.col}@${m.file}`;
 
 function loadBaseline() {
   if (!fs.existsSync(BASELINE_FILE)) return new Set();
