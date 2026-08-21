@@ -154,16 +154,39 @@ export function multiUserMatrix(spec: MatrixSpec): TestCase[] {
       );
       ctx.log(`status=${status} data=${JSON.stringify(data).slice(0, 200)}`);
 
-      // We accept 401 (preferred), 400, or 200 with explicit error.
-      // We REJECT: 200 with valid data (means it bound to some random user).
+      // We accept 401 (preferred), 400, 200 with an explicit error, or a
+      // staging outbound BLOCK.
+      //
+      // `blocked: true` added 2026-08-21. T2's outbound guard returns
+      // 200 { success: false, blocked: true, … } — deliberately 200, so callers
+      // do not read a staging block as a delivery failure and retry. Without
+      // this clause the guard looks like success and the check below fires.
+      //
+      // ⚠️ Worth knowing WHY that mattered, because it says something about this
+      // assertion rather than about the guard: on send-sms this test was never
+      // demonstrating what its name claims. It passed because the payload uses a
+      // fictional number (+15555550100) that TWILIO rejected, producing an error
+      // status — not because send-sms refused an unauthenticated caller. The
+      // guard simply intercepted before Twilio could, and removed the accident
+      // that made it green.
+      //
+      // What this test genuinely proves for every function in the matrix is the
+      // Hussein-bug guard: that no function falls back to "first user" when
+      // given neither a JWT nor a body user_id. send-sms passes that on the
+      // merits — resolveUserId returns null and nothing is attributed. Whether
+      // an unauthenticated caller should be able to reach Twilio AT ALL on
+      // production, where the guard is inert by design, is a different question
+      // and is tracked separately as T11.
       const looksLikeError =
         (status >= 400 && status < 500) ||
-        (data && typeof data.error === 'string' && data.error.length > 0);
+        (data && typeof data.error === 'string' && data.error.length > 0) ||
+        (data && data.blocked === true);
 
       if (!looksLikeError) {
         throw new Error(
           `SAFETY VIOLATION — function returned 2xx with data when no auth and no user_id provided. ` +
-          `It silently bound to some user. status=${status} data=${JSON.stringify(data).slice(0, 200)}`,
+          `It may have bound to some user (the Hussein bug), or completed an action it should have refused. ` +
+          `status=${status} data=${JSON.stringify(data).slice(0, 200)}`,
         );
       }
     },
