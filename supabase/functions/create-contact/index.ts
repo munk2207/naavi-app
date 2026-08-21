@@ -37,14 +37,9 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   const authHeader = req.headers.get('Authorization');
-  if (!authHeader) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401, headers: corsHeaders,
-    });
-  }
 
   const body = await req.json();
-  const { name, email, phone } = body;
+  const { name, email, phone, user_id: bodyUserId } = body;
 
   if (!name?.trim()) {
     return new Response(JSON.stringify({ error: 'Missing name' }), {
@@ -52,17 +47,31 @@ serve(async (req) => {
     });
   }
 
-  const userClient = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } }
-  );
-  const { data: { user }, error: userError } = await userClient.auth.getUser();
-  if (userError || !user) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+  // Standard 3-step user_id resolution per CLAUDE.md Configuration Discipline
+  // Rule 4: (a) JWT auth, (b) body.user_id — same pattern as
+  // create-calendar-event / manage-list, so voice server / server-side
+  // callers can use this function too, not just the mobile app.
+  let userId: string | null = null;
+  if (authHeader) {
+    try {
+      const userClient = createClient(
+        Deno.env.get('SUPABASE_URL')!,
+        Deno.env.get('SUPABASE_ANON_KEY')!,
+        { global: { headers: { Authorization: authHeader } } }
+      );
+      const { data: { user } } = await userClient.auth.getUser();
+      if (user) userId = user.id;
+    } catch (_) { /* fall through */ }
+  }
+  if (!userId && typeof bodyUserId === 'string' && bodyUserId.length > 0) {
+    userId = bodyUserId;
+  }
+  if (!userId) {
+    return new Response(JSON.stringify({ error: 'No user found — provide JWT or user_id in body' }), {
       status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
+  const user = { id: userId };
 
   const adminClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
