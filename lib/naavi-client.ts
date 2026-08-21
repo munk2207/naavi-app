@@ -15,7 +15,8 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { isSupabaseConfigured, callNaaviEdgeFunction, supabase } from './supabase';
 import { queryWithTimeout, getSessionWithTimeout } from './invokeWithTimeout';
-import { getEpicHealthContext } from './epic';
+// T8 (2026-08-21) — Epic import removed; it is no longer called from here.
+// lib/epic.ts is retained for a future Epic effort. See docs/T8_PHASE0_INTENT_2026-08-21.md.
 import { searchKnowledge, fetchAllKnowledge, formatFragmentsForContext } from './knowledge';
 import { remoteLog } from './remoteLog';
 
@@ -626,10 +627,17 @@ export async function sendToNaavi(
   // itself, so we don't pay the 9s timeout cap or ship the 57 KB result over
   // the wire. Mobile only fetches the small per-query context (health,
   // knowledge) and passes it inline.
+  // T8 (2026-08-21) — the Epic health fetch was removed from here. It ran on
+  // EVERY chat turn, with a 6-second timeout budget, querying five tables that
+  // no code path has ever written to. Epic was never built: no UI, three empty
+  // Edge Function folders, and 12 rows on production under a placeholder user
+  // id from a sandbox token that expired an hour after issue on 24 March 2026.
+  // The code is kept (see lib/epic.ts) for a future Epic effort; it is simply
+  // no longer called. `healthContext` stays as an empty string so the prompt
+  // assembly below is untouched.
+  const healthContext = '';
   log('parallel-context-start', { isBroadQuery });
-  const [healthContext, knowledgeFragments] = await Promise.all([
-    withTimeout(getEpicHealthContext(), 6_000, '', 'getEpicHealthContext')
-      .then(v => { log('getEpicHealthContext-end', { len: v?.length ?? 0 }); return v; }),
+  const [knowledgeFragments] = await Promise.all([
     // Cap at 20 fragments even for broad queries — prior 100-cap was the
     // other half of the cost lever; 20 is enough for "what do you know about
     // me" without bloating the prompt. AAB cost-lever #4.

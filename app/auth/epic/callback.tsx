@@ -1,4 +1,11 @@
 /**
+ * ⛔ NOT IN USE. NEVER WAS. Epic was never built — no UI ever routed here, and
+ * the Edge Function this page calls (exchange-epic-code) is an EMPTY FOLDER.
+ * Retained only as a starting point for a future Epic effort. See lib/epic.ts
+ * for the full status and docs/T8_PHASE0_INTENT_2026-08-21.md.
+ */
+
+/**
  * Epic SMART on FHIR OAuth callback page
  *
  * Epic redirects here after Robert authorizes Naavi.

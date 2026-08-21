@@ -34,7 +34,6 @@ import { signOut, supabase } from '@/lib/supabase';
 import { queryWithTimeout } from '@/lib/invokeWithTimeout';
 import { isCalendarConnected, connectGoogleCalendar, disconnectGoogleCalendar } from '@/lib/calendar';
 import { saveNotionToken, getNotionToken, removeNotionToken, hasNotionToken } from '@/lib/notion';
-import { isEpicConnected, connectEpic, disconnectEpic } from '@/lib/epic';
 import { registerPushNotifications } from '@/lib/push';
 import * as Notifications from 'expo-notifications';
 import { registry } from '@/lib/adapters/registry';
@@ -108,8 +107,10 @@ export default function SettingsScreen() {
   const [calendarLoading, setCalendarLoading]     = useState(false);
   const [notionToken, setNotionToken]             = useState('');
   const [notionConnected, setNotionConnected]     = useState(false);
-  const [epicConnected, setEpicConnected]         = useState(false);
-  const [epicLoading, setEpicLoading]             = useState(false);
+  // T8 (2026-08-21) — epicConnected/epicLoading removed. They were declared
+  // and never rendered: Epic has no UI at all. isEpicConnected() was still
+  // being called twice on every Settings open, querying tables nothing writes
+  // to. lib/epic.ts is kept for a future Epic effort.
   const [pushEnabled, setPushEnabled]             = useState(false);
   const [pushLoading, setPushLoading]             = useState(false);
   const [voicePlayback, setVoicePlayback]         = useState(true);
@@ -196,7 +197,6 @@ export default function SettingsScreen() {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         isCalendarConnected().then(setCalendarConnected).catch(() => {});
-        isEpicConnected().then(setEpicConnected).catch(() => {});
       }
     });
     return () => sub.remove();
@@ -206,7 +206,6 @@ export default function SettingsScreen() {
     hasApiKey().then(setApiKeySet);
     isCalendarConnected().then(setCalendarConnected);
     hasNotionToken().then(setNotionConnected);
-    isEpicConnected().then(setEpicConnected);
     // Name: read local cache first for instant display, then prefer Supabase
     // (server is canonical). Fixes build 93 regression where getUserName()
     // returned '' on native and the field came up empty.

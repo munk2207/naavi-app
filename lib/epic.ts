@@ -1,4 +1,44 @@
 /**
+ * ============================================================================
+ * ⛔ NOT IN USE. NEVER WAS. DO NOT ASSUME THIS RUNS.
+ * ============================================================================
+ *
+ * Epic was never built. This file is retained ONLY so a future Epic effort has
+ * a starting point — nothing in the app calls it, and nothing ever has in a way
+ * a user could reach.
+ *
+ * Verified by direct inspection, 2026-08-21 (T8):
+ *   - NO user interface exists. The Settings state for it was declared and
+ *     never rendered — there has never been a button or a screen.
+ *   - The server side is THREE EMPTY FOLDERS: supabase/functions/
+ *     exchange-epic-code, store-epic-token, sync-epic-data — 0 files, 0 bytes.
+ *     The OAuth exchange and the sync described below do not exist.
+ *   - The only data anywhere is 12 rows on production under user id
+ *     00000000-0000-0000-0000-000000000001 — a placeholder, not an account —
+ *     from a sandbox token issued 24 March 2026 that expired one hour later.
+ *     Staging has zero rows.
+ *
+ * Until 2026-08-21 this file WAS still being called: getEpicHealthContext() ran
+ * on every single chat turn with a 6-second timeout budget, and
+ * isEpicConnected() ran twice on every Settings open — querying five tables
+ * that nothing writes to and discarding the result. Those call sites were
+ * removed by T8. The five database tables and their 12 rows were deliberately
+ * left in place.
+ *
+ * ⚠️ IF EPIC WORK EVER STARTS: production's RLS policies on the Epic tables use
+ * `using = true`, meaning any authenticated user can read every user's rows.
+ * That is harmless today because the only rows are sandbox data under a
+ * non-existent user. It MUST be fixed before the first real row is written —
+ * the policy is already in place, so it will not announce itself.
+ *
+ * See docs/T8_PHASE0_INTENT_2026-08-21.md.
+ *
+ * The original description follows, and describes an intended design rather
+ * than anything that exists.
+ * ============================================================================
+ */
+
+/**
  * Epic FHIR integration — Phase 9
  *
  * Robert connects once via SMART on FHIR OAuth (authorization code + PKCE).
