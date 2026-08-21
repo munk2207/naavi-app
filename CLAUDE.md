@@ -624,10 +624,11 @@ All open, closed, and deferred items live there. Do not maintain a duplicate lis
 6. Resolve any merge conflicts (usually version-bump files — keep the newer version)
 7. `npm install` (picks up any package.json changes)
 8. Build + auto-submit: `npx eas build --platform android --profile production --auto-submit --non-interactive`
-   - `--auto-submit` builds the AAB AND pushes it to Google Play Internal Testing in one command (uses `submit.production.android` config in `eas.json`).
+   - `--auto-submit` builds the AAB AND pushes it to **Google Play Open Testing (beta)** in one command (uses `submit.production.android` config in `eas.json`, which sets `track: "beta"`).
+   - **⭐ Open Testing, NOT Internal Testing (Wael, 2026-08-21).** Internal Testing produced a bad experience and is not used. `eas.json` has been correct all along; these two lines said "Internal Testing" and were wrong, which would have sent a future session to the wrong track. Do not "correct" them back.
    - No manual download / upload step. Skips Chrome/Edge Safe Browsing warnings entirely.
 9. Wait for the auto-submit step to finish (EAS prints a Play Console link).
-10. User installs from Google Play on phone (Internal Testing track).
+10. User installs from Google Play on phone (**Open Testing / beta track**).
 
 ### MUST USE GOOGLE PLAY (not direct APK) — for distribution to OTHER users
 
