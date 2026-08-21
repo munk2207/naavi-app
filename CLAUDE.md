@@ -463,13 +463,17 @@ suite never starting — when a single accepted difference was removed.
 
 **Test account for the three AUTOMATED gates above:** `mynaavi2207@gmail.com` — no other account. This governs the auto-tester, voice regression, and Firebase Test Lab **only**. It does NOT govern manual or live testing. (Corrected 2026-07-22 — `mynaavidemo@gmail.com` is a separate demo-only account, not the test account. Clarified 2026-08-19 — "all gates" was being read as "all testing," which it never meant.)
 
-**The three accounts, and what each is for** (verified live 2026-08-19 against both projects):
+**The three accounts, and what each is for** (re-verified live **2026-08-21** against both projects, via the auth admin API — every id below was read, not carried forward):
 
 | Account | Purpose | Production user_id | Staging user_id |
 |---|---|---|---|
 | `mynaavi2207@gmail.com` | **Automated gates only.** The auto-tester wipes its rows on every run, by design. Never use it for manual testing. | `7739bab9-bfb1-4553-b3f0-3ed223e9dee8` | `ae1f3438-e132-422a-9b0b-7b8819119b46` |
-| `robert.esm.2207@gmail.com` | **Live manual testing and demos.** Hard-blocked from auto-tester runs via `PROTECTED_ACCOUNT_IDS` in `tests/lib/fixtures.ts` (B10y, 2026-08-03). | — | `f1bc46b8-a478-43ad-bf09-e138099c8847` |
-| `mynaavidemo@gmail.com` | **The 1-888-91-NAAVI public demo line only.** Routed by `DEMO_USER_ID`, not by caller-phone lookup. | — | `05e821a2-f0eb-4896-b309-b0979c5e7f9b` |
+| `robert.esm.2207@gmail.com` | **Live manual testing and demos.** Hard-blocked from auto-tester runs via `PROTECTED_ACCOUNT_IDS` in `tests/lib/fixtures.ts` (B10y, 2026-08-03). | `8cd727da-2cb0-47a6-8275-1c581b968c0d` | `f1bc46b8-a478-43ad-bf09-e138099c8847` |
+| `mynaavidemo@gmail.com` | **The 1-888-91-NAAVI public demo line only.** Routed by `DEMO_USER_ID`, not by caller-phone lookup. | `1dd01ef2-98d0-4ad0-aebc-ed4f878d7c53` | `05e821a2-f0eb-4896-b309-b0979c5e7f9b` |
+
+**⭐ Corrected 2026-08-21 — the previous version showed "—" for production against BOTH the Robert and demo accounts, and both were wrong.** All three accounts exist in both projects. The Robert production row was created 2026-08-14; the demo production id is the same value the voice production server prints at boot as `DEMO_USER_ID`. **The lesson is the table's own: a row that says "does not exist" is a claim, and it decays exactly like any other.** Re-read it before reasoning from it.
+
+**⭐⭐ AND THE ONE THAT WILL CATCH YOU: on PRODUCTION, `+1 343 333 2567` is registered to BOTH `mynaavi2207` and `robert.esm.2207`.** Voice resolves a caller by phone with an unordered `&limit=1` (`naavi-voice-server/src/index.js:994`), so **which account answers a production call from that number is arbitrary and changes between calls** — demonstrated 2026-08-20, when two calls eleven minutes apart landed on different accounts. If a production voice test says a contact is "not found", suspect this before suspecting the feature. Tracked as [[S2]]. Morning calls were disabled on the auto-tester account 2026-08-21 so it stops phoning a real number; **no phone number was removed, and none should be** — a shared number is legitimate, and S2 is the fix.
 
 Each project has its own row for the gates account; `tests/.env` selects between them via `TEST_USER_ID` (production) and `STAGING_TEST_USER_ID` (staging).
 
