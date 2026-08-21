@@ -1,15 +1,23 @@
 {
   "note": "What the T12 deploy wrapper recorded deploying, per function per environment. A TRIPWIRE, NOT EVIDENCE — anyone using the raw Supabase CLI bypasses it. Equilibrium may be claimed only on a passing `npm run parity:verify`.",
-  "updated": "2026-08-21, 4:36:38 p.m. EST",
+  "updated": "2026-08-21, 6:20:21 p.m. EST",
   "deployments": {
     "create-contact": {
       "staging": {
-        "commit": "bb31b24bc903381c526c9d9c02555197534b1880",
-        "source_sha256": "f2756ed92efd1a7845e3e72a2689020dd1de230dc907ea2bb27667a477c3199b",
+        "commit": "bb478da721438ed1aa22f479edb09b2aa6958fb1",
+        "source_sha256": "bbe0f159d538570e79dc5bb5bf9794e6e58810c79a38a06b47b98889262395b5",
         "files": [
           "supabase/functions/create-contact/index.ts"
         ],
-        "deployed_at": "2026-08-21, 4:23:43 p.m. EST"
+        "deployed_at": "2026-08-21, 6:19:36 p.m. EST"
+      },
+      "production": {
+        "commit": "bb478da721438ed1aa22f479edb09b2aa6958fb1",
+        "source_sha256": "bbe0f159d538570e79dc5bb5bf9794e6e58810c79a38a06b47b98889262395b5",
+        "files": [
+          "supabase/functions/create-contact/index.ts"
+        ],
+        "deployed_at": "2026-08-21, 6:20:21 p.m. EST"
       }
     },
     "send-sms": {

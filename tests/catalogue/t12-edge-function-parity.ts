@@ -319,15 +319,39 @@ export const t12EdgeFunctionParityTests: TestCase[] = [
         );
       }
 
-      // And the two comparators proven wrong must not reappear.
-      if (/ezbr_sha256/.test(src)) {
+      // And the comparator proven wrong must not reappear AS CODE.
+      //
+      // This assertion originally grepped the raw file and errored on its first
+      // real run (Phase 7, 2026-08-21) — because the parity script's header
+      // comment explains at length WHY ezbr_sha256 must never be used, and the
+      // grep matched that explanation. The test failed on the documentation of
+      // the rule it exists to enforce.
+      //
+      // Precisely: the old form was OVER-strict, not under-strict. It caught
+      // every real usage too, so nothing slipped past it — the cost was a
+      // permanent false positive that punished explaining the rule, and would
+      // have pushed a future maintainer to delete the explanation to get the
+      // suite green. Stripping comments keeps the same protection without
+      // creating an incentive to remove the reasoning.
+      //
+      // Verified in three cases when fixed: real file passes (2 mentions, 0 in
+      // code); an injected property access is caught; and a usage added after
+      // deleting the comments is still caught.
+      const code = src
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .split('\n')
+        .filter((l) => !/^\s*(\/\/|\*)/.test(l))
+        .join('\n');
+
+      if (/ezbr_sha256/.test(code)) {
         throw new Error(
-          'The parity check references ezbr_sha256. That field is not a hash of the function ' +
-            'source — it reported 20 differences on the voice boundary of which 15 were ' +
-            'byte-identical. It must not be used as a comparator.',
+          'The parity check USES ezbr_sha256 in executable code. That field is not a hash of ' +
+            'the function source — it reported 20 differences on the voice boundary of which 15 ' +
+            'were byte-identical on production, staging and in the repo. It must not be used as ' +
+            'a comparator. (Mentioning it in a comment is fine and expected.)',
         );
       }
-      ctx.log('normalization present; no forbidden comparator');
+      ctx.log('normalization present; ezbr_sha256 absent from executable code');
     },
   },
 ];
