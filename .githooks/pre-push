@@ -1,0 +1,37 @@
+#!/bin/sh
+# Refuses a push while staging and production have separated beyond the
+# recorded baseline.
+#
+# Why here, and not only in test:auto: binding the drift check to test:auto still
+# left a person deciding to run test:auto. That is a ritual, not a gate. Pushing
+# is not optional — code that is not pushed does not exist for anyone else — so
+# this is the last point at which drift can be caught without anyone choosing to
+# look.
+#
+# Wael's Phase 6 decision, 2026-08-20: "The drift check must become an enforced
+# automatic gate, not a command someone must remember to run."
+#
+# Fails closed. If STAGING_DB_URL is missing from tests/.env, or staging cannot
+# be reached, the push is refused rather than waved through. A gate that skips
+# itself when it cannot check is not a gate — and "knowledge recorded with
+# nothing enforcing it" is the exact failure T4 was opened to fix.
+#
+# When a difference is DELIBERATE — work on staging not yet promoted, which is
+# most of them — record it instead of reverting it:
+#     npm run drift:check -- --write-baseline
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+
+echo "[pre-push] checking staging/production parity..."
+
+if ! npm run --silent drift:check; then
+  echo ""
+  echo "[pre-push] PUSH REFUSED — staging and production have separated."
+  echo ""
+  echo "  If the difference is intentional, record it and push again:"
+  echo "    npm run drift:check -- --write-baseline"
+  echo ""
+  exit 1
+fi
+
+exit 0

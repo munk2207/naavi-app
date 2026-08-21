@@ -4,3 +4,11 @@
 *.js text eol=lf
 *.json text eol=lf
 *.md text eol=lf
+
+# Hook scripts must keep Unix line endings. The wildcard above already covers
+# them, and this is written explicitly anyway: a shell script stored with CRLF
+# often refuses to run, and a pre-push hook that refuses to run does not announce
+# itself — it just stops guarding while everyone assumes it is there. The voice
+# server repo hit exactly that on 2026-08-20 and carries the same rule.
+.githooks/** text eol=lf
+*.sh        text eol=lf

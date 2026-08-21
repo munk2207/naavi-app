@@ -446,6 +446,12 @@ build rather than being noticed later — or not at all.
 - **Escape hatch, for when staging is deliberately mid-change:** `npm run test:auto:nodrift` runs
   the suite alone. It does NOT satisfy Gate 1 for a production build.
 
+**⭐⭐ And it runs on every push (`.githooks/pre-push`).** Binding it to `test:auto` alone still
+left a person deciding to run `test:auto` — a ritual, not a gate. Pushing is not optional, so the
+hook is the last point at which drift is caught without anyone choosing to look. Enable once per
+clone: `git config core.hooksPath .githooks`. Both repos now use this pattern — the mobile repo
+for drift, the voice server for undefined names.
+
 Verified in both directions on the day it landed: clean at the baseline, and exit 1 — with the
 suite never starting — when a single accepted difference was removed.
 
