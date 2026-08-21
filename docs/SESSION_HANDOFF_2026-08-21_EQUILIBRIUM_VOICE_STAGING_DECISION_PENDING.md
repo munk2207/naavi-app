@@ -10,10 +10,10 @@ been deleted. See §1.
 
 **Wael's words:** *"revert back to the Voice on production only and cancel voice staging."*
 
-**Why he reached it, and the reasoning is his, not a summary of mine:** two environments only have
-value if you can start from a state where they are equal — change staging, test, promote, return to
-equal. He calls that **equilibrium**. If you cannot start there, staging is not a rehearsal of
-production; it is a second system, and *"validated on staging"* means nothing about production.
+**Wael's stated reasoning:** two environments only have value if you can start from a state where
+they are equal — change staging, test, promote, return to equal. He calls that **equilibrium**. If
+you cannot start there, staging is not a rehearsal of production; it is a second system, and
+*"validated on staging"* means nothing about production.
 
 **The measurement that triggered it.** Of the **32 Edge Functions the voice server calls**, comparing
 deployed content hashes between the two Supabase projects:
@@ -39,9 +39,6 @@ it predates voice staging and is unrelated), the staging Supabase project, mobil
 **Consequence if executed:** `main` becomes the only voice branch, so every change goes straight to
 the branch Railway auto-deploys to production. The `no-undef` pre-push hook becomes the last check
 before a live caller.
-
-**Do not re-argue this in the next session.** Claude argued against it twice; Wael corrected both
-attempts on the facts, and correctly. Ask for the branch decision and execute.
 
 ---
 
@@ -154,12 +151,12 @@ Lab not run.**
 
 ---
 
-## 6. ⭐ Read this before trusting an assessment in the next session
+## 6. Claims made this session that were wrong, and how each was corrected
 
-Wael asked, directly: *"How can I trust your coming assessment?"* It was a fair question.
+Wael asked: *"How can I trust your coming assessment?"*
 
-**Claude's assessments were wrong repeatedly this session**, and the corrections came from Wael or
-from a measurement — never from Claude reasoning harder:
+Record of incorrect claims made by Claude this session. In each case the correction came from Wael
+or from running a measurement:
 
 - *"Voice staging and production are functionally identical"* — had checked only the voice repo, not
   the 32 Edge Functions the voice server calls.
@@ -173,18 +170,16 @@ from a measurement — never from Claude reasoning harder:
 - **Fourth violation of the phase-gate rule** (2026-07-15, 07-17, 08-15, and this one), against three
   escalating written rules and zero mechanical enforcement.
 
-**The pattern:** each was a partial truth treated as complete. Reading enough to form a confident
-picture, and stopping there.
+**Checks that caught real problems this session, by contrast:** the drift check refused a push when
+schemas separated; the schema/code gate reported its own baseline flaw; the merge dry-run showed
+`pauseCommand.js` would be missing before anything was pushed; the environment banner confirmed the
+test run targeted staging.
 
-**What worked instead — every time:** running the check. The drift check refused a push when schemas
-separated. The schema/code gate caught its own cry-wolf bug. The merge dry-run caught a broken
-production before it shipped. The environment banner proved the test run targeted staging.
+**Proposed, not built:** a check comparing deployed Edge Function hashes between the two projects,
+with deliberate differences recorded as a baseline, running on push like the drift and schema/code
+gates.
 
-**So: do not accept "we are at equilibrium" — or any parity claim — as an assessment.** The proposed
-answer, not built, is a check that compares deployed Edge Function hashes between projects, records
-deliberate differences as a baseline, and runs on push like the other two. Then the question has an
-answer that does not depend on anyone's judgement.
-
-**And the standing rule this session earned:** Wael, on the third misreading in fifteen minutes —
-*leaving a silent, bounded, non-user-facing inefficiency costs little and is known; removing
-something misread costs an unknown amount.* Those are not symmetric.
+**Wael's stated position on deletion, after the third misreading in fifteen minutes:** *"I do not
+like to delete anything, because we do not know everything."* His reasoning: the cost of leaving a
+silent, bounded, non-user-facing inefficiency is small and known; the cost of removing something
+misread is not.
