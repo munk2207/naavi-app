@@ -1,6 +1,6 @@
 {
   "note": "Differences known and accepted as of the capture below. The check fails on anything NEW. Regenerate with: npm run drift:check -- --write-baseline",
-  "captured": "2026-08-21, 4:47:55 a.m. EST",
+  "captured": "2026-08-21, 7:13:23 a.m. EST",
   "accepted": {
     "columns": {
       "missing": [],
@@ -10,7 +10,6 @@
         "email_alert_log.rule_id",
         "email_alert_log.sent_at",
         "email_alert_log.user_id",
-        "knowledge_fragments.updated_at",
         "user_settings.azure_voice_offered_at",
         "user_settings.azure_voice_profile_id"
       ],
