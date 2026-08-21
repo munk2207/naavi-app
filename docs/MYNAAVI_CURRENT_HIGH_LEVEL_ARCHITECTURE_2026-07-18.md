@@ -1,6 +1,8 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.07.18.7 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+**Architecture Version:** 2026.07.18.8 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+
+**Revision 8 (2026-08-21, [[B11f]] Phase 8):** rewrites §3's "handling barge-in/interruption" bullet, which described as one capability something that is now **two different designs, one per voice branch** — production interrupts on any speech and discards the answer; staging interrupts only on a recognised pause word and resumes from the previous sentence. Mobile is a third design again. The entry also records the trade this creates and that Wael has assigned it to the production-promotion decision. **Also corrects a lapse in revision 7's own commit discipline:** the §0d Railway paragraph was retracted earlier the same day *without* a version bump, so `2026.07.18.7` briefly identified two different documents. Assessed for [[B11f]] per Phase 1A's Version Verification requirement: that edit concerned Railway deployment behaviour, not voice architecture, and invalidated no assumption this work item relied on.
 
 **Revision 7 (2026-08-20, the S1 promotion):** adds **§0d** — a feature is not one deployable thing. Records the four surfaces S1 needed, why their ordering is load-bearing, and the blind spot that nearly cost the promotion: because §2c moved voice-PIN logic into Shared Core, the voice server contains none of S1's identifiers on *either* branch, so the obvious check answers correctly and tells you nothing. Production had been serving Edge Functions three months stale, invisible to every comparison this project owns. Also records that a deploy can be complete while the feature stays dormant behind an undeployable client half, and that a push is not a deployment. Bumped in the same commit as the edit.
 
@@ -369,7 +371,29 @@ An "entry point" should only translate between the user and the Shared Core — 
 - Answering the Twilio call, managing the WebSocket audio stream
 - Speech-to-text (Deepgram) and text-to-speech (Deepgram/Polly)
 - Caller identification (phone number → user)
-- Playing audio back, handling barge-in/interruption
+- Playing audio back, handling interruption — **⭐ but "interruption" is now TWO different designs,
+  one per branch, and calling it one thing hides the difference that matters (recorded by [[B11f]]
+  Phase 8, 2026-08-21):**
+
+  | | `main` (production) | `staging` ([[B11f]]) |
+  |---|---|---|
+  | How a caller interrupts | **any transcript at all** — barge-in | only a recognised pause word |
+  | Background noise / a radio / another person | **silences her** | ignored |
+  | If the word is misheard | n/a — every word works | **cannot interrupt at all** |
+  | Resume where she left off | no — the answer is discarded | yes, from the previous sentence |
+
+  **B11f did not add a stop control alongside barge-in; it replaced barge-in.** `main:9946` clears
+  playback on any transcript; `staging` removed that block deliberately (Wael's decision — a radio
+  or another person in the room would otherwise silence her) and holds the remainder of the answer
+  for resume. Mobile is a third design again: `hooks/useOrchestrator.ts:5068` `stopSpeaking()`
+  terminates and discards, with no resume — closer to production voice than to staging voice.
+
+  **The trade is real and has been ruled on:** an open mechanism always works but is triggered by
+  noise; a closed vocabulary ignores noise but fails entirely when Deepgram mishears the word — and
+  `pauseCommand.js` documents against itself that "naavi stop" arrives as "stop by actions penny
+  threads" on 8 kHz mulaw. Wael's ruling (2026-08-21) is that this belongs to the **production
+  promotion decision**, not to the hardening work that recorded it. Until that decision, production
+  keeps barge-in and staging keeps the vocabulary.
 
 **Voice server currently also contains (drift from the ideal):**
 - Its own alert-creation classifier and reasoning loop, its own turn-state tracking, its own direct Gmail/Calendar API calls, its own direct database inserts for reminders and rules — none of which route through the mobile backend's equivalent logic. This is the single biggest gap between "what an entry point should do" and "what voice actually does."
