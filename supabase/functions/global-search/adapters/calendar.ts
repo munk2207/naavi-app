@@ -110,6 +110,7 @@ type GoogleEvent = {
   end?:   { dateTime?: string; date?: string };
   htmlLink?: string;
   organizer?: { email?: string; displayName?: string };
+  recurringEventId?: string; // B10r (Addendum 2) — present only on expanded instances of a recurring event
 };
 
 async function getAccessToken(refreshToken: string): Promise<string | null> {
@@ -279,11 +280,21 @@ export const calendarAdapter: SearchAdapter = {
 
       const startISO = e.start?.dateTime ?? e.start?.date ?? undefined;
       const endISO   = e.end?.dateTime   ?? e.end?.date   ?? undefined;
+      // B10r (Addendum 2) — a recurring "X's Birthday"/"X's Anniversary"
+      // instance's date is only ever the NEXT OCCURRENCE within the search
+      // window, never the person's real birth/anniversary year (Google's
+      // singleEvents expansion has no access to an origin year for these).
+      // Never assert that computed year as a fact (CLAUDE.md Rule 18) —
+      // Contacts (contacts.ts) is the real source for the year. Gated on
+      // recurringEventId (present only on recurring instances) AND the
+      // title, so a genuine one-time birthday-titled event keeps its year.
+      const isRecurringBirthdayOrAnniversary =
+        !!e.recurringEventId && /\b(birthday|anniversary|bday)\b/i.test(e.summary ?? '');
       const dateStr = startISO
         ? new Date(startISO).toLocaleDateString('en-US', {
             month: 'short',
             day:   'numeric',
-            year:  'numeric',
+            ...(isRecurringBirthdayOrAnniversary ? {} : { year: 'numeric' as const }),
           })
         : '';
       const snippetParts = [
