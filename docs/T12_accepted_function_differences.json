@@ -1,0 +1,5 @@
+{
+  "note": "Deliberate differences between the two Supabase projects, across the voice boundary. Every entry needs a written reason. The check fails on anything NOT listed here. Regenerate with: npm run parity:verify -- --write-baseline",
+  "captured": "2026-08-21, 4:44:16 p.m. EST",
+  "accepted": {}
+}
