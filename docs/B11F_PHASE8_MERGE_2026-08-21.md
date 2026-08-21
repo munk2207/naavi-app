@@ -59,6 +59,18 @@ invalidated.**
 
 ---
 
+## 2.3 Wael's Phase 8 decision, recorded verbatim
+
+**"APPROVED. … this approves staging closure only. It does NOT authorize production promotion.
+B11f governance cycle complete."** (2026-08-21)
+
+Recorded as an **explicit non-authorization**, not merely as the absence of an approval. The
+distinction matters: a future session reading "Phases 0-8 complete" without this line could
+reasonably infer that promotion was the natural next step and needed only a deploy. It is not, and
+it does not.
+
+---
+
 ## 3. What this merge does NOT authorise
 
 **B11f remains held from production, and this phase does not change that.**
