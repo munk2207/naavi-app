@@ -132,21 +132,36 @@ verified in both directions.
 Phase 7 states plainly that passing automated tests alone is not sufficient, and lists voice,
 notifications and end-to-end integrations as requiring manual validation.
 
-**Done, by Wael:**
+**Completed 2026-08-20 evening. Eight of nine.**
 
-- **Pause and resume on a live staging call** — confirmed working. This is the only user-facing
-  behaviour changed in this session and it was validated by a person on a phone, not by a test.
+| What | Result | By |
+|---|---|---|
+| **Pause and resume** on a live staging call | ✅ Passed | Wael, on a phone |
+| **OCR — text-layer PDF** | ✅ `$247.63`, ref `NF-2026-08842` extracted exactly | Claude, end to end |
+| **OCR — scanned image (Google Vision)** | ✅ `$38.53`, ref `BP-77401` extracted exactly; OCR sidecar written, proving Vision ran | Claude, end to end |
+| **Calendar sync** | ✅ 49 events fetched, 56 rows for the test account | Claude |
+| **Ticket pipeline** | ✅ Ticket #1075 created via `web-report`, drafted by the analysis cron within a minute, reply sent | **Wael confirmed receiving the emails** |
+| **Outbound guard on the ticket path** | ✅ Blocked case returns HTTP 403 and leaves the ticket unanswered (#1076) | Claude |
+| **Knowledge search** | ✅ Passed | Wael |
+| **"Which one did you mean?" · People · Conversation history** | ✅ Passed | Wael |
+| **Website signup (`waitlist_signups`)** | ✅ Created, and a duplicate returns `already: true` — the Pass 2b unique constraint working | Claude |
 
-**Outstanding — not yet validated by a person:**
+**⚠️ Wael's note on the three he ran (disambiguation, people, conversation history): they passed,
+and he wants them retested in future.** No specific defect was identified — recorded because a
+"passed, but look again" is a weaker result than a clean pass and should not be remembered as the
+latter.
 
-| What | Why it needs a human |
+**The remaining one:**
+
+| What | Why it is still open |
 |---|---|
-| **Push notifications on staging** | Requires a new staging APK. The new key only takes effect in a build; the current APK still carries production's |
-| **OCR / document extraction on staging** | Vision key now present, never exercised |
-| **Inbound email on staging** | Postmark token now present, never exercised |
-| **Calendar sync on staging** | `sync-calendar-every-6h` now runs; `calendar_events` should populate within six hours. Nobody has looked |
-| **Knowledge search on staging** | Verified by direct SQL call, not through the app |
-| **The four restored code paths** | Contacts, conversation history, disambiguation and website signup all have their tables now; none exercised through the product |
+| **Push notifications on staging** | Requires a new staging APK, which needs Wael's authorisation. The new key only takes effect in a build; the current APK still carries production's |
+
+**Two side effects of testing, worth knowing:** the OCR test classified a pharmacy receipt as
+`invoice` because the email body I sent described an invoice and the classify-once rule then
+prevented correction — my test data caused it, but it demonstrates that **when the email text
+disagrees with the attachment, the email wins and the decision is permanent.** And tickets #1075
+and #1076 remain in the staging queue; nothing was deleted.
 
 **⚠️ One behaviour change to watch for:** the three `NOT VALID` constraints mean anything writing
 `source='conversation'` is now refused on staging, exactly as production would refuse it. If that
