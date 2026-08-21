@@ -84,8 +84,26 @@ const EXTENSION_FN = /^(vector|halfvec|sparsevec|ivfflat|hnsw|l1_distance|l2_|ha
 
 const PROJECT_REFS = /hhgyppbxgmjrwdpdubcx|xugvnfudofuskxoknhve/g;
 
+/**
+ * JSON.stringify preserves key insertion order, so two objects with identical
+ * content serialise differently if their keys were written in a different
+ * order — and this comparison is string-based. Sorting keys removes a whole
+ * class of false difference that has nothing to do with either database.
+ *
+ * Added 2026-08-20 after three cron jobs reported as drift because a snapshot
+ * was written {active, schedule, command} while the fingerprint query emits
+ * {schedule, active, command}. Same crons, same schedules, same commands.
+ */
+function stableStringify(v) {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  return '{' + Object.keys(v).sort()
+    .map((k) => JSON.stringify(k) + ':' + stableStringify(v[k]))
+    .join(',') + '}';
+}
+
 function normalise(v) {
-  return JSON.stringify(v)
+  return stableStringify(v)
     .replace(PROJECT_REFS, 'PROJECT_REF')
     // Both key formats collapse to ONE placeholder. A service-role key differs
     // between environments by design, and the FORMAT differs too: Supabase
