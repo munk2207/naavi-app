@@ -1,0 +1,11 @@
+{
+  "note": "Known schema/code mismatches. Each is a REAL defect, not a dismissal — the gate fails on NEW ones so it is not permanently red from day one. Written by scripts/schema-code-check.js --write-baseline.",
+  "written": "2026-08-21, 7:37:46 a.m. EST",
+  "known": [
+    "pending_actions.expires_at@supabase/functions/naavi-chat/index.ts:4566",
+    "sent_messages.recipient@supabase/functions/analyze-ticket/index.ts:134",
+    "sent_messages.status@supabase/functions/analyze-ticket/index.ts:134",
+    "user_settings.azure_voice_profile_id@naavi-voice-server/src/index.js:5527",
+    "user_tokens.email@supabase/functions/check-ticket-replies/index.ts:82"
+  ]
+}

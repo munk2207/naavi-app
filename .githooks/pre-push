@@ -34,4 +34,30 @@ if ! npm run --silent drift:check; then
   exit 1
 fi
 
+echo "[pre-push] checking code against the database schema..."
+
+# Does deployed code reference columns that do not exist? The drift check above
+# compares the two DATABASES to each other; nothing compared either database to
+# the CODE. On 2026-08-21 a manual sweep for exactly that found three live
+# defects in one sitting — one already losing memory corrections for eight days,
+# one reachable by a spoken sentence, one armed to stop every alert on the next
+# deploy. All three had sat in the same list looking unremarkable.
+#
+# PostgREST fails the WHOLE statement when one column is missing, and most call
+# sites read that as 'no data' rather than as an error, so the failure is total
+# AND silent. That is the worst combination to leave uncovered.
+#
+# Fails on NEW findings only. The inherited backlog is recorded in
+# docs/schema_code_known_findings.json — real defects, not dismissals.
+if ! npm run --silent schema:check; then
+  echo ""
+  echo "[pre-push] PUSH REFUSED — code references a column that does not exist."
+  echo ""
+  echo "  This fails silently at runtime, not loudly. Fix it, or if the"
+  echo "  reference is deliberate and understood, record it:"
+  echo "    node scripts/schema-code-check.js --write-baseline"
+  echo ""
+  exit 1
+fi
+
 exit 0
