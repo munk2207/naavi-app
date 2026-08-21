@@ -1,6 +1,6 @@
 {
   "note": "Differences known and accepted as of the capture below. The check fails on anything NEW. Regenerate with: npm run drift:check -- --write-baseline",
-  "captured": "2026-08-20, 8:33:41 p.m. EST",
+  "captured": "2026-08-21, 4:47:55 a.m. EST",
   "accepted": {
     "columns": {
       "missing": [],
@@ -12,25 +12,10 @@
         "email_alert_log.user_id",
         "knowledge_fragments.updated_at",
         "user_settings.azure_voice_offered_at",
-        "user_settings.azure_voice_profile_id",
-        "user_settings.twilio_from_number",
-        "user_settings.voice_pin_failed_at",
-        "user_settings.voice_pin_failed_count",
-        "user_settings.voice_unregistered_blocked"
+        "user_settings.azure_voice_profile_id"
       ],
       "differing": [
-        "calendar_events.is_priority",
-        "calendar_events.updated_at",
-        "contacts.created_at",
-        "gmail_messages.is_important",
-        "gmail_messages.is_tier1",
-        "gmail_messages.is_unread",
-        "gmail_messages.updated_at",
-        "knowledge_fragments.created_at",
-        "knowledge_fragments.is_priority",
-        "naavi_notes.created_at",
-        "push_subscriptions.created_at",
-        "user_tokens.updated_at"
+        "gmail_messages.is_unread"
       ]
     },
     "constraints": {
@@ -79,8 +64,7 @@
     "functions": {
       "missing": [],
       "extra": [
-        "check_phone_numbers_unique()",
-        "record_voice_pin_failure(p_user_id uuid, p_window interval)"
+        "check_phone_numbers_unique()"
       ],
       "differing": [
         "search_knowledge_fragments(query_embedding vector, match_count integer, p_user_id uuid)"
