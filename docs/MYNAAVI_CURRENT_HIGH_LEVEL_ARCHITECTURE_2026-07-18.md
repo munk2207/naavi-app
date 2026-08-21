@@ -1,6 +1,8 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.07.18.6 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+**Architecture Version:** 2026.07.18.7 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+
+**Revision 7 (2026-08-20, the S1 promotion):** adds **§0d** — a feature is not one deployable thing. Records the four surfaces S1 needed, why their ordering is load-bearing, and the blind spot that nearly cost the promotion: because §2c moved voice-PIN logic into Shared Core, the voice server contains none of S1's identifiers on *either* branch, so the obvious check answers correctly and tells you nothing. Production had been serving Edge Functions three months stale, invisible to every comparison this project owns. Also records that a deploy can be complete while the feature stays dormant behind an undeployable client half, and that a push is not a deployment. Bumped in the same commit as the edit.
 
 **Revision 6 (2026-08-20, T4):** adds §0c — the two Supabase environments are not equal, why they never were, the three categories of difference and why they must not be collapsed, and the drift check that now measures them. Bumped in the same commit as the edit, which is what revision 5's own note asked of whoever came next.
 
@@ -173,6 +175,67 @@ automatically a defect on the staging side.**
 
 Full record: `docs/T4_PHASE_5_EVIDENCE_ALL_PASSES_2026-08-20.md`.
 
+### 0d. A feature is not one deployable thing (added by the S1 promotion, 2026-08-20)
+
+§0b maps the environments and §0c maps how their databases differ. This section records what the
+first real promotion between them proved: **"promote S1 to production" was not one action, and
+nothing in the system knew that.**
+
+**S1 needed four surfaces, each deployed independently, three of them per-environment:**
+
+| Surface | Deployed how | What was actually there before |
+|---|---|---|
+| Supabase schema | migration, per project | absent — production had neither S1 migration |
+| Edge Functions | `functions deploy`, per project | `manage-voice-pin` v19 from **14 May**, `receive-sms-reply` v11 from **19 June** |
+| Voice server code | git push → Railway, per branch | `main` had no S1 |
+| Mobile client | Play Store AAB | pre-S1, and **the only surface that cannot be deployed on demand** |
+
+**The ordering is load-bearing, not stylistic.** Schema before functions before code. Reversed, the
+code arrives and reads columns that do not exist, and PostgREST fails the *whole* query when any
+selected column is missing — so the failure is total and silent. That is the B11c mechanism, which
+had already cost this project a 30-second uninterruptible greeting on every staging call.
+
+**The blind spot, which is the part worth carrying forward.** §2c records that S1 moved voice-PIN
+security state *out of* the voice server and into Shared Core. The consequence was not recorded and
+nearly cost the promotion: **grepping the voice server for S1's identifiers returns nothing — on
+either branch.** `record_voice_pin_failure` and `voice_pin_failed_count` appear in
+`manage-voice-pin`, not in `src/index.js`. So "is S1 in the voice code?" is the wrong question, and
+answering it correctly ("no, on both branches, identically") looks reassuring while being
+irrelevant. The two stale Edge Functions were found by reading a call log, not by any check.
+
+**Nothing enforces that these surfaces move together, and the gaps are asymmetric:**
+
+- The drift check (§0c) compares **schema**. It is the only mechanical parity gate that exists.
+- **Nothing compares deployed Edge Function code between projects.** T4 recorded this as a known
+  weakness; this is the first time it bit. Three months of staleness was invisible to every
+  comparison the project owns.
+- **Nothing catches "edited in the repo, never deployed."** The prompt is the sharpest case: it
+  lives in `get-naavi-prompt`, a **per-environment Edge Function**, so CLAUDE.md's "shared source of
+  truth" means shared *in the repo*, not in deployment. Production's copy was five days older than
+  S1, and Naavi consequently read callers a four-digit PIN instruction that `manage-voice-pin` was
+  guaranteed to refuse ([[B11h]]). Found by Wael on a live call; 102 tests and two external reviews
+  had passed over it, because every check asked what the feature *does* and none asked what Naavi
+  *says* about it.
+
+**A deploy can be complete and the feature still dormant — by construction, not by fault.** S1 is
+live on production and refuses every unregistered caller, because the path requires an account with
+a PIN, setting a PIN requires the mobile client, and the shipped client sends four digits where the
+new function requires six. **Server-side promotion is not user-visible capability whenever a client
+half exists**, and the client is the one surface gated behind the three test gates and a store
+review. Plan the dormancy window deliberately; it is not a bug to be fixed at deploy time.
+
+**Operationally: "pushed" and "deployed" are separate facts.** Twice on 2026-08-20 a push reached
+GitHub and **no Railway build started** — once on staging, once on production. `railway redeploy
+--from-source` was required both times. Never infer a deployment from a successful push; check for
+a build, and prefer a log line from the running process over any version string in the code (both
+the voice server's `/` route and its per-turn `commit=` marker are hardcoded literals from April
+and report the same value no matter what is running — each briefly looked like evidence and was
+not).
+
+**And every voice production deploy is simultaneously a demo release**, because 1-888-91-NAAVI runs
+on the production voice server itself (§0b). That is [[T3]]'s subject; noted here because it is a
+property of *promoting*, not only of hosting.
+
 ## 1. Architecture Principles
 
 The architecture follows these principles. They are the lens every future decision should be evaluated through:
@@ -268,6 +331,14 @@ This is the capability most likely to surprise you, and the one that produced th
 **Extended rather than added.** `manage-voice-pin` already existed in Shared Core and already owned the PIN, so it gained `record_failure` / `clear_failures` / `set_blocked` instead of a fifth function being created (AI Coding Discipline #19, refactor over layer).
 
 **Reachability.** `record_voice_pin_failure()` is revoked from `PUBLIC`, `anon` and `authenticated`, and granted only to `service_role`. Postgres makes functions executable by everyone by default; without the revoke, any signed-in client could inflate another user's failure count and trigger alerts on their account.
+
+**⭐ Consequence for deployment, learned the hard way on 2026-08-20 — see §0d.** Because this state
+lives in Shared Core, **the voice server contains none of these identifiers on either branch.**
+Searching `src/index.js` for `record_voice_pin_failure` or `voice_pin_failed_count` returns nothing
+on `staging` and nothing on `main` — identically, and reassuringly, and uselessly. Promoting the
+voice code therefore does **not** promote this capability; `manage-voice-pin` and
+`receive-sms-reply` must be deployed to the target project separately, and production was running
+both three months stale when S1 was promoted.
 
 ## 3. Entry Point Responsibilities
 
