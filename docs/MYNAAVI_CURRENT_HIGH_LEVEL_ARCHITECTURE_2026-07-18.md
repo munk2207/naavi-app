@@ -224,13 +224,24 @@ new function requires six. **Server-side promotion is not user-visible capabilit
 half exists**, and the client is the one surface gated behind the three test gates and a store
 review. Plan the dormancy window deliberately; it is not a bug to be fixed at deploy time.
 
-**Operationally: "pushed" and "deployed" are separate facts.** Twice on 2026-08-20 a push reached
-GitHub and **no Railway build started** — once on staging, once on production. `railway redeploy
---from-source` was required both times. Never infer a deployment from a successful push; check for
-a build, and prefer a log line from the running process over any version string in the code (both
-the voice server's `/` route and its per-turn `commit=` marker are hardcoded literals from April
-and report the same value no matter what is running — each briefly looked like evidence and was
-not).
+**Operationally: verify a deployment from the running process, not from the push and not from the
+code.** Both the voice server's `/` route and its per-turn `commit=` marker are hardcoded literals
+from April and report the same value no matter what is running — each briefly looked like evidence
+on 2026-08-20 and was not. **A log line from the started container is the only reliable signal.**
+
+**⭐ Corrected 2026-08-21 — the original version of this paragraph claimed Railway "does not
+reliably auto-deploy on push", and that claim was itself an artifact of checking too early.** On
+2026-08-21 a push to `staging` was followed within seconds by `railway logs -b --since 4m`, which
+returned nothing; a `redeploy --from-source` was fired, and the Railway dashboard then showed the
+**GitHub auto-deploy had started on its own** and was merely superseded by the manual one. A
+Railway build takes appreciably longer to appear than a push takes to complete. **Wait and re-check
+before concluding a deploy did not happen** — the earlier production observation (no build logs
+across a 24-hour window) is a different and stronger measurement, and is not retracted, but the
+general "Railway is unreliable" reading was wrong and would have led future sessions to fire
+redundant redeploys.
+
+The narrower lesson survives: **do not infer a deployment from a successful push.** Confirm it —
+just allow the build time to start before deciding it never will.
 
 **And every voice production deploy is simultaneously a demo release**, because 1-888-91-NAAVI runs
 on the production voice server itself (§0b). That is [[T3]]'s subject; noted here because it is a
