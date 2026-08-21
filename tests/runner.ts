@@ -43,6 +43,7 @@ import { t2OutboundGuardTests } from './catalogue/t2-outbound-guard';
 import { t2VoiceEnvTests } from './catalogue/t2-voice-env';
 import { s1VoicePinScopingTests } from './catalogue/s1-voice-pin-scoping';
 import { pushVapidPerEnvironmentTests } from './catalogue/push-vapid-per-environment';
+import { s1PromptSixDigitsTests } from './catalogue/session-2026-08-20-s1-prompt-six-digits';
 import { ticketPipelineOutboundGuardTests } from './catalogue/ticket-pipeline-outbound-guard';
 import { dataIntegrityTests } from './catalogue/data-integrity';
 import { searchNormalizationTests } from './catalogue/search-normalization';
@@ -198,6 +199,7 @@ const ALL_TESTS: TestCase[] = [
   ...t2VoiceEnvTests,
   ...s1VoicePinScopingTests,
   ...pushVapidPerEnvironmentTests,
+  ...s1PromptSixDigitsTests,
   ...ticketPipelineOutboundGuardTests,
   ...dataIntegrityTests,
   ...searchNormalizationTests,

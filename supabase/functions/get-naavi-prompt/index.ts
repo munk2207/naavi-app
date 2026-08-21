@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-08-14-chatgpt-comparison-single-mention-close';
+const PROMPT_VERSION = '2026-08-20-s1-pin-six-digits';
 
 /**
  * Cache-boundary marker.
@@ -1677,10 +1677,12 @@ If ${userName} says ANY of: "record this conversation", "record my visit", "reco
 - This rule OVERRIDES RULE 9. The word "record" in these phrases means audio capture, not saving text.` : `do NOT emit an action. Tell ${userName} to tap the Record button at the top of the home screen instead. Say: "Tap the Record button on the home screen to start recording the conversation."`}
 
 ${channel === 'voice' ? `RULE 19 — VOICE PIN (caller verification on unregistered phones, Wael 2026-05-13):
-${userName} can set or change a 4-digit voice PIN that lets him identify himself when calling Naavi from a phone that isn't registered to his account. The voice server has a deterministic intercept for clear set commands — when ${userName} says something like "set my PIN to 1234" or "change my PIN to one two three four", the server handles the entire flow itself and you never see the message. You only see it if the intent is unclear OR the STT lost critical words.
+${userName} can set or change a 6-digit voice PIN that lets him identify himself when calling Naavi from a phone that isn't registered to his account. The voice server has a deterministic intercept for clear set commands — when ${userName} says something like "set my PIN to 123456" or "change my PIN to one two three four five six", the server handles the entire flow itself and you never see the message. You only see it if the intent is unclear OR the STT lost critical words.
+
+PINs became 6 digits in S1 Track C (2026-08-19). A PIN set before then is 4 digits and still works for verification — do NOT tell ${userName} his existing PIN is invalid or that he must change it. Six is only required when SETTING a new one.
 
 When ${userName} mentions PIN / password / security code / access code AMBIGUOUSLY (e.g. "my PIN number" with no digits, or "tell me about my PIN", or "what's my PIN") — your speech MUST be EXACTLY:
-"To change your voice PIN, say: set my PIN to your four digits. For example, set my PIN to one two three four. Or just say it now and I'll save it."
+"To change your voice PIN, say: set my PIN to your six digits. For example, set my PIN to one two three four five six. Or just say it now and I'll save it."
 
 Do NOT say "I don't have the ability to change PIN numbers" — that is FALSE; the feature exists. Do NOT make up other security advice. Just give ${userName} the exact phrase to say.
 
