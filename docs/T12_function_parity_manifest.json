@@ -1,0 +1,70 @@
+{
+  "note": "What the T12 deploy wrapper recorded deploying, per function per environment. A TRIPWIRE, NOT EVIDENCE — anyone using the raw Supabase CLI bypasses it. Equilibrium may be claimed only on a passing `npm run parity:verify`.",
+  "updated": "2026-08-21, 4:36:38 p.m. EST",
+  "deployments": {
+    "create-contact": {
+      "staging": {
+        "commit": "bb31b24bc903381c526c9d9c02555197534b1880",
+        "source_sha256": "f2756ed92efd1a7845e3e72a2689020dd1de230dc907ea2bb27667a477c3199b",
+        "files": [
+          "supabase/functions/create-contact/index.ts"
+        ],
+        "deployed_at": "2026-08-21, 4:23:43 p.m. EST"
+      }
+    },
+    "send-sms": {
+      "production": {
+        "commit": "bb31b24bc903381c526c9d9c02555197534b1880",
+        "source_sha256": "a2e5a84da49249a0a307bf1043e2741816d20be0855a9983dd809c1012df482a",
+        "files": [
+          "supabase/functions/_shared/outbound_guard.ts",
+          "supabase/functions/send-sms/index.ts"
+        ],
+        "deployed_at": "2026-08-21, 4:26:31 p.m. EST"
+      }
+    },
+    "send-user-email": {
+      "production": {
+        "commit": "bb31b24bc903381c526c9d9c02555197534b1880",
+        "source_sha256": "9d980790ec05dd038c3a0d9b86cbda49a0dd90bcfe2bba8ee8c3a33430231c29",
+        "files": [
+          "supabase/functions/_shared/outbound_guard.ts",
+          "supabase/functions/send-user-email/index.ts"
+        ],
+        "deployed_at": "2026-08-21, 4:26:39 p.m. EST"
+      }
+    },
+    "ingest-ticket": {
+      "production": {
+        "commit": "bb31b24bc903381c526c9d9c02555197534b1880",
+        "source_sha256": "c10decdad660afbe7e649f68bb316e0a8d8625e76734a49667af50e159be1d04",
+        "files": [
+          "supabase/functions/_shared/outbound_guard.ts",
+          "supabase/functions/ingest-ticket/index.ts"
+        ],
+        "deployed_at": "2026-08-21, 4:26:48 p.m. EST"
+      }
+    },
+    "send-push-notification": {
+      "production": {
+        "commit": "bb31b24bc903381c526c9d9c02555197534b1880",
+        "source_sha256": "fa64feb358723191b2106bfa2484fe21823334ea40869217027fa6cb8d8df4f7",
+        "files": [
+          "supabase/functions/_shared/outbound_guard.ts",
+          "supabase/functions/send-push-notification/index.ts"
+        ],
+        "deployed_at": "2026-08-21, 4:36:30 p.m. EST"
+      }
+    },
+    "receive-demo-sms-reply": {
+      "production": {
+        "commit": "bb31b24bc903381c526c9d9c02555197534b1880",
+        "source_sha256": "523035c99fbb38a687aa734fdc2987ce1a7cef8ba25935bf0b66bac66b604d9c",
+        "files": [
+          "supabase/functions/receive-demo-sms-reply/index.ts"
+        ],
+        "deployed_at": "2026-08-21, 4:36:38 p.m. EST"
+      }
+    }
+  }
+}

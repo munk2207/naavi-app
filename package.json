@@ -14,7 +14,10 @@
     "seed:test-user": "node scripts/seed-test-user.js",
     "drift:check": "node scripts/t4-drift-check.js",
     "test:auto:nodrift": "tsx tests/runner.ts",
-    "schema:check": "node scripts/schema-code-check.js"
+    "schema:check": "node scripts/schema-code-check.js",
+    "parity:check": "node scripts/edge-function-parity-check.js",
+    "parity:verify": "node scripts/edge-function-parity-check.js --verify",
+    "deploy:fn": "node scripts/deploy-edge-function.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",

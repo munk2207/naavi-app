@@ -45,6 +45,7 @@ import { s1VoicePinScopingTests } from './catalogue/s1-voice-pin-scoping';
 import { pushVapidPerEnvironmentTests } from './catalogue/push-vapid-per-environment';
 import { s1PromptSixDigitsTests } from './catalogue/session-2026-08-20-s1-prompt-six-digits';
 import { b11fResumePointWiringTests } from './catalogue/b11f-resume-point-wiring';
+import { t12EdgeFunctionParityTests } from './catalogue/t12-edge-function-parity';
 import { schemaCodeGateTests } from './catalogue/schema-code-gate';
 import { ticketPipelineOutboundGuardTests } from './catalogue/ticket-pipeline-outbound-guard';
 import { dataIntegrityTests } from './catalogue/data-integrity';
@@ -203,6 +204,7 @@ const ALL_TESTS: TestCase[] = [
   ...pushVapidPerEnvironmentTests,
   ...s1PromptSixDigitsTests,
   ...b11fResumePointWiringTests,
+  ...t12EdgeFunctionParityTests,
   ...schemaCodeGateTests,
   ...ticketPipelineOutboundGuardTests,
   ...dataIntegrityTests,

@@ -60,4 +60,38 @@ if ! npm run --silent schema:check; then
   exit 1
 fi
 
+echo "[pre-push] checking voice Edge Function parity..."
+
+# T12. The two gates above compare the two DATABASES to each other, and the
+# code to the database. Neither compares the deployed EDGE FUNCTIONS between
+# the two Supabase projects — the Architecture Reference recorded that as a
+# known weakness (0c, 0d) and it went unaddressed for three months.
+#
+# It matters because the Edge Functions live in THIS repo while the voice
+# server lives in another one. Promoting voice merges staging -> main over
+# there and moves none of them, so every voice promotion has delivered half a
+# change and left the rest behind.
+#
+# This is the fast tripwire. It reads the manifest the deploy wrapper writes,
+# so it costs seconds and can run on every push — but anyone using the raw
+# Supabase CLI bypasses it. It CANNOT demonstrate equilibrium and must never
+# be cited as having done so. Only `npm run parity:verify`, which downloads
+# and diffs the real deployed source from both projects, can:
+#
+#     npm run parity:verify
+#
+# It also asserts OUTBOUND_ALLOWLIST is unset on production. Once the outbound
+# guard is deployed to both projects, that secret's absence is the ONLY thing
+# keeping production sends unfiltered. Set it there by accident and alerts stop
+# arriving silently.
+if ! npm run --silent parity:check; then
+  echo ""
+  echo "[pre-push] PUSH REFUSED — voice Edge Function parity."
+  echo ""
+  echo "  If the difference is deliberate, record it WITH A REASON:"
+  echo "    npm run parity:verify -- --write-baseline"
+  echo ""
+  exit 1
+fi
+
 exit 0
