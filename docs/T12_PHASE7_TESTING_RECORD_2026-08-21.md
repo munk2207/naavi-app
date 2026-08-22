@@ -2,10 +2,10 @@
 
 **Work item:** [[T12]] — Voice environment equilibrium
 **Date:** 2026-08-21
-**Status:** **3 of 5 live checks done, 2 remaining.** Automated half green. **Check 2 — the one the
-equilibrium test hinged on — PASSED** on the criterion committed before the promotion existed.
-Remaining: check 3 (needs a throwaway phone number) and check 5 (mobile regression). Phase 6's
-approval was explicitly conditional on Phase 7 completing.
+**Status:** **4 of 5 live checks done. One remaining: check 3**, which needs a throwaway phone
+number and nothing else. Automated half green. **Check 2 — the one the equilibrium test hinged on —
+PASSED** on the criterion committed before the promotion existed. Phase 6's approval was explicitly
+conditional on Phase 7 completing.
 
 ---
 
@@ -93,7 +93,7 @@ real send completes, and Phase 6 approved on that condition.
 | 2 | **Production call → add a contact** | the promoted B11j fix; step 6 of the equilibrium test | **✅ PASSED** — see §2a |
 | 3 | **Demo line "stop"** (1-888-916-2284) | D4 — `receive-demo-sms-reply`, which was a 404 on production | **NOT RUN** — needs a throwaway number, see below |
 | 4 | **A push notification** | D3's added `user_settings` read did not break delivery | **✅ PASSED** — see §2b |
-| 5 | **Mobile regression pass** | mobile calls three functions redeployed today | **NOT RUN** |
+| 5 | **Mobile regression pass** | mobile calls three functions redeployed today | **✅ PASSED** — see §2d |
 
 ### 2a. Check 2 — PASSED, on the criterion recorded before the promotion existed
 
@@ -169,6 +169,59 @@ have produced `sent: 0` and looked like a D3 regression when it was not.
 **Noted, not acted on:** production holds **148** `push_subscriptions` rows, the large majority
 belonging to two accounts and clustered in late June. That is [[B11i]]'s dead-token accumulation
 half, already tracked.
+
+### 2d. Check 5 — PASSED, and it found a defect on the way
+
+**Scope, from Phase 2's regression matrix:** *"Mobile — YES, as a regression surface only, not a
+target. Mobile calls `send-sms`, `send-push-notification` and `ingest-ticket`."* Not a mobile parity
+investigation — a blast-radius check on functions T12 redeployed.
+
+**Result.** Wael sent a text from the production app to his own number. Recorded on production at
+2026-08-21, 11:53:18 p.m. EST:
+
+```
+channel   "sms"
+to_phone  "+16137697957"
+body      "Hello"
+user_id   "788fe85c-…"
+source    null
+```
+
+**`source: null` is the field that makes this the mobile path.** Every other recent row carries
+`source: "alert"` — server-side firing from `evaluate-rules` / `report-location-event`. A null source
+is the client. So `send-sms` v50 was exercised from the app, end to end, and **Wael confirmed the
+text arrived on his handset.**
+
+**Coverage of the three named functions, stated honestly:**
+
+| Function | Exercised post-deploy | How |
+|---|---|---|
+| `send-sms` | ✅ from the app | this check |
+| `send-push-notification` | ✅ from the mobile path | check 4; `lib/push.ts:197` is the client call site |
+| `ingest-ticket` | ❌ **not exercised** | zero ticket rows since the 4:26:47 p.m. deploy |
+| `send-user-email` | ❌ **not exercised** | zero email rows since deploy |
+
+**Two of four are unexercised.** Both are additive-with-guard-inert like the other two, and no
+behaviour change is expected — but "expected" is not "observed", and this record should not be read
+as saying all four were regression-tested.
+
+**⭐ THE DEFECT THIS CHECK FOUND — now [[B11l]].** The first attempt used the phrasing *"text me"*.
+The mobile draft card rendered **`To: me (+1 438 765 0528)`** — not Wael's number. Wael did not press
+Send, and asked about it. Measured directly on production for his account:
+
+```
+lookup-contact name="me"  →  AbdelMegid EL Mehelmy | +1 438-765-0528 | mehelmyam@yahoo.com
+```
+
+The two letters `me` matched inside "**Me**helmy". A real person, with a real phone number, returned
+as the top hit and then **labelled "me" on the confirmation card** — so the readback asserted the
+wrong recipient rather than exposing it. The digits were the only tell. Naming himself explicitly
+(*"text Wael"*) resolved correctly to `+1 (613) 769-7957` and the send succeeded, which is the row
+above.
+
+**Consistent with the pattern this whole work item has produced:** 528 automated tests, three gates
+and two external reviews passed over it. It was caught by a person reading a card and declining to
+press a button.
 
 ### 2c. Check 3 — why it is still not run, and a correction
 
