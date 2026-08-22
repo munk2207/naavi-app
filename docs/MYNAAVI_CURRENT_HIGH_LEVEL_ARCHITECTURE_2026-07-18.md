@@ -1,6 +1,8 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.07.18.8 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+**Architecture Version:** 2026.07.18.9 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+
+**Revision 9 (2026-08-21, [[T12]] Phase 8):** the four corrections T12's Phase 6 review made a hard merge precondition under the Architecture Drift Rule (Outcome 2 — divergence from an intentional, approved change). Two are now-false claims this document made about what the project can measure (§0d and §0c both said nothing compares deployed Edge Function code between projects — `parity:verify` now does); one is a stale line reference in §0b; and one is **a false safety claim, which is the only one of the four that could have hurt somebody**: §0b's "on every send path". **Checking it rather than rewording it found two unguarded Edge Functions the review had not identified** — see §0b's Outbound containment paragraph. Bumped in the same commit as the edits.
 
 **Revision 8 (2026-08-21, [[B11f]] Phase 8):** rewrites §3's "handling barge-in/interruption" bullet, which described as one capability something that is now **two different designs, one per voice branch** — production interrupts on any speech and discards the answer; staging interrupts only on a recognised pause word and resumes from the previous sentence. Mobile is a third design again. The entry also records the trade this creates and that Wael has assigned it to the production-promotion decision. **Also corrects a lapse in revision 7's own commit discipline:** the §0d Railway paragraph was retracted earlier the same day *without* a version bump, so `2026.07.18.7` briefly identified two different documents. Assessed for [[B11f]] per Phase 1A's Version Verification requirement: that edit concerned Railway deployment behaviour, not voice architecture, and invalidated no assumption this work item relied on.
 
@@ -97,9 +99,22 @@ Three Railway services exist, not six:
 
 This is the underlying problem [[T3]] exists to fix. Until T3 lands, treat "the voice platform" and "the demo line" as **one deployable unit** in any release plan.
 
-**Outbound containment.** Because staging shares a real Twilio account and real Google credentials, an allowlist guard sits in Shared Core (`supabase/functions/_shared/outbound_guard.ts`) on every send path. It is inert unless the `OUTBOUND_ALLOWLIST` secret is present, which it is only on staging — so production is protected by construction rather than by correct configuration. A second export resolves the outbound voice caller ID the same way, so a staging call never presents as production Naavi.
+**Outbound containment.** Because staging shares a real Twilio account and real Google credentials, an allowlist guard sits in Shared Core (`supabase/functions/_shared/outbound_guard.ts`). It is inert unless the `OUTBOUND_ALLOWLIST` secret is present, which it is only on staging — so production is protected by construction rather than by correct configuration. A second export resolves the outbound voice caller ID the same way, so a staging call never presents as production Naavi.
 
-**⚠️ Invariant this environment depends on.** `DEMO_TWILIO_NUMBER` and `STAGING_DEMO_TWILIO_NUMBER` must remain unset on the `naavi-voice-staging` service. The voice server contains one direct-to-Twilio SMS path (the F2b demo recap, `naavi-voice-server/src/index.js:7224`) that the Shared Core guard cannot see; it is unreachable only because those variables are unset. Setting either makes it reachable and requires a voice-server-side guard first. See [[T3]] for the underlying problem — the demo line and the registered-user voice platform being one process.
+**⭐ Corrected 2026-08-21 ([[T12]] Phase 8) — this paragraph used to say the guard sits "on every send path", and it does not.** The claim was already contradicted two paragraphs below, where the F2b demo recap is named as a path the guard cannot see; a document that states a safety property and then names an exception to it is asserting the property, because the first sentence is the one people quote. **Measured rather than reworded**, by comparing every Edge Function that performs an outbound send against the set that imports the guard:
+
+| Path | Guard | Reachable from |
+|---|---|---|
+| `send-sms`, `send-user-email`, `send-push-notification`, `outbound-call`, `trigger-morning-call`, `evaluate-rules`, `report-location-event`, `check-reminders`, `ingest-ticket`, `send-ticket-reply` | ✅ imports it | — |
+| **`send-email`** — sends real mail via the Gmail API (`messages/send`) | ❌ **none** | mobile (`lib/gmail.ts:95`) **and voice, two call sites** (`naavi-voice-server/src/index.js:1609`, `:13708`) |
+| **`send-drive-file`** — sends a Drive file as real mail via the Gmail API | ❌ **none** | mobile (`lib/drive.ts:53`) |
+| F2b demo recap — direct to the Twilio REST API, bypassing Shared Core entirely | ❌ by construction | voice server only; contained by an unset environment variable, not by code (see below) |
+
+Neither `send-email` nor `send-drive-file` contains the strings `allowlist`, `guard`, `blocked` or `OUTBOUND` anywhere. **On staging, an email sent through either reaches the real recipient's real inbox.** Production is unaffected — the guard is inert there by design — so this is a containment gap on the rehearsal environment, not a production defect, which is precisely why it could sit unnoticed: the environment it fails on is the one nobody watches.
+
+**Scope note:** T12 Phase 6 restricted this work to recording the divergence, not repairing it, so these two functions have deliberately **not** been changed. The finding needs its own item before anything is edited.
+
+**⚠️ Invariant this environment depends on.** `DEMO_TWILIO_NUMBER` and `STAGING_DEMO_TWILIO_NUMBER` must remain unset on the `naavi-voice-staging` service. The voice server contains one direct-to-Twilio SMS path (the F2b demo recap, `naavi-voice-server/src/index.js:7637`, the only `Messages.json` call in the file) that the Shared Core guard cannot see; it is unreachable only because those variables are unset. Setting either makes it reachable and requires a voice-server-side guard first. See [[T3]] for the underlying problem — the demo line and the registered-user voice platform being one process.
 
 **Test harness.** Gate 2 (`npm run test:voice`) selects its voice server from the same environment choice that drives `SUPABASE_URL` and refuses to run if the two disagree (`tests/lib/voice_env.ts`). Before T2 it always tested production.
 
@@ -152,8 +167,21 @@ are not failures; the check is about the two environments separating *further*.
   production's SQL editor. That is deliberate — it means no production database credentials need
   to exist anywhere — and it is sound only because production changes solely by deliberate act
   under the staging-first rule. Supabase upgrading an extension underneath is the one exception.
-- It compares **schema**, not data, and not Edge Function code. A function deployed to one
-  project and not the other is invisible to it.
+- It compares **schema**, not data. It does not compare Edge Function code — **but as of
+  2026-08-21 something else does.** [[T12]] built `npm run parity:verify`, which downloads the
+  deployed source of every voice-boundary Edge Function from both projects and diffs it, and
+  `npm run parity:check`, a fast manifest-based tripwire bound to pre-push that **states in its own
+  output that it is not proof**. The drift check's blind spot here is therefore covered for the 32
+  functions on the voice boundary, and still open everywhere else. **Corrected in revision 9 — this
+  bullet previously ended "A function deployed to one project and not the other is invisible to it",
+  which stopped being true the day the parity tool shipped.**
+- **Neither tool can see code deployed to both projects and committed to neither.** They compare the
+  two projects *to each other*, so identical-and-uncommitted passes clean. This is not hypothetical:
+  T12 found staging running 37 lines of `create-contact` that existed in no commit, and then found
+  `global-search/adapters/calendar.ts` in the same state **on production, live, for real users**.
+  Both are now under version control (`8e24aae`), and `scripts/deploy-edge-function.js` refuses to
+  deploy uncommitted source — but **nothing has swept the remaining Edge Functions for existing
+  instances.**
 
 **Its own measurements have been wrong, three times, in ways worth remembering.** Function bodies
 were hashed raw, so one extra space made two identical functions look different. Cron commands
@@ -208,9 +236,20 @@ irrelevant. The two stale Edge Functions were found by reading a call log, not b
 **Nothing enforces that these surfaces move together, and the gaps are asymmetric:**
 
 - The drift check (§0c) compares **schema**. It is the only mechanical parity gate that exists.
-- **Nothing compares deployed Edge Function code between projects.** T4 recorded this as a known
-  weakness; this is the first time it bit. Three months of staleness was invisible to every
-  comparison the project owns.
+- **⭐ Something now compares deployed Edge Function code between projects — as of 2026-08-21.**
+  When this section was written it said *"Nothing compares deployed Edge Function code between
+  projects"*, and that sentence is what [[T12]] was opened to answer. `npm run parity:verify`
+  downloads deployed source from both projects and diffs it; `npm run parity:check` is a fast
+  manifest tripwire bound to pre-push. **Only `parity:verify` is entitled to claim equilibrium**, and
+  `parity:check` says so in its own output. The three months of `manage-voice-pin` staleness that
+  cost the S1 promotion would be caught today. **Coverage is the 32 functions on the voice boundary,
+  not all of them** — and the gap that remains is described in §0c: code deployed to both projects
+  and committed to neither passes both tools clean.
+- **The measurement itself was the hard part, and two obvious comparators are wrong.** `ezbr_sha256`
+  from `functions list` is **not** a source hash — it flagged 20 differences of which 15 were
+  byte-identical across production, staging and the repo. **Deploy timestamps are equally useless,
+  because code is deployed before it is committed here**, so a deploy predating a fix proves nothing.
+  Four separate claims died to these two. Diff the source or measure nothing.
 - **Nothing catches "edited in the repo, never deployed."** The prompt is the sharpest case: it
   lives in `get-naavi-prompt`, a **per-environment Edge Function**, so CLAUDE.md's "shared source of
   truth" means shared *in the repo*, not in deployment. Production's copy was five days older than
