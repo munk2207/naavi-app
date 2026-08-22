@@ -97,9 +97,39 @@ server itself, so this promotion was simultaneously a demo-line release.
 
 ## Step 6 — Wael calls production
 
-*Not yet run.* Pass condition, from the prediction recorded at step 4: **a contact appears in Google
-Contacts bearing the exact digits dictated.** Naavi's spoken response is explicitly NOT the
-criterion — step 3 established it cannot distinguish success from failure ([[B11k]]).
+**✅ RUN 2026-08-21 evening. PASSED.** Pass condition, from the prediction recorded at step 4:
+**a contact appears in Google Contacts bearing the exact digits dictated.** Naavi's spoken response
+is explicitly NOT the criterion — step 3 established it cannot distinguish success from failure
+([[B11k]]).
+
+**Result.** Wael called production from `+16137697957` and dictated *"Linda, phone 12345, email
+linda@gmail.com"*:
+
+```
+[Action] ADD_CONTACT result: { success: true, resourceName: 'people/c6500953237091116222' }
+```
+
+Verified in Google rather than in the log — `lookup-contact` re-queried live at 11:11 p.m. EST
+returned `Linda · 12345 · Linda@Gmail.com`, and **Wael then confirmed it on his own screen.**
+`people.searchContacts` covers only the user's *grouped contacts*, per Google's documentation, so the
+record sits in the ordinary contact list where a person sees it.
+
+**The prediction held. Staging predicted production, for this change, through the full loop.**
+
+**⭐ An earlier call the same evening failed, and it is NOT a failure of this test.** From
+`+13433332567`, adding *"John"*, the promoted path resolved the user correctly — the exact thing
+[[B11j]] fixed — and then died on `Token refresh failed: invalid_grant`, a Google credential 10 days
+stale on that account. Different account, different cause, downstream of everything this test
+measures. Full trace in `T12_PHASE7_TESTING_RECORD_2026-08-21.md` §2a.
+
+**And the honest note on how nearly this test lost its answer.** Wael's first report of the Linda
+call was *"nothing added"* — he was looking at Robert's contacts, while the call had come from his
+own number and the contact went to his own account. **Nothing in the log or the spoken reply names
+the destination account**, and on production both candidate accounts are named "Robert" in
+`user_settings.name`, so the greeting cannot separate them either. The test was recovered by querying
+Google directly. **A readback naming the account would have made the result self-evident** — the
+same class of gap as [[B11k]], where the spoken confirmation carries less information than the
+outcome it is describing.
 
 ---
 

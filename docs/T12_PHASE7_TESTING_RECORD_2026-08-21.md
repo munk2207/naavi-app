@@ -2,8 +2,10 @@
 
 **Work item:** [[T12]] — Voice environment equilibrium
 **Date:** 2026-08-21
-**Status:** **INCOMPLETE — automated half green, live checks not run.** Phase 7 cannot close, and
-Phase 6's approval was explicitly conditional on it.
+**Status:** **3 of 5 live checks done, 2 remaining.** Automated half green. **Check 2 — the one the
+equilibrium test hinged on — PASSED** on the criterion committed before the promotion existed.
+Remaining: check 3 (needs a throwaway phone number) and check 5 (mobile regression). Phase 6's
+approval was explicitly conditional on Phase 7 completing.
 
 ---
 
@@ -88,10 +90,103 @@ real send completes, and Phase 6 approved on that condition.
 | # | Check | Verifies | Status |
 |---|---|---|---|
 | 1 | **Voice call → SMS alert, both lines** | `send-sms` guard genuinely inert on production | **DONE** — both delivered; staging sent from its own number, the deliberate caller-ID divergence |
-| 2 | **Production call → add a contact** | the promoted B11j fix; step 6 of the equilibrium test | **NOT RUN** |
-| 3 | **Demo line "stop"** (1-888-916-2284) | D4 — `receive-demo-sms-reply`, which was a 404 on production | **NOT RUN** |
-| 4 | **A push notification** | D3's added `user_settings` read did not break delivery | **NOT RUN** |
+| 2 | **Production call → add a contact** | the promoted B11j fix; step 6 of the equilibrium test | **✅ PASSED** — see §2a |
+| 3 | **Demo line "stop"** (1-888-916-2284) | D4 — `receive-demo-sms-reply`, which was a 404 on production | **NOT RUN** — needs a throwaway number, see below |
+| 4 | **A push notification** | D3's added `user_settings` read did not break delivery | **✅ PASSED** — see §2b |
 | 5 | **Mobile regression pass** | mobile calls three functions redeployed today | **NOT RUN** |
+
+### 2a. Check 2 — PASSED, on the criterion recorded before the promotion existed
+
+**Two calls were made, and they had different outcomes for different reasons. Read both — the first
+one looks like a failure of the promotion and is not.**
+
+**Call A — FAILED, and not because of B11j.** From `+13433332567`, 2026-08-21 evening. Dictated
+*"John, phone 12345, email john@gmail.com"*, confirmed, heard **"Saved."** Nothing was created.
+The production log resolves the caller and then shows the cause:
+
+```
+[Voice] Incoming call from "+13433332567" to "+12495235394"
+[Context] User ID resolved by phone +13433332567: 7739bab9-bfb1-4553-b3f0-3ed223e9dee8
+[Action] Executing: ADD_CONTACT
+[Action] ADD_CONTACT result: { error: 'Token refresh failed: invalid_grant' }
+```
+
+**User resolution SUCCEEDED — which is precisely what B11j fixed.** The call then died on the Google
+credential for that account, whose production `user_tokens` row was last written 2026-08-11 (10 days
+old). Confirmed independently by probing `lookup-contact` for the same account. `[fetchLiveCalendarEvents]
+token refresh failed` also repeats throughout the whole call, from the same dead token.
+
+**Call B — PASSED.** From `+16137697957`, which resolves to `788fe85c…` (`wael.aggan@gmail.com`) —
+Naavi greeted him as *"Wael"*, not *"Robert"*. Dictated *"Linda, phone 12345, email linda@gmail.com"*:
+
+```
+[Claude DIAG] tool_use name=add_contact jsonStr: {"name": "Linda", "phone": "12345", "email": "Linda@Gmail.com"}
+[Action] Executing: ADD_CONTACT
+[Action] ADD_CONTACT result: { success: true, resourceName: 'people/c6500953237091116222' }
+```
+
+**Verified in Google, not just in the log.** `lookup-contact` re-queried live at 11:11 p.m. EST
+returned `Linda · 12345 · Linda@Gmail.com · people/c6500953237091116222`. Google's own docs state
+`people.searchContacts` covers *"the authenticated user's grouped contacts"* — the ordinary contact
+list, not the hidden "other contacts" bucket — so the record is where a person would see it.
+**Wael then confirmed it visually in his own Google Contacts.**
+
+**That is the pass condition from `c3d6b5e`, met exactly:** *a contact bearing the digits dictated.*
+Not what Naavi said — [[B11k]] means her wording could not settle it either way, and in Call A it
+actively misled.
+
+**⭐ Why Call B initially read as a failure, and this is worth carrying:** Wael reported
+*"nothing added"* because he was looking at Robert's contacts. The call came from **his own** number,
+so the contact went to **his own** Google account. Neither the log nor the spoken reply says which
+account it landed in. **On production both `7739bab9` and `8cd727da` are named "Robert" in
+`user_settings.name`, so the greeting cannot distinguish accounts either.** A contact-creation
+readback that named the destination account would have removed the whole ambiguity.
+
+**One defect found while running this check, now tracked as [[B4z]] (restored to the holding list,
+`33fef96`):** Call A asked *"Say yes to confirm"* and waited; Call B executed in the same turn with
+no confirmation at all. Neither behaviour is required — `add_contact` is absent from the prompt's
+RULE 23 scope AND from its exempt list, and the voice server's gate only fires at **two or more**
+state-changing actions (`src/index.js:12086`, `…length > 1`). The confirmation in Call A was Claude's
+discretion, not a guarantee.
+
+### 2b. Check 4 — PASSED
+
+Sent 2026-08-21, 11:25:34 p.m. EST, to `788fe85c…` on production:
+
+```
+HTTP 200  {"success":true,"sent":1}
+```
+
+`sent: 1` proves the function ran, resolved the user, performed **D3's added `user_settings` read**,
+found one live token and had it accepted by Firebase. It does not prove delivery to the handset —
+that last hop is only observable by the user. **Wael confirmed receipt.** D3's added read did not
+break delivery.
+
+**Prerequisite that mattered:** a push token for that account was registered at 10:44:26 p.m. EST
+the same evening. Under [[B11i]] a token only lands on app launch, so a stale-token account would
+have produced `sent: 0` and looked like a D3 regression when it was not.
+
+**Noted, not acted on:** production holds **148** `push_subscriptions` rows, the large majority
+belonging to two accounts and clustered in late June. That is [[B11i]]'s dead-token accumulation
+half, already tracked.
+
+### 2c. Check 3 — why it is still not run, and a correction
+
+The demo-line "stop" check writes a real row into `demo_optouts`
+(`receive-demo-sms-reply/index.ts:69`, `upsert({ phone }, { onConflict: 'phone' })`), and **no code
+path anywhere removes one** — there is no un-subscribe keyword and no UI. Two enforcement points then
+refuse to send to that number: `create-demo-reminder` at creation and `evaluate-rules::fireAction` at
+send time.
+
+**So running it from `+13433332567` would opt Wael's own demo number out of the demo line** — the
+number used across ten YouTube recordings. **Run it from a throwaway number instead.**
+
+**Correction, recorded because it was stated in-session:** this was first described as
+*"permanently"* opting the number out. It is permanent as far as the product is concerned, but the
+row is a single primary-keyed record and can be deleted with one service-role query. **It was also
+implied at one point that the number was already on the list. It is not.** Measured 2026-08-21:
+production `demo_optouts` holds exactly one row, `+15555550100`, a fake test number; staging holds
+none. Nobody has declined, and nothing is suppressed.
 
 **Check 3 has a real consequence to state before it is run:** it now writes a genuine `demo_optouts`
 row for the calling number, because D4 fixed the path that previously wrote nothing. Before D4 the
