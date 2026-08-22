@@ -473,8 +473,6 @@ suite never starting — when a single accepted difference was removed.
 
 **⭐ Corrected 2026-08-21 — the previous version showed "—" for production against BOTH the Robert and demo accounts, and both were wrong.** All three accounts exist in both projects. The Robert production row was created 2026-08-14; the demo production id is the same value the voice production server prints at boot as `DEMO_USER_ID`. **The lesson is the table's own: a row that says "does not exist" is a claim, and it decays exactly like any other.** Re-read it before reasoning from it.
 
-**⭐⭐ AND THE ONE THAT WILL CATCH YOU: on PRODUCTION, `+1 343 333 2567` is registered to BOTH `mynaavi2207` and `robert.esm.2207`.** Voice resolves a caller by phone with an unordered `&limit=1` (`naavi-voice-server/src/index.js:994`), so **which account answers a production call from that number is arbitrary and changes between calls** — demonstrated 2026-08-20, when two calls eleven minutes apart landed on different accounts. If a production voice test says a contact is "not found", suspect this before suspecting the feature. Tracked as [[S2]]. Morning calls were disabled on the auto-tester account 2026-08-21 so it stops phoning a real number; **no phone number was removed, and none should be** — a shared number is legitimate, and S2 is the fix.
-
 Each project has its own row for the gates account; `tests/.env` selects between them via `TEST_USER_ID` (production) and `STAGING_TEST_USER_ID` (staging).
 
 **All of these are named "Robert" in `user_settings.name`** — the persona name. The name does not distinguish them; only the user_id does.
