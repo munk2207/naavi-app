@@ -78,13 +78,28 @@ be trusted as a signal. This criterion is immune to [[B11k]].
 
 ---
 
-## Step 5 — promotion to production
+## Step 5 — promotion to production — DONE
 
-*To be filled in when performed.*
+`staging` merged to `main` in the voice server, `078284f..55ce1d3`, pushed 2026-08-21. The repo's own
+`no-undef` pre-push gate passed. **`git diff staging..main -- src/ test/` is empty** — the voice repo
+is back at equilibrium, this time on the fixed code rather than the broken code.
+
+**Deploy confirmed, and the evidence is the before/after rather than a version string.** Immediately
+after the push, production's log window contained no boot line. Forty seconds later it contained
+`Starting Container` and `[Voice] Server running on port 8080`. A container started in that interval.
+
+**What is NOT claimed:** that the logs prove it is *this* commit. Railway's output carries no commit
+marker, and this codebase's hardcoded version strings are stale literals from April that report the
+same value regardless of what is running (Architecture Reference §0d). Step 6 is what settles it.
+
+**Note recorded at promotion time:** the public demo line 1-888-916-2284 runs on the voice production
+server itself, so this promotion was simultaneously a demo-line release.
 
 ## Step 6 — Wael calls production
 
-*To be filled in with the result.*
+*Not yet run.* Pass condition, from the prediction recorded at step 4: **a contact appears in Google
+Contacts bearing the exact digits dictated.** Naavi's spoken response is explicitly NOT the
+criterion — step 3 established it cannot distinguish success from failure ([[B11k]]).
 
 ---
 
