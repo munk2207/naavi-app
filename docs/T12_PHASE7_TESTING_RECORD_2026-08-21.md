@@ -2,10 +2,17 @@
 
 **Work item:** [[T12]] — Voice environment equilibrium
 **Date:** 2026-08-21
-**Status:** **4 of 5 live checks done. One remaining: check 3**, which needs a throwaway phone
-number and nothing else. Automated half green. **Check 2 — the one the equilibrium test hinged on —
-PASSED** on the criterion committed before the promotion existed. Phase 6's approval was explicitly
-conditional on Phase 7 completing.
+**Status: PHASE 7 COMPLETE.** Automated half green (522/528 on staging). Four live checks passed;
+**check 3 closed on partial evidence by Wael's explicit Governance §3 decision, 2026-08-22** — see
+§2c. **Check 2 — the one the equilibrium test hinged on — PASSED** on the criterion committed before
+the promotion existed. Phase 6's approval was conditional on Phase 7 completing; it has.
+
+**Phase 8's own precondition is already discharged** — the four Architecture Reference corrections
+landed at version `2026.07.18.9` (`9845182`, amended `fee91c2`).
+
+**Two things this record does NOT claim, stated here so the summary is not read as broader than it
+is:** `ingest-ticket` and `send-user-email` were redeployed and **never exercised** (§2d), and the
+spoken-word half of check 3 is unproven (§2c).
 
 ---
 
@@ -91,7 +98,7 @@ real send completes, and Phase 6 approved on that condition.
 |---|---|---|---|
 | 1 | **Voice call → SMS alert, both lines** | `send-sms` guard genuinely inert on production | **DONE** — both delivered; staging sent from its own number, the deliberate caller-ID divergence |
 | 2 | **Production call → add a contact** | the promoted B11j fix; step 6 of the equilibrium test | **✅ PASSED** — see §2a |
-| 3 | **Demo line "stop"** (1-888-916-2284) | D4 — `receive-demo-sms-reply`, which was a 404 on production | **NOT RUN** — needs a throwaway number, see below |
+| 3 | **Demo line "stop"** (1-888-916-2284) | D4 — `receive-demo-sms-reply`, which was a 404 on production | **CLOSED on partial evidence — Wael's decision, 2026-08-22.** See §2c |
 | 4 | **A push notification** | D3's added `user_settings` read did not break delivery | **✅ PASSED** — see §2b |
 | 5 | **Mobile regression pass** | mobile calls three functions redeployed today | **✅ PASSED** — see §2d |
 
@@ -223,7 +230,53 @@ above.
 and two external reviews passed over it. It was caught by a person reading a card and declining to
 press a button.
 
-### 2c. Check 3 — why it is still not run, and a correction
+### 2c. Check 3 — CLOSED on partial evidence, by Wael's explicit decision
+
+**⭐ This is a Phase-Gate decision under Governance §3, which states that closing a phase on
+alternative evidence instead of a live test "is itself a phase-gate decision and needs Wael's
+explicit sign-off, not Claude's own judgment call." He gave it, 2026-08-22:** *"I do not care, if it
+is broken it is OK, if it works, let someone else stop."* **No live call was made. Do not re-raise
+this check.**
+
+**What the check exists for.** The demo line is public. A stranger calls 1-888-916-2284, Naavi texts
+them, and every one of those texts says *"Reply STOP to opt out."* Before D4, saying "stop" on the
+call POSTed to an address that did not exist — **a 404** — so the caller heard *"you won't hear from
+us again"* and **nothing was recorded anywhere.** The next demo reminder would have gone to someone
+who had just declined. D4 deployed `receive-demo-sms-reply` to production so that address exists.
+
+**Verified without a call — three of the four links, at no cost to anyone:**
+
+| Link | Status | Evidence |
+|---|---|---|
+| The endpoint exists on production | ✅ | `POST` returned **HTTP 200** and valid TwiML. The 404 is gone. Probed with `Body: 'hello'` — a non-opt-out keyword, so the function ignored it and **wrote nothing**; `demo_optouts` stayed at its 1 baseline row |
+| The voice server points at it | ✅ | `handleDemoStopRequest` builds the URL from `demoEnv.supabaseUrl` — per-environment config, not a hardcoded address — and posts to `/functions/v1/receive-demo-sms-reply` |
+| The payload shape is right | ✅ | `URLSearchParams({ From: callerPhone, Body: 'STOP', MessageSid: '' })`, exactly what that function parses from a real inbound SMS |
+| Deepgram hears the spoken word, and the write lands | ❌ **unproven** | requires a real call; not made |
+
+**The keyword set is deliberately narrower than the SMS one:** `/\b(stop|stopall|unsubscribe)\b/i`.
+The code comment gives the reason — *"cancel"/"end"/"quit" are too likely to appear in unrelated
+natural speech when spoken, unlike typed.*
+
+**⭐ One thing found while reading the path, which is NOT a reason to reopen this check but is worth
+carrying:** the opt-out write is **fire-and-forget** — `fetch(...).catch(err => console.error(...))`,
+not awaited. **So the caller hears "you won't hear from us again" regardless of whether the write
+succeeded.** That is deliberate (a transient failure must never block someone hanging up) and it is
+the right trade — but it means **the spoken sentence is never evidence that the opt-out landed.**
+Same shape as [[B11k]]: a promise dispatched before its outcome exists. If this path ever needs
+assurance, the assurance has to come from `demo_optouts`, never from the call.
+
+**Residual risk, stated plainly so the decision is legible later:** if Deepgram mishears "stop", a
+member of the public who declined keeps receiving demo texts, and the TCPA promise in those texts
+stays unmet. The three verified links mean the failure that was actually demonstrated — the 404 — is
+fixed. The unverified link is speech recognition, which is a different and pre-existing risk class
+([[B10m]], [[B4b]]).
+
+**Baseline for whoever runs this later:** production `demo_optouts` held exactly **1 row**,
+`+15555550100`, a fake test number, at 2026-08-22 12:13 a.m. EST. Anything beyond that is a real
+opt-out. **Do not run this check from `+1 343 333 2567`** — that number appears across ten YouTube
+recordings and no code path removes an opt-out row.
+
+### 2c-1. Corrections recorded from the discussion of this check
 
 The demo-line "stop" check writes a real row into `demo_optouts`
 (`receive-demo-sms-reply/index.ts:69`, `upsert({ phone }, { onConflict: 'phone' })`), and **no code
