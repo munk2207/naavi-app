@@ -371,7 +371,20 @@ function runCheck() {
     return 1;
   }
 
-  console.log(`  no recorded divergence  (${unknown} of ${slugs.length} not yet deployed through the wrapper)`);
+  const covered = slugs.length - unknown;
+  console.log(`  no recorded divergence among the ${covered} of ${slugs.length} function(s) this manifest covers.`);
+  if (unknown) {
+    // Wording matters here. This line used to read "N of M not yet deployed
+    // through the wrapper", which sounded like a backlog of pending work and
+    // was flagged as misleading in T12's own holding-list row. The manifest
+    // gains an entry only when a function is deployed through
+    // scripts/deploy-edge-function.js; a function deployed before the wrapper
+    // existed, or through the raw Supabase CLI, simply has no fingerprint here.
+    // That is not a finding about the function — it is the absence of one.
+    console.log(`  ${unknown} of ${slugs.length} have NO recorded fingerprint, so this check makes`);
+    console.log('  no claim about them in either direction. Not a backlog, not a warning:');
+    console.log('  the manifest only gains an entry on deploy through the wrapper.');
+  }
   console.log('');
   console.log('  ⚠ THIS IS NOT PROOF OF EQUILIBRIUM.');
   console.log('    It compares a manifest this repo writes, which anyone using the raw');

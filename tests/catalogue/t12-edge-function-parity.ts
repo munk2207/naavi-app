@@ -226,6 +226,44 @@ export const t12EdgeFunctionParityTests: TestCase[] = [
   },
 
   {
+    id: 't12.parity-check.uncovered-count-is-not-worded-as-a-backlog',
+    category: 'smoke',
+    description:
+      '[T12] the count of functions with no recorded fingerprint says so plainly, instead of implying they are pending deployment',
+    async run(ctx: TestContext) {
+      const src = fs.readFileSync(PARITY_SCRIPT, 'utf8');
+
+      // The original wording — "N of M not yet deployed through the wrapper" —
+      // read as a backlog of work someone still owed, when the real meaning is
+      // that the manifest holds no fingerprint for those functions and the
+      // check therefore says nothing about them at all. T12's own holding-list
+      // row carried it as an open defect. A green gate whose summary line
+      // misdescribes its own coverage is the same failure class the
+      // "NOT PROOF OF EQUILIBRIUM" disclaimer exists to prevent.
+      if (/not yet deployed through the wrapper/i.test(src)) {
+        throw new Error(
+          'parity:check has regressed to the misleading "not yet deployed through the ' +
+            'wrapper" wording. Those functions are not pending anything — the manifest ' +
+            'simply has no fingerprint for them, and the check makes no claim either way.',
+        );
+      }
+      if (!/NO recorded fingerprint/i.test(src)) {
+        throw new Error(
+          'parity:check no longer states that the uncovered functions have no recorded ' +
+            'fingerprint. The reader must be able to tell "we measured these and they ' +
+            'match" apart from "we did not measure these."',
+        );
+      }
+      if (!/no claim about them/i.test(src)) {
+        throw new Error(
+          'parity:check no longer says it makes no claim about the uncovered functions.',
+        );
+      }
+      ctx.log('uncovered-count wording states absence of measurement, not a backlog');
+    },
+  },
+
+  {
     id: 't12.parity-gate.wired-into-pre-push',
     category: 'smoke',
     description: '[T12] the parity gate is bound to pre-push, not left as a command someone must remember',
