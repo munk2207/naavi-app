@@ -22,6 +22,32 @@
 #
 # Enable once per clone:  git config core.hooksPath .githooks
 
+echo "[pre-push] checking the priority list cap..."
+
+# Wael's rule, 2026-08-22: the priority list holds at most 5 items, and adding a
+# sixth requires deprioritising one first. "This will force us in cleaning and
+# closing items."
+#
+# Why it is a gate. The list it protects replaced a priority queue that was
+# correct the day it was written and never regenerated — by the time it was
+# archived it held nine closed items and an entry for a platform that had already
+# shipped. The same session found an architecture reference four months stale, a
+# parity audit nobody updated, and a work item cited eight times in the shared
+# prompt and tracked in no list at all. Every one was knowledge recorded
+# correctly with nothing forcing it to stay true.
+#
+# It counts rows. It cannot tell whether they are the RIGHT five — that is
+# judgement, and a counter must never be mistaken for one.
+if ! node scripts/priority-cap-check.js; then
+  echo ""
+  echo "[pre-push] PUSH REFUSED — the priority list is over its cap."
+  echo ""
+  echo "  Move an item back to the general list before adding another."
+  echo "  Deciding what stops being important IS the rule, not paperwork around it."
+  echo ""
+  exit 1
+fi
+
 echo "[pre-push] checking staging/production parity..."
 
 if ! npm run --silent drift:check; then

@@ -47,6 +47,7 @@ import { s1PromptSixDigitsTests } from './catalogue/session-2026-08-20-s1-prompt
 import { b11fResumePointWiringTests } from './catalogue/b11f-resume-point-wiring';
 import { t12EdgeFunctionParityTests } from './catalogue/t12-edge-function-parity';
 import { schemaCodeGateTests } from './catalogue/schema-code-gate';
+import { priorityCapGateTests } from './catalogue/priority-cap-gate';
 import { ticketPipelineOutboundGuardTests } from './catalogue/ticket-pipeline-outbound-guard';
 import { dataIntegrityTests } from './catalogue/data-integrity';
 import { searchNormalizationTests } from './catalogue/search-normalization';
@@ -206,6 +207,7 @@ const ALL_TESTS: TestCase[] = [
   ...b11fResumePointWiringTests,
   ...t12EdgeFunctionParityTests,
   ...schemaCodeGateTests,
+  ...priorityCapGateTests,
   ...ticketPipelineOutboundGuardTests,
   ...dataIntegrityTests,
   ...searchNormalizationTests,
