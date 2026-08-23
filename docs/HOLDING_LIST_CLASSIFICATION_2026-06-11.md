@@ -59,6 +59,17 @@ item whose blast radius reaches outside the team.
 **The strongest candidate now waiting is `T11`** — anyone holding the key shipped inside the app can
 make Naavi text any number in the world. It is not on the list because the list is full.
 
+**⭐ CONSIDERED AND REJECTED 2026-08-23 — do not propose this again.** A second split was designed and
+not built: moving roughly 19 of the items below into a *"Known and accepted"* section, on the grounds
+that the general list mixes work with memory. **Wael rejected it, and the reasoning is worth keeping.**
+The cap above already solves the problem it was for — the top of this document is five items you can
+read in a minute, and everything below is therefore not the current work without needing a second
+label. The split would add a classification to maintain and a judgement to keep current, for a benefit
+already delivered. **And it carries a real risk:** anything filed as "accepted" stops being read, while
+several of those items are genuine defects that are merely unscheduled — `B10s` promises a message
+that can never be delivered, `B9x` sends you a message meant for somebody else. Calling those
+"accepted" would dress an absence of scheduling up as a decision.
+
 ---
 
 ## Classification scheme
