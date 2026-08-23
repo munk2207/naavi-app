@@ -58,13 +58,35 @@ const WIKI = /\[\[([A-Za-z][A-Za-z0-9-]*)\]\]/g;
 /** Item-ID shape: B/F/T/S/I + digits + optional letter, or the T2-F1 form. */
 const SHAPE = /^(?:[BFTSI]\d{1,2}[a-z]?|T\d+-F\d+)$/;
 
+/**
+ * A nested checkout is not this repo, and must not be scanned.
+ *
+ * Found 2026-08-23 the hard way: a full 982 MB clone of this repository
+ * appeared at `docs/Naavi/` — its own `.git`, the same remote, HEAD on a commit
+ * made thirteen minutes earlier. The gate walked into it, read the COPY of the
+ * holding list as an ordinary document rather than as a source of truth, and
+ * reported five false orphans from wiki-links inside it.
+ *
+ * The check was right to fail; it was failing on rubbish. A gate that breaks
+ * because a directory was copied somewhere is fragile, and fragile gates get
+ * switched off. Anything carrying its own `.git` is a separate repository and
+ * is skipped whole.
+ */
+function isNestedCheckout(dir) {
+  return fs.existsSync(path.join(dir, '.git'));
+}
+
 function walk(dir, out = [], depth = 0) {
   if (depth > 6 || !fs.existsSync(dir)) return out;
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     if (SKIP_DIR.test(e.name)) continue;
     const f = path.join(dir, e.name);
-    if (e.isDirectory()) walk(f, out, depth + 1);
-    else if (/\.(md|ts|js|tsx)$/.test(e.name)) out.push(f);
+    if (e.isDirectory()) {
+      if (isNestedCheckout(f)) continue;
+      walk(f, out, depth + 1);
+    } else if (/\.(md|ts|js|tsx)$/.test(e.name)) {
+      out.push(f);
+    }
   }
   return out;
 }
