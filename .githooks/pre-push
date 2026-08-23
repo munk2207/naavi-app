@@ -48,6 +48,33 @@ if ! node scripts/priority-cap-check.js; then
   exit 1
 fi
 
+echo "[pre-push] checking for items written about but not in the list..."
+
+# The priority cap above counts what IS in the table. It cannot see what is
+# MISSING from it — and on 2026-08-23 that gap surfaced four times in one
+# session. T3 was ranked Tier 1 and referenced by the Architecture Reference
+# twice while appearing in no table at all. B4z was cited EIGHT times inside the
+# shared Claude prompt as the authority for RULE 23 and tracked nowhere. S1 —
+# a P0 security item — and B10x — ranked P1 above everything else — had no row
+# in either holding-list file, before or after they closed.
+#
+# An item becomes real the moment someone writes a paragraph about it. Nothing
+# checked that a thing being written about also had an entry.
+#
+# Scanning every bare mention produced 216 false positives (closed items living
+# in the closed archive, plus partial matches). Requiring the deliberate
+# [[wiki-link]] form AND the item-ID shape took that to 2 — both real. A check
+# that cries wolf gets switched off, which is worse than no check.
+if ! node scripts/orphan-item-check.js; then
+  echo ""
+  echo "[pre-push] PUSH REFUSED — an item is written about but has no row."
+  echo ""
+  echo "  Give it a row in the holding list, or if it is deliberately untracked:"
+  echo "    node scripts/orphan-item-check.js --write-baseline"
+  echo ""
+  exit 1
+fi
+
 echo "[pre-push] checking staging/production parity..."
 
 if ! npm run --silent drift:check; then

@@ -48,6 +48,7 @@ import { b11fResumePointWiringTests } from './catalogue/b11f-resume-point-wiring
 import { t12EdgeFunctionParityTests } from './catalogue/t12-edge-function-parity';
 import { schemaCodeGateTests } from './catalogue/schema-code-gate';
 import { priorityCapGateTests } from './catalogue/priority-cap-gate';
+import { orphanItemGateTests } from './catalogue/orphan-item-gate';
 import { ticketPipelineOutboundGuardTests } from './catalogue/ticket-pipeline-outbound-guard';
 import { dataIntegrityTests } from './catalogue/data-integrity';
 import { searchNormalizationTests } from './catalogue/search-normalization';
@@ -208,6 +209,7 @@ const ALL_TESTS: TestCase[] = [
   ...t12EdgeFunctionParityTests,
   ...schemaCodeGateTests,
   ...priorityCapGateTests,
+  ...orphanItemGateTests,
   ...ticketPipelineOutboundGuardTests,
   ...dataIntegrityTests,
   ...searchNormalizationTests,
