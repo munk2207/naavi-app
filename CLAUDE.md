@@ -584,8 +584,9 @@ All open, closed, and deferred items live there. Do not maintain a duplicate lis
 
 ### BACKEND
 
-- Supabase project: `hhgyppbxgmjrwdpdubcx`
-- Deploy Edge Functions with: `--no-verify-jwt`
+- Supabase projects: **staging `xugvnfudofuskxoknhve` (the default for all dev work)** / production `hhgyppbxgmjrwdpdubcx` (read-only unless Wael says "deploy to production"). See STAGING-FIRST at the top of this file.
+- Deploy Edge Functions with: `--no-verify-jwt --project-ref xugvnfudofuskxoknhve`
+- **(Corrected 2026-08-23** — this section named only the production ref, which read as the default and contradicted staging-first.)
 - Edge Functions handle: chat, calendar, gmail, contacts, WhatsApp, drive, travel time, TTS, knowledge, push notifications
 
 ### WEBSITE
@@ -651,10 +652,15 @@ Google Sign-In requires the app to be signed with a certificate whose SHA-1 is r
 
 ### HOW THE VOICE SERVER DEPLOYS
 
+**Staging-first applies here exactly as it does to Supabase. Default branch is `staging`.**
+
 1. Edit code in `C:\Users\waela\OneDrive\Desktop\Naavi\naavi-voice-server\src\index.js`
-2. `git add -A && git commit -m "description" && git push origin main`
-3. Railway auto-deploys from GitHub
-4. Check Deploy Logs in Railway dashboard for errors
+2. `git add -A && git commit -m "description" && git push origin staging`
+3. Railway auto-deploys `staging` → service `naavi-voice-staging`
+4. **Confirm the deploy from the running container's logs** — `railway logs --service naavi-voice-staging`. Do NOT infer a deployment from a successful push. Allow the build time to start before concluding it never will; the `/` route and the per-turn `commit=` marker are hardcoded April literals and prove nothing (Architecture Reference §0d).
+5. Promote to production ONLY when Wael says so: merge `staging` → `main`, push, and Railway deploys service `naavi-voice-server`. **That same deploy also releases the 1-888-91-NAAVI demo line**, which runs on the production voice server itself (Architecture Reference §0b).
+
+**(Corrected 2026-08-23** — steps 2-4 said `git push origin main` with no staging step, which predated the 2026-08-19 staging branch and contradicted line 189 of this file.)
 
 ### WHAT THE USER CARES ABOUT
 
@@ -692,9 +698,11 @@ The Naavi Claude system prompt lives in ONE place: the `get-naavi-prompt` Edge F
 
 **When adding/editing a RULE:**
 1. Edit `supabase/functions/get-naavi-prompt/index.ts`
-2. Deploy: `npx supabase functions deploy get-naavi-prompt --no-verify-jwt --project-ref hhgyppbxgmjrwdpdubcx`
+2. Deploy to **staging**: `npx supabase functions deploy get-naavi-prompt --no-verify-jwt --project-ref xugvnfudofuskxoknhve` (production `hhgyppbxgmjrwdpdubcx` only on Wael's explicit say-so — **corrected 2026-08-23**, this step named production alone)
 3. Voice server picks it up on next call automatically
 4. Bump `PROMPT_VERSION` constant inside the function for change tracking
+
+**⚠️ "Shared source of truth" means shared in the REPO, not in deployment.** `get-naavi-prompt` is a per-environment Edge Function — editing it here changes nothing until it is deployed, and deploying it to staging leaves production on its old copy. That gap is [[B11h]]: production's prompt was five days behind S1, so Naavi read callers a four-digit PIN instruction `manage-voice-pin` was guaranteed to refuse. 102 tests and two external reviews missed it because every check asked what the feature *does* and none asked what Naavi *says* about it. Architecture Reference §0d.
 
 **Current wiring:**
 - ✅ Voice server: fetches shared prompt, falls back to local `buildVoiceSystemPrompt` on error
@@ -721,8 +729,7 @@ Do NOT reintroduce separate tables like `email_watch_rules`. Extend `action_rule
 
 Naavi never creates a location alert from a guessed address. An address must be EITHER already in memory from a prior conversation OR confirmed by the user in-conversation after readback. After 3 failed clarification attempts, Naavi says *"please check the exact location and call me back."*
 
-- Resolution flow: `resolve-place` Edge Function → personal keyword lookup (`home`/`office` → `user_settings.home_address`/`.work_address`) → `user_places` cache → Google Places API (biased by reference coords). Only caches on `save_to_cache=true` (explicit user confirmation).
-- On confirmation, save under BOTH aliases: the spoken name AND the Places-canonical name.
+- Resolution flow: `resolve-place` Edge Function → personal keyword lookup (`home`/`office` → `user_settings.home_address`/`.work_address`, geocoded fresh) → Google Places API (biased by reference coords). **No cache.** 2+ results → picker, 1 → single, 0 → not_found. The user always picks. (**Corrected 2026-08-23** — this bullet still described the `user_places` cache and `save_to_cache=true`, and a second bullet described saving both aliases into it. That table was dropped in V57.13.3; `supabase/functions/resolve-place/index.ts:4` says so in its own header. See "FOUNDATIONAL PRINCIPLE — NO CACHE, FRESH ALWAYS, USER PICKS" at the top of this file, which is the authoritative version.)
 - Mobile orchestrator intercepts `SET_ACTION_RULE` for `trigger_type='location'` and runs the flow before writing the rule.
 - OS-level geofencing via `hooks/useGeofencing.ts` + `Location.startGeofencingAsync` + `TaskManager.defineTask`.
 
