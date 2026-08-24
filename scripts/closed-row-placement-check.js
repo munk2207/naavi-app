@@ -72,14 +72,26 @@ const lines = fs.readFileSync(DOC, 'utf8').split(/\r?\n/);
 // this script about should be checked, not skipped.
 const isClosedSection = (name) => /closed|archive|superseded|deferred/i.test(name);
 
-// Phrases by which a row declares its own completion. Deliberately narrow —
-// a row DISCUSSING another item's closure ("supersedes [[X]]") must not trip
-// this, so possessive/second-person forms are excluded.
+// Phrases by which a row declares its own completion.
+//
+// ⭐ NARROWED 2026-08-23, during the first triage, rather than baselining the
+// false positives it produced. `superseded by [[...]]` was in this list and
+// matched TWO rows that are not closed at all: T7's notes say "the duplicate
+// -phone trigger's 3 are superseded by [[S2]]" — a statement about a sub-item,
+// inside a live row — and B9y's status says the root cause moved to B9z while
+// B9y itself remains a judgement call.
+//
+// A row DISCUSSING another item's closure must not trip this check. Keeping the
+// marker and adding those rows to the baseline would have been the easy fix and
+// the wrong one: the baseline is a debt list, and parking a false positive there
+// makes it permanent debt that nobody can ever clear. The script's own guidance
+// says to narrow instead, so it was narrowed.
+//
+// Every genuinely-closed row matched one of the three below anyway.
 const CLOSURE_MARKERS = [
   /\bCLOSED\s+20\d\d-\d\d-\d\d/,
   /⭐+\s*CLOSED\b/,
   /\bDONE\s+20\d\d-\d\d-\d\d/,
-  /\bsuperseded\s+by\s+\[\[/i,
 ];
 
 let section = '(before first heading)';

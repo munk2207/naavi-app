@@ -1,15 +1,5 @@
 {
-  "written": "2026-08-23, 10:53:41 p.m.",
+  "written": "2026-08-23, 10:57:34 p.m.",
   "note": "Rows in open tables that declare themselves closed. A DEBT LIST, not an exemption — triage shrinks it to zero.",
-  "ids": [
-    "B11c",
-    "B11f",
-    "B11h",
-    "B9y",
-    "T12",
-    "T4",
-    "T5",
-    "T7",
-    "T8"
-  ]
+  "ids": []
 }
