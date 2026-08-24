@@ -5,7 +5,14 @@
 **Implementation commit:** `3ef7e6a`
 **Environment:** **STAGING only** (`xugvnfudofuskxoknhve`). Production untouched.
 
-**Status:** **DRAFT — awaiting Wael's Phase 5 → Phase 6 approval.** Not promoted to production.
+**Status:** ✅ **ACCEPTED by Wael, 2026-08-24. Phase 5 → Phase 6 authorized.** Not promoted to production.
+
+**How the hold was resolved.** ChatGPT's Phase 5 review held on one blocker — the Gate 1 suite reading "PENDING". That reading came from an earlier draft; the suite had already run. **But its result did not satisfy the hold's condition either:** Gate 1 completed and is **not green**, on an error B11x did not cause and cannot fix within its boundary (§5).
+
+Wael accepted Phase 5 on the evidence as it stands — 0 failed, the error proven unrelated by deploy timestamps and reproduced 3/3 — **and opened the blocker as its own work item rather than leaving Gate 1 red with no owner:**
+
+- **[[B11z]]** — the `comparison-chatgpt-single-mention` defect. Carries the Non-Determinism Rule.
+- **[[B12a]]** — the auto-tester prints its environment and never writes it down, which is why B11z cannot be dated.
 
 ---
 
