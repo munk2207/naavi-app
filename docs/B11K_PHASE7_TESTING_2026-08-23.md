@@ -178,7 +178,7 @@ argued with by proposing a tighter test setup.
 | T1 — successful action unchanged | **✅ PASS** | Wael, live call from +1 343 333 2567, 2026-08-23. `REMEMBER` — confirmed as before, no audible change, no noticeable added pause |
 | T2 — ⭐ failing action now says so | **✅ PASS** | Same call. `DELETE_EVENT` now reports the failure instead of claiming success. **This is B11k's defect, fixed and observed.** |
 | T3 — latency on a state-changing turn | **✅ largely covered by T1** | `REMEMBER` is a background action, so T1 exercised the new awaited batch. A second instance (`SET_REMINDER`) may still be run |
-| T4 — ⭐ pause-hold path | **⬜ NOT RUN — closed unrun by Wael, 2026-08-23** | See §6.3. **Phase 6 §2's claim remains unverified by observation.** |
+| T4 — ⭐ pause-hold path | **⬜ NOT RUN — reattempted 2026-08-24, did not execute; closed again** | See §6.3 and §6.5. **Phase 6 §2's claim remains unverified by observation.** |
 | T5 — unhandled action type | **⬜ NOT RUN** | No natural trigger presented itself; covered by unit test only |
 | T6 — Gate 2 voice regression | — | required before production promotion, not before staging |
 
@@ -210,6 +210,50 @@ every ordinary request takes.
 
 **Wael's live verdict is ground truth** (CLAUDE.md lever 5). No test setup is being renegotiated
 after the result.
+
+### 6.5 T4 reattempted 2026-08-24 — it did not run, and the reason is now a defect of its own
+
+**The second attempt failed at the same step as the first, for a different reason, and the reason is
+worth more than the test was.**
+
+Wael called staging from `+1 343 333 2567` at 6:22 a.m. EST, asked Naavi to remember a parking
+number, and said *"stop"* while the tick was playing. **Deepgram transcribed it `"Stubb."`**
+
+```
++12234ms  interim  "Stubb."        ← spoken here, inbound amplitude 593
++14031ms  interim  "Stubb."
++15034ms  interim  "Stubb."
++16034ms  interim  "Stubb."
++17052ms  interim  "Stubb."
++18051ms  final    "Stubb."
+[Deferred] isProcessing=true — buffering chunk: "Stubb...."
+```
+
+`isPauseCommand('stubb')` matches nothing in `src/voice/pauseCommand.js`. **There is no `[B11f]` line
+anywhere in the call** — `holdReplyForTurn` was never set, and the early return at `src/index.js:13372`
+was never reached.
+
+**Everything else about the attempt was correct**, which is what makes the result informative rather
+than merely another miss: `isProcessing` was `true` when the word arrived, and it arrived *before* the
+reply was dispatched, so `src/index.js:10336` would have set the hold had the word matched.
+
+**⚠️ The REMEMBER row landed, and it is NOT evidence for T4.** `knowledge_fragments` gained
+*"My parking number is 5."* at 6:22:35 a.m. EST — but by the ordinary path, with
+`bg_action_count: 1` and Naavi speaking *"Got it."* normally. **That is T1 over again.** The pass
+condition stated before the call — *"a new row exists"* — was insufficient: the row lands either way,
+and only the presence of `[B11f] pause while composing` in the log separates the two. Recorded here
+because a later reader finding that row could easily mistake it for a T4 pass.
+
+**What came out of it instead — [[B11u]] and [[B11v]]**, both now open. B11u: the pause vocabulary has
+zero keyterm bias while 18 content verbs have it, and a one-word interrupt takes ~5.8 s to reach the
+matcher. B11v: the per-user name keyterms use syntax Deepgram documents as invalid, on both
+environments. Neither was found by a test; both were found by reading the log of a test that did not
+run.
+
+**T4 is closed unrun a second time.** It verifies a side effect B11k does not depend on (§6.3), and
+the cheapest honest route to it — patching the matcher to recognise *"stubb"* — changes shipped
+behaviour to make a test pass, on a single observation, and would do nothing about the latency half.
+**Wael's decision, 2026-08-24.**
 
 ### 6.4 Three defects found by testing, none of them B11k — now open as holding-list items
 
