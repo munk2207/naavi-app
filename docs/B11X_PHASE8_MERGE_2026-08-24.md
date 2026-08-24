@@ -5,8 +5,40 @@
 **Implementation:** commit `3ef7e6a`
 **Branch:** `main` (per CLAUDE.md — work goes directly on main; no feature branch)
 
-**Status:** ✅ **COMPLETE THROUGH PHASE 8 — on STAGING.**
-**Production is NOT deployed** and requires Wael's explicit *"deploy to production."*
+**Status:** ✅ **COMPLETE THROUGH PHASE 8, AND PROMOTED TO PRODUCTION 2026-08-24.**
+
+---
+
+## 0. ⭐ Production promotion — 2026-08-24, on Wael's explicit "deploy to production"
+
+**Baseline captured read-only before deploying**, so the effect is measurable rather than asserted:
+
+| Production, before | Value |
+|---|---|
+| `gmail_messages` rows | 249 |
+| `email_actions` rows | 890 |
+| **Sentinel rows (`action_type` NULL)** | **0** — confirming the fix was not there |
+
+**Deployed** to `hhgyppbxgmjrwdpdubcx`:
+
+| Function | Version | Time (EST) |
+|---|---|---|
+| `extract-email-actions` | **v33** | 2026-08-24, 7:12:49 PM |
+| `backfill-email-actions` | **v24** | 2026-08-24, 7:13:00 PM |
+| `sync-gmail` | v70 | **2026-06-13** — untouched, as designed |
+
+**Verified live on production, not assumed.** A real already-classified message (`1a025fdee4ffcfac`, `action_type: info`) was passed to the deployed function:
+
+```
+POST /functions/v1/extract-email-actions
+→ {"action":null,"reason":"already_classified"}
+```
+
+And the row was **not** rewritten — `extracted_at` still `2026-08-24T23:10:17.486Z`. That timestamp is itself informative: **7:10 PM EST, two minutes before the deploy.** It is the last classification the old code performed.
+
+**What to expect next.** The cron fires at `:00`. The first post-fix production run is **8:00 PM EST**. From then, sentinel rows should begin appearing where previously nothing was written, and re-classification of in-window mail should stop.
+
+**The confirming measurement is still outstanding** — see §5. Everything above proves the mechanism works in production; none of it yet proves the bill fell.
 
 ---
 
