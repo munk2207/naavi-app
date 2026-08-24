@@ -127,6 +127,25 @@ A sentinel is now written there too. **Deliberately not applied to `parse_failed
 | `b11x.error-path-writes-no-row` | ✓ 404ms | Success Criterion 3 — retryability |
 | `b11x.sentinel-invisible-to-global-search` | ✓ 2599ms | The §6 regression claim |
 
+### ⭐ Gate 1 status — completed, but NOT green. Stated plainly.
+
+**The reviewer's Phase 5 hold was written against an earlier draft of this document that still said "RESULT PENDING". The suite has since run.** But the result does not satisfy the hold's condition, and that must not be glossed.
+
+`npm run test:auto` is **two** commands — `node scripts/t4-drift-check.js && tsx tests/runner.ts`:
+
+| Half | Result |
+|---|---|
+| Drift check | ✅ **PASS** — *"No new drift. Staging and production have not separated further."* (2026-08-24, 6:33:36 PM EST) |
+| Test suite | ⚠️ **537 passed, 0 failed, 1 errored, 5 skipped** |
+
+**Rule 15's bar is 100% green. One error means Gate 1 is NOT green** — regardless of who caused it, and this work item did not cause it (§5).
+
+**B11x cannot make Gate 1 green.** The error is in `naavi-chat`'s self-description prompt behaviour, a different function, out of this item's authorized boundary. Fixing it here would violate the No Extra Changes Rule and the Implementation Boundaries.
+
+**What Gate 1 actually gates:** Rule 15 makes a green `test:auto` a hard prerequisite for **every production AAB**. B11x ships **no client** — it is two Edge Functions, already deployed to staging. So this failure does not block anything B11x does; it blocks the next *mobile build*, by whoever attempts one.
+
+**The decision this needs is Wael's**, and it is not a B11x decision: either the `comparison-chatgpt-single-mention` defect gets its own work item and its own governance, or Gate 1 stays red for everyone. Recorded here rather than deferred silently, because a red gate that nobody owns is how it stays red.
+
 ### Full Gate 1 regression suite — 543 cases against STAGING
 
 ```
@@ -174,7 +193,7 @@ The test asserts that `naavi-chat`'s answer to *"what's the difference between y
 | Pre-filter produces sentinel | ✅ `b11x.prefilter-writes-null-sentinel` |
 | Failed Claude call produces no sentinel and retries | ✅ `b11x.error-path-writes-no-row` |
 | Forced backfill bypasses only the existence guard | ✅ `b11x.force-bypasses-guard-only` |
-| Regression suite passes | ✅ 537/543, **0 failed**; 1 pre-existing error proven unrelated (§5), 5 pre-existing data-gap skips |
+| Regression suite passes | ⚠️ **Ran; 0 failed, but not 100% green.** 537 passed · 1 pre-existing error proven unrelated (§5) · 5 pre-existing data-gap skips. Drift check green. **Gate 1 is red on a defect B11x did not cause and cannot fix in scope** — see the Gate 1 status block in §5 |
 | SQL hidden-coupling search recorded | ✅ Phase 3 §9, MC3 — ten database objects |
 
 ---
