@@ -1,11 +1,24 @@
 /**
  * backfill-email-actions Edge Function
  *
- * One-off utility: for a given user_id, runs extract-email-actions across
- * every tier-1 gmail message that doesn't yet have a row in email_actions.
- * Sequential to respect Anthropic rate limits. Returns counts.
+ * One-off utility: for a given user_id, runs extract-email-actions across the
+ * user's tier-1 gmail messages. Sequential to respect Anthropic rate limits.
+ * Returns counts.
  *
- * Input body: { user_id: string, max?: number }
+ * Input body: { user_id: string, max?: number, force?: boolean }
+ *
+ * `force` was already accepted here but undocumented (fixed 2026-08-24). It is
+ * now passed through to extract-email-actions per message, where it bypasses the
+ * already-classified guard AND NOTHING ELSE — the keyword pre-filter still runs
+ * and sentinel rows are still written.
+ *
+ * ⭐ Without force this call is now largely a no-op: extract-email-actions skips
+ * any message that already has an email_actions row (B11x). Forced mode is the
+ * approved procedure for applying a widened ACTIONABLE_KEYWORDS list to mail
+ * already in the window — see the comment at that array's declaration.
+ *
+ * This function's own duplicate-skipping guard was REMOVED in B11x; see the
+ * comment at the `todo` assignment for why it was wrong.
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
@@ -30,7 +43,10 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     );
 
-    // Fetch tier-1 messages that don't already have an email_action row.
+    // Fetch the user's most recent tier-1 messages. (Was "…that don't already have
+    // an email_action row" — that filter lived in the `seen` guard below, which B11x
+    // removed; the comment is corrected here rather than left describing code that
+    // no longer exists.)
     const { data: msgs, error } = await supabase
       .from('gmail_messages')
       .select('gmail_message_id')
@@ -41,18 +57,22 @@ serve(async (req) => {
 
     if (error) throw new Error(error.message);
 
-    // When force=true, re-extract every tier-1 email (useful after an
-    // extract-email-actions schema upgrade adds new fields like doc_type).
-    // Otherwise skip rows that already have an email_actions row.
-    const existing = await supabase
-      .from('email_actions')
-      .select('gmail_message_id')
-      .eq('user_id', user_id);
-    const seen = new Set((existing.data ?? []).map((r: { gmail_message_id: string }) => r.gmail_message_id));
-
-    const todo = (msgs ?? [])
-      .map((r: { gmail_message_id: string }) => r.gmail_message_id)
-      .filter((id: string) => force ? true : !seen.has(id));
+    // B11x (2026-08-24) — the local `seen` guard that used to live here was REMOVED.
+    //
+    // It read every email_actions row for the user and skipped any message that had
+    // one. That is the "skip if a row exists" shape B11x identified as broken: before
+    // B11x the keyword pre-filter wrote no row at all, so this guard skipped exactly
+    // the emails that HAD produced an action and re-sent every pre-filtered email on
+    // every run — backwards, and live in production for four months.
+    //
+    // Deduplication now belongs to extract-email-actions, which owns the sentinel
+    // rows that make the question answerable. Retired on ChatGPT's Phase 3 review,
+    // Mandatory Change 1. Do not reintroduce a second guard here — two guards over
+    // one fact is how they drift apart.
+    //
+    // `force` is passed straight through per message instead: it bypasses the
+    // downstream already-classified guard and nothing else.
+    const todo = (msgs ?? []).map((r: { gmail_message_id: string }) => r.gmail_message_id);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -70,7 +90,7 @@ serve(async (req) => {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${serviceKey}`,
           },
-          body: JSON.stringify({ gmail_message_id: id, user_id }),
+          body: JSON.stringify({ gmail_message_id: id, user_id, force }),
         });
         const data = await res.json();
         if (data?.action) actionable++;

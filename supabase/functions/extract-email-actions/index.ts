@@ -7,10 +7,25 @@
  *
  * Called from:
  *   - sync-gmail, per tier-1 message, immediately after upsert
- *   - One-off backfill scripts (pass { gmail_message_id, user_id })
+ *   - backfill-email-actions, for administrative reclassification (sends force)
  *
- * Input body: { gmail_message_id: string, user_id: string }
- * Returns:    { action: ExtractedAction | null }
+ * Input body: { gmail_message_id: string, user_id: string, force?: boolean }
+ * Returns:    { action: ExtractedAction | null, reason?: string }
+ *
+ * ⭐ B11x (2026-08-24) — this function is idempotent per (user_id, gmail_message_id).
+ * A message that already has an `email_actions` row is skipped without a Claude
+ * call, and emails the keyword pre-filter rejects now record a SENTINEL row
+ * (action_type NULL) so that "already looked at, found nothing" is a fact the
+ * guard can read. Before this, the pre-filter path wrote nothing, and sync-gmail
+ * re-sent every email in its 7-day window to Claude on every hourly tick.
+ *
+ * `force: true` bypasses the already-classified guard AND NOTHING ELSE. The
+ * pre-filter still runs, sentinels are still written, the error path still writes
+ * nothing. Only backfill-email-actions sets it; no cron may.
+ *
+ * `email_actions` therefore no longer means "emails with actions" — it means
+ * "emails Naavi has looked at", with action_type IS NULL marking the ones that
+ * had nothing worth surfacing.
  *
  * Only non-marketing, human-or-institutional emails should be fed to this
  * function (caller enforces `is_tier1 = true`). We still return `null` if
@@ -52,7 +67,7 @@ serve(async (req) => {
     const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
     if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
 
-    const { gmail_message_id, user_id } = await req.json();
+    const { gmail_message_id, user_id, force = false } = await req.json();
     if (!gmail_message_id || !user_id) {
       throw new Error('gmail_message_id and user_id required');
     }
@@ -61,6 +76,44 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     );
+
+    // B11x — ALREADY-CLASSIFIED GUARD.
+    //
+    // sync-gmail fires this function on `if (!error && !isMarketing)` (index.ts:362),
+    // and `!error` is true for an UPDATE exactly as for an INSERT — the upsert cannot
+    // fail on a message already present. So every email in the rolling 7-day window
+    // was re-sent to Claude on every sync, up to 168 times where the intended number
+    // is 1. Measured 2026-08-24: ~1.21M Haiku input tokens/hour, flat around the
+    // clock, on a two-user account.
+    //
+    // The guard keys on (user_id, gmail_message_id) and NOTHING ELSE — the same
+    // logical key as email_actions' UNIQUE constraint, so the lookup and the table's
+    // uniqueness cannot disagree. Row EXISTENCE is the whole signal. Do not add
+    // action_type, dismissed, extracted_at or recency to this check: a sentinel row
+    // (action_type NULL, written below when the pre-filter rejects an email) is
+    // exactly how "already looked at, found nothing" is recorded, and any extra
+    // condition would make those rows invisible to the guard again.
+    //
+    // `force` bypasses THIS GUARD ONLY. The pre-filter still runs, sentinels are
+    // still written, and the error path still writes nothing. It is set solely by
+    // backfill-email-actions for administrative reclassification. NO CRON AND NO
+    // sync-gmail-REACHABLE PATH MAY SET IT — if force were reachable from the hourly
+    // or 5-minute cron it would reinstate B11x exactly.
+    if (!force) {
+      const { data: priorRow } = await supabase
+        .from('email_actions')
+        .select('id')
+        .eq('user_id', user_id)
+        .eq('gmail_message_id', gmail_message_id)
+        .maybeSingle();
+
+      if (priorRow) {
+        console.log(`[extract-email-actions] Already classified ${gmail_message_id} — skipping Claude call.`);
+        return new Response(JSON.stringify({ action: null, reason: 'already_classified' }), {
+          headers: { ...corsHeaders, 'content-type': 'application/json' },
+        });
+      }
+    }
 
     // Fetch the email
     const { data: msg, error: fetchErr } = await supabase
@@ -107,6 +160,24 @@ serve(async (req) => {
     // Empirical: ~70-80% of tier-1 emails are filtered here. With 100 beta
     // users, this cuts ~$200-400/month off the email pipeline cost without
     // changing what surfaces in the morning brief.
+    //
+    // ⭐ B11x — IF YOU WIDEN THIS LIST, READ THIS FIRST.
+    //
+    // Emails rejected here now get a sentinel email_actions row (action_type NULL),
+    // and the guard at the top of this function skips any message that already has
+    // a row. That means widening this list NO LONGER re-evaluates old mail — it
+    // applies to newly arriving email only. Before B11x, every email in the window
+    // was re-classified hourly, so a keyword change took effect retroactively by
+    // accident.
+    //
+    // To apply a widened list to email already in the window, reprocess deliberately:
+    //
+    //   POST /functions/v1/backfill-email-actions
+    //   { "user_id": "<uuid>", "force": true, "max": <n> }
+    //
+    // There is deliberately NO automatic sentinel-clearing mechanism (ChatGPT Phase 3
+    // review, Mandatory Change 2, 2026-08-24). Reprocessing costs real Claude calls
+    // and must be an explicit decision, not a side effect of editing an array.
     const ACTIONABLE_KEYWORDS = [
       // bills / payments
       'invoice', 'receipt', 'bill', 'payment', 'charge', 'charged', 'due', 'balance', 'overdue', 'amount owed',
@@ -148,6 +219,39 @@ serve(async (req) => {
     if (!matchesActionable) {
       console.log(`[extract-email-actions] Pre-filter: no actionable keywords in email "${msg.subject?.slice(0, 60)}". Skipping Claude call but still harvesting attachments.`);
       fireHarvest();
+
+      // B11x — SENTINEL ROW. Before this, the pre-filter path wrote nothing at all,
+      // which is why "skip if an email_actions row exists" was a trap: for the 70-80%
+      // of emails that land here, absence of a row could not distinguish
+      // never-processed from processed-and-correctly-found-nothing.
+      //
+      // Recording the outcome is what makes the guard above safe. Every content
+      // field stays NULL — action_type IS NULL is the sole marker (Wael's Phase 2
+      // decision 2, 2026-08-24). No 'pre_filter_no_keywords' string goes in `summary`
+      // or any other user-content column: get-naavi-prompt instructs Naavi never to
+      // read those aloud, and a system string there could reach a caller's ear.
+      //
+      // Deliberately NOT written on the error path further down — a pre-filter
+      // rejection is deterministic (same keyword list, same answer forever) while an
+      // error is transient, so errors must stay retryable. That asymmetry is what
+      // preserves Success Criterion 3 with no new schema.
+      const { error: sentinelErr } = await supabase
+        .from('email_actions')
+        .upsert({
+          user_id,
+          gmail_message_id,
+          action_type: null,
+          extracted_at: new Date().toISOString(),
+        }, { onConflict: 'user_id,gmail_message_id' });
+
+      if (sentinelErr) {
+        // Non-fatal: the email genuinely has no action, so the user loses nothing
+        // now. The only cost is that this message gets re-classified next sync.
+        // Logged rather than swallowed, per AI Coding Discipline #21 — silent
+        // failure here would look exactly like B11x never having been fixed.
+        console.error(`[extract-email-actions] sentinel upsert failed for ${gmail_message_id}:`, sentinelErr.message);
+      }
+
       return new Response(JSON.stringify({ action: null, reason: 'pre_filter_no_keywords' }), {
         headers: { ...corsHeaders, 'content-type': 'application/json' },
       });
@@ -283,6 +387,36 @@ The user message will contain the email text under "EMAIL:".`;
 
     if (!parsed?.is_actionable) {
       fireHarvest();
+
+      // B11x — SENTINEL, second site. ⭐ THE PHASE 2 PLAN'S OUTCOME TABLE MISSED THIS
+      // BRANCH. It listed three outcomes (action found / pre-filter rejected / call
+      // errored); this is a fourth: Claude ran to completion and judged the email
+      // non-actionable, and the original code returned here without writing anything.
+      //
+      // That is the *expensive* silent-nothing. A message that clears the keyword
+      // pre-filter but comes back not_actionable had a Claude call paid for — and with
+      // no row recording it, the guard above could not see it, so it would be re-sent
+      // to Claude on every tick forever. Guarding only the pre-filter path would have
+      // left this entire class of email costing money hourly, and the fix would have
+      // looked like it worked because the 70-80% pre-filter case dominates the counts.
+      //
+      // Same shape as the pre-filter sentinel: action_type NULL, every content field
+      // NULL. Deliberately NOT applied to the parse_failed branch above — a malformed
+      // Claude response is a transient failure and must stay retryable, exactly like
+      // the error path.
+      const { error: sentinelErr } = await supabase
+        .from('email_actions')
+        .upsert({
+          user_id,
+          gmail_message_id,
+          action_type: null,
+          extracted_at: new Date().toISOString(),
+        }, { onConflict: 'user_id,gmail_message_id' });
+
+      if (sentinelErr) {
+        console.error(`[extract-email-actions] not_actionable sentinel upsert failed for ${gmail_message_id}:`, sentinelErr.message);
+      }
+
       return new Response(JSON.stringify({ action: null, sender_type: senderType, reason: 'not_actionable' }), {
         headers: { ...corsHeaders, 'content-type': 'application/json' },
       });

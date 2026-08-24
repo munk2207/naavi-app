@@ -119,6 +119,7 @@ import { b11dContactCrowdoutTests } from './catalogue/session-2026-08-09-b11d-co
 import { personLookupRelationshipWordsTests } from './catalogue/session-2026-08-13-person-lookup-relationship-words';
 import { draftMessageChannelTests } from './catalogue/session-2026-08-13-draft-message-channel';
 import { relationshipContactResolutionTests } from './catalogue/session-2026-08-13-relationship-contact-resolution';
+import { b11xEmailReclassificationTests } from './catalogue/b11x-email-reclassification';
 
 // ────────────────────────────────────────────────────────────────────────────
 // RE-ENABLED 2026-05-17 by Wael. The two destructive side effects that
@@ -280,6 +281,7 @@ const ALL_TESTS: TestCase[] = [
   ...personLookupRelationshipWordsTests,
   ...draftMessageChannelTests,
   ...relationshipContactResolutionTests,
+  ...b11xEmailReclassificationTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────
