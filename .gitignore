@@ -49,3 +49,12 @@ firebase/service-account.json
 # scrubbed 2026-08-19). It must never be tracked.
 .claude/settings.local.json
 supabase/.temp/
+
+# AGENTS.md — deleted 2026-08-24 (and in 9078949 before that). It is a stale
+# second copy of CLAUDE.md that drifts the moment it is written. Nothing in
+# this repo generates it; an external agent tool writes it by convention when
+# it opens the folder. We cannot stop that tool touching the disk, so this
+# line is the enforcement: it can be recreated locally, but it can never be
+# committed or reviewed as if it were project instructions again.
+# CLAUDE.md is the only instructions file. Do not remove this line.
+/AGENTS.md
