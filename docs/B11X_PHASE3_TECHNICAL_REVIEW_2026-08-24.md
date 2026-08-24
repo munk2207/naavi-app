@@ -5,9 +5,9 @@
 **Risk:** MEDIUM → Phase 3 review is **mandatory**
 **Plan under review:** `docs/B11X_PHASE2_CHANGE_PLAN_2026-08-24.md` revision 2 (commit `41ebb09`)
 
-**Status:** **AWAITING EXTERNAL REVIEW.** Reviewer: ChatGPT, via Wael. No code written.
+**Status:** ✅ **APPROVED WITH MANDATORY CHANGES — ChatGPT, 2026-08-24.** All three mandatory changes discharged (§9). **No code written. Phase 4 requires Wael's separate authorization.**
 
-> **Wael — this document is the package to forward.** It is self-contained: the reviewer has no repository access, so every code fragment they need is quoted inline. Per §14 Cost Awareness, do not send the governance document or the earlier phase documents with it.
+> Sections 1-8 below are the package as it was sent for review, preserved unchanged. **The verdict and the discharge of all three mandatory changes are in §9.**
 
 ---
 
@@ -164,6 +164,64 @@ Plus, per Phase 3's own requirements:
 
 ---
 
-## 9. Verdict
+## 9. Verdict — APPROVED WITH MANDATORY CHANGES (ChatGPT, 2026-08-24)
 
-**To be completed when the review returns.**
+**Q1** error-path asymmetry correct · **Q2** sentinel acceptable · **Q3** acceptable with a documented forced-reprocessing procedure · **Q4** retire the old guard · **Q5** expand the trace to database-level consumers before implementation.
+
+**Coding may proceed only when separately authorized.** Phase 3 approval is not Phase 4 authorization.
+
+### Mandatory Change 1 — retire `backfill-email-actions`'s `seen` guard ✅ folded into the plan
+
+Its `:48-55` row-existence guard duplicates the broken semantics B11x exists to fix. It is removed; the existing `force` value passes downstream instead, and `force: true` bypasses only the new classifier guard.
+
+### Mandatory Change 2 — document keyword-change handling ✅ recorded below and in §7 of the Phase 2 plan
+
+**If `ACTIONABLE_KEYWORDS` is widened, previously created sentinels must be deliberately reprocessed via the forced backfill path:**
+
+```
+POST /functions/v1/backfill-email-actions
+{ "user_id": "<uuid>", "force": true, "max": <n> }
+```
+
+**No automatic sentinel-clearing mechanism is required or approved.** This procedure belongs as a comment at the `ACTIONABLE_KEYWORDS` declaration itself (`extract-email-actions:110`), not only in this document — the person widening that list is reading the list, not the governance record.
+
+### Mandatory Change 3 — SQL-level hidden-coupling search ✅ **COMPLETE, run before coding**
+
+Q5 could not be closed by TypeScript grep alone. Full search of `*.sql` for `email_actions`, plus a search for every `CREATE VIEW` / `CREATE TRIGGER` / `CREATE FUNCTION` and every `cron.schedule` in `supabase/migrations/`.
+
+| Database object | Sentinel-row impact | Verdict |
+|---|---|---|
+| `email_actions_user_due_idx` — `(user_id, due_date) WHERE dismissed = false` | Sentinels have `dismissed = false` by default, so they **do** enter this index; `due_date` is `NULL` | ⚠️ **Index grows ~4-5×.** No correctness impact. **The only real cost sentinel rows carry.** |
+| `email_actions_expiry_idx` — `(user_id, expiry_date) WHERE expiry_date IS NOT NULL AND dismissed = false` | Sentinels have `expiry_date NULL` → **excluded by the predicate** | ✅ No impact |
+| `email_actions_document_type_check` — `CHECK (document_type = ANY (ARRAY[...]))` | `NULL = ANY(...)` evaluates to `NULL`, and a CHECK passes on `NULL` (fails only on `FALSE`). **Confirmed by existing behaviour**: today's upsert at `:306` already writes `document_type: documentType`, which can be null | ✅ No impact — **this was the one object that could have blocked the implementation** |
+| RLS: `for select using (auth.uid() = user_id)` | Sentinels are selectable by the owning user | ✅ No impact — *verified: no client-side `from('email_actions')` query exists in `app/`, `hooks/` or `lib/`; the SELECT policy is unexercised by app code* |
+| RLS: `for all using (auth.jwt() ->> 'role' = 'service_role')` | The write path | ✅ Unchanged |
+| FK `documents.email_action_id → email_actions(id) ON DELETE SET NULL` | Sentinels are valid targets but nothing links to them | ✅ No impact |
+| **Views** | — | ✅ **None exist.** No `CREATE VIEW` anywhere in migrations |
+| **Triggers** | — | ✅ **None on this table.** The only triggers are `trg_user_settings_phone_numbers_unique` and `tickets_updated_at_trigger` |
+| **Postgres functions** | — | ✅ **None reference it.** The seven that exist cover user_settings, geofence, tickets, knowledge search, and the voice PIN counter |
+| **Scheduled SQL jobs** | — | ✅ **None query it.** Every `cron.schedule` migration was searched for `email_actions`; no match |
+
+**Conclusion: no database-level consumer blocks this change.** One consequence recorded rather than dismissed — `email_actions_user_due_idx` will grow with sentinel rows. At the observed ~362 emails per window that is hundreds of index entries, not millions, and it is the honest cost of Q2's accepted trade.
+
+**Limitation, stated:** this search covers version-controlled migrations. An object created directly against the live database and never captured in a migration would not appear. Given T4's schema-parity work and the pre-push drift check, that risk is low — but it is not zero, and it is the residual Q5 cannot fully close from the repository alone.
+
+### Implementation Boundaries Confirmed
+
+**Authorized files, and only these four:**
+
+| File | Authorized change |
+|---|---|
+| `supabase/functions/extract-email-actions/index.ts` | Existence guard on `(user_id, gmail_message_id)`; accept `force` to bypass only that guard; write a sentinel row on the pre-filter branch with all content fields `NULL`; error path continues to write nothing; MC2 procedure comment at `ACTIONABLE_KEYWORDS` |
+| `supabase/functions/backfill-email-actions/index.ts` | Remove the `seen` guard (`:48-55`); pass existing `force` downstream; fix the `:8` header, which omits `force` |
+| `tests/catalogue/b11x-email-reclassification.ts` | New regression suite, §9a of the Phase 2 plan |
+| `tests/runner.ts` | Register the suite |
+
+**No additional files are approved. No opportunistic refactoring is approved. No schema changes are approved. No architectural changes beyond the plan are approved.**
+
+**Explicitly excluded:** all [[B11y]] work; any cron or cadence change; any change to `sync-gmail`; any mobile or voice change; the "senior" banned-word and `${todayISO}` prompt findings.
+
+### Deferred Architectural Decisions
+
+1. **Bounded retry state / a classification-state schema.** Not approved. A permanently-failing email retries indefinitely — today's behaviour, so not a regression. **Reconsider only if permanent failures create material repeated cost.**
+2. **A dedicated table or column for classification state.** Not approved. Sentinel-table semantics are accepted; no new table or column is justified now.
