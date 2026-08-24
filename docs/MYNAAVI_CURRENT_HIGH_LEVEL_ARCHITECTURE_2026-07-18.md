@@ -1,6 +1,8 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.07.18.10 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+**Architecture Version:** 2026.07.18.11 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+
+**Revision 11 (2026-08-24, [[B11x]] Phase 6):** adds **§2d** and rewrites §2's Gmail row, which described `sync-gmail` as *"cron-driven"* — **false, and false before B11x began.** There are five triggers; two of them, including the mobile app on a 60-second interval, silently fan out to *every active user* because they pass a parameter `sync-gmail` does not read. **The word cost four months and three migrations:** every attempt to control this pipeline's cost cut the cron cadence (5 → 15 → 30 → 60 min), because the cron is what this document showed. None touched the other four triggers, because nothing recorded that they existed. §2 also gains a row for `extract-email-actions`, which this document had never listed at all despite it being the pipeline's only Claude call and the whole of B11x's blast radius. **This was Outcome 3 under the Architecture Drift Rule — a Reference already stale before the work started — so Phase 6 was blocked until it landed, not deferred to Phase 8.** Bumped in the same commit as the edits.
 
 **Revision 10 (2026-08-23, [[B11k]] Phase 1A):** records a capability this document did not describe at all — **action outcome reporting / failure surfacing** — which turns out to be duplicated three ways. §5a gains a Priority 1c row, §5 the matching narrative, and §2 a row for `naavi-chat` Step 1.4's execute-then-speak contract, which §2b had described only as the marker's read-back point. **This was Outcome 3 under the Architecture Drift Rule, not a Phase 8 tidy-up** — the omission predated B11k, and §5a's title claims a *Full* Duplication Inventory, so omitting a three-way duplication made it inaccurate rather than merely thin. Phase 1A's first revision proposed deferring it and recorded a PASS; external review rejected both, correctly, and implementation stopped until these edits landed. **The cost of the omission is measurable:** the same defect was fixed narrowly three times in three months — 2026-05-12, 2026-07-15, 2026-07-21 — by three people who each had no row telling them it was one class. Bumped in the same commit as the edits.
 
@@ -310,7 +312,8 @@ For each capability, where the authoritative implementation actually lives — v
 | List reading | Duplicated | Both mobile-backend and voice independently query the `lists` table directly, rather than through one read function |
 | Calendar — writes (create/delete event) | `create-calendar-event`, `delete-calendar-event` (Shared Core) | Genuinely shared |
 | Calendar — reads (live event fetch) | Duplicated | Both `naavi-chat` and the voice server independently call the Google Calendar API themselves — see `docs/adr/0002-calendar-reads-remain-duplicated.md` |
-| Gmail — background sync | `sync-gmail` (Shared Core) | Genuinely shared, cron-driven, writes to `gmail_messages` |
+| Gmail — background sync | `sync-gmail` (Shared Core) | Genuinely shared, writes to `gmail_messages`. **NOT cron-only — it has five triggers, two of them client-initiated. See §2d.** |
+| Gmail — action classification | `extract-email-actions` (Shared Core) | Genuinely shared, single classifier. **Idempotent per `(user_id, gmail_message_id)` since B11x** — see §2d |
 | Gmail — live/recent read | Duplicated | Both sides independently call the Gmail API directly for "what's new" reads |
 | Drive saves (notes, transcripts, lists) | `save-to-drive` (Shared Core) | Genuinely shared — both mobile client and voice call it |
 | Document harvesting (attachments → Drive) | Mobile-backend only | Voice never calls this; it's wired into the email-sync pipeline only |
@@ -386,6 +389,46 @@ on `staging` and nothing on `main` — identically, and reassuringly, and useles
 voice code therefore does **not** promote this capability; `manage-voice-pin` and
 `receive-sms-reply` must be deployed to the target project separately, and production was running
 both three months stale when S1 was promoted.
+
+### 2d. The email pipeline has five triggers, not one — and two of them fan out to every user
+
+**Added by [[B11x]] Phase 6, 2026-08-24, under the Architecture Drift Rule (Outcome 3).** This
+document previously described `sync-gmail` as *"cron-driven"* in one word. That was false, it was
+false before B11x began, and the falsehood is load-bearing: **every attempt to control this
+pipeline's cost for four months targeted the cron, because the cron is what the map showed.**
+Three migrations cut the cadence 5 → 15 → 30 → 60 minutes. None of them touched the other four
+triggers, because nothing recorded that the other four existed.
+
+| # | Trigger | `file:line` | Params sent | Actual scope |
+|---|---|---|---|---|
+| 1 | Hourly cron | `20260430000001_gmail_sync_cron_60min.sql:24` (`'0 * * * *'`) | none | all active users, 7 days |
+| 2 | `sync-active-email-alerts` — **5-minute** cron | `sync-active-email-alerts/index.ts:68` | `target_user_id` | one user, 7 days |
+| 3 | **Mobile app, 60-second interval** | `lib/gmail.ts:33` ← `app/index.tsx:1269` | **none** | **all active users, 7 days** |
+| 4 | `naavi-chat` email-search intent | `naavi-chat/intentHandlers.ts:346` | **`user_id`** | **all active users, 7 days** |
+| 5 | `naavi-chat` live-recent + billing intent | `naavi-chat:1265`, `:3478` | `target_user_id`, `days_back: 1` | one user, 1 day |
+
+**Triggers 3 and 4 pass a parameter `sync-gmail` does not read.** It accepts only
+`target_user_id` (`sync-gmail:131-132`); there is no `body.user_id` branch. An unrecognised key is
+silently ignored, so both fall through to the no-body default at `:118-132` — `daysBack = 7`,
+`targetUserId = null`, every active user. Trigger 3's adapter (`email.adapter.ts:75-77`) even
+*accepts* a `userId` and discards it. **Tracked as [[B11y]]; not fixed by B11x.**
+
+**⭐ Mobile is a client-side trigger of a capability classified Shared Core.** That is not a
+contradiction — the *implementation* is genuinely shared and lives in one Edge Function — but any
+reader who takes "Shared Core, cron-driven" to mean "no client reaches this" will be wrong, and
+that is precisely the mistake this row previously invited.
+
+**Classification (`extract-email-actions`) has two callers, not one:** `sync-gmail:363` and
+`backfill-email-actions:67`. The second bypasses `sync-gmail` entirely, which is why B11x's guard
+was placed in the classifier rather than at the caller — a guard in `sync-gmail` would not have
+covered it.
+
+**Since B11x, classification is idempotent per `(user_id, gmail_message_id)`.** Emails that produce
+no action — whether rejected by the keyword pre-filter or judged non-actionable by Claude — record a
+**sentinel row** in `email_actions` with `action_type` NULL. So **`email_actions` no longer means
+"emails with actions"; it means "emails Naavi has looked at."** `force: true` bypasses that guard
+and nothing else, and is set only by `backfill-email-actions`. **No cron may set it** — a cron that
+did would reinstate B11x exactly.
 
 ## 3. Entry Point Responsibilities
 
