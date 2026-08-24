@@ -6,7 +6,9 @@
 **Phase 1A:** `docs/B11X_PHASE1A_ARCHITECTURE_COMPLETENESS_2026-08-24.md` — DOES NOT PASS, resolved by Phase 1 revision 2
 **Architecture Reference:** 2026.07.18.10
 
-**Status:** **DRAFT — awaiting Wael's Phase 2 → Phase 3 approval.** No code written.
+**Status:** **CHANGES REQUIRED → APPLIED. Phase 2 → Phase 3 authorized by Wael, 2026-08-24.** No code written.
+
+**Revision 2 (2026-08-24)** — Wael's five required changes, all applied: (1) `force: true` on `backfill-email-actions` approved, §8a; (2) sentinel content fields stay `NULL`, §8; (3) guard key defined as `(user_id, gmail_message_id)`, §8a; (4) `force` bypasses that guard only, §8a; (5) `backfill-email-actions/index.ts` added to §2 and forced-reclassification tests to §9a. **One knock-on correction not in his list:** the Change Impact Matrix's API-contracts row said "No"; adding an optional `force` parameter to two functions makes that false, so it is now "YES — additive only".
 
 **Risk classification: MEDIUM.** No user-visible behaviour should change. The danger is the opposite of the defect: a guard that is slightly too broad silently stops classifying emails that should be classified, and the symptom — a bill that never arrives in the morning brief — is invisible until a user misses a payment.
 
@@ -59,8 +61,9 @@ The guard is a single existence check at the top of the handler, before the Clau
 
 | File | Classification | Change |
 |---|---|---|
-| `supabase/functions/extract-email-actions/index.ts` | **Backend** (Protected Core) | Add existence guard before the Claude path; write a sentinel row on the pre-filter branch; leave the error path writing nothing |
-| `tests/catalogue/b11x-email-reclassification.ts` | **Tests** (new) | Rule 15a regression tests |
+| `supabase/functions/extract-email-actions/index.ts` | **Backend** (Protected Core) | Add existence guard on `(user_id, gmail_message_id)` before the Claude path; accept `force: true` to bypass **only** that guard; write a sentinel row on the pre-filter branch with all content fields `NULL`; leave the error path writing nothing |
+| `supabase/functions/backfill-email-actions/index.ts` | **Backend** | Accept `force` on its own request body and pass `force: true` per message to `extract-email-actions`, so the utility still re-runs classification after a schema upgrade. Added at Wael's direction — see §8a |
+| `tests/catalogue/b11x-email-reclassification.ts` | **Tests** (new) | Rule 15a regression tests — including **forced-reclassification coverage** (§9a) |
 | `tests/runner.ts` | **Tests** | Register the new suite |
 
 **`supabase/functions/sync-gmail/index.ts` — NOT changed.** Phase 0 named it In Scope and it is the file the defect was found in, but under Option 2 no change there is required: the guard downstream makes its firing condition harmless. **Stated explicitly rather than left silent**, because Phase 0's In Scope list implies it will change.
@@ -80,8 +83,8 @@ Every row answered explicitly, per governance.
 | **Shared Core** | **YES** | `extract-email-actions` — the only file whose behaviour changes. |
 | **Database** | **No schema change.** Row *volume* changes | No migration, no new column, no constraint change. Sentinel rows increase `email_actions` row count roughly 4-5× (the 70-80% pre-filtered share). At the observed ~362 emails per window that is hundreds of rows, not millions. |
 | **Cron** | **No** | No cron definition is touched. Both the hourly `sync-gmail` job and the 5-minute `sync-active-email-alerts` job keep their schedules. Explicitly avoided — cadence is a second Protected Core area (Architecture Reference §4, Background scheduling). |
-| **API contracts** | **No** | `extract-email-actions`'s request shape is unchanged. Its response gains one new `reason` value (`already_classified`); existing values are unchanged and the only caller that reads the response is the auto-tester. |
-| **Tests** | **YES** | New suite plus runner registration, per Rule 15a. |
+| **API contracts** | **YES — additive only** (revised at Wael's direction) | Both functions gain an **optional** `force` boolean on their request body. Omitting it preserves today's behaviour exactly, so no existing caller breaks — `sync-gmail:363-370` sends no `force` and is unchanged. `extract-email-actions`'s response gains one new `reason` value (`already_classified`); existing values are unchanged, and the only caller reading the response is the auto-tester. **Revision 1 said "No" on the strength of the guard being internal; adding `force` makes that false, and an additive change is still a contract change.** |
+| **Tests** | **YES** | New suite plus runner registration, per Rule 15a. Coverage list at §9a. |
 
 **Duplication:** the Architecture Reference does not mark this capability Duplicated — `extract-email-actions` is the single classifier. *Freshly verified this session — a repo-wide grep finds exactly two invoking call sites, `sync-gmail:363` and `backfill-email-actions:67`; all other hits are comments, tests, or parity-manifest entries.* Both callers pass through the changed function, so **one implementation changes and there is no second side to leave unaddressed.**
 
@@ -128,7 +131,7 @@ Produced by `grep -rn "email_actions"` across the repo, excluding `node_modules`
 | `harvest-attachment` | `:225-234` | `.maybeSingle()` for `id, document_type` | **None.** Already handles a null `document_type` by falling back to filename detection (`:234` comment). A sentinel row returns `document_type: null` — indistinguishable from today's no-row case. |
 | `naavi-spend-summary` | `:183-269` | Joins `documents` via `email_action_id`, aggregates `extracted_amount_cents` | **None.** Sentinel rows have no linked `documents` row and no amount. |
 | `extract-email-actions` itself | `:312` | The upsert being modified | This is the change. |
-| `backfill-email-actions` | `:46-67` | Calls the classifier directly | **⭐ Behaviour change — intended.** Its re-runs will now be skipped by the new guard, which defeats a utility whose purpose is re-running. **See §8, open decision 1.** |
+| `backfill-email-actions` | `:46-67` | Calls the classifier directly | **⭐ Changes — and is now in the change list.** Without a bypass the new guard would skip every re-run and defeat a utility whose entire purpose is re-running. Wael approved `force: true` (§8a); this file passes it per message, so its behaviour is preserved. |
 
 ### Consumers confirmed unaffected
 
@@ -159,11 +162,63 @@ Stated plainly rather than buried, because each is a real cost of this plan.
 
 ---
 
-## 8. Open decisions Phase 2 cannot make alone
+## 8. Decisions — RESOLVED by Wael, 2026-08-24
 
-1. **`backfill-email-actions` — exclude it from the guard, or let it be blocked?** Its purpose is re-running classification after a schema upgrade (`:45`). The new guard defeats that. **Recommend: give it a `force: true` parameter that bypasses the guard**, keeping the utility useful while default behaviour stays safe. That is a small addition to a second file and needs Wael's word.
+Both open decisions were settled in the Phase 2 review. Neither is open.
 
-2. **Should the sentinel row record *why* it was skipped?** A `summary` of `'pre_filter_no_keywords'` would make the table self-explanatory and cost nothing. Against: it puts a system string in a user-content column that Naavi is instructed never to read aloud (`get-naavi-prompt:1319`). **Recommend: leave all content fields NULL**, and rely on `action_type IS NULL` as the marker.
+1. **`backfill-email-actions` gets `force: true` — APPROVED.** The parameter bypasses the existing-classification guard so the utility keeps working after a schema upgrade, while default behaviour stays safe. Scope is defined in §8a.
+
+2. **Sentinel content fields stay `NULL` — APPROVED.** No `'pre_filter_no_keywords'` string in `summary` or any other user-content column. `action_type IS NULL` is the sole marker. This keeps a system string out of a column `get-naavi-prompt:1319` instructs Naavi never to read aloud.
+
+---
+
+## 8a. ⭐ Guard key and `force` scope — normative
+
+Added at Wael's direction, 2026-08-24. These two definitions are binding on Phase 4 implementation.
+
+### The guard key
+
+**The existing-classification guard keys on `(user_id, gmail_message_id)` — nothing else.**
+
+This is the same logical key as `email_actions`'s own `UNIQUE (user_id, gmail_message_id)` constraint (`20260419000001_email_actions.sql`), so the guard's lookup and the table's uniqueness cannot disagree. The guard must not additionally consider `action_type`, `dismissed`, `extracted_at`, recency, or any content field: a row's **existence** under that key is the whole signal, which is precisely what makes a sentinel row work as a record of "already looked at, found nothing".
+
+Per CLAUDE.md's data-integrity checklist — *"What's the logical key? Is there a UNIQUE constraint on it?"* — the answer is yes, and it already exists. No new constraint is required.
+
+### What `force: true` does, and only that
+
+**`force: true` bypasses the existing-classification guard, and nothing else.**
+
+Every other behaviour is unchanged when it is set:
+
+| Behaviour | Under `force: true` |
+|---|---|
+| Existing-classification guard | **bypassed** — the only effect |
+| Keyword pre-filter (`:110-146`) | still runs, unchanged |
+| Sentinel row written on pre-filter rejection | still written |
+| Error path writes nothing | unchanged |
+| Marketing exclusion in `sync-gmail` | unchanged — `force` is not plumbed through `sync-gmail` |
+| `onConflict` upsert semantics | unchanged — a forced re-run overwrites the existing row for the same key |
+
+**`force` is not a general "reprocess everything" switch and must not grow into one.** It is accepted only on `backfill-email-actions`'s own request body and passed to `extract-email-actions` per message. **No cron, and no path reachable from `sync-gmail`, may set it** — if it were reachable from the hourly or 5-minute cron, it would reinstate B11x exactly.
+
+---
+
+## 9a. Test coverage — Rule 15a
+
+New suite `tests/catalogue/b11x-email-reclassification.ts`, registered in `tests/runner.ts`. **Must be green against staging before this item closes.**
+
+| # | Test | Control |
+|---|---|---|
+| 1 | Second call for the same `(user_id, gmail_message_id)` returns `reason: 'already_classified'` and makes **no** Claude call | Negative — guards the defect |
+| 2 | Pre-filtered email writes a sentinel row: `action_type IS NULL`, and `title`/`vendor`/`summary`/`reference` all `NULL` | Positive — locks Wael's decision 2 |
+| 3 | Second call on a pre-filtered email is skipped by the sentinel | Negative — the 70-80% case, the whole reason Option 1 was rejected |
+| 4 | **Forced reclassification:** `force: true` re-runs a message that already has a row, and overwrites it | Positive — locks §8a |
+| 5 | **`force` scope:** with `force: true`, the keyword pre-filter still runs and a rejected email still writes its sentinel | Negative — proves `force` bypasses the guard *only* |
+| 6 | `backfill-email-actions` end-to-end re-runs an already-classified message | Positive — the utility still works |
+| 7 | An errored Claude call writes **no** row, so the next call retries | Positive — Success Criterion 3 |
+| 8 | A sentinel row is invisible to `global-search`'s `email_actions` adapter | Negative — guards the §6 regression claim |
+
+**Test 5 is the one that matters most for future safety.** If `force` ever silently widens beyond the guard, that is the test that fails.
 
 ---
 
