@@ -8,6 +8,8 @@
 **Status:** ✅ **APPROVED WITH MANDATORY CHANGES — ChatGPT, 2026-08-24.** All three mandatory changes discharged (§9). **No code written. Phase 4 requires Wael's separate authorization.**
 
 > Sections 1-8 below are the package as it was sent for review, preserved unchanged. **The verdict and the discharge of all three mandatory changes are in §9.**
+>
+> ⚠️ **§1 contains a figure since corrected: "~$930/month projected".** It is left in place because this section records what the reviewer was actually shown, and amending it would falsify that record. **The corrected figure is ≈$15/day (~$450/month)** — the 19-hour measuring window also contained this session's own test-suite runs. See Phase 7 §3. The flat hourly line and the root cause are unaffected.
 
 ---
 

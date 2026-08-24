@@ -18,7 +18,7 @@ Wael accepted Phase 5 on the evidence as it stands — 0 failed, the error prove
 
 ## 1. Summary
 
-`sync-gmail:362` fires classification on `if (!error && !isMarketing)`. `!error` is true for an UPDATE exactly as for an INSERT, so every email in the rolling 7-day window was re-sent to Claude on every sync. Measured before the fix: **~1.21M Haiku input tokens/hour, flat around the clock, on a two-user account** — ~$930/month projected.
+`sync-gmail:362` fires classification on `if (!error && !isMarketing)`. `!error` is true for an UPDATE exactly as for an INSERT, so every email in the rolling 7-day window was re-sent to Claude on every sync. Measured before the fix: **~1.21M Haiku input tokens/hour, flat around the clock, on a two-user account.** (A $930/month projection stated here was **corrected in Phase 7 to ≈$15/day / ~$450/month** — the measuring window also contained this session's own test runs. The flat line and the root cause are unaffected.)
 
 The fix guards the **classifier**, not the caller. `extract-email-actions` now records every terminal outcome — including a sentinel row (`action_type` NULL) for emails that produce no action, which previously wrote nothing at all — and skips any message that already has a row for `(user_id, gmail_message_id)`.
 

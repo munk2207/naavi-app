@@ -228,7 +228,7 @@ Per Architecture Reference §0a Ownership Model:
 1. **This is Protected Core** (§4 of the Reference) — Phase 0 set the governance level without knowing why.
 2. **The required fact is absent from the schema by construction** — `gmail_messages` has no `created_at` and no classification-state column, so the row cannot answer "is this new?" about itself.
 3. **The billing evidence is now measured, not arithmetic** — the flat hourly line, and the reasoning that two users cannot produce it.
-4. **The cost is larger and growing** — ~$930/month projected, against the *"$581 month-to-date"* on the April migration.
+4. **The cost is material.** ~$930/month was projected here; **corrected 2026-08-24 (Phase 7) to ≈$15/day (~$450/month) all-in** — the original extrapolation came from a 19-hour window that also contained this session's own test runs, and actual billing ($357.68 since 1 August) contradicts it. The flat hourly line and the root cause are unaffected.
 5. **Attribution to `extract-email-actions` specifically is still an inference**, with a named discriminator not yet run.
 
 ---
