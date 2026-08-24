@@ -145,6 +145,28 @@ That violates both count rules: the comparison rule's 3-4 (`:291`) and the gener
 
 ---
 
+## 5a. ⭐ Two facts added by Phase 1A (2026-08-24)
+
+Neither changes the problem definition. Both change how a fix must be planned and verified, so they belong here rather than being rediscovered in Phase 5.
+
+### The shared prompt is cached for five minutes inside `naavi-chat`
+
+*Freshly verified — `naavi-chat:1341`:* `const PROMPT_CACHE_TTL_MS = 5 * 60 * 1000;`, a module-level `Map` at `:1342`, checked at `:1355`, keyed `channel:timezone`.
+
+**A prompt change is not live the moment it deploys.** Each warm instance keeps serving the previous prompt for up to five minutes.
+
+**This is dangerous specifically for B11z**, because the fix is a prompt change validated by the Non-Determinism Rule's three independent trials. Trials taken inside the cache window measure the **old** prompt — a false failure if run too early, or a false pass if the cache holds a response that happens to match. **Phase 2 must specify a cache-expiry step before trials, and Phase 5 must evidence that trials came after it.** Same error class as the 2026-07-20 incident behind the Cross-Cutting Change Parity Check: measuring the wrong thing and believing the number.
+
+### Neither local fallback prompt contains the comparison rule
+
+*Freshly verified — `grep -ci "chatgpt\|competitor"` returns **0** for both `lib/naavi-client.ts` (`buildSystemPrompt`, `:289`) and `naavi-voice-server/src/index.js` (`buildVoiceSystemPrompt`, `:1935`).*
+
+**Good for scope:** there is no second copy of this rule to keep in sync. A `get-naavi-prompt` fix is complete on its own.
+
+**Latent gap, out of scope:** CLAUDE.md says the fallbacks *"MUST stay roughly in sync"* with the Edge Function. For this rule they are not merely stale — they are **absent**. If `get-naavi-prompt` ever fails, both surfaces answer comparison questions with no guidance at all, and the behaviour Wael spent four live rounds eliminating on 2026-08-14 returns silently. **Not proposed for this item.** Recorded so it is not rediscovered as new.
+
+---
+
 ## 6. Carried into Phase 1A / Phase 2
 
 1. **Confirm Defect A's causation** by removing the contradiction and re-measuring — 3 trials minimum per the Non-Determinism Rule.
