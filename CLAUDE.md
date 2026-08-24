@@ -20,6 +20,8 @@ All development work must comply with `docs/AI_DEVELOPMENT_GOVERNANCE.md` (Relea
 2. Edge Function deploy command for staging: `npx supabase functions deploy <name> --no-verify-jwt --project-ref xugvnfudofuskxoknhve`
 3. App build command for staging: `eas build --profile staging` (produces APK named "Naavi Staging", package `ca.naavi.app.staging`)
 4. Migration push for staging: `npx supabase db push --db-url "postgresql://postgres.xugvnfudofuskxoknhve:NaaviStaging2026@aws-1-us-east-1.pooler.supabase.com:6543/postgres?prefer_simple_protocol=true" --include-all --yes`
+
+   **⭐ The password above is in plaintext deliberately. DO NOT RAISE IT — Wael ruled on it 2026-08-24.** It is staging only, production credentials are in no committed file, and this repository is private. He assessed the residual exposure and **decided not to rotate.** It was raised three times in one session before he ruled, which is why the ruling sits here rather than only in the archive — a session meeting the literal will not think to go looking for a decision about it. Full record: `docs/HOLDING_LIST_CLOSED_ARCHIVE_2026-07-28.md`, "Closed without entry". Reopen only if the repo becomes public, if this credential is ever reused for production, or if Wael says otherwise.
 5. Only promote to production after Wael confirms staging works and explicitly says "deploy to production."
 6. Production deploy = standard commands with `--project-ref hhgyppbxgmjrwdpdubcx` and `eas build --profile production`.
 7. **NEVER run `eas build --profile production` or deploy to `hhgyppbxgmjrwdpdubcx` without clear explicit approval from Wael to deploy to production.**
