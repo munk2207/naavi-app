@@ -5,7 +5,8 @@
 **Scope:** **BACKEND ONLY** — Shared Core Edge Functions (`sync-gmail`, `extract-email-actions`). No mobile, no voice, no schema change proposed.
 **Governance:** Full Phase 1–8
 **Risk:** MEDIUM — the defect is cost, not correctness, but the fix changes *when* classification fires, and a careless version silently stops classifying emails that should be classified.
-**Status:** **DRAFT — awaiting Wael's Phase 0 approval.** No mechanism approved. No code written.
+**Status:** **APPROVED WITH COMMENTS by Wael, 2026-08-24** — Phase 0 → Phase 1 authorized. No mechanism approved. No code written.
+**Reviewer comment applied:** line 111 originally read *"firing on insert vs. update … is the shape chosen here,"* which selected a mechanism the document elsewhere says is not approved. Reworded to name it as one option for Phase 1/2 to evaluate. No other change requested.
 
 ---
 
@@ -52,9 +53,38 @@ Each reduced the multiplier. None removed it. The multiplier is the defect; the 
 
 ### Provenance of this finding
 
-It came out of reviewing an external cache-cost diagnosis (artifact "MyNaavi Cache Remediation", 24 Aug 2026), whose conclusion was that Naavi's Haiku requests never attempt prompt caching. **That conclusion is incorrect** — `cache_control` is set at all six Claude call sites. The redundant-classification defect was found while checking why the volume was as high as the Console reported.
+It came out of reviewing an external cache-cost diagnosis (artifact "MyNaavi Cache Remediation", 24 Aug 2026).
 
-**Not verified:** the actual call count in the Anthropic account. Every claim above is read from source and migration files; the size of the dollar effect is arithmetic from those, not a measured figure. Confirming it in Console → Usage is proposed as the first step of Phase 1, and is the number that would size this work item honestly.
+**Its stated mechanism is wrong, but its conclusion is right — and was later confirmed by measurement.** The artifact said Naavi's Haiku requests "never attempt" caching; in fact `cache_control` is set at every Claude call site. What it got right is the part that matters: the problem is *coverage*, and prompt length is the gate. Five of six cached blocks sit under Haiku 4.5's 4,096-token minimum, so `cache_control` there writes nothing — the same observable outcome the artifact predicted, by a different mechanism. It also correctly predicted a date interpolated into a cached prompt (finding 3 below), having never read the code.
+
+**The lesson for this item is not "the artifact was wrong."** It is that a confident, well-sourced diagnosis can be right about the destination and wrong about the road, and only reading the source separates the two. The redundant-classification defect was found while checking why call volume was as high as the Console reported — a question the caching frame never asks.
+
+---
+
+## ⭐ Measured evidence — the flat hourly line
+
+**Added 2026-08-24 after Phase 0 approval.** The original draft said the dollar effect was arithmetic from source, not a measured figure. It has since been measured, and the measurement is stronger evidence than anything else in this document.
+
+**Source:** Anthropic Console → Usage. Filters: API key `naavi-edge-functions-2026-05` · Model `claude-haiku-4-5` · Workspace All · Account All · **View by Day, 2026-08-24**.
+
+**Observed:**
+
+| Metric | Value |
+|---|---|
+| Total tokens in | **22,916,042** |
+| Total tokens out | 510,679 |
+| Hours elapsed at capture | ~19 |
+| **Implied rate** | **≈ 1.21M input tokens/hour** |
+
+**The shape is the finding.** Broken into hourly bars, the traffic is *flat* — roughly 1.2M tokens every hour, bar after bar, across the whole day including overnight. A few taller and shorter bars at the right edge ride on top of that floor.
+
+**Naavi has two users.** Two people cannot generate a level 1.2M tokens/hour at 3 AM. Human traffic is spiky and clusters around waking hours. **A flat hourly line is a machine repeating identical work on a schedule — which is precisely what `sync-gmail`'s `'0 * * * *'` cron does.** The variable bars at the edge are the actual human usage; the flat baseline underneath it is the defect.
+
+This upgrades the central claim from arithmetic to observation. Restated in the terms of 5-levers #3: *the flat baseline is an observation; attributing it specifically to `extract-email-actions` rather than another hourly job remains an inference* — the Console bills per API key and every Edge Function shares one, so it cannot split them directly. The cache-split view (uncached vs. cache-read) is the proposed discriminator, since the classifier prompts are all below the cacheable minimum and `naavi-chat`'s is far above it.
+
+**Projected at the observed rate:** ~28.9M tokens/day ≈ **$31/day ≈ $930/month**, against the *"$581 month-to-date across 2 users"* recorded on the April cron migration. The trend is upward, not flat.
+
+**Unrelated but urgent, noted at the same capture:** the account credit balance displayed **$9.00**, roughly seven hours of runway at the observed burn. Credit exhaustion fails every Claude call on every surface — mobile, voice, demo line, morning brief. Not part of this work item; raised to Wael separately.
 
 ---
 
@@ -78,7 +108,7 @@ Stop paying to classify the same email over and over. An email should be sent to
 
 ## Out of Scope
 
-- **Prompt caching.** Real but separate, and roughly two orders of magnitude smaller — caching would halve the cost of redundant calls that should not be made at all. Recommend a separate item; see "Related findings" below.
+- **Prompt caching.** Out of scope, and — corrected 2026-08-24 — **not worth opening as a separate item either.** The original draft called it "real but separate, roughly two orders of magnitude smaller" and recommended a follow-up item. Measurement since showed there is nothing actionable: `cache_control` is already set at every call site, and the five blocks that don't cache are below Haiku's minimum by construction, which no configuration change fixes. Caching would at best have made redundant calls cheaper; B11x stops making them. See "Related findings" #1 for the measured detail, recorded so a future session doesn't re-derive it.
 - **Changing the cron cadence.** The three migrations above already show cadence is the wrong lever. If this fix works, cadence could arguably be *raised* back toward responsiveness — that is a later, separate decision.
 - **The `harvest-attachment` and `extract-document-text` guards.** CLAUDE.md documents an idempotency guard on `harvest-attachment` at `(user_id, gmail_message_id, file_name)`; not re-verified this session. Their firing volume drops as a consequence of this fix, but their own logic is not touched.
 - Mobile and voice. Neither calls this path.
@@ -108,7 +138,7 @@ The obvious guard — *"skip if an `email_actions` row already exists"* — **is
 
 The same applies to a failed Claude call: no row, and nothing recording that the attempt happened.
 
-This is why firing on **insert vs. update** in `sync-gmail` is the shape chosen here — the message row's existence is the fact that is actually reliable. Phase 2 still owes an answer for the failed-attempt case, which insert-detection alone does not solve: an email whose classification errors out on the tick it arrives would never be retried.
+This makes **insert-vs-update detection** in `sync-gmail` one mechanism Phase 1/2 should evaluate — the message row's existence is a fact that is actually reliable. **It does not by itself solve the failed-attempt retry case:** an email whose classification errors out on the tick it arrives would never be retried. Phase 2 owes an answer for that case whichever mechanism it selects.
 
 ---
 
@@ -116,9 +146,31 @@ This is why firing on **insert vs. update** in `sync-gmail` is the shape chosen 
 
 Both were found during the same investigation. Recommend opening as separate holding-list items; neither is authorized by this Phase 0.
 
-1. **Prompt caching is a no-op on three of the four Haiku call sites.** Haiku 4.5's minimum cacheable prefix is **4,096 tokens** (verified against Anthropic SDK documentation, not the external artifact, which flagged its own figure as unverified). The cached system blocks in `extract-email-actions` (~1.2k tokens, per its own comment at `:158`), `extract-document-text` and `ingest-note` are all below it, so `cache_control` there writes nothing and reports nothing — silent by design. Only `naavi-chat:3579` clears the bar. This is consistent with the Console showing 2% cache writes.
+1. **Prompt caching is a silent no-op on five of the six cached blocks.** Haiku 4.5's minimum cacheable prefix is **4,096 tokens** (verified against Anthropic documentation, not the external artifact, which flagged its own figure as unverified). Below that, `cache_control` writes nothing and reports nothing — no error.
 
-2. **A banned word is live in a production prompt.** `extract-email-actions:161` opens: *"You are helping a senior user triage email."* CLAUDE.md bans "senior" in any prompt, and directs that the rule be applied retroactively when editing existing prompts. One-line fix, but it is a prompt change and therefore carries the Phase 3 non-determinism rule (3 independent trials).
+   **Corrected 2026-08-24.** The original draft said *"three of the four Haiku call sites"*; both numbers were wrong. There are **eight** Haiku call sites, and `extract-actions:148` is **Sonnet 4.6**, not Haiku. Block sizes measured directly from source rather than taken from code comments:
+
+   | Call site | Model | Cached block | Caches? |
+   |---|---|---|---|
+   | `naavi-chat:3579` (main conversation) | Haiku | ~38–42K tok | ✅ **yes** — the only one; source of the 7.23× amortization |
+   | `naavi-chat:1778` (Layer-2 classifier) | Haiku | ~3,500–3,800 tok | ❌ **no `cache_control` at all**, and `${nowToronto}` sits at the top of the prompt |
+   | `extract-email-actions:236` | Haiku | 5,282 chars ≈ 1,300–1,500 tok | ❌ under threshold |
+   | `extract-document-text:441` (PDF) | Haiku | 2,547 chars ≈ 640–710 tok | ❌ under threshold |
+   | `extract-document-text:177` (OCR) | Haiku | 1,635 chars ≈ 410–450 tok | ❌ under threshold |
+   | `ingest-note:54` | Haiku | ≈ 270 tok | ❌ under threshold |
+
+   **This is not a misconfiguration and there is no configuration that fixes it.** The prompts are structurally too small for Haiku's threshold. **Do not pad them to reach 4,096** — that pays the 1.25× write premium on filler every call and ends up worse than not caching. Caching is not a cost lever for Naavi; call volume is, which is what B11x addresses.
+
+2. **A banned word is live in production prompts — at three sites, not one.** CLAUDE.md bans "senior" in any prompt and directs retroactive application.
+   - `extract-email-actions:161` — *"You are helping a senior user triage email."*
+   - `extract-document-text:146` — *"...for a senior user."*
+   - `extract-document-text:402` — *"...attached to a senior user's email."*
+
+   **Corrected 2026-08-24** — the original draft listed only the first. Three one-line fixes, but they are prompt changes and carry the Phase 3 non-determinism rule (3 independent trials).
+
+3. **A date is interpolated inside a cached block, at two sites.** `extract-document-text:146` and `:402` both embed `${todayISO}` *within* the text carrying `cache_control`. Any change inside a cached prefix invalidates it — this one daily rather than per-request. **Currently moot**, because both blocks are under the 4,096 minimum and never cache anyway, but it would defeat caching the moment either prompt grew past the threshold.
+
+   Recorded because it is the exact defect the external artifact predicted from Console data alone, without having read the code. If any of these prompts is ever enlarged to make caching viable, this must be fixed in the same change — move the date out of the cached block and into the user message.
 
 ---
 
