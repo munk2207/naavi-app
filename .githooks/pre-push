@@ -22,6 +22,22 @@
 #
 # Enable once per clone:  git config core.hooksPath .githooks
 
+echo "[pre-push] checking for finished items sitting in open tables..."
+
+# Wael, 2026-08-23: "We said many times that T6 and Epic is not on the list,
+# however I see it now on the priority list! I'm really fed-up."
+#
+# T6 had been closed for three days. Its own row said so. The row was never
+# moved, and Claude then read it and recommended it as the highest priority.
+#
+# The reason no existing gate caught it is the part worth remembering: BOTH RAN
+# THAT NIGHT AND BOTH PASSED. priority-cap-check counts rows, not open rows.
+# orphan-item-check verifies an ID has a row, not that the row is in the right
+# table. They measured what was easy to measure rather than what fails.
+#
+# An item is not closed because its text says so. It is closed when it has MOVED.
+node scripts/closed-row-placement-check.js || exit 1
+
 echo "[pre-push] checking the priority list cap..."
 
 # Wael's rule, 2026-08-22: the priority list holds at most 5 items, and adding a
