@@ -1,0 +1,59 @@
+{
+  "version": "5",
+  "redirects": {
+    "https://esm.sh/@supabase/supabase-js@2": "https://esm.sh/@supabase/supabase-js@2.110.0"
+  },
+  "remote": {
+    "https://deno.land/std@0.224.0/async/delay.ts": "f90dd685b97c2f142b8069082993e437b1602b8e2561134827eeb7c12b95c499",
+    "https://deno.land/std@0.224.0/http/server.ts": "f9313804bf6467a1704f45f76cb6cd0a3396a3b31c316035e6a4c2035d1ea514",
+    "https://esm.sh/@supabase/supabase-js@2.110.0": "b99c0ce7729f9de7797f836b93ab9ec94f1cfe079b4f937fa4144fe13525e979",
+    "https://esm.sh/@supabase/supabase-js@2.45.4": "1108d69216995335d057dbd15907caaf514a4d1ef082f097050573b9d589a57c"
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@anthropic-ai/sdk@0.79",
+        "npm:@expo/metro-runtime@~55.0.6",
+        "npm:@expo/ngrok@^4.1.0",
+        "npm:@mykin-ai/expo-audio-stream@0.3",
+        "npm:@react-native-async-storage/async-storage@^2.1.2",
+        "npm:@supabase/supabase-js@2.105",
+        "npm:@types/react@~19.2.2",
+        "npm:expo-av@^16.0.8",
+        "npm:expo-background-fetch@~55.0.9",
+        "npm:expo-constants@~55.0.7",
+        "npm:expo-contacts@~55.0.13",
+        "npm:expo-gradle-ext-vars@~0.1.3",
+        "npm:expo-haptics@~55.0.8",
+        "npm:expo-intent-launcher@^55.0.12",
+        "npm:expo-linking@~55.0.7",
+        "npm:expo-localization@~55.0.8",
+        "npm:expo-location@~55.1.6",
+        "npm:expo-notifications@~55.0.12",
+        "npm:expo-router@~55.0.5",
+        "npm:expo-secure-store@~55.0.8",
+        "npm:expo-speech@~55.0.8",
+        "npm:expo-sqlite@~55.0.10",
+        "npm:expo-status-bar@~55.0.4",
+        "npm:expo-task-manager@~55.0.9",
+        "npm:expo-updates@~55.0.18",
+        "npm:expo-web-browser@~55.0.14",
+        "npm:expo@^55.0.9",
+        "npm:i18next@23",
+        "npm:react-dom@19.2.4",
+        "npm:react-i18next@14",
+        "npm:react-native-background-geolocation@^5.1.1",
+        "npm:react-native-keyboard-aware-scroll-view@~0.9.5",
+        "npm:react-native-safe-area-context@~5.6.2",
+        "npm:react-native-screens@4.23",
+        "npm:react-native-web@~0.21.2",
+        "npm:react-native-webview@^13.16.1",
+        "npm:react-native@0.83.2",
+        "npm:react@19.2.4",
+        "npm:sharp@~0.35.1",
+        "npm:tsx@^4.21.0",
+        "npm:typescript@~5.9.2"
+      ]
+    }
+  }
+}
