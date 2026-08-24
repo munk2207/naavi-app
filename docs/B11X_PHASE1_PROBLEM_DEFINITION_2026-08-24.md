@@ -3,7 +3,9 @@
 **Work item:** [[B11x]] — `sync-gmail` re-sends every email in its 7-day window to Claude on every cron tick
 **Date:** 2026-08-24
 **Phase 0:** `docs/B11X_PHASE0_INTENT_2026-08-24.md` — approved with comments by Wael, 2026-08-24
-**Status:** **DRAFT — awaiting Wael's Phase 1 → Phase 1A approval.** No code written. No mechanism selected.
+**Status:** **REVISED 2026-08-24 after Phase 1A returned DOES NOT PASS.** Awaiting Wael's re-approval. No code written. No mechanism selected.
+
+**⭐ Revision 2 (2026-08-24).** Phase 1A (`docs/B11X_PHASE1A_ARCHITECTURE_COMPLETENESS_2026-08-24.md`, commit `a06dafa`) found this document's problem definition materially incomplete: it counted one caller of `sync-gmail` where there are five, and declared mobile uninvolved when mobile triggers the capability every 60 seconds. Four corrections applied — §1, §2.1, §6, and In Scope. **The original claim of "up to 168" is preserved below, marked as superseded, rather than quietly overwritten** — a reader needs to see what the first pass believed and why it was wrong, or the same reasoning recurs.
 
 **Governance note.** Per `AI_DEVELOPMENT_GOVERNANCE.md` §3, no phase's own completeness is permission to proceed. This document answers Phase 1's five questions and nothing further.
 
@@ -24,9 +26,13 @@ A second Protected Core area sits adjacent but is **not** touched: *Background s
 
 ## 1. What exactly is broken
 
-**Every email in the rolling 7-day window is re-sent to Claude on every hourly cron tick, for as long as it remains in the window.**
+**Every email in the rolling 7-day window is re-sent to Claude on every `sync-gmail` run, for as long as it remains in the window.**
 
-The intended number of classifications per email is 1. The actual number is up to 168 (24 ticks/day × 7 days).
+The intended number of classifications per email is 1. **The actual number has no fixed ceiling.**
+
+> **Superseded, retained deliberately.** Revision 1 said: *"The actual number is up to 168 (24 ticks/day × 7 days)."* That counted the hourly cron and nothing else. Phase 1A found four more triggers. **168 is the floor, reached only when nobody is using the product** — see §2.1a.
+
+**The property this reframing exposes, which revision 1 missed entirely: using Naavi makes the bill worse.** Every open app and every email question adds full-window reclassifications on top of the crons.
 
 Nothing is functionally wrong with the output — `email_actions` rows are correct, the morning brief is correct, Global Search is correct. **The defect is exclusively cost.** That is why it survived four months and three attempted fixes: there is no user-visible symptom.
 
@@ -54,8 +60,27 @@ if (!error && !isMarketing) {
 
 `!error` is true for an **UPDATE** exactly as for an **INSERT**. An upsert on a row already present cannot fail. The condition therefore holds on every tick, for every non-marketing message in the window.
 
-**Cron cadence:** `supabase/migrations/20260430000001_gmail_sync_cron_60min.sql:24` — `'0 * * * *'`.
 **Window:** `sync-gmail/index.ts:118` — `let daysBack = 7;` (read from source, not from CLAUDE.md).
+
+### 2.1a ⭐ `sync-gmail` has five callers, not one (added by Phase 1A)
+
+Revision 1 named only the hourly cron. Every row below was freshly verified by direct read.
+
+| # | Caller | `file:line` | Params sent | Actual scope | Correct? |
+|---|---|---|---|---|---|
+| 1 | Hourly cron | `20260430000001_gmail_sync_cron_60min.sql:24` (`'0 * * * *'`) | none | all active users, 7 days | ✅ intended |
+| 2 | `sync-active-email-alerts` — **5-minute cron** | `sync-active-email-alerts/index.ts:68` | `target_user_id` | one user, 7 days | ✅ correct |
+| 3 | **Mobile app, 60-second interval** | `lib/gmail.ts:33` | **none** | **all active users, 7 days** | ❌ |
+| 4 | `naavi-chat` email-search intent | `intentHandlers.ts:346` | **`user_id`** | **all active users, 7 days** | ❌ |
+| 5 | `naavi-chat` live-recent + billing | `naavi-chat:1265`, `:3478` | `target_user_id`, `days_back: 1` | one user, 1 day | ✅ correct |
+
+**Callers 3 and 4 pass a parameter `sync-gmail` does not read**, so both fall through to the global default. `sync-gmail` accepts only `target_user_id` (`:131-132`); there is no `body.user_id` branch anywhere in the function.
+
+**Caller 3's chain:** `app/index.tsx:1269` `setInterval(runSync, 60 * 1000)` → `:1250` `registry.email.sync(currentUserId)` → `email.adapter.ts:75-77` `sync(userId) { await triggerGmailSync(); }`, **which accepts the user id and discards it** → `lib/gmail.ts:33`, POST with no body.
+
+**Both are tracked as their own defect, [[B11y]]** — they cause a global fan-out where a per-user call was intended, which is a correctness and privacy-surface question independent of cost.
+
+**A sixth path bypasses `sync-gmail` entirely:** `backfill-email-actions/index.ts:67` calls `extract-email-actions` directly. A guard placed only in `sync-gmail` does not cover it. Now named In Scope below.
 
 ### 2.2 The receiving function does not compensate (observation)
 
@@ -183,14 +208,18 @@ Per Architecture Reference §0a Ownership Model:
 | Owning component | **Shared Core** — the Edge Functions codebase, `munk2207/naavi-app/supabase/functions/*` | §0a |
 | Capability classification | **Shared Core** — *"Gmail — background sync \| `sync-gmail` (Shared Core) \| Genuinely shared, cron-driven, writes to `gmail_messages`"* | §2, capability table |
 | Protected Core? | **Yes — "Gmail integration", Full Phase 1-8** | §4 |
-| Mobile involvement | **None.** Document harvesting is *"Mobile-backend only… wired into the email-sync pipeline only"* — server-side, no client code | §2 |
+| Mobile involvement | ⭐ **NOT none — corrected by Phase 1A.** Revision 1 said "None", citing that document harvesting is *"Mobile-backend only… server-side, no client code."* That is true of *harvesting* and irrelevant to *triggering*: `app/index.tsx:1269` fires `sync-gmail` every 60 seconds via `lib/gmail.ts:33`. **`app/index.tsx`, `lib/gmail.ts` and `lib/adapters/google/email.adapter.ts` are in-scope surfaces.** | Freshly verified |
 | Voice involvement | **None.** Voice never calls this path. Voice's Gmail contact is *live/recent reads*, a separate Duplicated capability (ADR 0006) | §2, §5 |
 
 **Architecture location: PROVEN.** Every row above is a citation into the Architecture Reference, not a grep.
 
 **Environment consequence (§0b):** the mobile app and Supabase each have two environments. The fix is exercised on staging `xugvnfudofuskxoknhve` and reaches production only on Wael's explicit word.
 
-**Cross-Cutting Change Parity Check does not apply.** That rule governs items bundling a Shared Core change with a *client* promotion. B11x is backend-only — no mobile build, no voice deploy. Recorded so a later phase does not invent a client gate that does not exist here.
+⭐ **Cross-Cutting Change Parity Check — status changed by Phase 1A.** Revision 1 dismissed it: *"B11x is backend-only — no mobile build, no voice deploy."* That rested on the "Mobile involvement: None" error corrected above.
+
+**It now depends on a decision Phase 2 has not made.** If the fix is confined to Shared Core, the check still does not apply. If it touches `lib/gmail.ts` or `email.adapter.ts` to stop the 60-second global trigger, **a mobile client build enters scope** and the check becomes mandatory — the backend half must be confirmed deployed to the same environment the client build points at, by direct evidence.
+
+**Phase 2 must state which case applies rather than inheriting revision 1's dismissal.** Voice remains genuinely uninvolved either way: *freshly verified this session — no `fetch` to `sync-gmail` or `extract-email-actions` exists in `naavi-voice-server/src/index.js`; the only matches are descriptive comments at `:693`, `:726`, `:1457`.*
 
 ---
 
@@ -205,6 +234,10 @@ Per Architecture Reference §0a Ownership Model:
 ---
 
 ## 8. Carried into Phase 1A / Phase 2
+
+0. ⭐ **Which triggers the fix must cover** (added by Phase 1A). A guard in `sync-gmail` covers callers 1–5 but **not** `backfill-email-actions:67`, which reaches `extract-email-actions` directly. Phase 2 must either place the guard where all six paths pass through it, or exclude `backfill-email-actions` explicitly with a reason. **`backfill-email-actions` is hereby In Scope for that decision** — its header calls it a one-off utility, which is an argument for exclusion, not a reason to leave it unaddressed.
+
+0b. ⭐ **Whether B11x fixes the global fan-out or leaves it to [[B11y]].** Callers 3 and 4 make the multiplier user-activity-driven. B11x could make each classification idempotent and leave the excess *syncs* in place, or the two items could be sequenced. **Phase 1 does not decide this**; Phase 2 must state which, because it determines whether a mobile build enters scope (§6).
 
 1. **The failed-attempt retry case.** Unsolved by any mechanism yet named.
 2. **Schema change or not.** §4.2 makes this the pivotal question. Phase 0 grants no authority; Phase 2 may need to return for it.
