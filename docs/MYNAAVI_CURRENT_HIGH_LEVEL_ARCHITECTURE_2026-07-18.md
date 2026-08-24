@@ -1,6 +1,8 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.07.18.9 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+**Architecture Version:** 2026.07.18.10 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+
+**Revision 10 (2026-08-23, [[B11k]] Phase 1A):** records a capability this document did not describe at all — **action outcome reporting / failure surfacing** — which turns out to be duplicated three ways. §5a gains a Priority 1c row, §5 the matching narrative, and §2 a row for `naavi-chat` Step 1.4's execute-then-speak contract, which §2b had described only as the marker's read-back point. **This was Outcome 3 under the Architecture Drift Rule, not a Phase 8 tidy-up** — the omission predated B11k, and §5a's title claims a *Full* Duplication Inventory, so omitting a three-way duplication made it inaccurate rather than merely thin. Phase 1A's first revision proposed deferring it and recorded a PASS; external review rejected both, correctly, and implementation stopped until these edits landed. **The cost of the omission is measurable:** the same defect was fixed narrowly three times in three months — 2026-05-12, 2026-07-15, 2026-07-21 — by three people who each had no row telling them it was one class. Bumped in the same commit as the edits.
 
 **Revision 9 (2026-08-21, [[T12]] Phase 8):** the four corrections T12's Phase 6 review made a hard merge precondition under the Architecture Drift Rule (Outcome 2 — divergence from an intentional, approved change). Two are now-false claims this document made about what the project can measure (§0d and §0c both said nothing compares deployed Edge Function code between projects — `parity:verify` now does); one is a stale line reference in §0b; and one is §0b's inaccurate "on every send path", now replaced by a plain statement of what the guard actually covers. **That last one also carries Wael's ruling that the uncovered paths are not a gap to close** — staging is contained by controlled data, not by the guard — so it is closed, not open. Bumped in the same commit as the edits.
 
@@ -319,6 +321,8 @@ For each capability, where the authoritative implementation actually lives — v
 | Authentication / user identity | Two genuinely different mechanisms, not a duplication | Mobile identifies the user via login (JWT). Voice identifies the user via caller phone number lookup. Different problems, correctly solved differently — both ultimately read the same `user_settings` table |
 | **Voice PIN — authentication of a caller on an unregistered phone** | `manage-voice-pin` (Shared Core) | Genuinely shared. The caller claims an identity (last 4 digits of their registered number), which resolves to **one** account, and the PIN is verified against that account alone. Before [[S1]] (2026-08-19) the voice server tested an entered PIN against **every** account holding one, so a guess succeeded if it matched anyone and the odds worsened as the user base grew |
 | **Voice PIN — failure counting, alerting, and lockdown state** | `manage-voice-pin` (Shared Core), atop the `record_voice_pin_failure()` Postgres function | **Ownership moved out of the voice server at S1 Phase 6** (2026-08-19) — see §2c |
+| **Action execution and outcome-truthful reply (app path)** | `naavi-chat` Step 1.4 executors (Shared Core) | Genuinely shared for the seven intents it covers (`SET_REMINDER`, `CREATE_EVENT`, `REMEMBER`, `DELETE_RULE`, `DELETE_MEMORY`, `ADD_CONTACT`, `DELETE_EVENT`), and the **reference contract** for this capability: execute, then derive the reply's speech from the result. §2b previously described Step 1.4 only as the marker's read-back point; that it also owns the execute-then-speak contract was unrecorded until [[B11k]] Phase 1A. **Voice does not call it** — see §5's Priority 1c |
+| **Action outcome reporting / failure surfacing** | **Duplicated, three independent implementations** | The capability [[B11k]] exists to fix. See §5's Priority 1c |
 
 ### 2a. Why "Action Rules creation" is the important one
 
@@ -463,6 +467,18 @@ Ranked by priority. Debt that isn't visible stops being tracked and becomes a pe
 
 **Priority 1b — Action Rules execution (fan-out) duplicated intra-Shared-Core.** `evaluate-rules` and `report-location-event` independently implement overlapping fan-out logic (channel selection, self-alert detection, `task_actions` execution) for different trigger types, with only a code comment enforcing "keep both in sync." Proven by three confirmed drift incidents (F5c's partial fix, B10d's channel-preference gap, B10g's `task_actions` gap) — found during T1a (Architecture Integrity Audit, 2026-07-18). No full unification planned — the narrower "extract the specific drifted piece into a shared module" pattern (B10g's `_shared/task_actions.ts`) is the accepted approach instead. See `docs/adr/0005-action-rules-execution-fanout-duplication-accepted.md`.
 
+**Priority 1c — Action outcome reporting / failure surfacing duplicated three ways.** Whether a user
+is told the truth about an action that failed is decided independently in three places, with no
+shared module and nothing enforcing consistency: voice's action loop
+(`naavi-voice-server/src/index.js` — speaks before executing and discards the result), mobile's
+`hooks/useOrchestrator.ts` (`turnSpeechOverride`, correct for most actions), and `naavi-chat`'s Step
+1.4 executors (correct, and Shared Core). **Not an accepted Exception** — voice's instance is a live
+defect tracked as [[B11k]]. **The cost of this row's previous absence is the argument for its
+existence:** the voice instance was found and fixed narrowly three times — the list confirm gate
+(2026-05-12), the time-trigger gate (2026-07-15), and B10q's email-alert branch plus its own
+independently-discovered follow-up (2026-07-21) — each fixing only the action in front of the person
+who found it, because no inventory row said they were one class. Added 2026-08-23 by B11k Phase 1A.
+
 **Priority 2 — Calendar reads duplicated.** Both sides independently call the Google Calendar API for live event data, instead of sharing one fetch. No unification planned — formally accepted as an Architecture Exception, dated, reviewable 2027-07-18 or at the next Architecture Audit Trigger. See `docs/adr/0002-calendar-reads-remain-duplicated.md`.
 
 **Priority 3 — Gmail reads duplicated.** Both sides independently call the Gmail API for "what's new" reads — separate from the genuinely-shared `sync-gmail` background cron. Voice itself has two independent internal call sites, not just one vs. mobile's one. No unification planned — formally accepted as an Architecture Exception. See `docs/adr/0006-gmail-live-reads-remain-duplicated.md`.
@@ -487,6 +503,7 @@ Ranked by priority. Debt that isn't visible stops being tracked and becomes a pe
 | Drive saves | ✅ | | |
 | **Action Rules creation (classifier)** — Priority 1 | | ✅ | Not scheduled — Accepted as Architecture Exception (ADR 0001), dated, review 2027-07-18 or next Audit Trigger |
 | **Action Rules execution (fan-out), intra-Shared-Core** — Priority 1b | | ✅ | Not fully scheduled — Accepted as Architecture Exception (ADR 0005); narrower per-drift extraction pattern (B10g's `_shared/task_actions.ts`) is the accepted ongoing approach, review 2027-07-18 or next Audit Trigger. **Corrected 2026-07-18 (T1a):** this row previously appeared only in the ✅ Shared section above, worded "genuinely shared" — true only for the mobile-vs-voice axis; the intra-Shared-Core duplication between `evaluate-rules` and `report-location-event` was unstated until this audit |
+| **Action outcome reporting / failure surfacing** — Priority 1c (**new row 2026-08-23, was missing entirely**) | | ✅ | **Not** an accepted Exception. Three independent implementations: voice's action loop (broken — speaks before executing, discards the result), mobile's `useOrchestrator` (`turnSpeechOverride`, correct for most actions), and `naavi-chat`'s Step 1.4 executors (correct, and Shared Core). Nothing enforces consistency. Three narrow fixes to the voice instance landed independently — 2026-05-12, 2026-07-15, 2026-07-21 — without the class being named. Tracked as [[B11k]] |
 | Calendar reads — Priority 2 | | ✅ | Not scheduled — Accepted as Architecture Exception (ADR 0002), dated, review 2027-07-18 or next Audit Trigger |
 | Gmail live reads — Priority 3 | | ✅ | Not scheduled — Accepted as Architecture Exception (ADR 0006), dated, review 2027-07-18 or next Audit Trigger |
 | List reads | | ✅ | Not scheduled — Accepted as Architecture Exception (ADR 0007), dated, review 2027-07-18 or next Audit Trigger |

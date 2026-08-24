@@ -1,0 +1,151 @@
+diff --git a/src/index.js b/src/index.js
+index 7d8e46e..292e3d2 100644
+--- a/src/index.js
++++ b/src/index.js
+@@ -15,6 +15,7 @@ const azureSpeaker = require('./azure-speaker.js');
+ const { NAAVI_TOOLS, convertToolUseToAction } = require('./anthropic_tools.js');
+ const listGate = require('./list_confirm_gate.js');
+ const actionRuleGate = require('./action_rule_confirm_gate.js');
++const outcomeReport = require('./outcome_report.js');
+ const { parseTimezone, DEFAULT_TIMEZONE, getZoneLabel } = require('./voice/parseTimezone.js');
+ const { resolveEffectiveTimezone } = require('./voice/resolveEffectiveTimezone.js');
+ const { parseReminderTime, formatSpokenDateTime } = require('./voice/parseReminderTime.js');
+@@ -12496,22 +12497,52 @@ wss.on('connection', (twilioWs) => {
+         const subject  = String(action.category ?? 'general');
+         const note     = String(action.note ?? '');
+         const category = String(action.severity ?? 'low');
+-        fetch(`${SUPABASE_URL}/rest/v1/topics`, {
+-          method: 'POST',
+-          headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+-          body: JSON.stringify({ user_id: userId, subject, note, category }),
+-        }).catch(err => console.error('[Voice] LOG_CONCERN insert failed:', err?.message || err));
+-        console.log(`[Voice] LOG_CONCERN saved subject="${subject}" category="${category}"`);
++        // B11k (2026-08-23) — was a bare fire-and-forget fetch followed by an
++        // unconditional "saved" log, which was itself an untrue statement in a
++        // log file. This branch sits inside an explicit `else if`, so it looked
++        // handled and was missed by every audit that asked "is it in the
++        // background bucket?".
++        try {
++          const res = await fetch(`${SUPABASE_URL}/rest/v1/topics`, {
++            method: 'POST',
++            headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
++            body: JSON.stringify({ user_id: userId, subject, note, category }),
++          });
++          if (!res.ok) {
++            console.error(`[Voice] LOG_CONCERN insert failed: HTTP ${res.status}`);
++            finalSpeech = outcomeReport.sentenceFor('LOG_CONCERN', 'failure');
++            speechWasModified = true;
++          } else {
++            console.log(`[Voice] LOG_CONCERN saved subject="${subject}" category="${category}"`);
++          }
++        } catch (err) {
++          console.error('[Voice] LOG_CONCERN insert failed:', err?.message || err);
++          finalSpeech = outcomeReport.sentenceFor('LOG_CONCERN', 'failure');
++          speechWasModified = true;
++        }
+       } else if (action.type === 'UPDATE_PROFILE') {
+         // Parity with mobile saveTopic — write profile key/value to topics table.
+         const subject = String(action.key ?? 'preference');
+         const note    = String(action.value ?? '');
+-        fetch(`${SUPABASE_URL}/rest/v1/topics`, {
+-          method: 'POST',
+-          headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+-          body: JSON.stringify({ user_id: userId, subject, note, category: 'preference' }),
+-        }).catch(err => console.error('[Voice] UPDATE_PROFILE insert failed:', err?.message || err));
+-        console.log(`[Voice] UPDATE_PROFILE saved key="${subject}"`);
++        // B11k (2026-08-23) — same shape as LOG_CONCERN above; see that comment.
++        try {
++          const res = await fetch(`${SUPABASE_URL}/rest/v1/topics`, {
++            method: 'POST',
++            headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
++            body: JSON.stringify({ user_id: userId, subject, note, category: 'preference' }),
++          });
++          if (!res.ok) {
++            console.error(`[Voice] UPDATE_PROFILE insert failed: HTTP ${res.status}`);
++            finalSpeech = outcomeReport.sentenceFor('UPDATE_PROFILE', 'failure');
++            speechWasModified = true;
++          } else {
++            console.log(`[Voice] UPDATE_PROFILE saved key="${subject}"`);
++          }
++        } catch (err) {
++          console.error('[Voice] UPDATE_PROFILE insert failed:', err?.message || err);
++          finalSpeech = outcomeReport.sentenceFor('UPDATE_PROFILE', 'failure');
++          speechWasModified = true;
++        }
+       } else if (action.type === 'SET_ACTION_RULE' && isRelationshipWord((action.action_config ?? {}).to)) {
+         // S13b — relationship word in recipient. The rule would silently
+         // fail at fire time because contact lookup can't resolve "wife" to
+@@ -13237,6 +13268,54 @@ wss.on('connection', (twilioWs) => {
+       }
+     }
+ 
++    // ── B11k (2026-08-23) — execute the remaining actions BEFORE speaking ────
++    // This block used to sit after the speech was dispatched to Twilio, as a
++    // fire-and-forget Promise.all whose result was thrown away. The outcome
++    // therefore did not exist when Naavi committed to words about it, so a
++    // failed action was reported to the caller as a success. Wael proved it
++    // live 2026-08-21: she said the contact was saved and production had
++    // created nothing.
++    //
++    // Three things make awaiting here cheap, all verified at Phase 2:
++    //   1. this is still inside the pre-dispatch region — stopMusic() is below,
++    //      so the thinking tick is already playing and there is no dead air;
++    //   2. LIST_READ, GLOBAL_SEARCH and B10q's SET_EMAIL_ALERT branch already
++    //      await executeAction inside this same loop, in production, today;
++    //   3. on success finalSpeech is untouched, so the pre-generated-audio
++    //      fast path below is unaffected.
++    //
++    // One shared deadline across the whole batch, not per action, so N
++    // parallel actions cost at most BATCH_TIMEOUT_MS in total.
++    if (backgroundActions.length > 0) {
++      const deadline = Date.now() + outcomeReport.BATCH_TIMEOUT_MS;
++      const settled = await Promise.allSettled(backgroundActions.map(a =>
++        Promise.race([
++          executeAction(a, userId),
++          new Promise(resolve => setTimeout(
++            () => resolve(outcomeReport.TIMEOUT_SENTINEL),
++            Math.max(0, deadline - Date.now()),
++          )),
++        ]),
++      ));
++
++      const outcomes = settled.map((s, i) => ({
++        actionType: backgroundActions[i].type,
++        outcome:    outcomeReport.classifyResult(s),
++      }));
++
++      for (const o of outcomes) {
++        if (o.outcome !== 'success') {
++          console.error(`[Process] action ${o.actionType} → ${o.outcome}`);
++        }
++      }
++
++      const rebuilt = outcomeReport.composeTurnSpeech(finalSpeech, outcomes);
++      if (rebuilt !== finalSpeech) {
++        finalSpeech = rebuilt;
++        speechWasModified = true;
++      }
++    }
++
+     // Safety net — never let a turn go silent. If Claude returned empty
+     // speech AND no action modified it, emit a fallback so the user knows
+     // Naavi heard them and can retry. Observed case: user said "Kanata"
+@@ -13403,12 +13482,12 @@ wss.on('connection', (twilioWs) => {
+       }
+     }
+ 
+-    // Execute remaining actions in background AFTER speaking
+-    if (backgroundActions.length > 0) {
+-      Promise.all(backgroundActions.map(a => executeAction(a, userId))).catch(err => {
+-        console.error('[Process] Background action error:', err.message);
+-      });
+-    }
++    // B11k (2026-08-23) — the fire-and-forget execution that used to sit here
++    // moved ABOVE the speech dispatch, and is now awaited and inspected. See
++    // the B11k block before stopMusic(). Its `.catch()` was dead code anyway:
++    // executeAction wraps its whole body in try/catch and returns
++    // `{ error: err.message }`, so it essentially never rejects and the catch
++    // never fired for a real failure.
+ 
+     // Start call recording AFTER speaking confirmation finished.
+     // We wait ~3s to let Twilio finish playing the confirmation TTS before
