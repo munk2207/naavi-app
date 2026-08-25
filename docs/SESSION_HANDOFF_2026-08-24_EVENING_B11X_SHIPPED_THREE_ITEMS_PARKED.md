@@ -2,11 +2,33 @@
 
 **B11x is fixed and in production.** Three other items were opened, taken too far, and parked on Wael's call.
 
-**Do not start any of the parked items. Go to the priority list.**
+---
+
+## ⭐⭐⭐ STANDING INSTRUCTION — THE PRIORITY LIST IS THE ONLY WORK
+
+**Wael, closing this session: *"The ONLY work that we will focus on is the priority list."***
+
+That is not a preference for this week. It is the correction for what went wrong tonight, and it binds until Wael says otherwise.
+
+**The only work is the five items in the priority list** — `docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md`, top table.
+
+**Nothing else gets started.** Not the parked items. Not the older B11f / T4 / S1 threads. Not documentation tidy-ups, not memory compaction, not test-tooling improvements, and **not anything discovered along the way.**
+
+### ⭐ What to do when you find something — and you will
+
+Investigating a real bug surfaces other real bugs. That is what happened tonight: one cost question produced B11y, B11z and B12a in a chain, each one genuinely a defect, none of them worth the evening.
+
+**When you find something:**
+
+1. **Write it into the general list** with the evidence, so it is not lost.
+2. **Go back to the priority list item you were on.**
+3. **Do not open a Phase 0 for it. Do not investigate it "briefly first." Do not fix it because it is small.**
+
+**Finding a defect is not the same as it being worth fixing now.** The general list is where findings go; the priority list is where work happens. If something found is genuinely more urgent than a priority item, **say so to Wael and let him move it** — the list is capped at 5 and moving in means moving something out. That is his call, not the session's.
 
 ---
 
-## ⭐ Start here — one thing to check, then the priority list
+## ⭐ Start here — one check, then the priority list
 
 ### 1. The measurement nobody has yet
 
