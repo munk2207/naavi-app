@@ -3,7 +3,7 @@
 **Work item:** [[B11o]] — Voice `DELETE_EVENT` sends no `user_id`
 **Date:** 2026-08-25
 **Scope:** **STRICTLY VOICE STAGING**
-**Status:** **Deployed. Automated tests green. Manual validation RUN — 2 passed, 1 could not be exercised.**
+**Status:** **CLOSED — PASS. Wael's go-ahead to close, 2026-08-25.** Deployed, automated tests green, manual validation passed, and the no-match guard proven by execution after Wael refused to accept it unverified.
 
 > ### ⚠️ Tests are named, not numbered
 >
@@ -129,16 +129,39 @@ final_speech: "I don't see a meeting with John on your upcoming schedule..."
 
 The guard fires only when Claude *does* emit `delete_event` and Google's own event search then matches nothing. That requires the calendar context Claude reads and the search `delete-calendar-event` performs to **disagree** — different query mechanisms over the same calendar. Possible (stale context, title tokenisation, an event outside the fetched window), but not straightforward to force on demand.
 
-**Current coverage of the guard:**
+#### ⭐ RESOLVED — Wael refused to accept it unverified, and it is now proven by execution
 
-| Layer | Covers it? |
+**Wael, 2026-08-25: *"No... I want the airbag to work."*** He declined to ship the guard on source assertion alone. A second live attempt then also failed to reach it, for a different reason — and the eventual proof did not need a phone call at all.
+
+**Attempt 2 (the "Bob" test) — also did not exercise the guard.** An event was titled `Bob` so that Claude's query would be longer than the title and fail the substring match. Claude sent the query as **exactly `Bob`**:
+
+```
+tool_use name=delete_event jsonStr (16 chars): {"query": "Bob"}
+[Action] DELETE_EVENT result: OK      speech_modified: false
+```
+
+It matched, the event was deleted, the guard never engaged. **A third successful real delete — good evidence for the fix, none for the guard.** The test design was the fault: Claude extracts the bare name, and any title short enough to break the match is short enough for Claude to send verbatim.
+
+**Wael, on being asked to run it again: *"I have no idea about mechanism, I just did what you asked me to do, YOU can check the mechanism."*** Correct, and the right correction — verifying an internal mechanism is not the Product Owner's job.
+
+**Proven instead by executing the shipped code.** Three links, each with real artifacts:
+
+| Link | How it was proven |
 |---|---|
-| Source-assertion test (`test/deleteEventUserId.test.js`) | ✅ Asserts the guard is present and would fail loudly if removed |
-| Live behavioural evidence | ❌ **None** |
+| The API really returns `{success:true, deleted:0}` | **Live call to staging's `delete-calendar-event`** with an unmatchable query — returned `HTTP 200 {"success":true,"deleted":0,"message":"No matching events found"}` |
+| The guard converts that into a failure | **The `DELETE_EVENT` case source, lifted verbatim from the shipped `src/index.js` and executed** with `fetch` stubbed |
+| The failure becomes a truthful sentence | **The real `outcome_report.js` module, executed** with the guard's output |
 
-**This is a declared coverage gap, not a silent one.** The guard is defensive: it changes nothing on the paths exercised today, and it prevents a specific false-success on a path that is real but rare. **Whether that is acceptable to ship is Wael's call, and it is recorded here so the decision is made rather than assumed.**
+**Result, both directions:**
 
-**What it does NOT undermine:** the identity fix, which is the whole of B11o's original defect, is verified live by delete-existing.
+| API says | Naavi says |
+|---|---|
+| nothing matched | *"I wasn't able to delete that event. Please try again."* ✅ |
+| deleted 1 event | *"I'll delete the Bob meeting now."* ✅ — Claude's speech passes through untouched |
+
+**The second row matters as much as the first:** the guard does not interfere with a successful delete, so it cannot break the path that already works. That was never verified before this.
+
+**Not a source assertion.** The shipped code executed, against a payload captured live from staging. **The declared coverage gap is closed.**
 
 ---
 
@@ -182,7 +205,7 @@ Asked to add a meeting at 6 PM, at 9:00 AM, she said — verbatim from the log:
 
 ## 6. Phase 7 verdict
 
-**PASS, with one declared coverage gap.**
+**PASS. No outstanding coverage gap.** *(An earlier revision of this section read "PASS, with one declared coverage gap" — that gap was the no-match guard, and it is now closed by execution. See §3.)*
 
 | | |
 |---|---|
@@ -191,15 +214,15 @@ Asked to add a meeting at 6 PM, at 9:00 AM, she said — verbatim from the log:
 | **delete-existing** | ✅ **PASS** — live, end to end. **The original defect is fixed.** |
 | **cross-user** | ✅ **PASS** — confirmed by Wael, corroborated by the log's user id |
 | Regression (Phase 1 §6 reproduction) | ✅ No longer reproduces |
-| **delete-nonexistent** | ⚠️ **Could not be exercised.** Guard covered by source assertion only |
+| **delete-nonexistent** | ✅ **PASS — proven by execution.** Two live attempts could not reach the guard; the shipped source was then executed directly against a payload captured live from staging, in both directions |
 
 **Phase 0's Success Criteria, assessed honestly:**
 
 1. *Event deleted from the caller's own calendar* — ✅ verified live.
-2. *Spoken reply matches what happened* — ✅ **for every path tested.** The no-match path is correct by construction and by source assertion, **but has no live evidence.**
+2. *Spoken reply matches what happened* — ✅ **including the no-match path**, proven by executing the shipped source against a live-captured payload.
 3. *No path by which one caller's delete reaches another's calendar* — ✅ verified.
 4. *Nothing else changes* — ✅ no other behaviour altered.
 
-**The one decision Phase 8 must not inherit silently:** whether shipping the no-match guard without live behavioural evidence is acceptable. It is defensive, it is source-tested, and forcing it live requires the calendar context and Google's search to disagree on demand. **Wael's call, recorded rather than assumed.**
+**Nothing is left for Phase 8 to inherit.** The one open decision — whether to ship the no-match guard without behavioural evidence — was put to Wael rather than assumed, and he refused it: *"I want the airbag to work."* The evidence was then produced. **The refusal is the reason this item ships with proof instead of an accepted gap.**
 
-Phase 7 → Phase 8 requires Wael's own separate word (Governance §3, Phase-Gate Approval Rule).
+**Phase 7 → Phase 8 authorized by Wael, 2026-08-25.**
