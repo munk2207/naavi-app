@@ -350,6 +350,24 @@ Rules that are already covered elsewhere are NOT duplicated here — see CONFIGU
 
 **1a. THIS RULE DOES NOT COVER READ-ONLY ACTIONS (Wael 2026-08-15).** Reading a file, listing a directory, grepping/searching the codebase, checking git status/log, querying a database or API for information, inspecting logs — none of this changes any state, so none of it needs a confirmation step. Investigate as deeply and freely as the task requires without pausing to ask "should I check X?" or "can I read Y?" first. Rule 1 exists for actions that change something (edits, commits, pushes, builds, deploys, sends) — never generalize it onto adjacent read-only steps just because they're part of the same investigation. Origin: a `.claude/settings.json` audit (2026-08-15) found the technical permission system already fully open (`bypassPermissions` + a blanket `Bash(*)` allow) — the friction Wael was hitting wasn't the tool-permission dialogs, it was Claude asking permission for things no rule actually required.
 
+**1b. ⭐⭐⭐ NEVER CREATE A NEW TRACKED ITEM WITHOUT EXPLAINING IT FIRST AND GETTING CLEAR APPROVAL** (Wael 2026-08-25). **"I did not agree on anything called B12b, and I do not know what it is. You are NOT authorized to create any new item without taking a clear approval after explaining it."**
+
+**The rule:** creating a new item in `docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md` — or assigning it an ID, or writing its row — is a **state-changing act on Wael's own tracking system**. It requires, in this order:
+
+1. **Explain it** — in plain language, one item at a time: what the defect is from a user's point of view, what the evidence is, and what it would be called.
+2. **Get explicit approval for that specific item.**
+3. **Only then write the row.**
+
+**A general "add them" is NOT approval for rows Wael has not seen.** He cannot approve an ID, a description, or a classification he has never read. Approval of a *summary label* is not approval of the *item*.
+
+**This is the mirror of Rule 1a.** 1a says read-only investigation needs no permission. **1b says item creation needs MORE than ordinary permission** — it needs the explanation to come first, because the thing being created is a permanent entry in the list that governs what this project works on.
+
+**Applies to:** any new holding-list row · any new ID (`B12b`, `F23`, `T5`, …) · moving an item into or out of the priority list · reclassifying an existing item · opening a Phase 0 for anything. **Does not apply to:** recording a finding inside a phase document or a session note, which is description, not tracking.
+
+**Origin (2026-08-25, after [[B11o]] Phase 7).** Wael was shown a six-row summary table of findings and replied *"#3 Add them."* That was taken as authorization to mint **six new tracked items — B12b through B12g — with IDs and multi-paragraph descriptions he had never read.** He then asked what B12b was, because he had no idea. **The list is his instrument for deciding what gets built; filling it with entries he has not seen degrades exactly the thing it exists to do.**
+
+**Sister rule:** Rule 13a — explain and ask **on its own**, not appended to a status report. An item explanation buried at the bottom of a phase summary is not an explanation.
+
 2. **ONE STEP AT A TIME.** Give one command, one change, one instruction. Wait for confirmation before the next.
 
 3. **KEEP IT SHORT.** No technical walkthroughs. No multi-paragraph explanations. One-line description of what something does. The user is non-technical and trusts you to know the details.
