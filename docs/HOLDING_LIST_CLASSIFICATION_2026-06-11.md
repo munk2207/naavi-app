@@ -9,7 +9,9 @@ Every session that touches this document MUST follow the classification scheme b
 2. Surface column: only `mobile | voice | both | backend | website | staff portal | docs` — no extra text, no compound values.
 3. Server/AAB column: only `Server | AAB | Both` — no extra text.
 4. If closing an item, move the row to the correct Closed table — don't leave a stale duplicate in the open table.
-5. If new evidence contradicts a *closed* item's verdict, reopen it explicitly with a note explaining the contradiction — don't silently leave a false "closed" status standing.
+5. If new evidence contradicts a *closed* item's verdict, **surface it to Wael with the evidence — do NOT reopen it yourself.** Reopening a closed item is his decision alone (Wael, 2026-08-25: *"You are not opening any closed item"*). Bring him the contradiction; leave the row untouched until he rules. **This amends rule 5 as originally written**, which told the editing session to reopen the item directly; that instruction is superseded. What has not changed is the underlying goal — a false "closed" status must never be left standing silently. The change is who acts on it.
+
+   **⭐ Why, and it is not hypothetical.** On 2026-08-25 a session read [[B10x]]'s archived row, saw *"PRIORITY #1, TOP OF QUEUE — a truth/integrity bug"* under a heading reading *"not to be worked from"*, and concluded it had been *"never closed and never fixed."* It proposed restoring it to the open list. **B10x had shipped** — `fetchLiveCalendarEvents` takes `clientTimezone`, commit `47eb271` says *"B10x shipped"* — and the archive's own header states that nine of its items were already closed when it was archived. **The conclusion came from reading a section heading and stopping**, then dressing an inference up as a finding. Had it been acted on rather than raised, a solved bug would have re-entered the queue and consumed real work. **A closed item looking wrong is a reason to ask, not a reason to act.**
 
 **Before ending any session that touched this document:** re-run the duplicate-ID and enum-value consistency checks, not just eyeball the new rows you added.
 
