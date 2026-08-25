@@ -38,6 +38,20 @@ Open **https://platform.claude.com/usage** — filters `naavi-edge-functions-202
 
 **If it is still flat, B11x did not work** and that matters more than anything else in this document. Every test measured the *mechanism*; this is the only thing that measures the *outcome*.
 
+#### ⭐ The early signal, measured on production at 8:05 PM EST — read this before the Console
+
+| | |
+|---|---|
+| Sentinel rows on production **at deploy time**, 7:12 PM | **0** |
+| Sentinel rows **53 minutes later** | **88** |
+| Most recent | **8:01:25 PM EST** |
+
+**That 8:01 timestamp is the hourly cron's first tick after the deploy, and the fix handled it.** Those 88 rows are real emails that produced no action and previously wrote nothing at all — each one is now a message that will not be sent to Claude again.
+
+**This is production traffic, not a test.** It is the strongest evidence available this early, and it makes "did the mechanism reach real users" a settled question.
+
+**It still does not prove the bill fell.** 88 sentinels prove the guard is recording; only the hourly token graph proves the spend stopped. **Do not treat this as the answer — treat it as the reason to expect one.**
+
 ### 2. Then go to the priority list
 
 `docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md`, top table. Five items, all real user-facing bugs:
