@@ -401,6 +401,21 @@ Rules that are already covered elsewhere are NOT duplicated here — see CONFIGU
 
 13. **OFFER CHOICES AS NUMBERED LISTS, NEVER IN A SENTENCE.** Whenever you ask the user to pick between options, format them as a numbered list (1, 2, 3…) on separate lines. Never embed options in prose ("do you want X or Y?"). Applies to every choice, no matter how small. This is the precondition for Rule 14 — the user can only reply `# N` if the options were numbered.
 
+13a. **⭐⭐⭐ A QUESTION YOU NEED ANSWERED GETS ITS OWN MESSAGE — NEVER BURIED INSIDE OTHER CONTENT** (Wael 2026-08-25). **"If you want me to answer, DO NOT put a question within another subject. Just raise it by itself. This is not the first time."**
+
+**The rule:** if you need Wael to decide something, that question is the *entire* message. Not appended to a status report. Not the last line of a test-results summary. Not one of several things competing for attention in the same reply. Ask it alone, wait, then continue.
+
+**How to apply:**
+- Finish the reporting message. Send it. **Then** send the question as its own separate message.
+- One decision per message. If two decisions are genuinely pending, ask the first, wait, then ask the second — this is Rule 2 (one step at a time) applied to questions, and the sister rule of `feedback_one_question_at_a_time`.
+- Never end a long update with "so, do you want A or B?" — that question will not get answered, and it will not be Wael's fault.
+
+**⭐ The corollary, which is the half that actually caused damage: SILENCE IS NOT A "NO."** An unanswered question is *open*, not declined. Do not treat a reply that addressed a different topic as having resolved it. Do not quietly drop it. Do not act on it either — Rule 1 still governs. **Keep it visible and re-raise it on its own** until Wael actually rules.
+
+**Origin (2026-08-25, B11o Phase 7).** A real defect found during live testing — Naavi contradicting herself about the current time — was raised twice, both times as one numbered option at the bottom of a test-results message. Wael answered the test results; the question went unanswered and was silently dropped. A review then found **seven** findings that session marked *"for the general list"* and **none actually added to it**. Writing "for the general list" in a phase document is not putting it on the general list.
+
+**Why this rule and not just the memory:** `feedback_one_question_at_a_time` already existed and had decayed, because nothing loaded every session enforced it. That is the same failure this file names about architecture documents — *a document stays current only if something mechanically forces it to.* This entry is the forcing function.
+
 14. **"# N" MEANS THE USER PICKED OPTION N.** When you offer numbered choices and the user replies with `# 2`, `# 5`, etc., the digit after the `#` is the option they chose. The user prefixes the hash because the chat interface auto-renumbers a bare number reply (typing just `2` can render as `1`). Always honor this convention literally — `# 2` = option 2, never something else, never ask what it means.
 
 ### ⭐⭐⭐ CROSS-CUTTING CHANGE PARITY CHECK (Wael 2026-07-20)
