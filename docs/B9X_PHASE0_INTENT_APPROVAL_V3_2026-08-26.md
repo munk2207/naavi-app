@@ -49,6 +49,34 @@ confirm, so "office" was verified and "Abdyn" never was.
 > Before Naavi saves a location alert that is meant for another person, she must know who that
 > person is — and ask if she doesn't.
 
+### ⭐ The governing principle (Wael, 2026-08-26)
+
+> **Resolve silently when possible. Ask only when resolution is impossible or ambiguous. Never add
+> confirmation to a successfully resolved location alert.**
+
+**This sentence governs every later phase of this item.** Where any phase document, review comment,
+or implementation detail appears to conflict with it, this sentence wins and the other is wrong.
+
+**Why it is here rather than left in conversation.** The direction that opened this scope was *"add
+the recipient **confirmation** to the location path."* Taken literally, "confirmation" means RULE 23's
+two-turn *say-yes-to-confirm* pattern — and that reading had already leaked into this document twice
+before anyone noticed: Completion Criterion 2 required a recipient to be *confirmed*, and In Scope
+authorised changing the location exemption itself. Both were approved in writing, both contradicted
+Success Criterion 2, and **implementing Phase 0 as approved would have made *"alert me at Costco"*
+start asking for confirmation** — the exact behaviour the exemption exists to prevent.
+
+Wael's correction, 2026-08-26: *"my earlier phrase 'recipient confirmation' was imprecise. I do not
+recommend introducing the RULE 23 confirm-then-act behavior for location recipients."*
+
+**The four behaviours this principle fixes, stated so no later phase has to infer them:**
+
+| The user says | Naavi does |
+|---|---|
+| *"Alert me at Costco"* — no recipient | saves immediately, one turn |
+| *"Text my wife when I leave the office"* — resolves | saves immediately, one turn. **No read-back, no "say yes."** |
+| *"Text Abdyn when I arrive"* — cannot resolve | **does not save**; asks for enough information to identify the recipient |
+| Two contacts match the name | **does not save**; asks which person |
+
 ---
 
 ## What this changes, and why it is better than v2
