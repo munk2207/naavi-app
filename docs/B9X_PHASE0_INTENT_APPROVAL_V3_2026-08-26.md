@@ -53,12 +53,32 @@ confirm, so "office" was verified and "Abdyn" never was.
 
 ## What this changes, and why it is better than v2
 
-**v2 could only ever fix one of the two reproductions.** The mobile one kept the name "Abdyn" in the
-rule, so it was detectable at fire time. The voice one never captured a name at all — that rule is
-indistinguishable from a genuine *"remind me when I get there."*
+**Neither approach reaches Reproduction 2, and this document originally claimed otherwise.**
 
-**Confirming at creation fixes both**, because a rule with an unidentified recipient never gets
-saved.
+The mobile one kept the name "Abdyn" in the rule. Confirming at creation catches it — Naavi is
+holding a name she cannot identify, so she asks instead of saving.
+
+The voice one never captured a name at all. There is no *unidentified* recipient in that row — there
+is **no** recipient, which is indistinguishable from a genuine *"remind me when I get there."*
+Confirmation has nothing to trigger on.
+
+**Why prevention is still the better fix:** it is the only approach that reaches Reproduction 1
+**before** a message is misdelivered, rather than intercepting it on the way out. The fire-time
+approach could only ever act after the alert had already been created wrong.
+
+> **⚠️ Corrected 2026-08-26, on the Phase 2 reviewer's blocking finding.** This section previously
+> read: *"**Confirming at creation fixes both**, because a rule with an unidentified recipient never
+> gets saved."* **That conflated *unidentified* with *absent*.** A rule holding a name Naavi cannot
+> resolve and a rule holding no name at all are different states, and only the first is detectable.
+> The claim was written into an approved Phase 0 and contradicted three documents later by Phase 2's
+> own §9 — the reviewer caught the contradiction, not the author.
+>
+> **Prevention fixes one reproduction, not two.**
+
+**Reproduction 2 remains an open, unresolved observation.** Its creation-time failure has not been
+reproduced and its cause is unproven (Phase 1 v2 §5). Under Rule 17 it stays that way until someone
+reproduces it. **It is not in scope, and no tracked item has been created for it** — under Rule 1b
+that is Wael's decision.
 
 ---
 
