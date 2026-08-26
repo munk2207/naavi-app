@@ -176,9 +176,82 @@ independent trials**, and Phase 5 reports the full distribution — not pass/fai
 
 ---
 
-## 9. What the reviewer is asked to decide
+## 9. What the reviewer was asked to decide
 
 1. **§2.3** — which of the three resolver options.
 2. **§2.1** — whether the channel-aware filter is in scope, or location-only.
 3. Whether §4's `task_actions` coupling is acceptable as described.
-4. Gates 1–5 (§13), and a decision: Approved / Approved with Mandatory Changes / Rejected.
+4. Gates 1–5 (§13), and a decision.
+
+---
+
+## 10. Claude Implementation Handoff (Governance §14)
+
+### Decision
+
+**APPROVED WITH MANDATORY CHANGES**, external reviewer, 2026-08-26.
+
+⚠️ **This is not authorization to code.** Per Governance §3's Phase-Gate Approval Rule, a reviewer's
+verdict is one input Wael weighs. **Phase 4 begins only on Wael's own separate, explicit go-ahead.**
+
+### Mandatory Changes
+
+Nothing beyond this list may be performed under this authorization.
+
+1. **Resolver — Option 3.** The **location branch only** calls `resolve-recipient`. The existing
+   time-trigger branch keeps `lookup-contact`, **unchanged**. Option 1 was rejected for knowingly
+   mishandling email recipients and literals; Option 2 for changing working time-trigger behaviour
+   outside B9x's approved scope.
+2. **No channel-aware retrofit.** The time branch's phone-only filter (`:4276`) is **not** repaired
+   in this item. `resolve-recipient` gives the location branch correct phone / email / literal
+   handling by construction, so no retrofit is needed to satisfy B9x.
+3. **⭐ `task_actions` must NOT be resolved by the location branch.** This is the reviewer's one
+   mandatory design adjustment. Extending the existing intercept *wholesale* would begin resolving
+   `task_actions[].to_name` at creation, where they already resolve at fire time in
+   `_shared/task_actions.ts`. **The location branch resolves only the primary recipient**
+   (`action_config.to` / `to_name`). Existing `task_actions` behaviour is unchanged unless a
+   demonstrated technical necessity brings it back through governance.
+4. **Boundaries confirmed** — §6 stands as written.
+
+### Architecture Requirements
+
+- Extend the existing intercept **structurally** — a location branch beside the time branch in the
+  same region — rather than creating a second parallel mechanism (AI Coding Discipline #19).
+- Preserve the time branch **exactly**.
+- RULE 23 is untouched. Location alerts stay exempt; successful resolutions stay single-turn.
+- No mobile, voice, database, cron, or unrelated refactoring.
+
+### Regression Requirements
+
+- §5's isolation conditions are **implementation requirements**, not description: the branch engages
+  only for `SET_ACTION_RULE` + `trigger_type='location'` + no `self_override_*` + non-empty
+  `to`/`to_name` + empty `to_phone` **and** `to_email`.
+- Self-overrides preserved (F15 Defect A).
+- `tests/catalogue/confirm-then-act.ts:142-168` must stay green — *"alert me at Shoppers Drug Mart"*
+  single-turn.
+- Fail closed on unresolved and ambiguous. Never substitute the user as recipient.
+
+### Scope Restrictions
+
+Phase 0 v3's In Scope and Out of Scope, unchanged. **Reproduction 2 stays out** — cause unproven.
+
+### Verification Checklist (what Phase 5 must produce)
+
+- Git diff, files changed, rollback instructions.
+- Test results for all 8 cases in Phase 2 §8, **3 independent trials each** for prompt-dependent
+  cases, full distribution reported (Non-Determinism Rule).
+- Evidence that `task_actions` on a location alert still resolve at fire time and **not** at
+  creation — the mandatory change above, proven rather than asserted.
+- The live staging creation test required by Wael's Rule 17 ruling.
+
+### ⚠️ One implementation question Phase 4 must resolve before coding the ambiguous case
+
+The existing time intercept answers ambiguity with a **numbered candidate list plus a
+`PENDING_INTENT` marker**, so the user's `# 2` executes on the next turn. **Whether that
+`awaitingDisambig` path supports `trigger_type='location'` end-to-end has not been verified** — Step
+1.4's executor and the marker's `field`/`taIndex` shape were written for time triggers.
+
+Phase 4 must check this directly. If location is not supported, the fallback is voice's wording
+(*"say their full name and I'll try again"*), which is correct but loses the numbered choice
+CLAUDE.md Rule 13 prefers. **Raised to Wael separately if the fallback turns out to be needed** — not
+decided here, and not assumed either way.
