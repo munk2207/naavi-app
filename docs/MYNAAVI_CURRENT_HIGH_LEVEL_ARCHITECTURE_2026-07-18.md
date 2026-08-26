@@ -1,6 +1,8 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.07.18.11 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+**Architecture Version:** 2026.07.18.12 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+
+**Revision 12 (2026-08-26, [[B9x]] Phase 1A):** corrects §2b's recipient-resolution table, which said a location alert's recipient is re-resolved when the alert fires. **It is not.** `report-location-event` — the function that actually fires location alerts — contains no `contact_id` check and no `resolve-recipient` call anywhere in its 985 lines; `evaluate-rules:684` has that re-resolution and never sees a location rule, because its trigger `switch` has no `location` case. **Outcome 3 under the Architecture Drift Rule — the Reference was stale before B9x began** — so it is corrected at Phase 1A with implementation stopped, not deferred to Phase 8. **The row previously answered "yes" to the only question a reader would consult it for on this path.** Bumped in the same commit as the edit.
 
 **Revision 11 (2026-08-24, [[B11x]] Phase 6):** adds **§2d** and rewrites §2's Gmail row, which described `sync-gmail` as *"cron-driven"* — **false, and false before B11x began.** There are five triggers; two of them, including the mobile app on a 60-second interval, silently fan out to *every active user* because they pass a parameter `sync-gmail` does not read. **The word cost four months and three migrations:** every attempt to control this pipeline's cost cut the cron cadence (5 → 15 → 30 → 60 min), because the cron is what this document showed. None touched the other four triggers, because nothing recorded that they existed. §2 also gains a row for `extract-email-actions`, which this document had never listed at all despite it being the pipeline's only Claude call and the whole of B11x's blast radius. **This was Outcome 3 under the Architecture Drift Rule — a Reference already stale before the work started — so Phase 6 was blocked until it landed, not deferred to Phase 8.** Bumped in the same commit as the edits.
 
@@ -351,7 +353,7 @@ This is the capability most likely to surprise you, and the one that produced th
 
 | Trigger type | Mechanism | Shared? |
 |---|---|---|
-| Location (third-party or self) | `resolve-recipient` Edge Function | Yes — one function, used by mobile, voice (2 call sites), and `evaluate-rules`' fire-time re-resolution |
+| Location (third-party or self) | `resolve-recipient` Edge Function | Yes at **creation** time — one function, used by mobile and voice (2 call sites). **No at fire time:** `report-location-event`, which fires location alerts, performs no re-resolution — no `contact_id` check and no `resolve-recipient` call anywhere in its 985 lines. `evaluate-rules:684` has that re-resolution and never sees a location rule. *(Corrected 2026-08-26, revision 12 — this cell previously read "Yes — one function, used by mobile, voice (2 call sites), and `evaluate-rules`' fire-time re-resolution", which answered "yes" to the only question a reader would consult it for on this path.)* |
 | Time-trigger, third-party by name | **Three separate, independent `lookup-contact` call sites**, sharing no code: Layer 2's own fallthrough branch, Step 1.4's `lookupWithPhone` helper, and a third intercept that resolves Claude's tool output before the marker is embedded | **No** |
 | Self-override, any trigger | None needed — the user gave a literal address directly | N/A |
 
