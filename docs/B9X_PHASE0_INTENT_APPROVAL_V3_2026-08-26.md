@@ -96,18 +96,33 @@ that is Wael's decision.
 
 Shared Core only:
 
-- `supabase/functions/get-naavi-prompt/index.ts` — the location exemption, so it requires the
-  recipient to be identified.
-- `supabase/functions/naavi-chat/index.ts` — the gate at `:4179`, so a location alert with an
-  unidentified named recipient is held rather than passed through.
-- `naavi-voice-server/src/index.js:12613+` — **only if** Phase 1 finds a gap. Voice already resolves
-  the recipient here and already asks when a name is ambiguous.
+- `supabase/functions/naavi-chat/index.ts` — a **new recipient-resolution step**, placed in the
+  action-gate region (~`:4170-4210`) after the actions are assembled. A location alert naming a
+  person who cannot be resolved has its action **dropped**, and Naavi asks instead.
+- `supabase/functions/get-naavi-prompt/index.ts` — correct the `:1202` / `:1215` annotations so they
+  describe what the server now actually does, and state that an unresolvable recipient produces a
+  question. **The RULE 23 location exemption is NOT changed** — location alerts stay exempt.
+- `naavi-voice-server/src/index.js:12613+` — **only if** Phase 1 finds a gap. **Phase 1A found none;
+  voice is already correct and is not being changed.**
 - Regression tests, per Rule 15a.
-- Deploy to **Supabase staging** (`xugvnfudofuskxoknhve`) and, if voice changes, the `staging` branch.
+- Deploy to **Supabase staging** (`xugvnfudofuskxoknhve`). No voice deploy — no voice change.
 
-**Why no mobile file:** the gate in `naavi-chat` runs before the action reaches the mobile
-orchestrator — its own comment says so (`:4176-4177`). Fixing it in Shared Core covers the phone and
-the app without touching mobile code.
+**Why no mobile file:** the resolution step runs inside `naavi-chat`, before the action reaches the
+mobile orchestrator (`:4176-4177` states this of the gates in that region). Mobile has **three**
+location-creation paths and two of them skip resolution; fixing it in Shared Core covers all three
+without touching mobile code.
+
+> **⚠️ Corrected 2026-08-26 — three further Phase 0 ↔ Phase 2 inconsistencies, found on a full
+> re-read after the reviewer's blocking finding was fixed. The reviewer flagged one; these three were
+> not flagged by anyone.** This section previously said: (1) the change modifies *"the gate at
+> `:4179`"* — it does not; that gate is left alone and a **new** step is added near it; (2) the action
+> is *"held rather than passed through"* — "held" is the RULE 23 two-turn pattern, and this design
+> **drops** the action and asks a question instead; (3) the prompt change alters *"the location
+> exemption, so it requires the recipient to be identified"* — the exemption is **not** touched, only
+> two annotations that described the server inaccurately.
+>
+> **The third one mattered most:** as written, Phase 0 authorised removing the single-turn exemption,
+> which is the opposite of Success Criterion 2 and of the reviewer's constraint on Phase 2.
 
 ---
 
@@ -138,7 +153,11 @@ the app without touching mobile code.
 ## Completion Criteria
 
 1. Phase 1 confirms the creation-path cause and whether voice has a gap.
-2. Prompt and gate changed; recipient confirmed before a location alert is saved.
+2. Recipient **resolved** before a location alert is saved — and where it cannot be resolved, the
+   alert is not saved and Naavi asks. *(Corrected 2026-08-26: this read "recipient **confirmed**
+   before a location alert is saved", which contradicted Success Criterion 3 in the same document —
+   a recipient Naavi can identify saves in **one turn**, with no confirmation step. Nothing in this
+   work asks the user to confirm a recipient she has successfully identified.)*
 3. Deployed to staging.
 4. Reproduction 1's phrasing now produces a question, not a saved rule.
 5. *"Alert me at Costco"* verified still single-turn.
