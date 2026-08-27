@@ -55,11 +55,17 @@ later as the item being done.
 
 **Not proven, and not claimed:**
 
-- **The success path** — a name that resolves, saving in one turn with the number filled in. The
-  staging Google account holds no contacts. **This is the common case for real users and it has never
-  run live.**
+- **The contact-lookup route to the success branch.** The success branch itself **is** proven —
+  *"…send an email to hussein.test@example.com"* saved in one turn with `to_email` populated, which
+  before this fix would have misdelivered. Reaching it **via a Google Contacts lookup** is untested.
 - Ambiguous name; email-only contact on an email alert.
 - **Site A — not exercised. Not failed.** It never ran, so there is no result to characterise.
+
+> **⚠️ Corrected 2026-08-27.** This section originally read *"the staging Google account holds no
+> contacts… the common case has never run live."* **Both halves were wrong.** The account's Google
+> **connection** was expired (`invalid_grant`), which `resolve-recipient:96` reports as `not_found` —
+> and the "no contacts" claim was inferred from five invented names, never checked. The success path
+> was then proven. See Phase 7 §5a and §5b.
 
 ---
 
@@ -122,7 +128,8 @@ where Wael said to land it.
 | 3 (v2) | `B9X_PHASE3_TECHNICAL_REVIEW_V2_2026-08-27.md` — **verdict outstanding** |
 | 4 | `d8fc080` |
 | 5 | `B9X_PHASE5_EVIDENCE_2026-08-27.md` |
-| 6 | `B9X_PHASE6_TECHNICAL_REVIEW_2026-08-27.md` |
+| 6 (v1) | `B9X_PHASE6_TECHNICAL_REVIEW_2026-08-27.md` — reviewed `fc71146`, the build that never ran |
+| 6 (v2) | `B9X_PHASE6_TECHNICAL_REVIEW_V2_2026-08-27.md` — the shipped build. **Verdict outstanding** |
 | 7 | `B9X_PHASE7_TESTING_2026-08-27.md` |
 | 8 | this document |
 
