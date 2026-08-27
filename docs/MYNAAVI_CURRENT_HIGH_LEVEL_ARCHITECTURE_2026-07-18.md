@@ -1,6 +1,8 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.07.18.14 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+**Architecture Version:** 2026.07.18.15 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+
+**Revision 15 (2026-08-27):** rewrites §3's interruption entry, which since revision 8 had described call interruption as **two designs, one per voice branch** — production barge-in, staging pause-word — and stated that production would keep barge-in *"until"* the promotion decision was taken. **It was taken, and the entry was never updated.** As of today `origin/staging` and `origin/main` resolve to the identical tree `b203613b…`, the same `src/index.js` blob byte for byte, so [[B11f]]'s pause/resume is what every caller gets on both branches; mobile is now the only differing design. **The failure mode is worth naming because it is not the one this document usually guards against:** the claim was true when written and expired when two branches converged — an event nothing in this project observes. No test failed, no gate fired, and the drift check compares schema, not branches. Found only because Wael asked whether voice staging and production were in sync. Not an architectural change and no work item is in flight, so no Drift Rule outcome applies — a stale description corrected. **Revision 8's own note is marked superseded in place**, because a revision entry written in the present tense goes stale exactly like the section it describes, and a reader scanning the revision list meets it first. Bumped in the same commit as the edits.
 
 **Revision 14 (2026-08-27):** corrects §0b's name for the demo-staging Railway service. All three places named it `generous-tenderness-production-9235`, which is the **domain**, not the service — Railway's service list has no such entry, so the one identifier this section exists to preserve did not resolve. The service is `generous-tenderness`. Found while re-verifying §0b live against the Railway and Twilio APIs at Wael's request; **every other claim in §0b was confirmed unchanged** — three services, both staging services on the identical commit, the four number-to-server mappings, the two staging services pointing at Supabase `xugvnfudofuskxoknhve`, and the invariant that `DEMO_TWILIO_NUMBER` / `STAGING_DEMO_TWILIO_NUMBER` are unset on `naavi-voice-staging`. A naming correction, not an architectural change — no Drift Rule outcome applies. Bumped in the same commit as the edits.
 
@@ -14,7 +16,7 @@
 
 **Revision 9 (2026-08-21, [[T12]] Phase 8):** the four corrections T12's Phase 6 review made a hard merge precondition under the Architecture Drift Rule (Outcome 2 — divergence from an intentional, approved change). Two are now-false claims this document made about what the project can measure (§0d and §0c both said nothing compares deployed Edge Function code between projects — `parity:verify` now does); one is a stale line reference in §0b; and one is §0b's inaccurate "on every send path", now replaced by a plain statement of what the guard actually covers. **That last one also carries Wael's ruling that the uncovered paths are not a gap to close** — staging is contained by controlled data, not by the guard — so it is closed, not open. Bumped in the same commit as the edits.
 
-**Revision 8 (2026-08-21, [[B11f]] Phase 8):** rewrites §3's "handling barge-in/interruption" bullet, which described as one capability something that is now **two different designs, one per voice branch** — production interrupts on any speech and discards the answer; staging interrupts only on a recognised pause word and resumes from the previous sentence. Mobile is a third design again. The entry also records the trade this creates and that Wael has assigned it to the production-promotion decision. **Also corrects a lapse in revision 7's own commit discipline:** the §0d Railway paragraph was retracted earlier the same day *without* a version bump, so `2026.07.18.7` briefly identified two different documents. Assessed for [[B11f]] per Phase 1A's Version Verification requirement: that edit concerned Railway deployment behaviour, not voice architecture, and invalidated no assumption this work item relied on.
+**Revision 8 (2026-08-21, [[B11f]] Phase 8) — ⚠️ its §3 claim is SUPERSEDED by revision 15; the two branches have since converged and the "one per branch" split below no longer exists. Read §3 itself, not this note.** Rewrites §3's "handling barge-in/interruption" bullet, which described as one capability something that is now **two different designs, one per voice branch** — production interrupts on any speech and discards the answer; staging interrupts only on a recognised pause word and resumes from the previous sentence. Mobile is a third design again. The entry also records the trade this creates and that Wael has assigned it to the production-promotion decision. **Also corrects a lapse in revision 7's own commit discipline:** the §0d Railway paragraph was retracted earlier the same day *without* a version bump, so `2026.07.18.7` briefly identified two different documents. Assessed for [[B11f]] per Phase 1A's Version Verification requirement: that edit concerned Railway deployment behaviour, not voice architecture, and invalidated no assumption this work item relied on.
 
 **Revision 7 (2026-08-20, the S1 promotion):** adds **§0d** — a feature is not one deployable thing. Records the four surfaces S1 needed, why their ordering is load-bearing, and the blind spot that nearly cost the promotion: because §2c moved voice-PIN logic into Shared Core, the voice server contains none of S1's identifiers on *either* branch, so the obvious check answers correctly and tells you nothing. Production had been serving Edge Functions three months stale, invisible to every comparison this project owns. Also records that a deploy can be complete while the feature stays dormant behind an undeployable client half, and that a push is not a deployment. Bumped in the same commit as the edit.
 
@@ -491,29 +493,45 @@ An "entry point" should only translate between the user and the Shared Core — 
 - Answering the Twilio call, managing the WebSocket audio stream
 - Speech-to-text (Deepgram) and text-to-speech (Deepgram/Polly)
 - Caller identification (phone number → user)
-- Playing audio back, handling interruption — **⭐ but "interruption" is now TWO different designs,
-  one per branch, and calling it one thing hides the difference that matters (recorded by [[B11f]]
-  Phase 8, 2026-08-21):**
+- Playing audio back, handling interruption — **[[B11f]]'s pause/resume design, now on BOTH voice
+  branches.** *(Corrected 2026-08-27, revision 15 — see the "what this entry used to say" note
+  below; the promotion this section was waiting on has already happened.)*
 
-  | | `main` (production) | `staging` ([[B11f]]) |
-  |---|---|---|
-  | How a caller interrupts | **any transcript at all** — barge-in | only a recognised pause word |
-  | Background noise / a radio / another person | **silences her** | ignored |
-  | If the word is misheard | n/a — every word works | **cannot interrupt at all** |
-  | Resume where she left off | no — the answer is discarded | yes, from the previous sentence |
+  A caller interrupts by saying a **recognised pause word** — the vocabulary lives in
+  `naavi-voice-server/src/voice/pauseCommand.js` (`PAUSE_WORDS` / `RESUME_WORDS` / `CANCEL_WORDS`,
+  unit-tested there), required at `src/index.js:34` and wired to the pause/resume block at
+  `src/index.js:9206`. "Stop" means **pause, not cancel**: the remainder of the answer is held for
+  up to 5 minutes (`HELD_ANSWER_TTL_MS`) and resumes from the previous sentence boundary. All of it
+  is per-connection state, deliberately — a module-level counter would let one caller's "stop"
+  silence another caller's audio (CLAUDE.md Rule 10).
 
-  **B11f did not add a stop control alongside barge-in; it replaced barge-in.** `main:9946` clears
-  playback on any transcript; `staging` removed that block deliberately (Wael's decision — a radio
-  or another person in the room would otherwise silence her) and holds the remainder of the answer
-  for resume. Mobile is a third design again: `hooks/useOrchestrator.ts:5068` `stopSpeaking()`
-  terminates and discards, with no resume — closer to production voice than to staging voice.
+  **Why pause and not cancel, in Wael's framing:** *"if I'm on speaker phone and someone comes to my
+  office, I say stop — and I mean pause until I say start again."* On mobile an answer has two
+  outputs, screen and voice, so silencing the audio leaves the information on screen. On a call there
+  is ONE output, so cancelling destroys the caller's only copy of a fully-computed answer.
 
-  **The trade is real and has been ruled on:** an open mechanism always works but is triggered by
-  noise; a closed vocabulary ignores noise but fails entirely when Deepgram mishears the word — and
-  `pauseCommand.js` documents against itself that "naavi stop" arrives as "stop by actions penny
-  threads" on 8 kHz mulaw. Wael's ruling (2026-08-21) is that this belongs to the **production
-  promotion decision**, not to the hardening work that recorded it. Until that decision, production
-  keeps barge-in and staging keeps the vocabulary.
+  **The trade is real, and it did not go away by being promoted:** an open barge-in mechanism always
+  works but is triggered by a radio or another person in the room; a closed vocabulary ignores noise
+  but fails entirely when Deepgram mishears the word — and `pauseCommand.js` documents against itself
+  that "naavi stop" arrives as "stop by actions penny threads" on 8 kHz mulaw. Production now carries
+  that trade too.
+
+  **Mobile is still a different design**, and is now the only one: `hooks/useOrchestrator.ts`
+  `stopSpeaking()` (exported as `stopAndReset`) terminates and discards, with no resume — the file
+  contains no held-answer or resume-point concept at all.
+
+  > **⭐ What this entry used to say, and why the correction matters.** From revision 8 (2026-08-21)
+  > until revision 15 it described interruption as *"TWO different designs, one per branch"* —
+  > production barge-in on any transcript, staging pause-word only — and closed by saying Wael's
+  > ruling assigned the choice to *"the production promotion decision"*, with production keeping
+  > barge-in "until that decision". **That decision was taken and executed, and this section was not
+  > updated.** `main`'s history carries the hold and its revert (`ea02361` then `d312fac`), and as of
+  > 2026-08-27 `origin/staging` and `origin/main` resolve to the **identical tree**
+  > `b203613be12275f4bb0f8cae75ef017350c45103` — same `src/index.js` blob, byte for byte. A section
+  > that names a difference between two branches is exactly the kind of claim that expires silently
+  > when the branches converge: nothing fails, nothing warns, and the document keeps asserting a
+  > distinction the code no longer draws. Found by re-verifying voice staging/production sync at
+  > Wael's request, not by any check this project owns.
 
 **Voice server currently also contains (drift from the ideal):**
 - Its own alert-creation classifier and reasoning loop, its own turn-state tracking, its own direct Gmail/Calendar API calls, its own direct database inserts for reminders and rules — none of which route through the mobile backend's equivalent logic. This is the single biggest gap between "what an entry point should do" and "what voice actually does."
