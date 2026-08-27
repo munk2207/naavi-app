@@ -1,6 +1,8 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.07.18.12 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+**Architecture Version:** 2026.07.18.13 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+
+**Revision 13 (2026-08-27, [[B9x]] Phase 8):** adds **§2e** and rewrites §2b's Location row, which said recipient resolution had **two** call sites. It has three: `naavi-chat` joined voice and the mobile orchestrator when B9x landed. **§2e is the part worth reading.** A location alert is constructed in TWO places inside `naavi-chat`, and B9x's first fix was correct code placed on one of them — **eleven static tests passed while it was unreachable**, `deno check` was clean, two external reviews approved it, and three live trials of the item's own reproduction went to the other site and came back unfixed. The claim that put it there was written from a grep of a file that contains no location handling at all. **A provenance tag records that evidence was gathered; it cannot record whether the evidence covers the claim.** Outcome 2 under the Architecture Drift Rule — an intentional approved change — so this update was a hard Phase 8 merge precondition, not a follow-up. Bumped in the same commit as the edits.
 
 **Revision 12 (2026-08-26, [[B9x]] Phase 1A):** corrects §2b's recipient-resolution table, which said a location alert's recipient is re-resolved when the alert fires. **It is not.** `report-location-event` — the function that actually fires location alerts — contains no `contact_id` check and no `resolve-recipient` call anywhere in its 985 lines; `evaluate-rules:684` has that re-resolution and never sees a location rule, because its trigger `switch` has no `location` case. **Outcome 3 under the Architecture Drift Rule — the Reference was stale before B9x began** — so it is corrected at Phase 1A with implementation stopped, not deferred to Phase 8. **The row previously answered "yes" to the only question a reader would consult it for on this path.** Bumped in the same commit as the edit.
 
@@ -353,7 +355,7 @@ This is the capability most likely to surprise you, and the one that produced th
 
 | Trigger type | Mechanism | Shared? |
 |---|---|---|
-| Location (third-party or self) | `resolve-recipient` Edge Function | Yes at **creation** time — one function, used by mobile and voice (2 call sites). **No at fire time:** `report-location-event`, which fires location alerts, performs no re-resolution — no `contact_id` check and no `resolve-recipient` call anywhere in its 985 lines. `evaluate-rules:684` has that re-resolution and never sees a location rule. *(Corrected 2026-08-26, revision 12 — this cell previously read "Yes — one function, used by mobile, voice (2 call sites), and `evaluate-rules`' fire-time re-resolution", which answered "yes" to the only question a reader would consult it for on this path.)* |
+| Location (third-party or self) | `resolve-recipient` Edge Function | Yes at **creation** time — one function, **three call sites**: voice (`src/index.js:12616`), the mobile orchestrator (`useOrchestrator.ts:3493`), and **`naavi-chat` since [[B9x]]** (`resolveLocationRecipient()`, awaited at **two** places inside it — see §2e). **No at fire time:** `report-location-event`, which fires location alerts, performs no re-resolution — no `contact_id` check and no `resolve-recipient` call anywhere in its 985 lines. `evaluate-rules:684` has that re-resolution and never sees a location rule. *(Corrected 2026-08-26, revision 12 — this cell previously read "Yes — one function, used by mobile, voice (2 call sites), and `evaluate-rules`' fire-time re-resolution", which answered "yes" to the only question a reader would consult it for on this path. Third call site added revision 13, 2026-08-27.)* |
 | Time-trigger, third-party by name | **Three separate, independent `lookup-contact` call sites**, sharing no code: Layer 2's own fallthrough branch, Step 1.4's `lookupWithPhone` helper, and a third intercept that resolves Claude's tool output before the marker is embedded | **No** |
 | Self-override, any trigger | None needed — the user gave a literal address directly | N/A |
 
@@ -364,6 +366,41 @@ This is the capability most likely to surprise you, and the one that produced th
 **Never valid:** a `self_override_*` field AND `to`/`to_name` populated on the same `action_config`. That is a third-party recipient colliding with a self-override, and it is the contamination shape of B9g/B9n. `hooks/useOrchestrator.ts` guards against it; **the database does not enforce it**, so any new write path to `action_rules` must carry the same guard.
 
 **Line numbers drift.** Treat any cited line as a starting point for a grep, not a permanent address. The superseded source was written from a single read-through, not an exhaustive per-branch audit — verify specifics against current code before relying on a claim for a fix.
+
+### 2e. A location alert is built in TWO places inside `naavi-chat`, and one of them is easy to miss
+
+**Added by [[B9x]] Phase 8, 2026-08-27.** §2b describes `naavi-chat` as running two
+action-generation systems. For **location alerts specifically**, both of them construct the rule, and
+a change made to only one is invisible to every static check this project owns.
+
+| | Site A — Path B | Site B — the Universal gate |
+|---|---|---|
+| Built at | `convertLocationToolToActionRule()` | `buildActionConfirm()`, location branch |
+| Emitted at | the action-gate region, late in the handler | **an immediate `return` ~966 lines earlier** |
+| Reached when | the deterministic classifier falls through to Claude | the classifier recognises the request — **the common case** |
+| Shares its exit with | — | **`DRAFT_MESSAGE`**, per its own comment |
+
+**Why this is recorded rather than left to be re-derived.** B9x's first fix (`fc71146`) was correct
+code placed on Site A alone. **Eleven static tests passed while it was unreachable**, `deno check` was
+clean, two external reviews approved it, and three live staging trials of the item's own reproduction
+went to Site B and came back unfixed. The Phase 1A claim that supported the placement — *"location
+alerts always route through Path B"* — was written from a grep of `intentHandlers.ts`, which is a
+different file and contains no location handling at all.
+
+**The transferable lesson, in the reviewer's words:** *"Searching only `intentHandlers.ts` supported
+the narrow statement that location handling was absent there, but not the broader conclusion that no
+deterministic location path existed."* **A provenance tag records that evidence was gathered. It
+cannot record whether the evidence covers the claim.**
+
+**Practical consequence for anyone changing location-alert creation:** change both, or state
+explicitly why one is excluded. `resolveLocationRecipient()` exists as a shared helper for exactly
+this reason, and a test asserts it is awaited at exactly two call sites.
+
+**Mobile has three creation paths of its own**, only one of which resolved a recipient before B9x:
+`useOrchestrator.ts:3996` (main handler — resolves and blocks), `:914` (compound requests) and
+`:1516` (place-picker commit). The latter two never resolved. Since B9x they receive a pre-resolved
+`action_config` from Shared Core, so all three are covered without any mobile file changing —
+**which is why the fix went into `naavi-chat` rather than into the client.**
 
 ### 2c. Voice-PIN security state moved into Shared Core (S1, 2026-08-19)
 
