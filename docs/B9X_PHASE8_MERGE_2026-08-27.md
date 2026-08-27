@@ -7,7 +7,28 @@
 | **Commit** | `d8fc080` (the fix) |
 | **Architecture Reference** | **2026.07.18.13** (revision 13, this work item) |
 | **Governance** | v4.2, §3 Phase 8 |
-| **Status** | Conditions met. **Awaiting Wael's explicit go-ahead to close.** |
+| **Status** | **PHASE 8 CLOSED — Wael, 2026-08-27.** The *phase* is closed; **the item is not.** See §0. |
+
+---
+
+## 0. What Wael approved, and what he did not
+
+**Approved 2026-08-27: Phase 8 closure.** The merge phase is complete — conditions met, change on
+`main`, pushed (`c3bbb22`), running on staging.
+
+**⭐ He explicitly did NOT close B9x.** His words: *"I'm not closing, I'm just APPROVED FOR PHASE 8
+CLOSURE."* **The item stays open and stays at the top of the priority list.** Its holding-list row has
+not been moved, and the priority table is untouched.
+
+**Recorded because closing a phase and closing an item are different acts**, and this session started
+by reading a row whose own claims had gone stale. A phase document saying "closed" must not be read
+later as the item being done.
+
+**Two things also outstanding, neither resolved by this approval:**
+
+1. **The Phase 6 v2 verdict has not returned.** Phase 8 was closed on Wael's own authority with that
+   review open — he was told so at the time. **Not a reviewer sign-off, and not recorded as one.**
+2. **Production is untouched** and its promotion is a separate decision entirely.
 
 ---
 
