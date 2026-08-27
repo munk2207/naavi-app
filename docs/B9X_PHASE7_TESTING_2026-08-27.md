@@ -101,20 +101,78 @@ shape real users do not make in order to tick it off.
 
 ---
 
-## 6. Three branches that cannot be tested on staging
+## 5a. ⭐ The success path — **proven live 2026-08-27**, on a case that would have misdelivered
 
-The **successful**-resolution branches need contacts to exist. Google **is** connected on the staging
-account (`user_tokens`, provider `google`, token refreshed 2026-08-21), but that account has no
-contacts — every probe (`Bob`, `Sam`, `Huss`, `Wael`, `Fatma`) returns `not_found`.
+Originally recorded below as untestable. It was tested, once the staging Google connection was
+restored and once the test stopped depending on contacts existing.
 
-| Untested branch | Proven by |
+**Input:** *"When I arrive at Costco send an email to hussein.test@example.com"*
+
+**Result:**
+
+```json
+"action_config": { "to": "hussein.test@example.com", "to_email": "hussein.test@example.com" }
+```
+
+**Saved in one turn. No question, no confirmation, no friction.** `resolve-recipient` returned
+`literal_email`, the helper populated `to_email`, and the alert went straight through — exactly what
+Phase 0 v3's governing principle requires of a recipient that resolves.
+
+**⭐ And this is not merely a positive control — it is the defect, prevented.** Before `d8fc080` the
+same request saved with `to` set and `to_email` **empty**, because `naavi-chat` passed
+`action_config` through untouched. At fire time `report-location-event:765` computes
+`noRecipient = !toPhone && !toEmail` — **true** — and `:772` classifies it as a self-alert. That is
+the 19 July mechanism exactly. **The one thing that changed is `to_email` now being populated at
+creation.**
+
+**Why a literal address rather than a contact:** it exercises the same success branch of the helper
+without depending on what any Google account happens to hold. The contact-lookup route to the same
+branch is still unproven — §6.
+
+---
+
+## 5b. Correction to §6 as first written — the staging account was not empty
+
+**§6 originally stated that the staging Google account "has no contacts". That was wrong, and it was
+never checked.** It was inferred from five invented names — Bob, Sam, Huss, Wael, Fatma — all
+returning `not_found`. **Five guessed names missing proves nothing about an account's contents.**
+
+The real cause, found only when Wael challenged the claim:
+
+```
+lookup-contact → {"error":"Token refresh failed: invalid_grant — Token has been expired or revoked"}
+```
+
+**The Google connection was broken.** Wael reconnected it on 2026-08-27; `user_tokens.updated_at`
+moved to 04:18 AM EST and the token error stopped.
+
+**⭐ A finding that outlives this item, and it is in the path B9x now depends on.**
+`resolve-recipient:96` returns `not_found` when the lookup returns nothing **or fails**. A broken
+Google connection and a genuinely unknown person are indistinguishable to every caller. So Naavi
+says *"I don't have a contact named X — save them to your contacts first"* when the contact exists
+and the connection is what needs fixing. **The refusal is right; the reason given is false.**
+Pre-dates B9x, affects voice identically. **No tracked item created — Rule 1b.**
+
+---
+
+## 6. Branches that cannot be tested on staging
+
+The success branch itself is now proven (§5a). What remains unproven is reaching it **through a
+Google Contacts lookup**, which needs a name that account's search actually returns.
+
+| Untested branch | Status |
 |---|---|
-| Name resolves to one contact → saves single-turn with the number filled in | code + static test only |
-| Two contacts share the name → asks for the full name | code + static test only |
-| Contact has an email but no phone, on an email alert → fails closed | code + static test only |
+| Name resolves via **Google Contacts** → saves single-turn with the number filled in | **Untested.** The branch is proven via a literal address (§5a); the contact route to it is not. |
+| Two contacts share the name → asks for the full name | **Untested.** Needs two contacts with one name. |
+| Contact has an email but no phone, on an email alert → fails closed | **Untested.** Needs such a contact. |
 
-**The success path — the common case for real users — has never run live.** It is not claimed as
-proven. Adding a single contact to the staging Google account would unlock all three.
+**Attempted with a real name.** Wael supplied `Hussein Aggan`. After the reconnect, `lookup-contact`
+returns `{"contact":null,"contacts":[]}` for `Hussein`, `hussein`, `Aggan`, `Huss` and
+`Hussein Aggan` — an empty result, no error. Naavi therefore refuses, **which is correct behaviour
+on an empty result.** Whether that contact is reachable by the search is not established here:
+`lookup-contact:16` uses `people:searchContacts`, which covers **My Contacts** and not the
+auto-collected **Other contacts** list. **Stated as a limitation of the search, not as a claim about
+the account.**
 
 ---
 
