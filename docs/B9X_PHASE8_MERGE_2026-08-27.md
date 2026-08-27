@@ -108,9 +108,13 @@ where Wael said to land it.
 
 **Does NOT:**
 
-- **Production is untouched.** It still serves the pre-B9x `naavi-chat` and prompt version
-  `2026-08-20-s1-pin-six-digits`. Promotion is a separate decision requiring Wael's explicit
-  instruction, and is **not** part of Phase 8.
+- ~~Production is untouched.~~ **DEPLOYED TO PRODUCTION 2026-08-27 on Wael's explicit instruction**,
+  after closure. `naavi-chat` and `get-naavi-prompt` both deployed to `hhgyppbxgmjrwdpdubcx` and
+  **verified from the running functions**, not from the deploy output: production serves
+  `PROMPT_VERSION 2026-08-27-b9x-location-recipient-resolved-server-side` (matching staging), and its
+  downloaded `naavi-chat` source contains **both** call sites. **Smoke-tested live on production:**
+  unknown recipient refuses with `actions: []`; *"alert me at Costco"* still saves single-turn.
+  **This was a separate decision, not part of Phase 8.**
 - **Reproduction 2 is not fixed.** Its rule stored no recipient at all; cause unproven. Out of scope
   since Phase 0 v3, no tracked item created.
 - **ADR 0001 is not resolved.** Mobile and voice still classify alerts independently.
