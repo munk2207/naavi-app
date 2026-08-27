@@ -114,6 +114,7 @@ import { session2026_07_17_b10jLocationCompoundSelfReminderTests } from './catal
 import { session2026_07_21_b10oLocationReadbackTests } from './catalogue/session-2026-07-21-b10o-location-readback';
 import { session2026_07_21_b10pLocationNumberedFactsTests } from './catalogue/session-2026-07-21-b10p-location-numbered-facts';
 import { session2026_07_21_b10qEmailAlertValidationTests } from './catalogue/session-2026-07-21-b10q-email-alert-validation';
+import { session2026_08_27_b9xLocationRecipientTests } from './catalogue/session-2026-08-27-b9x-location-recipient';
 import { b10rContactBirthdaysTests } from './catalogue/session-2026-07-22-b10r-contact-birthdays';
 import { b11dContactCrowdoutTests } from './catalogue/session-2026-08-09-b11d-contact-crowdout';
 import { personLookupRelationshipWordsTests } from './catalogue/session-2026-08-13-person-lookup-relationship-words';
@@ -276,6 +277,7 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_07_21_b10oLocationReadbackTests,
   ...session2026_07_21_b10pLocationNumberedFactsTests,
   ...session2026_07_21_b10qEmailAlertValidationTests,
+  ...session2026_08_27_b9xLocationRecipientTests,
   ...b10rContactBirthdaysTests,
   ...b11dContactCrowdoutTests,
   ...personLookupRelationshipWordsTests,

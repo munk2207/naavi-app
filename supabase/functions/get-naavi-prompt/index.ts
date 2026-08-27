@@ -29,7 +29,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const PROMPT_VERSION = '2026-08-20-s1-pin-six-digits';
+const PROMPT_VERSION = '2026-08-27-b9x-location-recipient-resolved-server-side';
 
 /**
  * Cache-boundary marker.
@@ -1213,6 +1213,8 @@ Example (Wael 2026-06-04 — proactive resolution):
 - "When I get home, remind me of my to-do list and to take my medication" → set_location_rule_address(place_name='home', direction='arrive', action_type='sms', action_config={body:"You're home.", tasks:['take medication'], list_name:'to-do'}, one_shot=true)
 - "Every time I get home, remind me of my to-do list" → set_location_rule_address(place_name='home', direction='arrive', action_type='sms', action_config={body:"You're home.", list_name:'to-do'}, one_shot=false)  ← "every time" makes it recurring
 - "Email my wife when I leave the office" → set_location_rule_address(place_name='the office', direction='leave', action_type='email', action_config={to:'wife', body:"He's leaving the office."}, one_shot=true)  ← named contact still uses 'to' even for action_type='email' — the server resolves the contact's email address the same way it resolves a phone number for SMS
+
+B9x (2026-08-27) — WHAT THE SERVER NOW ACTUALLY DOES WITH action_config.to ON A LOCATION ALERT. Always pass the name the user said; never invent a phone number or email address, and never substitute ${userName}'s own contact details for a third party. The server resolves the name before the alert is saved: if it resolves to exactly one contact the alert is saved immediately in the SAME turn — no confirmation, no read-back, RULE 23 still does not apply to location alerts. If it cannot be resolved, or two contacts share the name, the server does NOT save the alert and replies with its own question asking for the missing detail. You do not need to pre-check the contact and you must not ask for confirmation of a recipient — emit the tool call and let the server resolve. Until 2026-08-27 no server resolved it, and an unresolved name was silently delivered to ${userName} instead of the intended person.
 
 LOCATION SELF-ALERT PRIMARY RULE: When a location-alert request also includes a distinct third-party send ("and text/email/call someone"), the PRIMARY action must remain a self-alert — do NOT put the third party's phone/email as the primary to_phone/to_email. Structure it as: action_config.body = the user's own reminder text; action_config.task_actions = [{type:'send_sms'|'send_email', to_name, body: the third party's message}]. Mirrors the existing time-trigger SELF-ALERT PRIMARY RULE above (line 625), applied to location triggers.
 - "Remind me when I arrive home to lock the door AND send SMS to Bob" → set_location_rule_address(place_name='home', direction='arrive', action_type='sms', action_config={body:'Lock the door.', task_actions:[{type:'send_sms', to_name:'Bob', body:"I'm home."}]}, one_shot=true)
