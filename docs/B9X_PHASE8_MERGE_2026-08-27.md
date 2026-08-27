@@ -7,7 +7,7 @@
 | **Commit** | `d8fc080` (the fix) |
 | **Architecture Reference** | **2026.07.18.13** (revision 13, this work item) |
 | **Governance** | v4.2, §3 Phase 8 |
-| **Status** | **PHASE 8 CLOSED — Wael, 2026-08-27.** The *phase* is closed; **the item is not.** See §0. |
+| **Status** | **B9x CLOSED — Wael, 2026-08-27**, after the Phase 6 v2 verdict returned PASS/PASS/PASS. Row moved to Closed Bugs in the archive. |
 
 ---
 
@@ -143,6 +143,13 @@ was wrong should show that it was.
 
 ## 7. Holding-list row
 
-B9x's row has been corrected once already this item (wrong function, and the false *"not yet observed
-at actual fire time"*). **On closure it needs moving to Closed Bugs with the reason and date.
-Not done — that is a state change on Wael's tracking system and waits for his word to close.**
+B9x's row was corrected twice during this item — it named the wrong function, and claimed *"not yet
+observed at actual fire time"* when the misdelivery had been in `sent_messages` since 19 July.
+
+**Closed 2026-08-27 on Wael's instruction.** The row was **moved** — not copied — from the priority
+table in `HOLDING_LIST_CLASSIFICATION_2026-06-11.md` into **Closed Bugs** in
+`HOLDING_LIST_CLOSED_ARCHIVE_2026-07-28.md`, with the date and a reason recording the fix, the 19 July
+firing with its three provider SIDs, and everything deliberately not covered.
+
+**The priority list is now 4 of 5, one slot free** — verified by `scripts/priority-cap-check.js`.
+Remaining, in order: **B11m, B10c, B11l, S2.**
