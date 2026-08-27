@@ -1,6 +1,6 @@
 {
   "note": "What the T12 deploy wrapper recorded deploying, per function per environment. A TRIPWIRE, NOT EVIDENCE — anyone using the raw Supabase CLI bypasses it. Equilibrium may be claimed only on a passing `npm run parity:verify`.",
-  "updated": "2026-08-27, 1:39:56 a.m. EST",
+  "updated": "2026-08-27, 3:29:18 a.m. EST",
   "deployments": {
     "create-contact": {
       "staging": {
@@ -86,8 +86,8 @@
     },
     "naavi-chat": {
       "staging": {
-        "commit": "278af475f726ab37e0564696d942cbedf286df74",
-        "source_sha256": "acd055f6ba4b68a88ea72404cbf8fd442908acd8ec0b37ada11d05ee11d9eefb",
+        "commit": "d8fc0804de73cdea6c3812c410c5a59116054b1f",
+        "source_sha256": "f012462f46de9f3e2b9b25dcc02654b7ac662c5857501820585add7771c9b881",
         "files": [
           "supabase/functions/_shared/anthropic_tools.ts",
           "supabase/functions/_shared/community_hash.ts",
@@ -95,7 +95,7 @@
           "supabase/functions/naavi-chat/index.ts",
           "supabase/functions/naavi-chat/intentHandlers.ts"
         ],
-        "deployed_at": "2026-08-27, 1:39:56 a.m. EST"
+        "deployed_at": "2026-08-27, 3:29:18 a.m. EST"
       }
     }
   }
