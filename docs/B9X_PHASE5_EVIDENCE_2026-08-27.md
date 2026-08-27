@@ -224,6 +224,30 @@ in git.
 
 ---
 
+## 7a. Review outcome — **APPROVED FOR PHASE 6**, external reviewer, 2026-08-27
+
+The reviewer confirmed the implementation matches the Phase 3 authorization: `resolve-recipient` on
+the location branch, self-overrides preserved, primary recipient only, `task_actions` untouched, time
+branch and the RULE 23 exemption unchanged.
+
+**Three points explicitly ruled on:**
+
+1. **Not claiming Gate 1 was correct.** The runner was rightly avoided — its current configuration
+   points at production and its fixtures are destructive.
+2. **The Non-Determinism requirement is correctly left open.** No live Claude trials have run.
+3. **⭐ The missing timeout (Risk 1) does NOT block B9x.** *"That would exceed the approved
+   implementation boundary. Fail-closed behavior during a resolver outage is intentional and
+   preferable to silently saving a potentially misdirected alert."* **Recorded so a later session
+   does not reopen it as an oversight — it was seen, weighed, and left deliberately.**
+
+**The reviewer's own procedural caveat, kept verbatim because it is the thing most easily
+misremembered:** *"nothing has been deployed yet, so this is approval of the implementation/evidence
+package, not evidence that B9x works in staging."*
+
+**Staging deployment and live validation remain Phase 7 gates and are not satisfied.**
+
+---
+
 ## 8. Improvement noted, not implemented
 
 Per Phase 4's No Extra Changes Rule, reported rather than done: **the time-trigger intercept's
