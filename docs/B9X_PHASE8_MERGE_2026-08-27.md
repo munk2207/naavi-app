@@ -26,8 +26,11 @@ later as the item being done.
 
 **Two things also outstanding, neither resolved by this approval:**
 
-1. **The Phase 6 v2 verdict has not returned.** Phase 8 was closed on Wael's own authority with that
-   review open — he was told so at the time. **Not a reviewer sign-off, and not recorded as one.**
+1. ~~The Phase 6 v2 verdict has not returned.~~ **RETURNED 2026-08-27: PASS / PASS / PASS, APPROVED
+   FOR CLOSURE.** Phase 8 was closed on Wael's own authority *before* the verdict arrived — he was
+   told so at the time, and the sequence is left visible rather than tidied. **The review has since
+   confirmed it**, and settled the outstanding Phase 3 v2 boundary without a separate retroactive
+   verdict. See `B9X_PHASE6_TECHNICAL_REVIEW_V2_2026-08-27.md` §9.
 2. **Production is untouched** and its promotion is a separate decision entirely.
 
 ---
@@ -38,7 +41,7 @@ later as the item being done.
 |---|---|
 | Automated tests pass | **14/14 static tests pass.** ⚠️ **Gate 1 was not run** — `npm run test:auto` defaults to production and its fixtures delete rows. Not claimed. |
 | Manual validation passes | **Yes for what is testable** — §2. Three branches and Site A are recorded gaps, not passes. |
-| External review completed | **Phase 6: PASS / PASS / PASS, approved with conditions.** ⚠️ **Phase 3 v2's verdict never returned** — §4. |
+| External review completed | ✅ **Phase 6 v2 (against the shipped build `d8fc080`): PASS / PASS / PASS, approved for closure.** Phase 3 v2's boundary settled by that same review. |
 | Architectural change reflected in the Architecture Reference **in this work item** | ✅ **Done — revision 13**, §3. |
 | No newer Reference has superseded the Phase 1A version | ✅ **Confirmed** — Phase 1A recorded 2026.07.18.12; nothing intervened between then and revision 13, which this item authored. |
 
@@ -129,7 +132,7 @@ where Wael said to land it.
 | 4 | `d8fc080` |
 | 5 | `B9X_PHASE5_EVIDENCE_2026-08-27.md` |
 | 6 (v1) | `B9X_PHASE6_TECHNICAL_REVIEW_2026-08-27.md` — reviewed `fc71146`, the build that never ran |
-| 6 (v2) | `B9X_PHASE6_TECHNICAL_REVIEW_V2_2026-08-27.md` — the shipped build. **Verdict outstanding** |
+| 6 (v2) | `B9X_PHASE6_TECHNICAL_REVIEW_V2_2026-08-27.md` — the shipped build. **PASS / PASS / PASS, approved for closure** |
 | 7 | `B9X_PHASE7_TESTING_2026-08-27.md` |
 | 8 | this document |
 

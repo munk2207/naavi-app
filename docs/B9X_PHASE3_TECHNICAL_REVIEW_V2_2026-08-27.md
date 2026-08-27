@@ -7,7 +7,7 @@
 | **Supersedes** | `B9X_PHASE3_TECHNICAL_REVIEW_2026-08-26.md` — its rulings carry forward, see §6 |
 | **Plan under review** | `B9X_PHASE2_CHANGE_PLAN_V3_2026-08-27.md` |
 | **Risk** | **HIGH** — Protected Core (Action Rules) |
-| **Status** | **Submitted for external review. No code written.** |
+| **Status** | **Boundary satisfied by the Phase 6 v2 review, 2026-08-27** — no separate Phase 3 verdict was issued, and the reviewer ruled none is needed. See `B9X_PHASE6_TECHNICAL_REVIEW_V2_2026-08-27.md` §9. |
 
 ---
 

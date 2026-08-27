@@ -8,7 +8,7 @@
 | **Supersedes** | `B9X_PHASE6_TECHNICAL_REVIEW_2026-08-27.md`, which reviewed `fc71146` |
 | **Architecture Reference** | **2026.07.18.13** (revision 13, authored by this item) |
 | **Deployed** | Supabase **staging** only. Production untouched. |
-| **Status** | Submitted. **Phase 8 is written but not closed.** |
+| **Status** | **APPROVED FOR CLOSURE — external reviewer, 2026-08-27.** See §9. |
 
 ---
 
@@ -122,7 +122,48 @@ CLAUDE.md's five levers exist to catch, and the same shape as the Phase 1A error
 
 ---
 
-## 8. What the reviewer is asked to decide
+## 9. ⭐ Review outcome — **PASS / PASS / PASS, APPROVED FOR CLOSURE** (2026-08-27)
+
+**The re-review was confirmed necessary:** the earlier verdict covered `fc71146`, while what is
+deployed and tested is `d8fc080`. *"Closing B9x against the old review would therefore have been
+incorrect."*
+
+| Verdict | Result |
+|---|---|
+| Technical Review | **PASS** — behaviour contract preserved while reachability was corrected; deployment verified from downloaded deployed source rather than assumed |
+| Architecture Completeness | **PASS** — revision 13 documents the three resolver call sites and the two construction sites; **the Phase 8 merge condition is satisfied** |
+| Governance Compliance | **PASS, with the recorded exception** — coding while Phase 3 v2 was open *"was done on your explicit instruction and recorded rather than concealed. That is a governance exception, but it does not invalidate the technical evidence."* |
+| Overall | **APPROVED FOR CLOSURE** |
+
+**Phase 3 v2 is settled, and no retroactive verdict is needed.** The shipped architecture *"is exactly
+the boundary that Phase 2 v3 established: one shared helper, two call sites, location-gated,
+behaviour contract unchanged"* — and the live evidence validates the implementation rather than only
+its plan.
+
+**The unproven cases in §5 do not block closure.** Site A is acceptable unexercised *"because the
+defect-bearing live path has been identified and exercised"*; the contact-name and duplicate-name
+routes are useful additional coverage, not essential; Reproduction 2 was already excluded. **Gate 1
+stays honestly unclaimed** — *"I would not run a test suite configured against production with
+destructive fixtures merely to satisfy the label."*
+
+### ⭐ On §6 — the ruling is **do not add process**
+
+The three unverified claims *"deserve attention"*, but the reviewer explicitly declined to add a rule
+or a phase: they share one cause already identified after the first failure — **evidence scope did
+not justify the breadth of the conclusion.** The lesson is to stay a single sentence:
+
+> **A verification claim must state what was directly observed separately from what was inferred from
+> it.**
+
+*"That is enough; adding more process around the same principle risks creating paperwork rather than
+improving verification."*
+
+**Recorded so a later session does not propose the rule again as though it were an oversight.** It was
+considered and declined.
+
+---
+
+## 8. What the reviewer was asked to decide
 
 1. The four verdicts against **`d8fc080`**: Technical Review · Architecture Completeness ·
    Governance Compliance · Overall Recommendation.
