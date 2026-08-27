@@ -144,7 +144,41 @@ The reviewer is asked whether it is acceptable as described.
 
 ---
 
-## 6. What the reviewer is asked to decide
+## 5a. ⭐ Review outcome — **APPROVED WITH CONDITIONS**, external reviewer, 2026-08-27
+
+| Verdict | Result |
+|---|---|
+| Technical Review | **PASS** |
+| Architecture Completeness | **PASS** |
+| Governance Compliance | **PASS for B9x itself** — the separately disclosed governance-v4.2 review exception does not invalidate this implementation |
+| Overall Recommendation | **APPROVED WITH CONDITIONS** |
+
+**§4.1 — the fifth fail-closed case: ACCEPT, keep it.** *"Once `resolve-recipient` returns a contact,
+B9x still has to establish that the contact has the address required by the requested channel.
+Otherwise the implementation could pass an unresolved location rule downstream and recreate the exact
+failure class B9x is intended to prevent."* Ruled a direct consequence of Phase 0's governing
+principle, not scope expansion.
+
+**§4.2 — discarding all actions on failure: ACCEPT for B9x, explicitly as a known limitation.** Not
+to be repaired here — the behaviour already exists in the time-trigger intercept and changing the
+response/queue architecture would enlarge B9x considerably. **⭐ And explicitly: it must NOT
+automatically become another work item.** Under Rule 1b that is Wael's decision. **Preserved in the
+evidence and carried into Phase 7's testing context** so it is remembered as a known, accepted limit
+rather than rediscovered later as a defect.
+
+**Architecture Drift confirmed as Outcome 2.** The third `resolve-recipient` call site is an
+intentional approved change, not accidental drift.
+
+### The two conditions
+
+1. **Phase 7 must prove the implementation live in staging**, including the required
+   non-deterministic trials. **Nothing currently proves runtime behaviour.**
+2. **Phase 8 may not merge or close B9x until the Architecture Reference is updated** for the third
+   call site and the resulting state of the three mobile creation paths.
+
+---
+
+## 6. What the reviewer was asked to decide
 
 1. §4.1 — is the added fifth fail-closed case acceptable, or scope creep to be removed?
 2. §4.2 — is the all-actions discard acceptable as described?
