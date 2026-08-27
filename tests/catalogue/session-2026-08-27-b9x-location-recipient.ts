@@ -30,10 +30,17 @@ import type { TestCase } from '../lib/types';
 const NAAVI_CHAT_PATH = join(process.cwd(), 'supabase', 'functions', 'naavi-chat', 'index.ts');
 const PROMPT_PATH     = join(process.cwd(), 'supabase', 'functions', 'get-naavi-prompt', 'index.ts');
 
-/** The B9x location branch, isolated from the rest of the file. */
+/**
+ * The shared helper, isolated from the rest of the file.
+ *
+ * Was an inline block until 2026-08-27. It became a helper because naavi-chat
+ * builds a location alert in TWO places and the first fix (fc71146) covered
+ * only one — see the b9x.both-call-sites test below, which exists so that
+ * cannot recur silently.
+ */
 function locationBranch(src: string): string {
-  const start = src.indexOf('// ── B9x — Location-trigger recipient resolution');
-  const end   = src.indexOf('// ── Time-trigger contact resolution (Turn 1 confirm)', start);
+  const start = src.indexOf('async function resolveLocationRecipient(');
+  const end   = src.indexOf('// ── Fallback speech for tool-only Claude responses', start);
   return start > -1 && end > start ? src.slice(start, end) : '';
 }
 
@@ -58,13 +65,14 @@ export const session2026_08_27_b9xLocationRecipientTests: TestCase[] = [
     description: 'naavi-chat resolves a named location-alert recipient before the action leaves the server — the step the prompt has always claimed exists',
     async run() {
       const branch = locationBranch(readFileSync(NAAVI_CHAT_PATH, 'utf8'));
-      expectTruthy(branch.length > 0, 'the B9x location branch must exist in naavi-chat');
+      expectTruthy(branch.length > 0, 'the shared helper resolveLocationRecipient must exist in naavi-chat');
       expectTruthy(
-        branch.includes("a.type === 'SET_ACTION_RULE' && String(a.trigger_type ?? '') === 'location'"),
-        'the branch must select location-trigger SET_ACTION_RULE actions',
+        branch.includes("if (action?.type !== 'SET_ACTION_RULE') return { ok: true };") &&
+        branch.includes("if (String(action?.trigger_type ?? '') !== 'location') return { ok: true };"),
+        'the helper must no-op for anything that is not a location SET_ACTION_RULE — this is what keeps DRAFT_MESSAGE untouched at Site B',
       );
       expectTruthy(
-        branch.includes("_locAC?.to ?? _locAC?.to_name"),
+        branch.includes("ac?.to ?? ac?.to_name"),
         'it must read BOTH action_config.to and to_name — reproduction bb48e478 stored `to`',
       );
     },
@@ -99,14 +107,16 @@ export const session2026_08_27_b9xLocationRecipientTests: TestCase[] = [
       expectTruthy(branch.includes('default:'), 'not_found/invalid/unknown must be handled by a default arm');
       expectTruthy(branch.includes('} catch (e) {'), 'an infrastructure error must be caught, not allowed to fall through');
       expectTruthy(
-        branch.includes('if (locFailure) {') && branch.includes('actions: [], pendingThreads: []'),
-        'every failure must return with actions: [] — the action is dropped, never emitted unresolved',
+        branch.includes('return { ok: false, message:'),
+        'every failure must return ok:false with a message — never ok:true with no destination',
       );
-      const failIdx    = branch.indexOf('if (locFailure) {');
-      const successLog = branch.indexOf('B9x: resolved location recipient');
+      // The helper only reports; the two call sites are what actually drop the
+      // action. Both must turn ok:false into actions: [].
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      const dropSites = src.split('if (!_b9x.ok) {').length - 1;
       expectTruthy(
-        failIdx > -1 && successLog > failIdx,
-        'the failure return must come BEFORE the success path — a failed resolution can never continue',
+        dropSites === 2,
+        `both call sites must drop the action on failure — found ${dropSites}, expected 2`,
       );
     },
   },
@@ -117,7 +127,7 @@ export const session2026_08_27_b9xLocationRecipientTests: TestCase[] = [
     async run() {
       const branch = locationBranch(readFileSync(NAAVI_CHAT_PATH, 'utf8'));
       expectTruthy(
-        branch.includes('if (_locAC.to_phone || _locAC.to_email) {'),
+        branch.includes('if (ac.to_phone || ac.to_email) {'),
         'resolved_contact must verify a destination was actually set before accepting it',
       );
       expectTruthy(
@@ -171,8 +181,8 @@ export const session2026_08_27_b9xLocationRecipientTests: TestCase[] = [
     description: 'F15 Defect A preserved — "email me at jane@x.com when I arrive" is a self-alert with a channel override and must never be treated as a third-party recipient',
     async run() {
       const branch = locationBranch(readFileSync(NAAVI_CHAT_PATH, 'utf8'));
-      const overrideIdx = branch.indexOf('const hasSelfOverrideLoc = Boolean(');
-      const guardIdx    = branch.indexOf('if (!hasSelfOverrideLoc && locToName');
+      const overrideIdx = branch.indexOf('const hasSelfOverride = Boolean(');
+      const guardIdx    = branch.indexOf('if (hasSelfOverride || !toName');
       expectTruthy(overrideIdx > -1, 'self-override detection must exist');
       expectTruthy(guardIdx > overrideIdx, 'the resolution guard must check hasSelfOverrideLoc first');
     },
@@ -184,8 +194,8 @@ export const session2026_08_27_b9xLocationRecipientTests: TestCase[] = [
     async run() {
       const branch = locationBranch(readFileSync(NAAVI_CHAT_PATH, 'utf8'));
       expectTruthy(
-        branch.includes('!hasSelfOverrideLoc && locToName && !_locAC.to_phone && !_locAC.to_email'),
-        'all four isolation conditions must be present in one guard',
+        branch.includes('if (hasSelfOverride || !toName || ac.to_phone || ac.to_email) return { ok: true };'),
+        'all four isolation conditions must be present in one early-return guard',
       );
     },
   },
@@ -238,6 +248,79 @@ export const session2026_08_27_b9xLocationRecipientTests: TestCase[] = [
       expectTruthy(
         prompt.includes("const PROMPT_VERSION = '2026-08-27-b9x"),
         'PROMPT_VERSION must be bumped for this change (CLAUDE.md, shared-prompt rule)',
+      );
+    },
+  },
+
+  // ── Added 2026-08-27 after the Phase 7 failure ───────────────────────────
+  // fc71146 placed correct code on one of two execution paths. Every test
+  // above passed while it was unreachable. These three exist because of that.
+  {
+    id: 'b9x.both-call-sites-invoke-the-helper',
+    category: 'rules',
+    description: 'THE test that would have caught the Phase 7 failure — naavi-chat builds a location alert in two places (Path B tool-use, and the Universal gate immediate-emit) and BOTH must resolve the recipient',
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      const uses = src.split('await resolveLocationRecipient(').length - 1;
+      expectTruthy(
+        uses === 2,
+        `resolveLocationRecipient must be awaited at exactly 2 call sites — found ${uses}. Site A is Path B; Site B is the Universal gate immediate-emit return, which fires ~966 lines earlier and is where 3/3 live trials went.`,
+      );
+      expectTruthy(src.includes('// ── B9x — Site A: Path B (Claude tool-use)'), 'Site A must be present and labelled');
+      expectTruthy(src.includes('// ── B9x — Site B (2026-08-27)'), 'Site B must be present and labelled');
+
+      // Site B must resolve BEFORE the emit, not after.
+      const siteB   = src.indexOf('// ── B9x — Site B (2026-08-27)');
+      const emitLog = src.indexOf('deterministic action emitted immediately', siteB);
+      expectTruthy(siteB > -1 && emitLog > siteB, 'Site B must run before the immediate-emit return, not after it');
+    },
+  },
+  {
+    id: 'b9x.buildActionConfirm-stays-synchronous',
+    category: 'rules',
+    description: 'the resolution must NOT be moved inside buildActionConfirm — it is synchronous and cannot await, which is why the helper runs at the call site',
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      expectTruthy(
+        src.includes('function buildActionConfirm('),
+        'buildActionConfirm must still exist',
+      );
+      expectTruthy(
+        !src.includes('async function buildActionConfirm('),
+        'buildActionConfirm must remain synchronous — making it async to resolve inside it changes every caller',
+      );
+    },
+  },
+  {
+    id: 'b9x.draft-message-unaffected-at-site-b',
+    category: 'rules',
+    description: 'REQUIRED by the Phase 2 v3 reviewer — Site B is a shared return for DRAFT_MESSAGE and SET_ACTION_RULE(location); DRAFT_MESSAGE has its own recipient handling and must not acquire a second one',
+    async run() {
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+
+      // The return really is still shared — if this comment ever disappears,
+      // the isolation below is guarding nothing and the test should be revisited.
+      expectTruthy(
+        src.includes('// Immediate-emit intents: DRAFT_MESSAGE, SET_ACTION_RULE(location)'),
+        'Site B must still be the shared immediate-emit return for both intents',
+      );
+
+      // Isolation comes from the helper's own gate, not from a check at the
+      // call site — so the call site must contain no intent-specific logic.
+      const siteB = src.indexOf('// ── B9x — Site B (2026-08-27)');
+      const endB  = src.indexOf('deterministic action emitted immediately', siteB);
+      const block = src.slice(siteB, endB);
+      expectTruthy(block.length > 0, 'Site B block must be locatable');
+      expectTruthy(
+        !block.includes('DRAFT_MESSAGE') || block.includes('DRAFT_MESSAGE — the other intent'),
+        'Site B must not branch on DRAFT_MESSAGE; isolation is the job of the gate inside the helper',
+      );
+
+      // And the gate itself, in the helper.
+      const branch = locationBranch(src);
+      expectTruthy(
+        branch.includes("if (action?.type !== 'SET_ACTION_RULE') return { ok: true };"),
+        'the helper must return ok:true untouched for a DRAFT_MESSAGE action',
       );
     },
   },

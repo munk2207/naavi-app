@@ -183,6 +183,124 @@ function convertLocationToolToActionRule(
   return result;
 }
 
+// ── B9x — location-alert recipient resolution (2026-08-27) ───────────────────
+//
+// The prompt tells Claude to pass a bare name in action_config.to for a
+// location alert because "the server resolves the contact"
+// (get-naavi-prompt:1215). Until B9x no server did: naavi-chat passed
+// action_config through unexamined, and resolution was left to the mobile
+// orchestrator — where two of its three location-creation paths skip it
+// (useOrchestrator.ts:914 compound, :1516 place-picker commit; only :3996
+// resolves). A rule saved by either path kept the raw name, no phone, and at
+// fire time report-location-event:765 read "no addresses" as "self-alert" and
+// delivered it to the user. Rule bb48e478 did exactly that on 2026-07-19 at
+// 7:58 PM EST — SMS, WhatsApp and voice all to the user; the intended
+// recipient got nothing.
+//
+// ⭐ WHY THIS IS A SHARED HELPER AND NOT AN INLINE BLOCK.
+// naavi-chat builds a location SET_ACTION_RULE in TWO places, and the first
+// attempt at this fix (fc71146) covered only one:
+//   Site A — convertLocationToolToActionRule() above → Path B (Claude
+//            tool-use) → the action-gate region.
+//   Site B — buildActionConfirm() → the Universal gate's immediate-emit
+//            return, which returns ~966 lines BEFORE Site A's gate region.
+// Three live staging trials went to Site B, so the first fix never ran. The
+// 11 static tests all passed while it sat unreachable: they proved the shape
+// and could not prove the reach. Two copies of a fail-closed security check
+// is the pattern ADR 0005 records three drift incidents for — hence one
+// helper, two callers.
+//
+// Only one site executes per request: Site B returns immediately, and Site A
+// is reached only when the gate falls through to Claude.
+//
+// Governing principle (Phase 0 v3): resolve silently when possible, ask only
+// when resolution is impossible or ambiguous, never add confirmation to a
+// successfully resolved location alert. RULE 23 stays exempt for location.
+//
+// Returns { ok: true } — possibly having mutated action_config in place — or
+// { ok: false, message } meaning: do not emit this action, say this instead.
+// A non-location action, a self-override, an absent name, or an already
+// resolved address all return ok:true untouched, so callers may invoke it
+// unconditionally.
+async function resolveLocationRecipient(
+  action: Record<string, any>,
+  userId: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (action?.type !== 'SET_ACTION_RULE') return { ok: true };
+  if (String(action?.trigger_type ?? '') !== 'location') return { ok: true };
+
+  const ac = (action.action_config ?? {}) as Record<string, any>;
+
+  // F15 Defect A — an explicit self-override is unconditionally a self alert.
+  // Checked first so it is never treated as a third-party name.
+  const hasSelfOverride = Boolean(
+    ac.self_override_email || ac.self_override_sms ||
+    ac.self_override_whatsapp || ac.self_override_voice,
+  );
+  const toName = String(ac?.to ?? ac?.to_name ?? '').trim();
+  if (hasSelfOverride || !toName || ac.to_phone || ac.to_email) return { ok: true };
+
+  const url = Deno.env.get('SUPABASE_URL') ?? '';
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const actType = String(action.action_type ?? 'sms');
+
+  try {
+    const rr = await fetch(`${url}/functions/v1/resolve-recipient`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ mode: 'create', to: toName, user_id: userId }),
+    });
+    const resolved = rr.ok ? await rr.json() : { kind: 'invalid' };
+
+    switch (resolved?.kind) {
+      case 'literal_email':
+        ac.to_email = resolved.value;
+        break;
+      case 'literal_phone':
+        ac.to_phone = resolved.value;
+        break;
+      case 'resolved_contact':
+        if (actType === 'email') {
+          if (resolved.email) ac.to_email = resolved.email;
+        } else if (resolved.phone) {
+          ac.to_phone = resolved.phone;
+        }
+        if (ac.to_phone || ac.to_email) {
+          ac.to_name = resolved.name ?? toName;
+          if (resolved.contact_id) ac.contact_id = resolved.contact_id;
+        } else {
+          // Contact found, but not on the channel this alert needs. Fail
+          // closed rather than continue with no destination — Phase 6 §4.1.
+          return {
+            ok: false,
+            message: actType === 'email'
+              ? `I found ${resolved.name ?? toName}, but there's no email address saved for them. Tell me their email, or add it to your contacts.`
+              : `I found ${resolved.name ?? toName}, but there's no phone number saved for them. Tell me their number, or add it to your contacts.`,
+          };
+        }
+        break;
+      case 'ambiguous':
+        // Asks for the full name rather than offering a numbered pick (Wael,
+        // 2026-08-27). The pick path routes through Step 1.4 to manage-rules,
+        // which cannot write location rules — its own comment at
+        // manage-rules:321 says "non-location" — so the alert would save with
+        // no resolved_lat/resolved_lng and never fire.
+        return { ok: false, message: `You have more than one contact named ${toName} — say their full name and I'll try again.` };
+      default:
+        // not_found, invalid, or an unrecognised kind — all fail closed.
+        return { ok: false, message: `I don't have a contact named ${toName}. Tell me their phone number or email directly, or save them to your contacts first.` };
+    }
+  } catch (e) {
+    // Never fall through to "no recipient" on an infrastructure error — that
+    // is the exact path that misdelivers.
+    console.error(`[naavi-chat] B9x: resolve-recipient failed for "${toName}":`, e instanceof Error ? e.message : String(e));
+    return { ok: false, message: `I couldn't verify that contact right now — please try again.` };
+  }
+
+  console.log(`[naavi-chat] B9x: resolved location recipient "${toName}" → ${ac.to_phone ?? ac.to_email}`);
+  return { ok: true };
+}
+
 // ── Fallback speech for tool-only Claude responses (Bug E fix, V57.12.1) ─────
 //
 // Phase 2 structured outputs migration revealed that Anthropic Haiku
@@ -3352,6 +3470,27 @@ Deno.serve(async (req) => {
 
             } else if (confirmed.actions.length > 0) {
               // Immediate-emit intents: DRAFT_MESSAGE, SET_ACTION_RULE(location)
+              //
+              // ── B9x — Site B (2026-08-27) ───────────────────────────────
+              // THIS return is why the first attempt at B9x (fc71146) did
+              // nothing: it fires ~966 lines before Site A's gate region, and
+              // three live staging trials of "send sms to Abdyn when I arrive
+              // at the office" all came through here.
+              //
+              // resolveLocationRecipient() is a no-op for anything that is
+              // not a location SET_ACTION_RULE, which is what keeps
+              // DRAFT_MESSAGE — the other intent sharing this return —
+              // completely untouched. It has its own recipient handling and
+              // must not acquire a second one.
+              if (userId) {
+                for (const _b9xAction of confirmed.actions as Array<Record<string, any>>) {
+                  const _b9x = await resolveLocationRecipient(_b9xAction, userId);
+                  if (!_b9x.ok) {
+                    console.warn(`[naavi-chat] B9x: dropping location rule at Site B — ${_b9x.message}`);
+                    return jsonResponse({ rawText: JSON.stringify({ speech: _b9x.message, display: _b9x.message, actions: [], pendingThreads: [] }) });
+                  }
+                }
+              }
               console.log(`[timing] ${elapsed()} | Level action ${classification.intent} — deterministic action emitted immediately`);
               return jsonResponse({ rawText: JSON.stringify({ speech: confirmed.speech, display: confirmed.display, actions: confirmed.actions, pendingThreads: [] }) });
 
@@ -4319,120 +4458,19 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── B9x — Location-trigger recipient resolution (2026-08-27) ────────────
-    //
-    // The prompt tells Claude to pass a bare name in action_config.to for a
-    // location alert, because "the server resolves the contact"
-    // (get-naavi-prompt:1215). Until now no server did: this function passed
-    // action_config through unexamined, and resolution was left to the mobile
-    // orchestrator — where TWO of its three location-creation paths skip it
-    // (useOrchestrator.ts:914 compound, :1516 place-picker commit; only :3996
-    // resolves). A rule saved by either path kept the raw name, no phone, and
-    // at fire time report-location-event:765 read "no addresses" as "this is a
-    // self-alert" and delivered it to the user. Rule bb48e478 did exactly that
-    // on 2026-07-19 at 7:58 PM EST — SMS, WhatsApp and voice all to the user;
-    // the intended recipient got nothing. See docs/B9X_PHASE1_PROBLEM_
-    // DEFINITION_V2_2026-08-26.md.
-    //
-    // Resolving here fixes all three mobile paths at once and makes the
-    // prompt's claim true. Voice is unaffected — it never calls naavi-chat and
-    // already resolves correctly (src/index.js:12613).
-    //
-    // Governing principle (Phase 0 v3): resolve silently when possible, ask
-    // only when resolution is impossible or ambiguous, and never add
-    // confirmation to a successfully resolved location alert. RULE 23 stays
-    // exempt for location — "alert me at Costco" is untouched and single-turn.
-    //
-    // Phase 3 mandatory changes (reviewer, 2026-08-26):
-    //   - resolve-recipient here, NOT lookup-contact. The time branch above
-    //     keeps lookup-contact unchanged. resolve-recipient handles email
-    //     recipients and literal phone/email addresses; lookup-contact filters
-    //     on c.phone and would reject an email-only contact on an email alert.
-    //   - Resolve ONLY the primary recipient. task_actions keep their existing
-    //     fire-time resolution in _shared/task_actions.ts — deliberately NOT
-    //     resolved here.
-    //   - Ambiguous asks for the full name rather than offering a numbered
-    //     pick (Wael, 2026-08-27). The numbered-pick path routes through
-    //     Step 1.4 → manage-rules, which cannot write location rules — its own
-    //     comment at manage-rules:321 says "non-location" — so the rule would
-    //     save with no resolved_lat/resolved_lng and the geofence would never
-    //     fire. Silent non-firing is the same bug class B9x exists to remove.
+    // ── B9x — Site A: Path B (Claude tool-use) ──────────────────────────────
+    // Resolve a named location recipient before the action leaves the server.
+    // Site B is the Universal gate's immediate-emit return, far above. Both
+    // call the same helper — see resolveLocationRecipient() for why.
     if (userId) {
-      const locRule = actions.find((a: any) =>
-        a.type === 'SET_ACTION_RULE' && String(a.trigger_type ?? '') === 'location'
-      );
-      if (locRule) {
-        const _locAC = (locRule.action_config ?? {}) as Record<string, any>;
-        // F15 Defect A — an explicit self-override is unconditionally a self
-        // alert. Checked first so it is never treated as a third-party name.
-        const hasSelfOverrideLoc = Boolean(
-          _locAC.self_override_email || _locAC.self_override_sms ||
-          _locAC.self_override_whatsapp || _locAC.self_override_voice,
-        );
-        const locToName = String(_locAC?.to ?? _locAC?.to_name ?? '').trim();
-
-        if (!hasSelfOverrideLoc && locToName && !_locAC.to_phone && !_locAC.to_email) {
-          const _locUrl  = Deno.env.get('SUPABASE_URL') ?? '';
-          const _locKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-          const actTypeLoc = String(locRule.action_type ?? 'sms');
-          let locFailure: string | null = null;
-
-          try {
-            const rr = await fetch(`${_locUrl}/functions/v1/resolve-recipient`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${_locKey}` },
-              body: JSON.stringify({ mode: 'create', to: locToName, user_id: userId }),
-            });
-            const resolved = rr.ok ? await rr.json() : { kind: 'invalid' };
-
-            switch (resolved?.kind) {
-              case 'literal_email':
-                _locAC.to_email = resolved.value;
-                break;
-              case 'literal_phone':
-                _locAC.to_phone = resolved.value;
-                break;
-              case 'resolved_contact':
-                if (actTypeLoc === 'email') {
-                  if (resolved.email) _locAC.to_email = resolved.email;
-                } else if (resolved.phone) {
-                  _locAC.to_phone = resolved.phone;
-                }
-                if (_locAC.to_phone || _locAC.to_email) {
-                  _locAC.to_name = resolved.name ?? locToName;
-                  if (resolved.contact_id) _locAC.contact_id = resolved.contact_id;
-                } else {
-                  // Contact found, but not on the channel this alert needs.
-                  // Fail closed rather than fall through with no destination.
-                  locFailure = actTypeLoc === 'email'
-                    ? `I found ${resolved.name ?? locToName}, but there's no email address saved for them. Tell me their email, or add it to your contacts.`
-                    : `I found ${resolved.name ?? locToName}, but there's no phone number saved for them. Tell me their number, or add it to your contacts.`;
-                }
-                break;
-              case 'ambiguous':
-                locFailure = `You have more than one contact named ${locToName} — say their full name and I'll try again.`;
-                break;
-              default:
-                // not_found, invalid, or an unrecognised kind — all fail closed.
-                locFailure = `I don't have a contact named ${locToName}. Tell me their phone number or email directly, or save them to your contacts first.`;
-            }
-          } catch (e) {
-            // Never fall through to "no recipient" on an infrastructure error —
-            // that is the exact path that misdelivers.
-            console.error(`[naavi-chat] B9x: resolve-recipient failed for "${locToName}":`, e instanceof Error ? e.message : String(e));
-            locFailure = `I couldn't verify that contact right now — please try again.`;
-          }
-
-          if (locFailure) {
-            console.warn(`[naavi-chat] B9x: dropping location rule — unresolved recipient "${locToName}" (action_type=${actTypeLoc})`);
-            return jsonResponse({ rawText: JSON.stringify({ speech: locFailure, display: locFailure, actions: [], pendingThreads: [] }) });
-          }
-
-          console.log(`[naavi-chat] B9x: resolved location recipient "${locToName}" → ${_locAC.to_phone ?? _locAC.to_email}`);
+      for (const _b9xAction of actions as Array<Record<string, any>>) {
+        const _b9x = await resolveLocationRecipient(_b9xAction, userId);
+        if (!_b9x.ok) {
+          console.warn(`[naavi-chat] B9x: dropping location rule at Site A — ${_b9x.message}`);
+          return jsonResponse({ rawText: JSON.stringify({ speech: _b9x.message, display: _b9x.message, actions: [], pendingThreads: [] }) });
         }
       }
     }
-
     // ── Time-trigger contact resolution (Turn 1 confirm) ────────────────────
     // When B4y dropped a time-trigger SET_ACTION_RULE on Turn 1 (confirm ask),
     // resolve the recipient phone server-side NOW — before embedding PENDING_INTENT.

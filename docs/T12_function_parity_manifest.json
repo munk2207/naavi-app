@@ -1,6 +1,6 @@
 {
   "note": "What the T12 deploy wrapper recorded deploying, per function per environment. A TRIPWIRE, NOT EVIDENCE — anyone using the raw Supabase CLI bypasses it. Equilibrium may be claimed only on a passing `npm run parity:verify`.",
-  "updated": "2026-08-21, 6:20:21 p.m. EST",
+  "updated": "2026-08-27, 1:39:56 a.m. EST",
   "deployments": {
     "create-contact": {
       "staging": {
@@ -72,6 +72,30 @@
           "supabase/functions/receive-demo-sms-reply/index.ts"
         ],
         "deployed_at": "2026-08-21, 4:36:38 p.m. EST"
+      }
+    },
+    "get-naavi-prompt": {
+      "staging": {
+        "commit": "278af475f726ab37e0564696d942cbedf286df74",
+        "source_sha256": "2e5c7d0f9665dd64f35cb900559e4b9382f4c988d44e58e77aa8b168142fa959",
+        "files": [
+          "supabase/functions/get-naavi-prompt/index.ts"
+        ],
+        "deployed_at": "2026-08-27, 1:39:44 a.m. EST"
+      }
+    },
+    "naavi-chat": {
+      "staging": {
+        "commit": "278af475f726ab37e0564696d942cbedf286df74",
+        "source_sha256": "acd055f6ba4b68a88ea72404cbf8fd442908acd8ec0b37ada11d05ee11d9eefb",
+        "files": [
+          "supabase/functions/_shared/anthropic_tools.ts",
+          "supabase/functions/_shared/community_hash.ts",
+          "supabase/functions/_shared/relationship_words.ts",
+          "supabase/functions/naavi-chat/index.ts",
+          "supabase/functions/naavi-chat/intentHandlers.ts"
+        ],
+        "deployed_at": "2026-08-27, 1:39:56 a.m. EST"
       }
     }
   }
