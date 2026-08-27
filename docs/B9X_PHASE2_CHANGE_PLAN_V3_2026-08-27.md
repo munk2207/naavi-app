@@ -172,6 +172,35 @@ proved the shape and could not prove the reach.**
 
 ---
 
+## 9a. Review outcome — **APPROVED**, external reviewer, 2026-08-27
+
+The design is approved: **one shared async helper, `resolveLocationRecipient()`, called from both
+execution paths** — *"preferable to copying the security-sensitive resolution block."* The behaviour
+contract is unchanged: self-overrides, all six resolver outcomes, wrong-channel fail-closed,
+ambiguity handling, `task_actions` exclusion.
+
+**On the verification failure (§2), the reviewer's own words, because the distinction is the
+transferable lesson:** *"Searching only `intentHandlers.ts` supported the narrow statement that
+location handling was absent there, but **not** the broader conclusion that no deterministic location
+path existed."*
+
+**Two things called out as required:**
+
+1. **The helper must remain strictly gated to `trigger_type === 'location'`**, because the
+   immediate-return region also handles `DRAFT_MESSAGE`. **The isolation regression test is
+   required, not optional.**
+2. The reviewer endorsed the testing conclusion in §9: *"static source assertions cannot establish
+   execution-path reachability; Phase 7 must exercise both paths live."*
+
+**Explicitly closed and not to be reopened:** the Phase 6 rulings on wrong-channel fail-closed
+behaviour and the all-actions-discard limitation.
+
+**Decision: APPROVED — proceed to the Phase 3 re-review before coding.** *(That re-review was
+submitted as `B9X_PHASE3_TECHNICAL_REVIEW_V2_2026-08-27.md`, commit `cc9c36c`, and awaits its own
+verdict. **This is a Phase 2 approval and is not authorization to code.**)*
+
+---
+
 ## 10. Not decided here
 
 Phase 3 re-review before any code. The Phase 6 reviewer's two rulings — keep the wrong-channel case,
