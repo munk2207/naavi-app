@@ -1,6 +1,8 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.07.18.13 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+**Architecture Version:** 2026.07.18.14 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+
+**Revision 14 (2026-08-27):** corrects §0b's name for the demo-staging Railway service. All three places named it `generous-tenderness-production-9235`, which is the **domain**, not the service — Railway's service list has no such entry, so the one identifier this section exists to preserve did not resolve. The service is `generous-tenderness`. Found while re-verifying §0b live against the Railway and Twilio APIs at Wael's request; **every other claim in §0b was confirmed unchanged** — three services, both staging services on the identical commit, the four number-to-server mappings, the two staging services pointing at Supabase `xugvnfudofuskxoknhve`, and the invariant that `DEMO_TWILIO_NUMBER` / `STAGING_DEMO_TWILIO_NUMBER` are unset on `naavi-voice-staging`. A naming correction, not an architectural change — no Drift Rule outcome applies. Bumped in the same commit as the edits.
 
 **Revision 13 (2026-08-27, [[B9x]] Phase 8):** adds **§2e** and rewrites §2b's Location row, which said recipient resolution had **two** call sites. It has three: `naavi-chat` joined voice and the mobile orchestrator when B9x landed. **§2e is the part worth reading.** A location alert is constructed in TWO places inside `naavi-chat`, and B9x's first fix was correct code placed on one of them — **eleven static tests passed while it was unreachable**, `deno check` was clean, two external reviews approved it, and three live trials of the item's own reproduction went to the other site and came back unfixed. The claim that put it there was written from a grep of a file that contains no location handling at all. **A provenance tag records that evidence was gathered; it cannot record whether the evidence covers the claim.** Outcome 2 under the Architecture Drift Rule — an intentional approved change — so this update was a hard Phase 8 merge precondition, not a follow-up. Bumped in the same commit as the edits.
 
@@ -78,7 +80,7 @@ Each codebase — and the demo line that rides on one of them — has a differen
 |---|---|---|
 | Mobile app | 2 | Supabase project `xugvnfudofuskxoknhve` (staging) / `hhgyppbxgmjrwdpdubcx` (production); app packages `ca.naavi.app.staging` / `ca.naavi.app` |
 | Voice server | 2 (since 2026-08-19) | Two Railway services in one project: `naavi-voice-staging` deploying from branch `staging`, and `naavi-voice-server` deploying from `main`. Separated by which Twilio number is dialled: `+13435041572` reaches staging, `+12495235394` reaches production. |
-| Demo line | 2 numbers, but **0 independent code paths** | Not a platform. A routing mode of the voice server, selected by `DEMO_USER_ID` and by which number is dialled. `+18889162284` (production demo) runs on the **voice production server itself**; `+18734462284` (staging demo) runs on a separate Railway service, `generous-tenderness-production-9235`, which deploys the **same `staging` branch** as voice-staging. |
+| Demo line | 2 numbers, but **0 independent code paths** | Not a platform. A routing mode of the voice server, selected by `DEMO_USER_ID` and by which number is dialled. `+18889162284` (production demo) runs on the **voice production server itself**; `+18734462284` (staging demo) runs on a separate Railway service, **`generous-tenderness`** (domain `generous-tenderness-production-9235.up.railway.app`), which deploys the **same `staging` branch** as voice-staging. |
 | Supabase | 2 | The two projects above. |
 
 **Before 2026-08-19 the voice server had ONE environment.** Every voice change for real callers was developed and deployed straight against production. T2 built the staging half; see `docs/T2_PHASE_0_CREATING_VOICE_STAGING_2026-08-19.md` onward for the full governed record.
@@ -94,7 +96,7 @@ Three Railway services exist, not six:
 | `+12495235394` | Voice production | `naavi-voice-server-production` |
 | `+13435041572` | Voice staging | `naavi-voice-staging-production` |
 | `+18889162284` | **Demo production** | `naavi-voice-server-production` — *the voice production server* |
-| `+18734462284` | **Demo staging** | `generous-tenderness-production-9235` |
+| `+18734462284` | **Demo staging** | `generous-tenderness` — domain `generous-tenderness-production-9235.up.railway.app` |
 
 **How this was established, so a later reader does not have to re-derive it:** the four Twilio numbers' `voice_url` values were read from the Twilio API, and each service was then probed for the S1 `/voice/identify-result` endpoint. Both staging services answered `200`; voice production answered `404`. Since S1 was pushed to the `staging` branch and deployed only to voice-staging, the demo staging service having the same code proves it deploys that same branch. Nobody deployed to it.
 
@@ -103,7 +105,9 @@ Three Railway services exist, not six:
 1. **T2's isolation does not cover the demo line.** T2 separated Voice-staging from Voice-production. The public 1-888-91-NAAVI demo line still runs *inside* voice production, so any voice production deploy changes the demo line at the same instant, and any voice production incident is simultaneously a demo outage. A work item that promotes voice changes to production is also, silently, a demo release.
 2. **The two staging services are not isolated from each other.** They deploy the same branch, so a change intended for voice-staging lands on demo-staging too. They differ only by environment variables.
 
-`generous-tenderness-production-9235` is an auto-generated Railway name recorded in exactly one place before this entry — `docs/SESSION_HANDOFF_2026-07-01_F2B_STAGING_LIVE_SCENARIOS_NEXT.md`. Nothing in either codebase refers to it. It is written down here because a service that exists only in someone's memory is a service that gets orphaned.
+`generous-tenderness` is an auto-generated Railway name recorded in exactly one place before this entry — `docs/SESSION_HANDOFF_2026-07-01_F2B_STAGING_LIVE_SCENARIOS_NEXT.md`. Nothing in either codebase refers to it. It is written down here because a service that exists only in someone's memory is a service that gets orphaned.
+
+**⭐ The service is named `generous-tenderness`. `generous-tenderness-production-9235` is its *domain*** — `…up.railway.app` with the suffix dropped. *(Corrected 2026-08-27 — the three places this document named the service all gave the domain instead, so searching Railway's service list for the recorded string returns nothing. Verified live against the Railway API the same day, along with every other claim in this section.)*
 
 This is the underlying problem [[T3]] exists to fix. Until T3 lands, treat "the voice platform" and "the demo line" as **one deployable unit** in any release plan.
 
