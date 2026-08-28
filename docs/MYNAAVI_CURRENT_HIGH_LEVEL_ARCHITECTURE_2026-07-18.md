@@ -1,8 +1,6 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.07.18.16 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
-
-**Revision 16 (2026-08-28):** adds **§0e**. §0b has always said the mobile app has two environments; it never said whether they run the same code, and they do not — `EXPO_PUBLIC_TEST_LOGIN_ENABLED` is set on the staging and preview profiles and unset on production, and the 60-second background sync is skipped whenever it is true. **The practical consequence was not written down anywhere and cost real time on 2026-08-28:** a preview APK was proposed as the diagnostic vehicle for a production-only symptom, and it would have measured a different app. Wael caught it from his own experience — *"we do not have problem with APK"* — not from any document. The section also records the route that does work, Internal app sharing, because until this investigation nobody had needed to put production behaviour on a phone without publishing it. Not an architectural change and no work item is in flight, so no Drift Rule outcome applies — a gap filled. Bumped in the same commit as the edit.
+**Architecture Version:** 2026.07.18.15 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
 
 **Revision 15 (2026-08-27):** rewrites §3's interruption entry, which since revision 8 had described call interruption as **two designs, one per voice branch** — production barge-in, staging pause-word — and stated that production would keep barge-in *"until"* the promotion decision was taken. **It was taken, and the entry was never updated.** As of today `origin/staging` and `origin/main` resolve to the identical tree `b203613b…`, the same `src/index.js` blob byte for byte, so [[B11f]]'s pause/resume is what every caller gets on both branches; mobile is now the only differing design. **The failure mode is worth naming because it is not the one this document usually guards against:** the claim was true when written and expired when two branches converged — an event nothing in this project observes. No test failed, no gate fired, and the drift check compares schema, not branches. Found only because Wael asked whether voice staging and production were in sync. Not an architectural change and no work item is in flight, so no Drift Rule outcome applies — a stale description corrected. **Revision 8's own note is marked superseded in place**, because a revision entry written in the present tense goes stale exactly like the section it describes, and a reader scanning the revision list meets it first. Bumped in the same commit as the edits.
 
@@ -294,32 +292,6 @@ just allow the build time to start before deciding it never will.
 **And every voice production deploy is simultaneously a demo release**, because 1-888-91-NAAVI runs
 on the production voice server itself (§0b). That is [[T3]]'s subject; noted here because it is a
 property of *promoting*, not only of hosting.
-
-### 0e. A staging or preview build cannot exercise production behaviour (added 2026-08-28)
-
-§0b says the mobile app has two environments. It does not say they run the same code, and they do
-not.
-
-`eas.json` sets `EXPO_PUBLIC_TEST_LOGIN_ENABLED=true` on the **staging** and **preview** profiles
-(`:15`, `:25`). The **production** profile does not set it, and the EAS `production` environment
-holds only two variables — the Supabase URL and key — so it is genuinely unset there.
-
-Three places in `app/index.tsx` branch on that flag. The load-bearing one is `:1267`: the
-**60-second background sync is skipped whenever the flag is true**. That loop fires six network
-operations, including `sync-gmail`. Production builds run it. Staging and preview builds never do.
-
-**The consequence, which is the reason this section exists:** "tested on the staging APK" does not
-cover any behaviour that depends on that loop, and **there is no build installable outside Google
-Play that behaves like production.** A preview APK is not the production app with a different
-backend — it is a different app.
-
-**The route that does work**, established 2026-08-28: build with `--profile production` and **no
-`--auto-submit`**, then distribute through Play Console → **Internal app sharing**. It reaches no
-track and no testers, carries Play's signing certificate so Google Sign-In works, and is the only
-way to put production behaviour on a phone for diagnosis.
-
-Found 2026-08-28 during the AAB 325 delay investigation, after a preview APK was proposed as the
-diagnostic vehicle and would have measured the wrong app.
 
 ## 1. Architecture Principles
 

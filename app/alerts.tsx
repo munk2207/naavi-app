@@ -491,23 +491,13 @@ export default function AlertsScreen() {
         console.warn('[alerts] user_settings phone fetch failed:', e?.message ?? e);
       }
       remoteLog(getLifecycleSession(), 'alerts-load-invoke-start');
-      // 2026-08-28 (Wael) — `ms` on the invoke-end row measures the manage-rules
-      // CALL, from tInvoke. It used to be `Date.now() - t0`, which silently
-      // folded in getSession and the user_settings query above, so a field named
-      // for the invoke reported roughly twice the call's duration. During the AAB
-      // 325 delay investigation that produced a false "3.5x slower than build
-      // 311" finding; measuring from the invoke-start row instead showed the
-      // medians were 285 ms and 351 ms. `since_load_start_ms` preserves the old
-      // number so rows written before this build stay comparable.
-      const tInvoke = Date.now();
       const { data, error: err } = await invokeWithTimeout('manage-rules', {
         body: { op: 'list' },
       }, 15_000);
       remoteLog(getLifecycleSession(), 'alerts-load-invoke-end', {
         had_error: !!err,
         rules_count: Array.isArray((data as any)?.rules) ? (data as any).rules.length : 0,
-        ms: Date.now() - tInvoke,
-        since_load_start_ms: Date.now() - t0,
+        ms: Date.now() - t0,
       });
       if (err) throw err;
       const loadedRules: ActionRule[] = Array.isArray((data as any)?.rules) ? (data as any).rules : [];
