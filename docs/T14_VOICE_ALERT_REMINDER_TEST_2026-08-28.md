@@ -1,5 +1,20 @@
 # T14 — Voice Alert & Reminder Test: running record
 
+**⭐ CLOSED 2026-08-28 (Wael).** The campaign ran to find out, and it found out. **All six creation
+paths passed** — time, location and email, each with and without the word "set" — plus firing on all
+three and recurrence on email. **The alert engine itself works; everything found sits around it.**
+
+**Five items opened**, each explained and approved individually before its row existed (Rule 1b):
+[[B12h]] · [[B12i]] · [[B12j]] · [[B12k]] · [[B12l]]. **Four existing items corrected or
+strengthened:** [[B11m]]'s root cause was wrong and is fixed · [[B4z]] widened · [[B4b]] to eight
+reproductions · [[B10d]] confirmed still live six weeks on.
+
+**Three of nine candidates turned out to be items already open** — found only because Wael asked for
+the comparison against the holding list. Without that question, three duplicates would have been
+opened. **That check belongs in every future campaign of this shape.**
+
+**[[B12k]] took this item's slot on the priority list at closure**, as agreed when it was opened.
+
 **Opened 2026-08-28.** Test campaign against **voice production** (`+1 249 523 5394` →
 `naavi-voice-server`, commit `5dff3d5d`, Supabase `hhgyppbxgmjrwdpdubcx`).
 
@@ -343,6 +358,126 @@ single — same split as 05:29.
 No WhatsApp on this fire either, while the Settings toggle shows WhatsApp **ON**. Now demonstrated
 across time, location and email triggers: every path that reads `alert_channels_enabled` skips
 WhatsApp, and the only path that sent it is the one that reads no preference at all.
+
+---
+
+## Test 4a — Time, phrased "Remind me" — CREATION PASS, LISTING FAILS
+
+`"Remind me in 5 minutes to say good morning"` — no "set", no "alert".
+
+**Created correctly.** `action_rules` row `fb264262`, `trigger_type: time`, `enabled: true`, due
+07:01, `action_config {"body":"Good morning!","to_phone":"+16137697957"}`. This answers the B10l
+question for the time case: **a voice "remind me" lands in `action_rules`, not the `reminders`
+table** — which is what the shared prompt mandates (*"NEVER use SET_REMINDER for time-based
+reminders — always SET_ACTION_RULE with trigger_type:'time'"*, `get-naavi-prompt:1914`).
+
+### I — Naavi confirms creating a reminder, then says you have none. Same call, 26 seconds apart ⭐
+
+```
+06:57:16  Claude emits set_action_rule  trigger_type:"time"      ← correct
+06:57:31  [Action] B4y: defaulted SET_ACTION_RULE to_phone       ← written to action_rules
+06:57:42  Wael : "What reminders do I have?"
+06:57:43  [ARCH-1] Classified: REMINDER_READ
+06:57:45  [ARCH-1] Level A answer in 3159ms
+          → "You don't have any upcoming reminders."
+06:58:02  Wael asked again          → same answer (1068ms)
+```
+
+**She looked. She looked in the wrong table.** `REMINDER_READ` queries
+`/rest/v1/reminders?...&fired=eq.false` (`src/index.js:2180`). The `reminders` table holds **zero**
+rows for this user. The query really ran — 3159 ms, then 1068 ms on the repeat — so this is not an
+invented or cached answer.
+
+**The write path and the read path disagree about which table the word "reminder" means:**
+
+| | Table | Engine | Visible in the app |
+|---|---|---|---|
+| `"Remind me in 5 minutes…"` writes to | `action_rules` | `evaluate-rules` | Alerts screen |
+| `"What reminders do I have?"` reads from | `reminders` | `check-reminders` | nothing reads it |
+
+**This is systematic, not intermittent.** Time-based creation is mandated into `action_rules` by the
+prompt; `REMINDER_READ` is hardcoded to the `reminders` table. **A reminder created by voice can
+therefore never be listed by voice — every time, by construction.**
+
+**⭐ Distinct from [[B11m]], and deliberately not filed under it.** B11m is Naavi answering the
+reminders question *without looking anything up*. Here the lookup ran correctly against the table it
+targets. Same symptom, different cause; merging them would hide the real one.
+
+**Related to Architecture Reference Priority 5 / ADR 0003** (reminders write-path divergence, tracked
+as B10l) but not the same statement: ADR 0003 is about voice *writing* to `reminders` where mobile
+redirects to `action_rules`. This is the *read* side, and it is the half that reaches the user.
+
+**D recurred — third occurrence.** The detail-free *"I need your confirmation before I can make that
+change"* again preceded the specific readback, costing an extra turn and an extra "yes".
+
+**Note on the session:** two earlier calls dropped and were discarded at Wael's direction; only the
+third (06:56-06:58) is analysed here.
+
+---
+
+## Test 4b — Location, phrased "Alert me" — PASS
+
+`"Alert me when I arrive at Walmart"`. An existing **disabled** Walmart rule from 11 June was
+name-matched and re-enabled rather than duplicated — same designed path as test 2.
+
+Rule `dc92ee64`, now enabled: Walmart Orleans, 2900 St Joseph Blvd, arrive, `one_shot`,
+`action_config {"body":"Remember to buy eggs.","tasks":["buy eggs"]}`.
+
+**Claude asked Wael whether the stored "buy eggs" message was expected rather than asserting it was
+stale.** It was what he asked for. **Second time in this campaign that asking beat asserting** — see
+the withdrawn finding under Test 2. The listing that followed was correct: two alerts, the recurring
+Bob email rule and Walmart.
+
+## Test 3 recurrence — PASS
+
+A second email from Bob (07:11:30, id `1a0481182439b1c3`) fired the `one_shot: false` rule again at
+**07:18:41**, with a distinct `trigger_ref` per message id. Recurring email rules work.
+
+**F recurred, and this time it was user-visible.** Server side: 3 voice + 3 SMS, one log row. **Wael
+received two messages.** Earlier fires reached him once. So the duplication does surface on the
+handset, at a count that varies (1, 1, 2) while the server side is consistently 3.
+
+## Test 4c — Email, phrased "Alert me" — the request was refused with a false reason
+
+```
+07:15:55  Naavi: "I see you got an email from Bob this morning at 7:11 AM.
+                  The subject line shows 'dhighe' — that's all the preview shows me."
+07:16:17  Wael : "Create a new alert." / "When I receive an email from Bob."
+07:16:28  Naavi: "I'll alert you when an email from Bob arrives. Say yes to confirm..."
+07:16:37  Wael : "Yes."
+07:16:50  Claude emits SET_ACTION_RULE(email, from_name:"Bob")
+07:16:51  Naavi: "I had trouble saving that alert — please try again."
+07:17:08  Naavi: "You have 2 active alerts. 1. Alert when Bob emails. 2. Walmart Orleans arrival."
+```
+
+**No duplicate rule was created** — verified, still exactly two enabled. The database correctly
+rejected it; Wael already had that identical rule from test 3.
+
+### J — A duplicate is refused with "please try again", which cannot ever work
+
+**The rejection is correct. The sentence is not**, on two counts:
+
+1. **Retrying is guaranteed to fail.** The uniqueness constraint will reject it identically, every
+   time, forever. Naavi instructed the caller to do something that cannot succeed.
+2. **The real reason was available and useful.** *"You already have that alert"* is actionable;
+   *"I had trouble saving that"* is a generic infrastructure error that misdescribes what happened.
+
+*(That the uniqueness index on `(user_id, from_name, subject_keyword)` for enabled email rules is the
+specific cause is **inference from the shape of the failure**, not something read in the log. The
+observation is that the save failed and the message was wrong about why.)*
+
+**The contrast with location is the sharpest part.** The location path **has** a duplicate pre-check —
+it is what produces *"Your Costco arrival alert is expired. Want me to re-enable it?"* and the Walmart
+equivalent. **The email path has none**, so it falls through to the DB constraint and surfaces as a
+failure.
+
+**CLAUDE.md's own pre-commit checklist names this exact split as the thing to avoid:** *"Does the
+application code pre-check for duplicates and surface a friendly message, or does it rely on the DB
+constraint to fire and the user to see a generic error?"* Location does the former; email does the
+latter.
+
+**D did NOT recur on this call** — the confirmation at 07:16:28 named the specifics correctly. More
+evidence that the detail-free variant is non-deterministic rather than universal.
 
 ---
 
