@@ -75,7 +75,7 @@ export const voicePinTests: TestCase[] = [
     timeoutMs: 15_000,
     async run(ctx) {
       try {
-        const res = await callSet(ctx, { pin: '1234', user_id: ctx.testUserId });
+        const res = await callSet(ctx, { pin: '123456', user_id: ctx.testUserId });
         expect2xx(res.status, 'SET');
         expectEqual((res.data as any)?.success, true, 'success=true');
       } finally {
@@ -85,17 +85,22 @@ export const voicePinTests: TestCase[] = [
   },
 
   {
-    id: 'voice-pin.set-rejects-non-4-digit-pin',
+    id: 'voice-pin.set-rejects-non-6-digit-pin',
     platform: 'voice',
     category: 'voice-pin',
-    description: 'SET — rejects PIN that isn\'t exactly 4 digits',
+    description: 'SET — rejects PIN that isn\'t exactly 6 digits',
     timeoutMs: 10_000,
     async run(ctx) {
-      const badPins = ['123', '12345', 'abcd', '12a4', '', '1.34'];
+      // Updated 2026-08-29: S1 changed SET from 4 digits to 6
+      // (manage-voice-pin PIN_SET_RE = /^\d{6}$/). '1234' is included
+      // deliberately — a 4-digit PIN was valid before S1 and must now be
+      // rejected, so it is the one input that actually covers the change.
+      // VERIFY is unchanged and still accepts 4 or 6; only SET tightened.
+      const badPins = ['123', '1234', '12345', '1234567', 'abcdef', '12a456', '', '1.3456'];
       for (const pin of badPins) {
         const res = await callSet(ctx, { pin, user_id: ctx.testUserId });
         expectEqual(res.status, 400, `pin="${pin}" should return 400, got ${res.status}`);
-        expectEqual((res.data as any)?.error, 'pin_must_be_4_digits', `error message for pin="${pin}"`);
+        expectEqual((res.data as any)?.error, 'pin_must_be_6_digits', `error message for pin="${pin}"`);
       }
     },
   },
@@ -121,8 +126,8 @@ export const voicePinTests: TestCase[] = [
     timeoutMs: 15_000,
     async run(ctx) {
       try {
-        await callSet(ctx, { pin: '4242', user_id: ctx.testUserId });
-        const res = await callVerify(ctx, { user_id: ctx.testUserId, pin: '4242' });
+        await callSet(ctx, { pin: '424242', user_id: ctx.testUserId });
+        const res = await callVerify(ctx, { user_id: ctx.testUserId, pin: '424242' });
         expect2xx(res.status, 'VERIFY');
         expectEqual((res.data as any)?.success, true, 'success=true');
         expectEqual((res.data as any)?.match,   true, 'match=true');
@@ -140,8 +145,15 @@ export const voicePinTests: TestCase[] = [
     timeoutMs: 15_000,
     async run(ctx) {
       try {
-        await callSet(ctx, { pin: '4242', user_id: ctx.testUserId });
-        const res = await callVerify(ctx, { user_id: ctx.testUserId, pin: '0000' });
+        // Updated 2026-08-29: the PIN was '4242', which SET has rejected since
+        // S1 required 6 digits. The set silently failed, so no PIN was stored,
+        // and verifying a wrong PIN returned match:false — the expected answer
+        // reached by accident. The test reported green while exercising
+        // nothing. The assertion below is the guard against that recurring:
+        // if the setup stops working, the test now fails instead of passing.
+        const setRes = await callSet(ctx, { pin: '424242', user_id: ctx.testUserId });
+        expect2xx(setRes.status, 'SET (precondition)');
+        const res = await callVerify(ctx, { user_id: ctx.testUserId, pin: '000000' });
         expect2xx(res.status, 'VERIFY');
         expectEqual((res.data as any)?.success, true,  'success=true');
         expectEqual((res.data as any)?.match,   false, 'match=false');
