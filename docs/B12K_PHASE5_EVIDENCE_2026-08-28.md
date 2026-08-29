@@ -3,7 +3,7 @@
 **Work item:** [[B12k]] — Naavi is too slow to answer on voice.
 **Date:** 2026-08-28
 **Covers:** Phase 4 implementation of **Stages 1 and 2 only.** Stage 3's three parts are conditionally authorized by Phase 3 §4 and are **not implemented.**
-**Status:** **RESUBMITTED with executed evidence, 2026-08-28.** The first version was returned by Wael as premature — it documented a change and admitted the required staging evidence had not been performed. It has now been deployed to staging and the checks have run.
+**Status:** **APPROVED by Wael, 2026-08-29 — Phase 5 → 6 authorized.** All six checks pass. Approved after two holds and one correction: returned as premature when it documented a change without executing the evidence, held until the live call was actually made rather than inferred from a remark, and corrected for a stale test count in §7.
 
 ---
 
@@ -85,6 +85,15 @@ Duration: 54.1s
 
 **So: this change introduced no new failures. It did not make Gate 2 pass, because Gate 2 was already not passing.** The four skips are environmental — the account has no Google token on staging.
 
+**⭐ Update, 2026-08-29 — Gate 2 is now clean.** Wael authorised fixing the stale tests. `manage-voice-pin` has required 6 digits since S1 (`PIN_SET_RE = /^\d{6}$/`); three tests still expected 4. A fourth, `verify-wrong-pin-returns-match-false`, was **passing for the wrong reason** — its 4-digit set silently failed, so no PIN was stored and a wrong PIN returned `match:false`, the expected answer by accident. It now asserts its own precondition. Fixed in `49de2c6`.
+
+```
+Testing against: STAGING  (xugvnfudofuskxoknhve)
+✓ 54 passed   ✗ 0 failed   ⨯ 0 errored   ○ 4 skipped
+```
+
+**First clean Gate 2 in at least four days.** The 2026-08-25 session handoff had diagnosed this precisely — naming the tests, the function and the line numbers — and it was never acted on.
+
 ### 4c. Checks 3-6, via the server's `/test/ask` endpoint
 
 Run against the staging gates account (`ae1f3438…`). No phone call required.
@@ -104,9 +113,15 @@ Run against the staging gates account (`ae1f3438…`). No phone call required.
 | `naavi-voice-server` (production) | **not set** |
 | `generous-tenderness` (staging demo) | **not set** |
 
-### 4d. Check 2 — live call: NOT PERFORMED
+### 4d. Check 2 — live call: **PASS**
 
-Requires a real call to `+1 343 504 1572`. **Only Wael can place it.** Outstanding.
+**Wael placed a live call to `+1 343 504 1572` on 2026-08-29 and reported: "live staging call passed."**
+
+**What that verdict covers**, agreed with him before he called, so the bar was fixed rather than interpreted afterwards: Naavi answered; her voice was clean with no cut-off or garbled audio; the answer made sense for what was asked; the call did not drop.
+
+**What it deliberately does NOT cover: speed.** A slow turn is not a failure of this check — it is the defect the work item exists to address. **Check 2 asks one narrow question: did adding instrumentation to the file that controls every phone call break a real call?** It did not. This is the only check with a real phone on the other end, and no automated test can stand in for it.
+
+*(A correction on the record: an earlier remark of Wael's — "I retested it works now", made during a discussion of the ticking sound — was recorded here as a check 2 pass. It was not one. He held Phase 5 and asked for the call to actually be made. The pass above rests on the call, not on that remark.)*
 
 ---
 
@@ -166,7 +181,7 @@ This is the same function that stalled at 122 seconds in production. **Caveat: t
 
 | # | Risk | Assessment after execution |
 |---|---|---|
-| 1 | An editing mistake in Protected Core | **Materially reduced.** 51 Gate 2 tests pass, 0 fail, and four live turns behaved correctly |
+| 1 | An editing mistake in Protected Core | **Materially reduced.** 54 Gate 2 tests pass, 0 fail, 0 errored, and four live turns behaved correctly |
 | 2 | Log volume | Six new per-turn lines. Small against existing per-turn logging |
 | 3 | Lag probe timer overhead | No observable effect; probe silent throughout |
 | 4 | Variable set on the wrong service | **Did not occur.** Verified absent from production and the demo service at every step |
@@ -199,6 +214,8 @@ This is the same function that stalled at 122 seconds in production. **Caveat: t
 
 **Claims:** the change is what was authorized; it is deployed and running; it introduced no new test failures; the switch is inert by default and correct when set; and the instrumentation produces usable measurements.
 
-**Does not claim:** that Gate 2 is green — it is not, for reasons predating this work. That the caller experience is verified — **check 2 has not been performed.** That any Stage 3 gate is settled — four samples are not the trial set.
+**Does not claim:** that any Stage 3 gate is settled — four samples are not the trial set. That the 5-second bar is met, or moved at all — **this change makes Naavi no faster and was never meant to.** That the caller's *experienced* wait is measured — every timing here begins after Deepgram has already decided the caller finished speaking, and ends at audio dispatch rather than at audio heard.
+
+*(Two claims that were withheld here when this package was first written, both now closed: Gate 2 was not green — it is, since `49de2c6`. Check 2 was not performed — it passed on 2026-08-29.)*
 
 Per Governance §3, Phase 5 → 6 requires Wael's own separate word.
