@@ -149,29 +149,23 @@ The sentinel, the per-turn list of unreachable sources, the formatter, the promp
 
 ---
 
-### The original constraint section, retained
+### What happens now when a bound fires
 
-*(Kept because the reasoning below is what the validation tested and disproved. Superseded by §4a.)*
-
-### ⭐ The mandatory constraint, and why it is most of the work
-
-Phase 3 §4c: *"a bound without this is not authorized under any branch."*
-
-**A timeout falling back to an empty result would make Naavi say the caller has no notes on a subject when the truth is she could not look.** That is CLAUDE.md Rule 18 — reshaping a fact to fit what is stored — and it would be **caused by the fix**.
-
-| Site | What happens when the bound fires |
+| Site | Behaviour |
 |---|---|
-| Knowledge | Returns a sentinel, **not `''`**. That produces its **own** prompt section: *"You do NOT know whether the user has notes on this subject. Do NOT say they have none."* |
-| Alerts | Falls into the existing catch: *"I couldn't reach your alerts right now"* — true, and not "you have no alerts" |
+| Knowledge | Returns `''`, and Naavi answers as she otherwise would. **Measured word-for-word identical to a successful lookup that found nothing** |
+| Alerts | Falls into the existing catch: *"I couldn't reach your alerts right now"* |
 | TTS | Existing handler returns 502; Twilio moves on. A bounded failure rather than an open one |
 
-**The knowledge section is deliberately NOT placed under "What Naavi knows about this user."** Framing a failed lookup as knowledge is exactly how *"I couldn't reach it"* becomes *"you have none."*
+**None of these needed building.** All three already existed; the bound simply gives them something finite to react to.
 
 ---
 
 ## 5. Tests
 
-**Seven new permanent regression tests**, registered in `tests/runner.ts` so they run on every build. **Stage 3 carries no Rule 15a exception** — Wael's condition when granting one for Stage 2 was that Stage 3 requires *"permanent regression auto-tests that run on every new build."*
+**Five permanent regression tests**, registered in `tests/runner.ts` so they run on every build. **Stage 3 carries no Rule 15a exception** — Wael's condition when granting one for Stage 2 was that Stage 3 requires *"permanent regression auto-tests that run on every new build."*
+
+**Seven were written; four were deleted with the machinery they covered, and two survive from the bounded set.** Deleting them was the point: tests that assert removed behaviour either fail, or get "fixed" into testing something that no longer exists.
 
 ```
 Testing against: STAGING  (xugvnfudofuskxoknhve)
@@ -181,11 +175,9 @@ b12k.fast-path.information-requests-stay-off-it               ✓ PASS
 b12k.fast-path.selection-comment-records-the-boundary         ✓ PASS
 b12k.bounded.fires-against-a-server-that-never-responds       ✓ PASS
 b12k.bounded.three-call-sites-are-bounded                     ✓ PASS
-b12k.bounded.knowledge-timeout-does-not-look-like-no-notes    ✓ PASS
-b12k.bounded.timeout-tells-claude-not-to-claim-there-are-none ✓ PASS
 
-Naavi Auto-Tester — 65 tests
-✓ 61 passed   ✗ 0 failed   ⨯ 0 errored   ○ 4 skipped
+Naavi Auto-Tester — 63 tests
+✓ 59 passed   ✗ 0 failed   ⨯ 0 errored   ○ 4 skipped
 ```
 
 **One is behavioural rather than a source check**, and it is the validation Phase 3 specified. It stands up a local server that accepts a connection and never answers — the production stall's exact shape — lifts the real helper out of the voice server, and asserts the bound fires:
@@ -232,7 +224,7 @@ Revert `2583b9c` and push; Railway redeploys `staging`.
 |---|---|---|
 | 1 | **The fast path is widened later to include a request** | The real risk. Mitigated by a test with adversarial negatives and by the comment stating the rule. **Not eliminated** — a future edit could change both |
 | 2 | **10 s is wrong for some upstream** | Derived from 24 samples of one call. The alerts and TTS calls were not separately sized; both measured far faster |
-| 3 | **A bound fires and Naavi's phrasing is poor** | The prompt section instructs, it does not script. What she actually says on a fired bound **has never been heard** — no stall has recurred |
+| 3 | **A bound fires and Naavi's phrasing is poor** | **Closed by validation.** The bound was injected and the answer observed end-to-end: *"I don't have that information in your records. Forward the school calendar email to yourself and I'll pick it up automatically."* — **word-for-word what she says when the lookup succeeds and finds nothing.** There is no distinct failure phrasing to be poor |
 | 4 | **In-process delay reduces the bound's value** | Recorded in Phase 2 §2.3: a timer on a blocked loop fires late, not never. Lag has measured zero throughout |
 
 ---
