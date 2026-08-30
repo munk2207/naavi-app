@@ -178,7 +178,7 @@ Module-level, not per-connection — it measures the process and writes nothing 
 **Duplicated capabilities, addressed individually as the rule requires:**
 
 - **Live calendar reads are Duplicated** (Reference §2, ADR 0002). Only voice's side is touched, and only by Stage 1's log line. Mobile's implementation in `naavi-chat` is unchanged and needs no matching change, because no stage alters calendar-read behaviour on either side.
-- **`fetchCalendarPdfBlock` exists twice** — `src/index.js:1292` and `supabase/functions/naavi-chat/index.ts:806`. **Freshly verified this session.** Stages 1 and 3b touch voice's call site only. The function's behaviour is unchanged on both sides.
+- **`fetchCalendarPdfBlock` exists twice** — `src/index.js:1331` and `supabase/functions/naavi-chat/index.ts:806`. **Freshly verified this session.** Stages 1 and 3b touch voice's call site only. The function's behaviour is unchanged on both sides.
 - **Model selection is Duplicated** — voice at `:3446`, `naavi-chat` at `:3683`/`:3848`. **Stage 3a changes voice only, deliberately.** Mobile is out of scope by approved Phase 0 scope, and mobile is already on the faster model, so the divergence Stage 3a would create is *smaller* than the one that exists today.
 
 ---
@@ -220,7 +220,7 @@ Module-level, not per-connection — it measures the process and writes nothing 
 |---|---|---|
 | `fetchUserLists` | `src/index.js:329` | Voice only. No occurrence in `hooks/`, `lib/`, `supabase/functions/` |
 | `_b4xBuildAlertsContext` | `src/index.js:4150` | Voice only. Same search, no occurrence |
-| `fetchCalendarPdfBlock` | `src/index.js:1292` | Voice only **for this definition**. The same-named function at `naavi-chat/index.ts:806` is a different one, called at `:3658`, untouched |
+| `fetchCalendarPdfBlock` | `src/index.js:1331` | Voice only **for this definition**. The same-named function at `naavi-chat/index.ts:806` is a different one, called at `:3658`, untouched |
 
 **⭐ Shared, and the only cross-surface exposure in this plan — Stage 3c only:**
 

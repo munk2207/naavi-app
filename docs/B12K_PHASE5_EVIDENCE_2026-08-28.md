@@ -206,7 +206,7 @@ This is the same function that stalled at 122 seconds in production. **Caveat: t
 3. **Three `voice-pin` tests have been erroring since at least 2026-08-25**, expecting a 4-digit PIN where the deployed function requires 6 — apparently stale against the S1 change. **Gate 2 has therefore not been clean for at least three days.**
 4. **Naavi produced a 1 411-character spoken answer containing markdown bold markers.** Two separate problems — length, and formatting in TTS-bound text.
 5. **The calendar chain in the parallel block has no combined timing** (§3).
-6. **`fetchCalendarPdfBlock` exists twice** — `src/index.js:1292` and `naavi-chat/index.ts:806`.
+6. **`fetchCalendarPdfBlock` exists twice** — `src/index.js:1331` and `naavi-chat/index.ts:806`.
 
 ---
 

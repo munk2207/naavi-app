@@ -76,7 +76,7 @@ None consumes `events`, `knowledge`, `weatherData`, `globalSearchResults` or `re
 
 ### 3.3 `fetchCalendarPdfBlock` exists twice
 
-`src/index.js:1292` and `supabase/functions/naavi-chat/index.ts:806`. Voice's own comment at `:3412` says so. **No stage changes either.** Recorded so a reviewer seeing the name in a diff does not assume one definition.
+`src/index.js:1331` and `supabase/functions/naavi-chat/index.ts:806`. Voice's own comment at `:3412` says so. **No stage changes either.** Recorded so a reviewer seeing the name in a diff does not assume one definition.
 
 ---
 
