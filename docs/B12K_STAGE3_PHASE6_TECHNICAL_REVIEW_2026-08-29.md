@@ -3,7 +3,7 @@
 **Work item:** [[B12k]] — Naavi is too slow to answer on voice.
 **Date:** 2026-08-29
 **Covers:** **Stages 3a and 3c only.** 3b was ruled out by the baseline; 3d was closed by Wael.
-**Status:** **RESUBMITTED FOR REVIEW after one return — no verdicts issued.** The return was for a factual claim in §9, now corrected. The reviewer stated what the verdicts would be after that correction; **they are not recorded**, because the correction is a change they have not yet seen.
+**Status:** **APPROVED by the reviewer, 2026-08-29 — all four verdicts PASS/Approved.** Returned once for a factual claim in §9, corrected, resubmitted, and approved. See §8 for the sequence, including a draft that recorded the verdicts before the reviewer had seen the correction.
 
 **What this document is.** Governance §3 puts the four Phase 6 verdicts with the reviewer. This is the submission: the diff after the fact, architecture and regression impact, isolation, test coverage, and the drift check. **§8's verdicts are blank.**
 
@@ -129,16 +129,18 @@ fb6546c  remove the failure-message machinery, keep the bound
 
 Per Governance §3, four independent verdicts. Numeric scores are not used.
 
-- **Technical Review:** PASS / FAIL — *not yet issued*
-- **Architecture Completeness:** PASS / FAIL — *not yet issued*
-- **Governance Compliance:** PASS / FAIL — *not yet issued*
-- **Overall Recommendation:** Approved / Approved with Mandatory Changes / Rejected — *not yet issued*
+**ISSUED — the reviewer approved the corrected document, reported by Wael 2026-08-29:**
 
-**The reviewer returned this document once**, for the *"nothing else moved"* claim in §9 — a summary that contradicted this work item's own Phase 5 finding — and stated the four verdicts it would carry **after that correction**.
+- **Technical Review:** **PASS**
+- **Architecture Completeness:** **PASS**
+- **Governance Compliance:** **PASS**
+- **Overall Recommendation:** **Approved**
 
-**Those verdicts are NOT recorded here, and a draft of this section wrongly did record them.** The correction was conditional on a change the reviewer had not seen; writing the verdicts in on the strength of having made it is Claude certifying its own fix. **The corrected document goes back for review.**
+**How this record was arrived at, because the sequence matters.** The reviewer returned the document once, for the *"nothing else moved"* claim in §9 — a summary that contradicted this work item's own Phase 5 finding — and stated the four verdicts it would carry **after that correction**. A draft of this section then recorded those verdicts on the strength of the correction having been made. **That was wrong and was reverted**: a conditional verdict is not an issued one, and certifying my own fix is not review. The corrected document went back, and the approval above is the reviewer's response to it.
 
-**A verdict of Approved would not itself authorize Phase 7.** Wael's own separate word is required for that.
+**Recorded on Wael's report of the reviewer's approval.** Claude did not see the review itself.
+
+**A verdict of Approved does not itself authorize Phase 7.** Wael's own separate word is required, and he gave it separately.
 
 ---
 
