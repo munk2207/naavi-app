@@ -70,7 +70,7 @@ Both connected and both dropped without Naavi answering. The logs show why, and 
 
 **Twilio delivered hundreds of frames carrying silence.** Zero amplitude on 20 of 24 readings, `transcript=EMPTY` every time. **Because no transcript was produced, `processUserMessage` never ran, so `askClaude` never ran, so nothing Stage 3 changed could execute.** The test did not fail; it did not run.
 
-Wael confirmed nothing changed on his end — same handset, no speakerphone or headset change. **This matches the existing `project_naavi_audio_focus_race` memory ("listens but captures nothing"), and the `[B10m-diag]` amplitude instrumentation that made it visible was already in the code**, which indicates prior investigation. **It did not recur on the third call and is not explained here.**
+Wael confirmed nothing changed on his end — same handset, no speakerphone or headset change. **The amplitude instrumentation that made this visible was already in the code**, which indicates prior investigation of something in this area. **It did not recur on the third call, it is not explained here, and this document makes no claim about which tracked item, if any, it belongs to** — see §6.5.
 
 #### Call 3 — what actually happened, in order
 
@@ -176,15 +176,15 @@ Immediately after the timezone confirmation, Deepgram captured a stray **"Yes."*
 2. **The two other knowledge paths remain unbounded.** `fetchAllKnowledge` and `arch1HandleMemorySearch` reach the same Edge Function and have no bound. Phase 3 authorized three specific sites; this is outside that authorization and is recorded, not fixed.
 3. **The caller's experienced wait is still unmeasured.** Every timing begins after Deepgram decides the caller stopped speaking and ends at audio dispatch. Deferred by Wael to [[B12m]].
 4. **Only one of the five moved phrases was spoken on a real call.** *"Are you there?"* was tested; *"are you still there"*, *"are you listening"*, *"can you hear me"* and *"you there"* are covered by the regression suite against the live regex, not by a phone.
-5. **The silent-audio failure is [[B10m]]** — an existing item on the **general** list, not the priority list.
+5. **The silent-audio failure is recorded as an observation and nothing more.** Two of three calls produced **zero-amplitude audio and no transcript**, the watchdog reconnected twice and gave up, and Twilio disconnected. **It is not diagnosed, and this document makes no claim about whether an existing tracked item covers it.**
 
-   > **⚠ Corrected twice on 2026-08-30, and the second correction is the more instructive one.**
+   > **⚠ Reverted 2026-08-30 on Wael's instruction, and the reason is worth more than the text that was removed.**
    >
-   > **First:** this gap read *"unexplained… and no item was opened for it."* **False. B10m is exactly this defect** — *"Deepgram connects and audio flows in continuously for the entire call, but zero transcripts are ever produced."* **The `[B10m-diag]` lines quoted in §3b carry the item's own ID in their log prefix**, and I quoted them verbatim while writing that nothing tracked it.
+   > This gap briefly asserted that the failure **is B10m** (de-linked here deliberately, so the revert does not leave the association behind in the graph), then "corrected" that to place B10m on the priority list, which it is not. **Neither claim was presented to Wael, discussed, or approved.** They were written into an already-committed, already-approved document during work authorized for something else, and committed alongside it — so his approval of that other work became the vehicle for a classification he never saw.
    >
-   > **Second:** the fix then said B10m was *"one of the five on the priority list."* **Also false** — `node scripts/priority-cap-check.js` reports the five as **B12m, B11m, B10c, B11l, S2**. **I had corrected an unchecked claim with another unchecked claim**, from a stale sentence in the holding list itself that still reads *"`B10m` took the last slot on Wael's call, 2026-08-23"*. **That sentence is wrong and should be repaired in the list**; it is flagged, not edited here.
-
-   **One difference from B10m's recorded profile is worth logging there:** its 2026-07-19 evidence records the watchdog never firing. **Tonight it fired twice and reconnected twice before giving up** (`no transcript after 6s with 385 frames`, then `700 frames`, then `reconnect limit reached`). That is a variant, not a contradiction, and it belongs in B10m's row rather than here.
+   > **The identification was also weak on its own evidence.** It rested on matching the `[B10m-diag]` log prefix. **B10m's recorded evidence is that audio was *provably flowing* into Deepgram; tonight's frames measured amplitude 0**, which is frames arriving carrying silence. Those may be the same defect or two different ones. **Nothing here tested it**, and a same-shape guess is exactly what Wael had refused hours earlier on the calendar defect: *"one test does not justify creating a new items."*
+   >
+   > **The observation stands on its own and is enough.** Whoever picks this up has the amplitude readings, the watchdog sequence and the disconnect code, and can decide what it belongs to on evidence.
 6. **This document gained its central evidence after its first approval.** **§3 of Stage 3's Phase 8** declares that, and this return has now put the call result back in front of the reviewer regardless.
 
 ---
@@ -214,6 +214,6 @@ Immediately after the timezone confirmation, Deepgram captured a stray **"Yes."*
 
 **⭐ ANSWERED at Phase 8 — Wael, 2026-08-30: "accepted."** The reviewer recommended acceptance and the decision was his.
 
-**Accepting them does not retire them.** The calendar-routing defect stays untracked under his separate Rule 1b ruling. **The silent-audio failure is [[B10m]]**, already tracked on the general list — see §6.5, which corrects an earlier claim here that it was untracked, and a second one that put it on the priority list. **§4 and §6 hold the evidence so a second sighting starts from it.**
+**Accepting them does not retire them.** The calendar-routing defect stays untracked under his separate Rule 1b ruling. **The silent-audio failure stands as an unattributed observation** — see §6.5, which reverts an identification made here without his approval. **§4 and §6 hold the evidence so a second sighting starts from it.**
 
 Per Governance §3, Phase 7 → 8 requires Wael's own separate word.
