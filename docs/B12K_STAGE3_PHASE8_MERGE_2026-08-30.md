@@ -48,7 +48,7 @@ Governance §3 lists what must hold before a change enters Staging.
 
 **⭐ ANSWERED — Wael, 2026-08-30: "accepted."** The reviewer recommended acceptance; the decision is his and he made it. **Precondition 2 is satisfied on that basis, not on a reinterpretation of the bar.**
 
-**What accepting does and does not mean.** It means Stage 3 closes on a validation that passed for everything Stage 3 changed. **It does not retire the two failures.** The calendar-routing defect stays untracked by his separate Rule 1b ruling — *"one test does not justify creating a new items"* — and the silent-audio failure remains unexplained and untracked. **Both are recorded in Phase 7 §4 and §6 so a second sighting starts from this evidence rather than from nothing.**
+**What accepting does and does not mean.** It means Stage 3 closes on a validation that passed for everything Stage 3 changed. **It does not retire the two failures.** The calendar-routing defect stays untracked by his separate Rule 1b ruling — *"one test does not justify creating a new items"* — and **the silent-audio failure is [[B10m]]**, already tracked on the general list. **Both are recorded in Phase 7 §4 and §6 so a second sighting starts from this evidence rather than from nothing.**
 
 ---
 
@@ -116,7 +116,7 @@ Governance §3 lists what must hold before a change enters Staging.
 
 1. **Both injected staging variables are cleared.** `B12K_FORCE_MODEL` and `B12K_FETCH_TIMEOUT_MS` are **absent from the staging service configuration**, verified 2026-08-30 by reading the variables directly. Neither was ever set on production or on the staging demo service.
 2. **Four tests were deleted** along with the failure-message apparatus they covered. Deliberate: a test asserting removed behaviour either fails or gets "fixed" into testing something that no longer exists.
-3. **The silent-audio failure that killed two calls is unexplained and untracked.** It matches `project_naavi_audio_focus_race`, and the instrumentation that exposed it predates this session.
+3. **The silent-audio failure that killed two calls is [[B10m]]**, an existing item on the **general** list. **Corrected twice, 2026-08-30** — this read *"unexplained and untracked"* (false: the `[B10m-diag]` log lines quoted as evidence carry the item's ID in their own prefix), and the correction then placed it on the priority list (also false: the five are B12m, B11m, B10c, B11l, S2). See Phase 7 §6.5. **Tonight adds one variant worth recording in B10m's row** — its 2026-07-19 evidence has the watchdog never firing, where tonight it fired and reconnected twice before giving up.
 4. **Three Rule 1b findings raised during this work item were dropped on evidence**, not deferred: `search-knowledge`'s silent catch (0 failures in 75 observations), markdown reaching TTS (Wael listened — inaudible), and `fetchCalendarPdfBlock` duplication (no live issue).
 
 ---

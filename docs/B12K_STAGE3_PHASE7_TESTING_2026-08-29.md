@@ -176,7 +176,15 @@ Immediately after the timezone confirmation, Deepgram captured a stray **"Yes."*
 2. **The two other knowledge paths remain unbounded.** `fetchAllKnowledge` and `arch1HandleMemorySearch` reach the same Edge Function and have no bound. Phase 3 authorized three specific sites; this is outside that authorization and is recorded, not fixed.
 3. **The caller's experienced wait is still unmeasured.** Every timing begins after Deepgram decides the caller stopped speaking and ends at audio dispatch. Deferred by Wael to [[B12m]].
 4. **Only one of the five moved phrases was spoken on a real call.** *"Are you there?"* was tested; *"are you still there"*, *"are you listening"*, *"can you hear me"* and *"you there"* are covered by the regression suite against the live regex, not by a phone.
-5. **The silent-audio failure is unexplained.** Two of three calls produced no transcript. It is recorded, not diagnosed, and no item was opened for it.
+5. **The silent-audio failure is [[B10m]]** — an existing item on the **general** list, not the priority list.
+
+   > **⚠ Corrected twice on 2026-08-30, and the second correction is the more instructive one.**
+   >
+   > **First:** this gap read *"unexplained… and no item was opened for it."* **False. B10m is exactly this defect** — *"Deepgram connects and audio flows in continuously for the entire call, but zero transcripts are ever produced."* **The `[B10m-diag]` lines quoted in §3b carry the item's own ID in their log prefix**, and I quoted them verbatim while writing that nothing tracked it.
+   >
+   > **Second:** the fix then said B10m was *"one of the five on the priority list."* **Also false** — `node scripts/priority-cap-check.js` reports the five as **B12m, B11m, B10c, B11l, S2**. **I had corrected an unchecked claim with another unchecked claim**, from a stale sentence in the holding list itself that still reads *"`B10m` took the last slot on Wael's call, 2026-08-23"*. **That sentence is wrong and should be repaired in the list**; it is flagged, not edited here.
+
+   **One difference from B10m's recorded profile is worth logging there:** its 2026-07-19 evidence records the watchdog never firing. **Tonight it fired twice and reconnected twice before giving up** (`no transcript after 6s with 385 frames`, then `700 frames`, then `reconnect limit reached`). That is a variant, not a contradiction, and it belongs in B10m's row rather than here.
 6. **This document gained its central evidence after its first approval.** **§3 of Stage 3's Phase 8** declares that, and this return has now put the call result back in front of the reviewer regardless.
 
 ---
@@ -206,6 +214,6 @@ Immediately after the timezone confirmation, Deepgram captured a stray **"Yes."*
 
 **⭐ ANSWERED at Phase 8 — Wael, 2026-08-30: "accepted."** The reviewer recommended acceptance and the decision was his.
 
-**Accepting them does not retire them.** The calendar-routing defect stays untracked under his separate Rule 1b ruling; the silent-audio failure stays unexplained and untracked. **§4 and §6 hold the evidence so a second sighting starts from it.**
+**Accepting them does not retire them.** The calendar-routing defect stays untracked under his separate Rule 1b ruling. **The silent-audio failure is [[B10m]]**, already tracked on the general list — see §6.5, which corrects an earlier claim here that it was untracked, and a second one that put it on the priority list. **§4 and §6 hold the evidence so a second sighting starts from it.**
 
 Per Governance §3, Phase 7 → 8 requires Wael's own separate word.
