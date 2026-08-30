@@ -62,6 +62,7 @@ import { listConnectionsTests } from './catalogue/list-connections';
 import { voicePinTests } from './catalogue/voice-pin';
 import { b12kFastPathTests } from './catalogue/b12k-fast-path';
 import { b12kBoundedCallsTests } from './catalogue/b12k-bounded-calls';
+import { voiceMediaBufferTests } from './catalogue/voice-media-buffer';
 import { multiPhoneTests } from './catalogue/multi-phone';
 import { listsReconcileTests } from './catalogue/lists-reconcile';
 import { ticketsTests } from './catalogue/tickets';
@@ -227,6 +228,7 @@ const ALL_TESTS: TestCase[] = [
   ...voicePinTests,
   ...b12kFastPathTests,
   ...b12kBoundedCallsTests,
+  ...voiceMediaBufferTests,
   ...multiPhoneTests,
   ...listsReconcileTests,
   ...ticketsTests,
