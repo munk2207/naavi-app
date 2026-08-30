@@ -60,6 +60,8 @@ import { hostedRepliesTests } from './catalogue/hosted-replies';
 import { pendingDwellTests } from './catalogue/pending-dwell';
 import { listConnectionsTests } from './catalogue/list-connections';
 import { voicePinTests } from './catalogue/voice-pin';
+import { b12kFastPathTests } from './catalogue/b12k-fast-path';
+import { b12kBoundedCallsTests } from './catalogue/b12k-bounded-calls';
 import { multiPhoneTests } from './catalogue/multi-phone';
 import { listsReconcileTests } from './catalogue/lists-reconcile';
 import { ticketsTests } from './catalogue/tickets';
@@ -223,6 +225,8 @@ const ALL_TESTS: TestCase[] = [
   ...pendingDwellTests,
   ...listConnectionsTests,
   ...voicePinTests,
+  ...b12kFastPathTests,
+  ...b12kBoundedCallsTests,
   ...multiPhoneTests,
   ...listsReconcileTests,
   ...ticketsTests,
