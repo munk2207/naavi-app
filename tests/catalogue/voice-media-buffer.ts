@@ -128,6 +128,55 @@ export const voiceMediaBufferTests: TestCase[] = [
         /bufferedDroppedCount\+\+;/.test(s),
         'evictions must be counted where they occur (at the shift), not derived by subtracting flush count from a running total',
       );
+    },
+  },
+
+  {
+    id: 'voice.media.deepgram-connect-does-not-wait-on-the-database',
+    platform: 'voice',
+    category: 'voice-media',
+    description: 'Keyterm lookups run in parallel and are bounded, so a slow database cannot delay the Deepgram connection',
+    tags: ['voice', 'audio', 'regression', 'latency'],
+    run: async () => {
+      const s = src();
+
+      // The buffering fix alone was not enough. Production, 2026-08-30, real call:
+      //   [FrameIn] #1000 at +19729ms (DG state: null)
+      //   [Context] Known names (80): …      <- ~20s for one query
+      //   [Context] Voice keyterms (10): …   <- ~10s more
+      //   [Deepgram] WebSocket connected     <- +32 SECONDS
+      //   Flushed 250 … 1352 evicted by the 250-frame cap
+      // A ~5s buffer cannot absorb a 32s stall. The connection itself had to
+      // stop depending on the database.
+
+      expectTruthy(
+        !/const knownNames = userId \? await fetchKnownNames\(userId\) : \[\];\s*\n\s*const customKeyterms = userId \? await fetchVoiceKeyterms\(userId\) : \[\];/.test(s),
+        'the two keyterm lookups must not run sequentially with connectDeepgram waiting on both — that is the 32-second stall',
+      );
+
+      expectTruthy(
+        /Promise\.all\(\[\s*\n\s*userId \? fetchKnownNames\(userId\) : \[\],\s*\n\s*userId \? fetchVoiceKeyterms\(userId\) : \[\],/.test(s),
+        'the two independent lookups must run in parallel',
+      );
+
+      const budget = s.match(/const KEYTERM_BUDGET_MS = Number\(process\.env\.KEYTERM_BUDGET_MS\) \|\| (\d+);/);
+      expectTruthy(budget !== null, 'a keyterm budget constant must exist — an unbounded wait here costs the whole call');
+      expectTruthy(
+        Number(budget![1]) <= 5000,
+        `the budget must be shorter than the media buffer can cover (~5s) — got ${budget![1]}ms`,
+      );
+
+      expectTruthy(
+        /Promise\.race\(\[[\s\S]{0,400}KEYTERM_BUDGET_MS\)\),?\s*\n?\s*\]\)/.test(s),
+        'the keyterm work must be raced against the budget so the socket opens regardless of database health',
+      );
+
+      // Only one socket, ever. The budget path and the catch path can both reach
+      // connectDeepgram, and two sockets means the first one's audio goes nowhere.
+      expectTruthy(
+        (s.match(/if \(!keytermsSettled\)/g) || []).length >= 2,
+        'every connectDeepgram fallback on the start path must be guarded by keytermsSettled, or a late failure opens a duplicate socket',
+      );
 
       // Assert on the ARTEFACT, not on the phrase. An earlier version of this
       // test forbade the string "dropped due to cap" anywhere in the file, and
