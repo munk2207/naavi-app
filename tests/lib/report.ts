@@ -26,6 +26,16 @@ export function renderMarkdown(report: SuiteReport): string {
   const lines: string[] = [];
   lines.push(`# Naavi Auto-Tester — ${report.startedAt}`);
   lines.push('');
+  // B12a (2026-08-31) — the environment goes in the artifact, immediately
+  // under the title, not only in the console banner it was added to in
+  // 2026-07-20. A saved result that cannot say which environment produced it
+  // cannot be read as evidence later, and B11z proved that the hard way.
+  lines.push(
+    report.environment
+      ? `**Environment: ${report.environment}**${report.projectRef ? `  (${report.projectRef})` : ''}`
+      : '**Environment: not recorded** — this report predates B12a; it cannot be attributed.'
+  );
+  lines.push('');
   lines.push('────────────────────────────────────────────────────────');
   lines.push(`Total: **${report.total}**   Passed: **${report.passed}** ✓   Failed: **${report.failed}** ✗   Errored: **${report.errored}** ⨯   Timed out: **${report.timedOut}** ⧗   Skipped: **${report.skipped}** ○`);
   lines.push(`Duration: ${(report.durationMs / 1000).toFixed(1)}s`);

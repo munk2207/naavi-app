@@ -101,6 +101,7 @@ import { session2026_07_13_b9lPhoneShapedToNameTests } from './catalogue/session
 import { session2026_07_13_b9nSelfOverridePriorityTests } from './catalogue/session-2026-07-13-b9n-self-override-priority';
 import { session2026_07_13_b9oScrollToTopCollisionTests } from './catalogue/session-2026-07-13-b9o-scroll-to-top-collision';
 import { session2026_07_13_b9pNotificationPermissionRaceTests } from './catalogue/session-2026-07-13-b9p-notification-permission-race';
+import { session2026_08_31_b12aReportEnvironmentTests } from './catalogue/session-2026-08-31-b12a-report-environment';
 import { session2026_07_13_b9qTtsScrollSyncTests } from './catalogue/session-2026-07-13-b9q-tts-scroll-sync';
 import { session2026_07_14_b9rContactLookupRetryTests } from './catalogue/session-2026-07-14-b9r-contact-lookup-retry';
 import { session2026_07_14_b9cListsFocusRefetchTests } from './catalogue/session-2026-07-14-b9c-lists-focus-refetch';
@@ -267,6 +268,7 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_07_13_b9nSelfOverridePriorityTests,
   ...session2026_07_13_b9oScrollToTopCollisionTests,
   ...session2026_07_13_b9pNotificationPermissionRaceTests,
+  ...session2026_08_31_b12aReportEnvironmentTests,
   ...session2026_07_13_b9qTtsScrollSyncTests,
   ...session2026_07_14_b9rContactLookupRetryTests,
   ...session2026_07_14_b9cListsFocusRefetchTests,
@@ -560,6 +562,11 @@ async function main(): Promise<void> {
   const finishedAt = new Date().toISOString();
   const report: SuiteReport = {
     startedAt, finishedAt,
+    // B12a (2026-08-31) — carry the environment into the saved report, not
+    // just the console banner. A stored result that cannot say what it tested
+    // is not evidence of anything.
+    environment: envLabel as SuiteReport['environment'],
+    projectRef:  projectRef || supabaseUrl,
     durationMs: Date.now() - startMs,
     total:    results.length,
     passed:   results.filter(r => r.status === 'passed').length,

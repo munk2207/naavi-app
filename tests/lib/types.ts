@@ -67,6 +67,27 @@ export interface TestResult {
 export interface SuiteReport {
   startedAt: string;
   finishedAt: string;
+  /**
+   * Which environment this run actually tested — 'STAGING' | 'PRODUCTION' |
+   * 'UNKNOWN' — and the Supabase project ref it resolved to.
+   *
+   * B12a (2026-08-31). The runner has printed this as a console banner since
+   * 2026-07-20, added after a production AAB was built on a green run that had
+   * actually tested production's stale backend. The banner fixed the console
+   * and stopped there, so the same class of mistake survived in the artifact
+   * the console produced: once scrollback is gone, no saved report can be
+   * trusted, because nobody can tell what it was testing.
+   *
+   * Not hypothetical — dating B11z needed to know whether the 2026-08-22 run
+   * had targeted staging or production, and that answer is unrecoverable.
+   *
+   * Optional so older reports still parse; absent means "written before this
+   * field existed", which is itself the honest answer for them.
+   */
+  environment?: 'STAGING' | 'PRODUCTION' | 'UNKNOWN';
+  /** Supabase project ref the run resolved to. Recorded alongside the label
+   *  because the label is a translation and the ref is the fact. */
+  projectRef?: string;
   durationMs: number;
   total: number;
   passed: number;
