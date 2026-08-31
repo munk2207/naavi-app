@@ -57,11 +57,36 @@ const SECTION_TITLE = "FOR WAEL'S EYES";
 // heading is the detailed list and is not subject to these rules.
 const SECTION_END = /^##\s+⭐⭐⭐\s+GOVERNANCE/m;
 
-// A row in the summary: | **B12m** | plain english | Full |
-const SUMMARY_ROW = /^\|\s*\*\*((?:B|F|T|S|I)\d+[a-z]?)\*\*\s*\|([^|]*)\|/;
+// A row in the summary: | **B12m** | Both | plain english | Full |
+const SUMMARY_ROW = /^\|\s*\*\*((?:B|F|T|S|I)\d+[a-z]?)\*\*\s*\|([^|]*)\|([^|]*)\|/;
 
-// A row in the detailed tables below: | B12m | ... |
-const DETAIL_ROW = /^\|\s*((?:B|F|T|S|I)\d+[a-z]?)\s*\|/;
+// A row in the detailed tables below: | B12m | title | surface | ... |
+const DETAIL_ROW = /^\|\s*((?:B|F|T|S|I)\d+[a-z]?)\s*\|([^|]*)\|([^|]*)\|/;
+
+// ── Platform column (Wael, 2026-08-31) ────────────────────────────────────
+// Where you would meet the problem. Derived from the item's own Surface value
+// below rather than typed independently, because two hand-maintained copies of
+// one fact is the failure this whole file exists to prevent — see the four
+// rows that were each wrong on the night it was written.
+//
+// Backend and Internal are deliberately NOT folded into 'Both', even though
+// only three names were asked for. Calling a backend item 'Both' claims where
+// fifteen items surface, which no row supports; Internal items (test tooling,
+// unpromoted infrastructure) appear on neither the phone nor the app.
+const PLATFORMS = new Set(['Voice', 'Mobile', 'Both', 'Backend', 'Internal']);
+
+function platformForSurface(raw) {
+  const s = String(raw || '').toLowerCase().trim();
+  if (s.startsWith('infra') || s.startsWith('tooling')) return 'Internal';
+  if (s.startsWith('backend')) return 'Backend';
+  if (s === 'both') return 'Both';
+  // "mobile (voice unverified)" is Mobile until voice is actually confirmed —
+  // an unverified surface is not a second surface.
+  if (s.includes('voice') && s.includes('mobile')) return s.includes('unverified') ? 'Mobile' : 'Both';
+  if (s.startsWith('voice')) return 'Voice';
+  if (s.startsWith('mobile')) return 'Mobile';
+  return 'Backend';
+}
 
 // Sections below the summary that hold rows which are NOT open work.
 const NON_OPEN_SECTION = /archive|closed|superseded/i;
@@ -121,7 +146,7 @@ const headLines = head.split(/\r?\n/);
 const summary = [];
 headLines.forEach((line, i) => {
   const m = line.match(SUMMARY_ROW);
-  if (m) summary.push({ id: m[1], desc: m[2].trim(), line: i + 1 });
+  if (m) summary.push({ id: m[1], platform: m[2].trim(), desc: m[3].trim(), line: i + 1 });
 });
 
 // ── Collect open rows ─────────────────────────────────────────────────────
@@ -131,7 +156,7 @@ bodyLines.forEach((line, i) => {
   if (/^#{2,3}\s/.test(line)) { section = line.replace(/^#+\s*/, '').trim(); return; }
   if (NON_OPEN_SECTION.test(section)) return;
   const m = line.match(DETAIL_ROW);
-  if (m) open.push({ id: m[1], section, line: endMatch.index !== undefined ? i + headLines.length : i });
+  if (m) open.push({ id: m[1], surface: m[3].trim(), section, line: i + headLines.length });
 });
 
 const summaryIds = new Set(summary.map(s => s.id));
@@ -155,7 +180,23 @@ for (const s of summary) {
   if (broken.length) malformed.push({ ...s, broken });
 }
 
-const problems = missing.length + stale.length + duplicates.length + malformed.length;
+// ── Platform must be a known value AND agree with the item's own Surface ──
+// Checking agreement, not merely presence, is the point. A Platform column
+// typed by hand would be a second copy of a fact that already exists below,
+// and this file's own history says the second copy is the one that goes stale.
+const surfaceById = new Map(open.map(o => [o.id, o.surface]));
+const platformWrong = [];
+for (const s of summary) {
+  if (!surfaceById.has(s.id)) continue;           // already reported as stale
+  const expected = platformForSurface(surfaceById.get(s.id));
+  if (!PLATFORMS.has(s.platform)) {
+    platformWrong.push({ ...s, expected, why: `"${s.platform}" is not one of ${[...PLATFORMS].join(' / ')}` });
+  } else if (s.platform !== expected) {
+    platformWrong.push({ ...s, expected, why: `says ${s.platform}, but its row's Surface is "${surfaceById.get(s.id)}" → ${expected}` });
+  }
+}
+
+const problems = missing.length + stale.length + duplicates.length + malformed.length + platformWrong.length;
 
 console.log(`  ${open.length} open item(s), ${summary.length} summary line(s)`);
 console.log('');
@@ -210,6 +251,18 @@ if (malformed.length) {
   console.log('');
   console.log('     The evidence belongs in the item\'s own row, where there is no limit.');
   console.log('     Up here: plain English, no code, no paths, no line numbers.');
+  console.log('');
+}
+
+if (platformWrong.length) {
+  console.log(`  ❌ ${platformWrong.length} summary line(s) with a Platform that does not match the item's own row:`);
+  console.log('');
+  for (const p of platformWrong) {
+    console.log(`     ${p.id.padEnd(6)} line ${String(p.line).padEnd(4)} — ${p.why}`);
+  }
+  console.log('');
+  console.log('     Platform is DERIVED from the row\'s Surface column, never typed twice.');
+  console.log('     If the surface genuinely changed, change it in the row and here together.');
   console.log('');
 }
 
