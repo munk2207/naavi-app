@@ -6,7 +6,14 @@
 
 **The rule for this section: ID, plain English, three lines maximum, no file paths, no code, no evidence.** The evidence belongs in the item's own row and must never be copied up here. **If you are editing this file and find yourself adding a fourth line, or a backtick, you are rebuilding the thing this section exists to escape.** It has been asked for before and lost to creeping detail each time.
 
-**Platform column (Wael, 2026-08-31):** where you would meet the problem. **Voice** (22) · **Mobile** (12) · **Both** (6) · **Backend** (15) · **Internal** (4). **It is derived mechanically from each item's own Surface column below, and the gate checks the two still agree**, so it cannot drift from the row. **⭐ Backend and Internal are deliberately NOT folded into "Both", though only three of the five names were asked for.** Calling a backend item "Both" would claim where fifteen items surface, which no row supports; *Internal* items — test tooling, unpromoted infrastructure — appear on neither the phone nor the app at all. An honest fifth name beats a tidy wrong one.
+**Platform column (Wael, 2026-08-31) — where you would meet the problem.**
+
+- **Voice** (22) — you would run into it on a phone call with Naavi.
+- **Mobile** (12) — you would run into it in the app on your phone.
+- **Both** (6) — the same problem shows up on a call *and* in the app.
+- **Backend** (15) — it lives in the part of Naavi nobody sees directly, the machinery behind both. You still feel the result — a message that arrives twice, an alert that skips a channel — but the row does not say which surface it shows up on, so this column does not guess.
+- **Internal** (4) — it never reaches you at all. Our own tools and plumbing: test runs, infrastructure built and not yet switched on. Worth fixing because it slows us down or hides other problems, not because you would ever notice it.
+ **It is derived mechanically from each item's own Surface column below, and the gate checks the two still agree**, so it cannot drift from the row. **⭐ Backend and Internal are deliberately NOT folded into "Both", though only three of the five names were asked for.** Calling a backend item "Both" would claim where fifteen items surface, which no row supports; *Internal* items — test tooling, unpromoted infrastructure — appear on neither the phone nor the app at all. An honest fifth name beats a tidy wrong one.
 
 **Fix column:** **Fast** = touches none of the twelve Protected Core areas, so it can be done without the full Phase 0-8 process. **Full** = touches at least one, so it cannot. **Mixed** = the row holds several sub-items of different weight. Marked *(row's own)* where the item's own text already made the call rather than this summary proposing one. **Everything not marked *(row's own)* is a proposal for Wael to overrule.**
 
