@@ -770,7 +770,8 @@ All trigger/action rules live in `action_rules` table. The legacy `email_watch_r
 - Reads: `evaluate-rules` Edge Function (cron every minute) iterates `action_rules` and fires matching actions via `send-sms` / `send-email`.
 - Trigger types shipped: `email`, `time`, `calendar`, `weather`, `contact_silence`, `location` (see `evaluate-rules` source + `project_naavi_alert_scope.md` memory for each trigger_config shape).
 - Action types: `sms`, `whatsapp`, `email`.
-- Trigger types deferred: `list_change` (7 design questions open — see `project_naavi_list_change_trigger_deferred.md`), `health` (Epic integration required), `price` (scraping complexity).
+- Trigger types deferred: `list_change` (7 design questions open — see `project_naavi_list_change_trigger_deferred.md`), `price` (scraping complexity).
+- **⛔ There is no `health` trigger and no health data source. Do not propose one, and do not treat its absence as a gap to fill.** A `health` trigger was listed here as deferred *"(Epic integration required)"* until 2026-08-31, when Wael removed it: *"EPIC was an idea in May this year, and I stated many times that it is dead… however it comes again."* **He is right that it kept coming back, and this line was one of the reasons why** — it sat in the file every session reads first, describing a dead idea as pending work, so each new session met it as something unfinished rather than something decided. Epic was never built: no user interface, three Edge Function folders containing no code, and the only data anywhere is 12 rows of vendor sandbox test data on production under user id `00000000-0000-0000-0000-000000000001`, which matches no account. **If a health feature is ever wanted, it starts as a fresh decision — not as the resumption of this one.**
 
 Do NOT reintroduce separate tables like `email_watch_rules`. Extend `action_rules` trigger types instead.
 
