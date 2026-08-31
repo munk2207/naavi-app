@@ -15,9 +15,11 @@
 - **Internal** (4) — it never reaches you at all. Our own tools and plumbing: test runs, infrastructure built and not yet switched on. Worth fixing because it slows us down or hides other problems, not because you would ever notice it.
  **It is derived mechanically from each item's own Surface column below, and the gate checks the two still agree**, so it cannot drift from the row. **⭐ Backend and Internal are deliberately NOT folded into "Both", though only three of the five names were asked for.** Calling a backend item "Both" would claim where fifteen items surface, which no row supports; *Internal* items — test tooling, unpromoted infrastructure — appear on neither the phone nor the app at all. An honest fifth name beats a tidy wrong one.
 
-**Fix column:** **Fast** = touches none of the twelve Protected Core areas, so it can be done without the full Phase 0-8 process. **Full** = touches at least one, so it cannot. **Mixed** = the row holds several sub-items of different weight. Marked *(row's own)* where the item's own text already made the call rather than this summary proposing one. **Everything not marked *(row's own)* is a proposal for Wael to overrule.**
+**Fix column:** **Fast** = touches none of the twelve Protected Core areas *checked against Architecture Reference §4's file list, not against the row's own opinion*, so it can be done without the full Phase 0-8 process. **Full** = touches at least one, so it cannot. **Mixed** = the row holds several sub-items of different weight. **TBD** = the root cause or the file boundary is not settled, so the process cannot be chosen yet — investigate before classifying, never default to Fast. Marked *(row's own)* where the item's own text already made the call rather than this summary proposing one. **Everything not marked *(row's own)* is a proposal for Wael to overrule.**
 
-**59 open items: 5 priority · 38 bugs · 7 features · 4 tooling · 5 deferred ideas.** **12 of the 59 look Fast** — B9b, B9d, B9m, B9s, B10i, B10v, B11n, B11v, B12a, F22, I4a, I4b. *(**F20 was on this list and was moved to Full by Wael, 2026-08-31**, overriding the partial waiver recorded in its own row. See that row for what the waiver actually said and why it did not hold up.)* **That is the shortest available path to a shorter list**, and five of the thirteen were already marked as such in their own rows and never grouped where anyone would see them.
+**59 open items: 5 priority · 38 bugs · 7 features · 4 tooling · 5 deferred ideas.** **⭐⭐ 4 of the 59 are Fast — B9d, B11n, B12a, F22 — not the 13 first claimed here. Corrected 2026-08-31 after a proper audit against Architecture Reference §4.** **TBD** (4) means the root cause or the file boundary is not settled, so the process cannot be chosen yet: B9b, B9m, B10v, I4a.
+
+**⭐ Why the first count was wrong, because the mistake is more useful than the number.** It was assembled from what each row *said about itself* plus a reading of the surfaces, and it was never checked against §4's actual file list. Five items fell out on contact with it: **B9s** and **I4b** touch Action Rules files named there outright, **B10i** is Permissions, **B11v** is the voice server whose *entire file* is Protected Core, and **F20** was carrying a partial waiver that had been restated as a total one. Three of those were found one at a time, while proposing each as the next safe thing to start. **A classification nobody checked against the map is a guess wearing a label**, and this one sent four Protected Core items to the "no review needed" pile. **Nothing mechanical catches this** — the gate checks Platform against the rows, and there is no check tying Fix to §4. **That is the shortest available path to a shorter list**, and five of the thirteen were already marked as such in their own rows and never grouped where anyone would see them.
 
 ### Priority list — 5 of 5
 
@@ -31,46 +33,46 @@
 
 ### Bugs
 
-| ID | Platform | What it is | Fix |
-|---|---|---|---|
-| **B4z** | Both | Before changing anything she should say what she is about to do and wait. For some actions she does; for three she never asks at all. | Full *(row's own)* |
-| **B4b** | Voice | Talk over her to interrupt and the first word or two of what you say is lost. Worst when the lost word is a name — the message can then go to the wrong person. | Full |
-| **B9a** | Backend | When what you asked could mean two things, she picks one instead of asking you which. | Full |
-| **B9b** | Mobile | You ask for someone's phone number and she gives you their email. Right person, wrong question answered. | Fast |
-| **B9d** | Mobile | The app's layout goes wrong now and then — buttons in the wrong place, menu unresponsive — and only force-closing fixes it. | Fast |
-| **B9m** | Backend | Searching a person by name can return the wrong contact, because she also searches their email and phone text. | Fast |
-| **B9s** | Backend | Two leftover fields in saved alert settings. Nothing misbehaves; they sit there doing nothing. | Fast *(row's own)* |
-| **B10a** | Voice | On a call, an alert meant to text a named person never looks up their number and quietly becomes a reminder to you instead. | Full |
-| **B10d** | Both | Settings let you switch off a channel. Arrival alerts ignore that completely and use every channel anyway. | Full |
-| **B10e** | Backend | On the test system one alert sent the same text twice to each person, and skipped one of your own channels. | Full |
-| **B10i** | Mobile | The button offered to fix notification permissions can be silently dead, because Android limits how often an app may ask. | Fast *(row's own)* |
-| **B10m** | Voice | You call, she answers, you talk normally for the whole call — and she hears nothing at all. No warning. | Full |
-| **B10n** | Voice | Asking about your calendar on a call can make her read raw computer code aloud instead of the sentence. | Full |
-| **B10s** | Backend | An arrival alert promises to WhatsApp somebody else, confidently, and that message can never actually be delivered. | Full |
-| **B10t** | Voice | The phone side keeps its own second copy of the logic that decides what you asked for. Fixing one copy does not reach the other. | Full |
-| **B10u** | Backend | Deleting a calendar event takes over forty seconds and looks like it has hung. Creating one is fast. | Full |
-| **B10v** | Mobile | Ask about a person and she never mentions they are in your close circle, though she knows. | Fast |
-| **B10w** | Voice | Asking about a person on a call gives only name and number, leaving out birthdays she already has. The app side was fixed; the phone side was not. | Full |
-| **B11b** | Voice | The phone side records a call, works out what to do, and creates calendar events on its own — without the safeguards the app side has. | Full |
-| **B11e** | Voice | The first word of her spoken reply comes out garbled before the sound settles. | Full *(row's own)* |
-| **B11g** | Voice | While she reads the PIN prompt you cannot speak or press keys. A deliberate trade-off, accepted to avoid a worse problem on landlines. | Full |
-| **B11i** | Mobile | Allow notifications and the app does not start listening until you next open it — so the first day is silent. Separately, dead phone addresses pile up and are never cleared. | Mixed |
-| **B11n** | Mobile | A one-shot alert that has fired disappears from the app completely, instead of showing as triggered. | Fast |
-| **B11p** | Backend | The server saves an alert, records that the save failed, and tells you it worked anyway. | Full |
-| **B11q** | Mobile | The app saves a concern or a profile preference without ever checking whether the save succeeded. | Full |
-| **B11t** | Voice | She tells you to say "change", and there is no handling for that word. Saying exactly what she asked for loops the call forever. | Full |
-| **B11u** | Voice | Saying "stop" on a call does not stop her. The word is mis-heard, unsupported, and arrives about six seconds late. | Full *(row's own)* |
-| **B11v** | Voice | She is meant to feed the transcriber names you have used so it stops Anglicising them. The way they are sent is wrong, so it may never have worked. | Fast *(row's own)* |
-| **B11w** | Voice | Ask about someone not in your contacts, spell the name, confirm it — and she says she cannot find it and asks you to spell it again. Forever. | Full *(row's own)* |
-| **B11x** | Backend | She re-read and re-classified the same emails every hour, all week. Nothing looked wrong; it was purely a bill paid again every hour. | **Done** *(all eight phases complete — see note below)* |
-| **B11y** | Backend | The phone app quietly asks the server to re-read Gmail for one person every sixty seconds, and the server re-reads it for everybody. | Full |
-| **B11z** | Backend | Asked how she differs from ChatGPT, she says the competitor's name twice and adds that she cannot verify it from a live source. | Full |
-| **B12a** | Internal | Test runs never record which system they tested. Once the screen scrolls away, no saved result means anything. | Fast *(row's own)* |
-| **B12b** | Voice | You ask her to forget something. She confirms she has. If nothing matched, she confirms anyway and the old fact keeps steering her answers. | Full |
-| **B12h** | Backend | One alert goes off once but arrives two or three times as email. Texts and calls arrive once, and nothing explains the difference. | Full |
-| **B12i** | Both | WhatsApp is switched on in Settings and most alerts do not send it. What is stored for the account does not match the screen. | Full |
-| **B12j** | Voice | She holds a paused answer and never says so. Ask something new and you get silence, with no way to know why. | Full |
-| **B12l** | Voice | Ask for an alert you already have and she says "please try again". Trying again can never work — it will be refused every time. | Full |
+| ID       | Platform | What it is                                                                                                                                                                    | Fix                                                     |
+| -------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| **B4z**  | Both     | Before changing anything she should say what she is about to do and wait. For some actions she does; for three she never asks at all.                                         | Full *(row's own)*                                      |
+| **B4b**  | Voice    | Talk over her to interrupt and the first word or two of what you say is lost. Worst when the lost word is a name — the message can then go to the wrong person.               | Full                                                    |
+| **B9a**  | Backend  | When what you asked could mean two things, she picks one instead of asking you which.                                                                                         | Full                                                    |
+| **B9b**  | Mobile   | You ask for someone's phone number and she gives you their email. Right person, wrong question answered.                                                                      | TBD |
+| **B9d**  | Mobile   | The app's layout goes wrong now and then — buttons in the wrong place, menu unresponsive — and only force-closing fixes it.                                                   | Fast                                                    |
+| **B9m**  | Backend  | Searching a person by name can return the wrong contact, because she also searches their email and phone text.                                                                | TBD |
+| **B9s**  | Backend  | Two leftover fields in saved alert settings. Nothing misbehaves; they sit there doing nothing.                                                                                | Full |
+| **B10a** | Voice    | On a call, an alert meant to text a named person never looks up their number and quietly becomes a reminder to you instead.                                                   | Full                                                    |
+| **B10d** | Both     | Settings let you switch off a channel. Arrival alerts ignore that completely and use every channel anyway.                                                                    | Full                                                    |
+| **B10e** | Backend  | On the test system one alert sent the same text twice to each person, and skipped one of your own channels.                                                                   | Full                                                    |
+| **B10i** | Mobile   | The button offered to fix notification permissions can be silently dead, because Android limits how often an app may ask.                                                     | Full |
+| **B10m** | Voice    | You call, she answers, you talk normally for the whole call — and she hears nothing at all. No warning.                                                                       | Full                                                    |
+| **B10n** | Voice    | Asking about your calendar on a call can make her read raw computer code aloud instead of the sentence.                                                                       | Full                                                    |
+| **B10s** | Backend  | An arrival alert promises to WhatsApp somebody else, confidently, and that message can never actually be delivered.                                                           | Full                                                    |
+| **B10t** | Voice    | The phone side keeps its own second copy of the logic that decides what you asked for. Fixing one copy does not reach the other.                                              | Full                                                    |
+| **B10u** | Backend  | Deleting a calendar event takes over forty seconds and looks like it has hung. Creating one is fast.                                                                          | Full                                                    |
+| **B10v** | Mobile   | Ask about a person and she never mentions they are in your close circle, though she knows.                                                                                    | TBD |
+| **B10w** | Voice    | Asking about a person on a call gives only name and number, leaving out birthdays she already has. The app side was fixed; the phone side was not.                            | Full                                                    |
+| **B11b** | Voice    | The phone side records a call, works out what to do, and creates calendar events on its own — without the safeguards the app side has.                                        | Full                                                    |
+| **B11e** | Voice    | The first word of her spoken reply comes out garbled before the sound settles.                                                                                                | Full *(row's own)*                                      |
+| **B11g** | Voice    | While she reads the PIN prompt you cannot speak or press keys. A deliberate trade-off, accepted to avoid a worse problem on landlines.                                        | Full                                                    |
+| **B11i** | Mobile   | Allow notifications and the app does not start listening until you next open it — so the first day is silent. Separately, dead phone addresses pile up and are never cleared. | Mixed                                                   |
+| **B11n** | Mobile   | A one-shot alert that has fired disappears from the app completely, instead of showing as triggered.                                                                          | Fast                                                    |
+| **B11p** | Backend  | The server saves an alert, records that the save failed, and tells you it worked anyway.                                                                                      | Full                                                    |
+| **B11q** | Mobile   | The app saves a concern or a profile preference without ever checking whether the save succeeded.                                                                             | Full                                                    |
+| **B11t** | Voice    | She tells you to say "change", and there is no handling for that word. Saying exactly what she asked for loops the call forever.                                              | Full                                                    |
+| **B11u** | Voice    | Saying "stop" on a call does not stop her. The word is mis-heard, unsupported, and arrives about six seconds late.                                                            | Full *(row's own)*                                      |
+| **B11v** | Voice    | She is meant to feed the transcriber names you have used so it stops Anglicising them. The way they are sent is wrong, so it may never have worked.                           | Full |
+| **B11w** | Voice    | Ask about someone not in your contacts, spell the name, confirm it — and she says she cannot find it and asks you to spell it again. Forever.                                 | Full *(row's own)*                                      |
+| **B11x** | Backend  | She re-read and re-classified the same emails every hour, all week. Nothing looked wrong; it was purely a bill paid again every hour.                                         | **Done** *(all eight phases complete — see note below)* |
+| **B11y** | Backend  | The phone app quietly asks the server to re-read Gmail for one person every sixty seconds, and the server re-reads it for everybody.                                          | Full                                                    |
+| **B11z** | Backend  | Asked how she differs from ChatGPT, she says the competitor's name twice and adds that she cannot verify it from a live source.                                               | Full                                                    |
+| **B12a** | Internal | Test runs never record which system they tested. Once the screen scrolls away, no saved result means anything.                                                                | Fast *(row's own)*                                      |
+| **B12b** | Voice    | You ask her to forget something. She confirms she has. If nothing matched, she confirms anyway and the old fact keeps steering her answers.                                   | Full                                                    |
+| **B12h** | Backend  | One alert goes off once but arrives two or three times as email. Texts and calls arrive once, and nothing explains the difference.                                            | Full                                                    |
+| **B12i** | Both     | WhatsApp is switched on in Settings and most alerts do not send it. What is stored for the account does not match the screen.                                                 | Full                                                    |
+| **B12j** | Voice    | She holds a paused answer and never says so. Ask something new and you get silence, with no way to know why.                                                                  | Full                                                    |
+| **B12l** | Voice    | Ask for an alert you already have and she says "please try again". Trying again can never work — it will be refused every time.                                               | Full                                                    |
 
 ### Features
 
@@ -100,8 +102,8 @@
 | **I2a** | Backend | Alert when a list changes — "tell me when the grocery list hits ten items". Seven design questions open. | Full |
 | **I2b** | Backend | Alert when a price drops — flight, retail, gas. No integration path chosen. | Full |
 | **I3a** | Backend | Alert on a health reading — "tell me if my pulse goes over 120". Blocked on hospital-system access and a privacy review. | Blocked |
-| **I4a** | Mobile | Ask people to rate Naavi in the Play Store. Suggested, never decided. | Fast |
-| **I4b** | Both | Alert messages arrive as bare text with no greeting and no sender, so a third party gets "Lock the door." and nothing else. | Fast |
+| **I4a** | Mobile | Ask people to rate Naavi in the Play Store. Suggested, never decided. | TBD |
+| **I4b** | Both | Alert messages arrive as bare text with no greeting and no sender, so a third party gets "Lock the door." and nothing else. | Full |
 
 **⚠️ One thing this summary surfaced that nobody asked for: B11x's own row says ALL EIGHT PHASES COMPLETE, and it is still sitting in the open Bugs table.** Under governance rule 4 a finished item is closed by being **moved**, not by its text saying so. **This is not being acted on** — rule 5 reserves that decision for Wael. It is raised here because writing one line per item is what made it visible, which is the whole argument for the section.
 

@@ -352,18 +352,39 @@ async function fetchTodayTimeAlerts(userId: string): Promise<BriefItem[]> {
     if (!sb) return [];
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const todayEnd   = new Date(); todayEnd.setHours(23, 59, 59, 999);
+    // B11n (2026-08-31) — a one-shot rule sets enabled=false the instant it
+    // fires, so filtering on enabled=true here made today's alert DISAPPEAR
+    // from the brief the moment it went off. Wael, 2026-08-23: "Even when the
+    // alert expires, it kept as a triggered alert not completely empty."
+    //
+    // An empty brief after an alert fires is indistinguishable from the alert
+    // never having existed — the user cannot tell "it ran" from "it was never
+    // created". The Alerts screen already gets this right (it keeps fired
+    // rules and shows an "Expired" pill); the brief was the only place that
+    // dropped them.
+    //
+    // enabled is no longer filtered in the query because the two cases we want
+    // cannot be expressed as one equality. It is filtered in JS below, so a
+    // rule the user DELIBERATELY switched off still stays hidden — only a
+    // one-shot rule that fired is brought back.
     const query = sb
       .from('action_rules')
-      .select('id, label, trigger_config, action_config')
+      .select('id, label, trigger_config, action_config, enabled, one_shot, last_fired_at')
       .eq('user_id', userId)
-      .eq('trigger_type', 'time')
-      .eq('enabled', true);
+      .eq('trigger_type', 'time');
     const timeout = new Promise<{ data: null; error: Error }>(resolve =>
       setTimeout(() => resolve({ data: null, error: new Error('timeout') }), 8_000)
     );
     const { data, error } = await Promise.race([query, timeout]);
     if (error || !data) return [];
     return (data as any[]).flatMap(rule => {
+      // B11n — which rules belong in today's brief:
+      //   enabled           → upcoming, as before
+      //   one-shot + fired  → keep, labelled as already done
+      //   anything else off → the user switched it off deliberately; stay gone
+      const hasFired = rule.enabled === false && rule.one_shot === true && !!rule.last_fired_at;
+      if (rule.enabled !== true && !hasFired) return [];
+
       const dt: string | undefined = rule.trigger_config?.datetime ?? rule.trigger_config?.time;
       if (!dt) return [];
       const fireAt = new Date(dt);
@@ -377,7 +398,12 @@ async function fetchTodayTimeAlerts(userId: string): Promise<BriefItem[]> {
         id: `time-alert-${rule.id}`,
         category: 'task' as const,
         title: body,
-        detail: `Alert at ${timeStr}`,
+        // B11n — a fired alert says so, rather than reading as one still to
+        // come. Carried in `detail` deliberately: BriefItem is a shared DTO
+        // with several consumers, and adding a field to it would need a full
+        // regression pass first (feedback_shared_dto_extension_regression_first).
+        // The wording change needs none and answers the actual complaint.
+        detail: hasFired ? `Alerted at ${timeStr}` : `Alert at ${timeStr}`,
         urgent: false,
         startISO: fireAt.toISOString(),
       }];

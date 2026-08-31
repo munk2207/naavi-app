@@ -102,6 +102,7 @@ import { session2026_07_13_b9nSelfOverridePriorityTests } from './catalogue/sess
 import { session2026_07_13_b9oScrollToTopCollisionTests } from './catalogue/session-2026-07-13-b9o-scroll-to-top-collision';
 import { session2026_07_13_b9pNotificationPermissionRaceTests } from './catalogue/session-2026-07-13-b9p-notification-permission-race';
 import { session2026_08_31_b12aReportEnvironmentTests } from './catalogue/session-2026-08-31-b12a-report-environment';
+import { session2026_08_31_b11nFiredAlertInBriefTests } from './catalogue/session-2026-08-31-b11n-fired-alert-in-brief';
 import { session2026_07_13_b9qTtsScrollSyncTests } from './catalogue/session-2026-07-13-b9q-tts-scroll-sync';
 import { session2026_07_14_b9rContactLookupRetryTests } from './catalogue/session-2026-07-14-b9r-contact-lookup-retry';
 import { session2026_07_14_b9cListsFocusRefetchTests } from './catalogue/session-2026-07-14-b9c-lists-focus-refetch';
@@ -269,6 +270,7 @@ const ALL_TESTS: TestCase[] = [
   ...session2026_07_13_b9oScrollToTopCollisionTests,
   ...session2026_07_13_b9pNotificationPermissionRaceTests,
   ...session2026_08_31_b12aReportEnvironmentTests,
+  ...session2026_08_31_b11nFiredAlertInBriefTests,
   ...session2026_07_13_b9qTtsScrollSyncTests,
   ...session2026_07_14_b9rContactLookupRetryTests,
   ...session2026_07_14_b9cListsFocusRefetchTests,
