@@ -197,6 +197,14 @@ Split out from `docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md` on 2026-07-28 fo
 
 ---
 
+## Closed Ideas (I)
+
+*Added 2026-08-31. The archive had a section per prefix except this one; an Idea that is decided against needs somewhere to go that is not "Closed without entry", which is for items that never had a row at all.*
+
+| ID | Description | Surface | Closed | Notes |
+|---|---|---|---|---|
+| I3a | `health` alert trigger (Epic / wearable integration) | backend | 2026-08-31 | **⭐⭐ CLOSED 2026-08-31 BY WAEL — EPIC IS DEAD AND THIS ROW WAS ONE OF THE THINGS KEEPING IT ALIVE.** His words: *"EPIC was an idea in May this year, and I stated many times that it is dead, and recorded many things to close it, however it comes again."* **He is right, and this row is part of the mechanism.** It sat in the open Ideas table describing a health trigger as *blocked on prerequisites* rather than as *decided against* — so every session reviewing the list met it as work waiting on an unblock, not as a closed question. **What Epic actually was, recorded so nobody re-derives it as promising:** never built — no user interface, three Edge Function folders containing no code, and the only data anywhere is 12 rows of vendor sandbox test data on production under user id `00000000-0000-0000-0000-000000000001`, which matches no account. **DO NOT REOPEN, and do not propose a health trigger from any other source either** — CLAUDE.md now carries the same prohibition. If a health feature is ever wanted it starts as a fresh decision, not as the resumption of this one. **Original text, kept verbatim:** *Alert when a health metric changes — *"alert me if my pulse is above 120"*, *"text my wife if BP > 180"*. Blocked — Epic FHIR account, healthcare-data agreement, privacy review, and wearable SDK integration are multi-month wall-clock prereqs.* |
+
 ## Closed without entry
 
 Items walked but not added to any table. Reopen if symptom recurs.
