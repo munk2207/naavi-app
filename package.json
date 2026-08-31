@@ -15,6 +15,7 @@
     "drift:check": "node scripts/t4-drift-check.js",
     "test:auto:nodrift": "tsx tests/runner.ts",
     "schema:check": "node scripts/schema-code-check.js",
+    "eyes:check": "node scripts/wael-eyes-check.js",
     "parity:check": "node scripts/edge-function-parity-check.js",
     "parity:verify": "node scripts/edge-function-parity-check.js --verify",
     "deploy:fn": "node scripts/deploy-edge-function.js"

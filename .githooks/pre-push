@@ -91,6 +91,37 @@ if ! node scripts/orphan-item-check.js; then
   exit 1
 fi
 
+echo "[pre-push] checking the FOR WAEL'S EYES summary..."
+
+# Wael, 2026-08-31: "My intention in building the Holding list is to have a
+# simple list that can help me review the different bugs, features, etc, then I
+# have control on what we have. Today it is becoming so complex and long it
+# loses for me the major reason of creating it."
+#
+# He had asked for that summary BEFORE. Every previous attempt died the same
+# way — in his words, "they impeded in the long text." Nobody ever deleted one.
+# They filled with detail, one reasonable-sounding addition at a time, until
+# they could no longer be read at a glance, which was the only thing they were
+# for. That is why this gate checks SHAPE and not only presence: coverage decay
+# is slow and visible, format decay is what actually killed the earlier tries.
+#
+# It cannot check that a line is TRUE. On the night it was written four rows in
+# that same file were each wrong about something, and every one of them was
+# perfectly well-formed. A green run here means the summary is readable, not
+# that it is right. Nothing mechanical closes that second gap.
+#
+# No baseline, deliberately. The fix is always one short sentence.
+if ! npm run --silent eyes:check; then
+  echo ""
+  echo "[pre-push] PUSH REFUSED — the summary has drifted from the list."
+  echo ""
+  echo "  Every open item gets one line at the top: ID, plain English, three"
+  echo "  lines maximum, no code and no file paths. The evidence stays in the"
+  echo "  item's own row, where there is no limit."
+  echo ""
+  exit 1
+fi
+
 echo "[pre-push] checking staging/production parity..."
 
 if ! npm run --silent drift:check; then
