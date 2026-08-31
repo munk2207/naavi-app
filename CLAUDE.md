@@ -594,6 +594,20 @@ Memory folder: `C:\Users\waela\.claude\projects\C--Users-waela-OneDrive-Desktop-
 **Single source of truth: `docs/HOLDING_LIST_CLASSIFICATION_2026-06-11.md`**
 All open, closed, and deferred items live there. Do not maintain a duplicate list here — edit the doc directly.
 
+#### ⭐⭐⭐ FOR WAEL'S EYES — the summary at the top of that file is Wael's view of the whole list (Wael 2026-08-31)
+
+**The first section of the holding list is `FOR WAEL'S EYES`: every open item, one line each, plain English.** It is not decoration and it is not optional. It is the only view of that document Wael actually reads, and it exists because the list had grown to 59 items of a page each — in his words: *"My intention in building the Holding list is to have a simple list that can help me review the different bugs, features, etc, then I have control on what we have. Today it is becoming so complex and long it loses for me the major reason of creating it."*
+
+**If you add, close, or move an item, update its summary line in the same edit.** Adding a row without a line is not a smaller version of the job; it is the job left undone.
+
+**The format rule, and it is the whole point:** ID · plain English · **three lines maximum** · no code, no file paths, no line numbers, no evidence. **The evidence belongs in the item's own row, where there is no limit.** A `Fix` column marks **Fast** (touches none of the twelve Protected Core areas, so it can skip the full Phase 0-8 process), **Full**, or **Mixed**.
+
+**⭐ This has been asked for before and lost three times, always the same way** — *"they impeded in the long text."* Nobody ever deleted one. They filled with detail, one reasonable-sounding addition at a time, until they could no longer be read at a glance, which was the only thing they were for. **If you find yourself adding a fourth line or a backtick, you are rebuilding the thing the section exists to escape.**
+
+**Enforced on every push — `scripts/wael-eyes-check.js`, gate 4 of 7 in `.githooks/pre-push`** (also `npm run eyes:check`). It refuses a push when an open item has no line, a line points at an item no longer open, one item has two lines, a line carries a backtick / path / line reference / over 240 characters, or the section is renamed or removed. **No baseline, deliberately** — the fix is always one short sentence, and parking it would defeat the section.
+
+**⚠️ What the gate CANNOT do, so a green run is never mistaken for the truth: it checks that a line EXISTS and is still SHORT AND PLAIN. It cannot check that it is still TRUE.** On the night it was built, four rows in that same file were each wrong about something — a shipped item recorded as pending, a defect recorded as milder than it had become, counts taken from the wrong environment, citations pointing at lines that no longer existed. **Every one was perfectly well-formed and the gate would have passed all four.** Re-read a row before acting on it; that half is still yours.
+
 ### THE PROJECT — TWO PARTS
 
 **Part 1: Mobile App (Android)**
