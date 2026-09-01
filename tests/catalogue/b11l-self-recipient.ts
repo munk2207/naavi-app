@@ -232,6 +232,28 @@ export const b11lSelfRecipientTests: TestCase[] = [
       );
     },
   },
+  {
+    id: 'b11l.card-does-not-ask-for-a-resolved-address',
+    category: 'rules',
+    description: 'BUILD 330 REGRESSION. The card showed "To: you (wael.aggan@gmail.com)" and "I don\'t have an email for me — type it here" at the same time, contradicting itself',
+    async run() {
+      const card = readFileSync(APP_INDEX_PATH, 'utf8');
+      // Read the whole statement, not one line — the condition is wrapped.
+      const start = card.indexOf('const showManualInput =');
+      const line = start > -1 ? card.slice(start, card.indexOf(';', start) + 1) : '';
+      expectTruthy(line.length > 0, 'the DraftCard must decide when to offer manual email entry');
+      expectTruthy(
+        /alreadyResolved|to_email/.test(String(line)),
+        'manual entry must be suppressed when Shared Core already resolved an address — otherwise the card asks for what it is displaying',
+      );
+      // The escape hatch must survive: "none of these" still lets the user type
+      // an address even when candidates were found.
+      expectTruthy(
+        String(line).includes('overrideManualEntry'),
+        'the "none of these" override must remain — suppressing manual entry entirely would trap the user on a wrong match',
+      );
+    },
+  },
 ];
 
 /**

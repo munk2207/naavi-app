@@ -673,7 +673,22 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
   const toRaw = String(action.to ?? '');
   const toIsEmail = toRaw.includes('@');
   const showPicker = !isMessaging && !toIsEmail && recipientCandidates.length > 1 && !sent && !overrideManualEntry;
-  const showManualInput = !isMessaging && !toIsEmail && (recipientCandidates.length === 0 || overrideManualEntry) && !sent;
+  // B11l fix-3 (2026-09-01) — do not ask for an address we already resolved.
+  //
+  // Wael's build 330 screenshot showed the card reading
+  //     To: you (wael.aggan@gmail.com)
+  // and directly beneath it "I don't have an email for me — type it here."
+  // Both at once, contradicting each other on the same card.
+  //
+  // Mine. The mount effect skips the email lookup when Shared Core has already
+  // resolved the address — correct, that lookup is what returned a stranger —
+  // but the manual-entry box keys off that lookup having produced no
+  // candidates. Skipping it leaves the list empty, which this condition read
+  // as "no match found". `overrideManualEntry` is untouched, so "none of these"
+  // still works.
+  const alreadyResolved = Boolean((action as any).to_email);
+  const showManualInput = !isMessaging && !toIsEmail && !alreadyResolved
+    && (recipientCandidates.length === 0 || overrideManualEntry) && !sent;
 
   // Discarded card — minimal placeholder, no Gmail action possible.
   if (discarded) {
