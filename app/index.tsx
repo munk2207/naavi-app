@@ -457,6 +457,11 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
     if ((action as any)._voiceConfirmed === true) setSent(true);
   }, [(action as any)._voiceConfirmed]);
   const [resolvedContact, setResolvedContact] = useState<string | null>(null);
+  // B11l — the matched contact's NAME, and the destination the card will
+  // actually send to. Both exist so what is displayed and what is sent come
+  // from ONE resolution instead of two independent ones.
+  const [matchedName, setMatchedName] = useState<string | null>(null);
+  const [resolvedSendTarget, setResolvedSendTarget] = useState<string | null>(null);
 
   // Email recipient resolution (Session 26 design lock).
   //   recipientCandidates  — all matches returned by resolveRecipient()
@@ -493,9 +498,28 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
     const to = String(action.to ?? '').trim();
     if (!to || to.includes('@') || to.startsWith('+')) return;
 
+    // B11l — Shared Core already resolved this one (a self-reference like
+    // "text me"). Do not look it up: the lookup is what returned a stranger.
+    if (action.to_phone || action.to_email) return;
+
     if (isMessaging) {
       lookupContact(to).then(contact => {
-        if (contact?.phone) setResolvedContact(contact.phone);
+        if (contact?.phone) {
+          setResolvedContact(contact.phone);
+          // B11l — capture WHO was matched, not just their number. The card
+          // used to print the user's own word beside the number and drop the
+          // name entirely, so "To: me (+1 438 765 0528)" looked correct while
+          // naming a stranger. lookup-contact returned "AbdelMegid EL Mehelmy"
+          // in the same object; it was simply never displayed.
+          if (contact.name) setMatchedName(contact.name);
+          // B11l — bind SEND to the resolution the card is DISPLAYING.
+          // handleSend used to call lookupContact a second time, so display
+          // and send were two independent calls to a non-deterministic API
+          // and nothing guaranteed they agreed. Phase 0 Success Criterion 2
+          // ("the card names the matched contact truthfully") cannot hold
+          // while the card can name one person and send to another.
+          setResolvedSendTarget(contact.phone);
+        }
       });
       return;
     }
@@ -530,6 +554,24 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
                  : /^\d{10}$/.test(stripped) ? `+1${stripped}`   // 10-digit North American → add +1
                  : /^\d{7,15}$/.test(stripped) ? `+${stripped}`  // other lengths → add +
                  : null;
+
+      // B11l — SEND WHAT WAS SHOWN. Prefer, in order: the destination Shared
+      // Core resolved (a self-reference), then the one this card already
+      // displayed. Only fall back to a fresh lookup when neither exists.
+      //
+      // Until now this branch called lookupContact a SECOND time, independently
+      // of the call that produced the number on screen. Two calls to a
+      // non-deterministic API with nothing binding them together: the card
+      // could name one person and the message go to another. Nobody had
+      // observed it, which is not the same as it being safe.
+      if (!phone) {
+        const preResolved = String((action as any).to_phone ?? resolvedSendTarget ?? '');
+        if (preResolved) {
+          const s = preResolved.replace(/[^+\d]/g, '');
+          phone = s.startsWith('+') ? s : s.length === 10 ? `+1${s}` : s.length >= 7 ? `+${s}` : null;
+        }
+      }
+
       if (!phone) {
         const contact = await lookupContact(to);
         if (contact?.phone) {
@@ -577,6 +619,12 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
       //   4. Single contact match          → use it (already shown inline)
       //   5. Nothing                       → ask Robert (block send)
       let email: string | null = to.includes('@') ? to : null;
+      // B11l — step 0: Shared Core already resolved a self-reference ("email
+      // me") to the account's own address. Prefer it over any lookup, for the
+      // same reason as the messaging branch above.
+      if (!email && String((action as any).to_email ?? '')) {
+        email = String((action as any).to_email);
+      }
       if (!email && manualEmail.trim().includes('@')) {
         email = manualEmail.trim();
       }
@@ -656,12 +704,25 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
       <Text style={styles.draftLabel}>
         {`${channelIcon} ${channelLabel} draft ready`}
       </Text>
+      {/* B11l — name WHO was matched, not what the user typed.
+          This line rendered `To: me (+1 438 765 0528)` on Wael's production
+          app: his own word for himself, beside a stranger's real number, with
+          the matched contact's actual name discarded one line earlier. Only
+          the digits gave it away, and only because he read them.
+          Order: to_display (Shared Core said "you", or the real name) →
+          the matched contact's name → the raw word, when nothing resolved. */}
       <Text style={styles.draftField}>
         <Text style={styles.draftFieldLabel}>To: </Text>
-        {toRaw}
-        {resolvedContact && !toIsEmail && !toRaw.startsWith('+')
-          ? <Text style={styles.contactResolved}> ({resolvedContact})</Text>
-          : null}
+        {String(action.to_display ?? matchedName ?? toRaw)}
+        {(() => {
+          const dest = String(action.to_phone ?? action.to_email ?? resolvedContact ?? '');
+          if (!dest) return null;
+          // Suppress only when the label already IS the destination — showing
+          // "+1613… (+1613…)" helps nobody.
+          const label = String(action.to_display ?? matchedName ?? toRaw);
+          if (label === dest) return null;
+          return <Text style={styles.contactResolved}> ({dest})</Text>;
+        })()}
       </Text>
       {/* Multi-match picker — Robert taps the right John. */}
       {showPicker && (

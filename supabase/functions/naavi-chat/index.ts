@@ -301,6 +301,95 @@ async function resolveLocationRecipient(
   return { ok: true };
 }
 
+// ── B11l (2026-09-01) — "text me" must reach the user, not a contact ─────────
+//
+// Wael said "text me" on the production app. Google People API substring-matched
+// the two letters "me" inside the surname "Mehelmy", and the draft card rendered
+//   To: me (+1 438 765 0528)
+// — a real stranger's real number, labelled with the user's own word for
+// themselves. One tap would have sent it. Measured again 2026-09-01: still 9
+// matches on that account, same stranger on top.
+//
+// "me" is not an invalid recipient — it is a VALID one that resolves to the
+// user. So this resolves it; it does not reject it. Routing it into the
+// missing-recipient question would ask what the user just answered.
+//
+// This is NOT a second recipient handling (cf. the B9x note at the Universal
+// gate). It performs no contact lookup of any kind — no lookup-contact, no
+// People API, no resolve-recipient. For every non-self recipient it returns
+// immediately and the existing handling runs unchanged.
+//
+// Two destinations, two different sources — they are not symmetric:
+//   phone → user_settings.phone            (same column the time-trigger
+//                                           self-default reads, see the
+//                                           SET_ACTION_RULE(time) block below)
+//   email → auth.admin.getUserById().email  (user_settings has NO email column;
+//                                           this is the evaluate-rules pattern)
+// The admin call is made ONLY for channel="email" — an SMS draft must not pay
+// for an auth round-trip.
+//
+// Fails closed. Every failure path asks rather than sending: never guess, never
+// fall back to contact search. See B11L_PHASE2_CHANGE_PLAN_2026-09-01.md §1.2.
+const SELF_RECIPIENT_TOKENS = new Set([
+  'me', 'myself', 'my phone', 'my number', 'my cell', 'my email',
+]);
+
+async function resolveSelfRecipient(
+  action: Record<string, any>,
+  userId: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (action?.type !== 'DRAFT_MESSAGE') return { ok: true };
+
+  // Whole-value match, never a substring. Substring matching is the mechanism
+  // of the bug being fixed — "my wife" must keep reaching the relationship
+  // resolver in lookup-contact, and it does, because it is not in this set.
+  const rawTo = String(action?.to ?? '').trim();
+  if (!SELF_RECIPIENT_TOKENS.has(rawTo.toLowerCase())) return { ok: true };
+
+  const channel = String(action?.channel ?? 'email').toLowerCase();
+  const url = Deno.env.get('SUPABASE_URL') ?? '';
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+
+  try {
+    const admin = createClient(url, key);
+
+    if (channel === 'email') {
+      const { data } = await admin.auth.admin.getUserById(userId);
+      const email = data?.user?.email ?? null;
+      if (!email) {
+        console.warn(`[naavi-chat] B11l: no account email for ${userId} — asking instead of sending`);
+        return { ok: false, message: 'Who should I send the message to?' };
+      }
+      action.to_email = email;
+    } else {
+      const { data } = await admin
+        .from('user_settings').select('phone').eq('user_id', userId).maybeSingle();
+      const phone = (data as any)?.phone ?? null;
+      if (!phone) {
+        console.warn(`[naavi-chat] B11l: no user_settings.phone for ${userId} — asking instead of sending`);
+        return { ok: false, message: 'Who should I send the message to?' };
+      }
+      action.to_phone = phone;
+    }
+  } catch (e) {
+    // The email path is a network call to the auth service, separate from the
+    // phone read, so it can fail on its own. Ask — never fall through to the
+    // contact search that produced this defect. AI Coding Discipline #21:
+    // log with enough context to diagnose.
+    console.error(
+      `[naavi-chat] B11l: self-recipient resolution failed (user=${userId} channel=${channel}):`,
+      e instanceof Error ? e.message : String(e),
+    );
+    return { ok: false, message: 'Who should I send the message to?' };
+  }
+
+  // Display identity. The card echoed the user's own word next to a stranger's
+  // number; "you" is what makes the resolution readable at a glance.
+  action.to_display = 'you';
+  console.log(`[naavi-chat] B11l: self-recipient "${rawTo}" → ${action.to_phone ?? action.to_email} (channel=${channel})`);
+  return { ok: true };
+}
+
 // ── Fallback speech for tool-only Claude responses (Bug E fix, V57.12.1) ─────
 //
 // Phase 2 structured outputs migration revealed that Anthropic Haiku
@@ -3480,14 +3569,41 @@ Deno.serve(async (req) => {
               // resolveLocationRecipient() is a no-op for anything that is
               // not a location SET_ACTION_RULE, which is what keeps
               // DRAFT_MESSAGE — the other intent sharing this return —
-              // completely untouched. It has its own recipient handling and
-              // must not acquire a second one.
+              // untouched BY IT. It has its own recipient handling and must
+              // not acquire a second one.
+              //
+              // ⭐ Amended 2026-09-01 (B11l). The original said DRAFT_MESSAGE
+              // was left "completely untouched" here. That is no longer true:
+              // resolveSelfRecipient() runs in the same loop below.
+              //
+              // It does NOT violate the rule above. That rule protects against
+              // a second CONTACT resolver competing with the card's — two
+              // resolvers that could disagree about who a name refers to.
+              // resolveSelfRecipient performs no contact lookup at all; it
+              // rewrites one self-reference token into the user's own stored
+              // details and returns immediately for every other recipient.
+              //
+              // The reason it had to exist: DRAFT_MESSAGE's "own recipient
+              // handling" is the draft card, and the card was the thing that
+              // lied — it printed the user's word "me" beside a stranger's
+              // phone number. The rule was sound; the handling it protected
+              // was not.
               if (userId) {
                 for (const _b9xAction of confirmed.actions as Array<Record<string, any>>) {
                   const _b9x = await resolveLocationRecipient(_b9xAction, userId);
                   if (!_b9x.ok) {
                     console.warn(`[naavi-chat] B9x: dropping location rule at Site B — ${_b9x.message}`);
                     return jsonResponse({ rawText: JSON.stringify({ speech: _b9x.message, display: _b9x.message, actions: [], pendingThreads: [] }) });
+                  }
+                  // B11l — call site 1 of 2. This is the deterministic path:
+                  // buildActionConfirm() built the DRAFT_MESSAGE and returned
+                  // it here for immediate emission. buildActionConfirm is
+                  // synchronous and has no userId, so the resolution cannot
+                  // live inside it — it belongs here, where B9x's already does.
+                  const _b11l = await resolveSelfRecipient(_b9xAction, userId);
+                  if (!_b11l.ok) {
+                    console.warn(`[naavi-chat] B11l: dropping self draft — ${_b11l.message}`);
+                    return jsonResponse({ rawText: JSON.stringify({ speech: _b11l.message, display: _b11l.message, actions: [], pendingThreads: [] }) });
                   }
                 }
               }
@@ -3957,6 +4073,23 @@ Deno.serve(async (req) => {
       }
       return action;
     }).filter((a: any) => a !== null);
+
+    // ── B11l — call site 2 of 2. The Claude tool-use path. ───────────────────
+    // The mapper above is a synchronous .map(), so the resolution runs here in
+    // its own pass. Both DRAFT_MESSAGE construction paths must carry this: a
+    // fix on one site alone is invisible to every static check this project
+    // owns — Architecture Reference §2e, where eleven passing tests guarded
+    // unreachable code because B9x's first fix landed on the site the common
+    // case never reaches.
+    if (userId && actions.length > 0) {
+      for (const _a of actions) {
+        const _b11l = await resolveSelfRecipient(_a as Record<string, any>, userId);
+        if (!_b11l.ok) {
+          console.warn(`[naavi-chat] B11l: dropping self draft (tool-use path) — ${_b11l.message}`);
+          return jsonResponse({ rawText: JSON.stringify({ speech: _b11l.message, display: _b11l.message, actions: [], pendingThreads: [] }) });
+        }
+      }
+    }
 
     // ── Server-side execution for time-trigger reminders (2026-06-21) ─────────
     // In compound (6-item) mode, Haiku classifies the message as "chat" so

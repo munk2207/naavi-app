@@ -234,6 +234,25 @@ export interface NaaviResponse {
 
 export interface NaaviAction {
   type: 'SPEAK' | 'SET_REMINDER' | 'UPDATE_PROFILE' | 'DRAFT_MESSAGE' | 'FETCH_DETAIL' | 'LOG_CONCERN' | 'ADD_CONTACT' | 'DRIVE_SEARCH' | 'CREATE_EVENT' | 'DELETE_EVENT' | 'SAVE_TO_DRIVE' | 'REMEMBER' | 'DELETE_MEMORY' | 'FETCH_TRAVEL_TIME' | 'SCHEDULE_MEDICATION' | 'SET_EMAIL_ALERT' | 'SET_ACTION_RULE' | 'LIST_CREATE' | 'LIST_ADD' | 'LIST_REMOVE' | 'LIST_READ' | 'GLOBAL_SEARCH' | 'SPEND_SUMMARY';
+
+  // B11l (2026-09-01) — three DISTINCT concepts on a DRAFT_MESSAGE, deliberately
+  // three fields. Collapsing them is what produced the defect.
+  //
+  //   to          — the recipient AS THE USER SAID IT: "me", "Bob", "my wife".
+  //                 Never overwritten. Four consumers read it expecting a name;
+  //                 handing them a phone number silently changes its meaning.
+  //   to_phone /
+  //   to_email    — the RESOLVED destination, when Shared Core could resolve it.
+  //                 Absent for ordinary contacts, which still resolve client-side.
+  //   to_display  — the DISPLAY IDENTITY: "you" for a self-reference, otherwise
+  //                 the matched contact's real name.
+  //
+  // to_display exists because the card printed the user's own word next to a
+  // stranger's number — "To: me (+1 438 765 0528)" — and "me" reads as
+  // self-evidently safe. CLAUDE.md Rule 12 requires a readback the user can
+  // check; echoing their own query term back is not one.
+  to_display?: string;
+
   [key: string]: unknown;
 }
 

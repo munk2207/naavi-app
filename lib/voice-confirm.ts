@@ -88,7 +88,12 @@ export const CONFIRM_PHRASE = 'Say yes to confirm, no to cancel, or tell me what
 export function buildActionSummary(action: NaaviAction): string {
   switch (action.type) {
     case 'DRAFT_MESSAGE': {
-      const to = String(action.to ?? '');
+      // B11l — the SPOKEN readback must name who the message actually reaches.
+      // This is the voice-confirm path, where there is no card to read: the
+      // sentence is the only thing standing between the user and a send, so
+      // echoing their own word ("to me") while a stranger receives it is the
+      // same failure the card had, with less to notice it by.
+      const to = String(action.to_display ?? action.to ?? '');
       const channel = String(action.channel ?? 'email').toLowerCase();
       const subject = String(action.subject ?? '');
 

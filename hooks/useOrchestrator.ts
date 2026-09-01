@@ -745,10 +745,15 @@ export function useOrchestrator(language: 'en' | 'fr' = 'en', briefItems: BriefI
       const subject = String((action as any).subject ?? '');
       const body    = String((action as any).body    ?? '');
       let resolvedEmail: string | null = to.includes('@') ? to : null;
+      // B11l — prefer the address Shared Core resolved for a self-reference
+      // ("email me") before falling back to a contact lookup. Same reason as
+      // the compound auto-send branch: the lookup is what returned a stranger.
+      if (!resolvedEmail) resolvedEmail = String((action as any).to_email ?? '') || null;
       if (!resolvedEmail) { const c = await lookupContact(to); resolvedEmail = c?.email ?? null; }
       if (!resolvedEmail) return null;
       return {
-        description: `email ${to}${subject ? ` — "${subject}"` : ''}`,
+        // B11l — describe WHO it goes to, not the word the user typed.
+        description: `email ${String((action as any).to_display ?? to)}${subject ? ` — "${subject}"` : ''}`,
         execute: async () => {
           try {
             const result = await registry.email.send({
@@ -3232,8 +3237,18 @@ const oneShot = pending.originalAction?.one_shot ?? true;
             const to = String((action as any).to ?? '').trim();
             const body = String((action as any).body ?? '');
             try {
-              const contact = await lookupContact(to);
-              const phone = contact?.phone ?? (to.replace(/[^+\d]/g, '').startsWith('+') ? to.replace(/[^+\d]/g, '') : null);
+              // B11l — THE SHARPEST PATH IN THIS FIX. This branch sends with
+              // NO CARD AT ALL, and the compound flow resolves the recipient
+              // AFTER consent: `useOrchestrator.ts:4352` records that Naavi's
+              // proposal turn "has NO actions yet — they're only created on the
+              // confirm turn". So the user agrees to the sentence "text me",
+              // and only then is a contact looked up. There is no number to
+              // read, no name to check, and no card to decline — the single
+              // defence that actually caught this defect does not exist here.
+              // Prefer the destination Shared Core resolved.
+              const preResolved = String((action as any).to_phone ?? '');
+              const contact = preResolved ? null : await lookupContact(to);
+              const phone = preResolved || (contact?.phone ?? (to.replace(/[^+\d]/g, '').startsWith('+') ? to.replace(/[^+\d]/g, '') : null));
               if (phone) {
                 const ep = ch === 'whatsapp' ? 'send-whatsapp' : 'send-sms';
                 const { data: sendData, error: sendErr } = await invokeWithTimeout(ep, { body: { to: phone, body, channel: ch } }, 15_000);
