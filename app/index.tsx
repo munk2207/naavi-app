@@ -41,7 +41,7 @@ import * as Speech from 'expo-speech';
 import { SPEECH } from '@/lib/voice-confirm';
 
 import { getUserName } from '@/lib/naavi-client';
-import { useOrchestrator, isInputLocked, isSendLocked, isOrangeButtonVisible, orangeButtonLabel } from '@/hooks/useOrchestrator';
+import { useOrchestrator, isInputLocked, isSendLocked, isOrangeButtonVisible, orangeButtonLabel, speakResponse } from '@/hooks/useOrchestrator';
 import { useVoice } from '@/hooks/useVoice';
 import { useWhisperMemo } from '@/hooks/useWhisperMemo';
 import { useConversationRecorder, type ConversationAction } from '@/hooks/useConversationRecorder';
@@ -447,6 +447,27 @@ async function enrichWithTravelTime(items: BriefItem[]): Promise<BriefItem[]> {
 
 // ─── Draft card component ─────────────────────────────────────────────────────
 
+// B11l fix-4 (2026-09-01) — speak confirmations in NAAVI's voice, not the phone's.
+//
+// These three lines used Speech.speak() — expo-speech, the DEVICE's built-in
+// voice — while every other thing Naavi says goes through Deepgram as Hera. So
+// each send ended with a different voice from the one that had just spoken.
+// Wael heard it on build 330 on all three tests: "the voice that said Sent is
+// different... Voice must change."
+//
+// CLAUDE.md is explicit on both counts: Hera is the in-app voice, and
+// tap-to-send and voice-confirm-to-send must share the same audio feedback.
+// They already shared the SPEECH.* constants. They did not share the voice.
+//
+// Falls back to the device voice only if Hera fails, because silence after
+// tapping Send is worse than the wrong voice — the user needs to know it went.
+function speakConfirmation(text: string) {
+  speakResponse(text, 'en').catch((err) => {
+    console.warn('[TTS] Hera confirmation failed, falling back to device voice:', err?.message ?? err);
+    try { Speech.speak(text, { rate: 1.0, pitch: 1.0 }); } catch {}
+  });
+}
+
 function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-client').NaaviAction; onManualSend?: () => void }) {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState((action as any)._voiceConfirmed === true);
@@ -605,7 +626,7 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
           // rule). Both tap-to-send and voice-confirm-to-send must emit
           // the same audio feedback. Without this Robert can't tell from
           // a quick glance whether the message was sent.
-          try { Speech.speak(SPEECH.SENT, { rate: 1.0, pitch: 1.0 }); } catch {}
+          speakConfirmation(SPEECH.SENT);
         }
       } catch (err) {
         setSending(false);
@@ -651,7 +672,7 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
       if (result.success) {
         setSent(true);
         // V57.8 — speak confirmation (see matching note in SMS path).
-        try { Speech.speak(SPEECH.SENT, { rate: 1.0, pitch: 1.0 }); } catch {}
+        speakConfirmation(SPEECH.SENT);
       } else {
         setSendError(result.error ?? 'Send failed');
       }
@@ -1468,7 +1489,7 @@ export default function HomeScreen() {
   const sendVisitActionsToChat = useCallback((extracted: ConversationAction[]) => {
     if (extracted.length === 0) return;
     if (pendingAction) {
-      try { Speech.speak(SPEECH.AWAITING_PRIOR_CONFIRM, { rate: 1.0, pitch: 1.0 }); } catch {}
+      speakConfirmation(SPEECH.AWAITING_PRIOR_CONFIRM);
       return;
     }
     const visitMsg = buildVisitCompoundMessage(extracted);

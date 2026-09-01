@@ -5506,7 +5506,20 @@ async function speakCloudNative(text: string, language: 'en' | 'fr'): Promise<vo
   }
 }
 
-async function speakResponse(text: string, language: 'en' | 'fr'): Promise<void> {
+/**
+ * The app's single speech path — Deepgram, which `text-to-speech` resolves to
+ * `aura-hera-en` (any unrecognised voice falls back to Hera, so the stale
+ * `voice: 'shimmer'` above has no effect).
+ *
+ * Exported 2026-09-01 (B11l fix-4). The DraftCard's "Sent" confirmation used
+ * `Speech.speak()` — expo-speech, the DEVICE's built-in voice — so every send
+ * ended with the phone speaking in a different voice from the one Naavi had
+ * been using a sentence earlier. Wael heard it on build 330 across all three
+ * tests. CLAUDE.md's voice rule is explicit that Hera is the in-app voice, and
+ * its "one TTS confirmation, one path" rule says send confirmations share the
+ * same helpers. They shared the constant; they did not share the voice.
+ */
+export async function speakResponse(text: string, language: 'en' | 'fr'): Promise<void> {
   text = sanitiseForSpeech(text);
   if (Platform.OS === 'web') {
     return speakCloud(text);

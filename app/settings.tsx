@@ -1403,7 +1403,7 @@ export default function SettingsScreen() {
         </TouchableOpacity>
 
         {/* Version */}
-        <Text style={styles.version}>MyNaavi — V57.99.2 (build 330)</Text>
+        <Text style={styles.version}>MyNaavi — V57.99.3 (build 331)</Text>
 
       </ScrollView>
       </KeyboardAvoidingView>

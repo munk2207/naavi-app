@@ -254,6 +254,32 @@ export const b11lSelfRecipientTests: TestCase[] = [
       );
     },
   },
+  {
+    id: 'b11l.confirmations-speak-in-naavis-voice',
+    category: 'rules',
+    description: 'Send confirmations must use Naavi\'s voice (Deepgram/Hera), not the device\'s built-in speech engine. Two voices one sentence apart is what Wael heard on build 330',
+    async run() {
+      const card = readFileSync(APP_INDEX_PATH, 'utf8');
+      expectTruthy(
+        !/Speech\.speak\(SPEECH\./.test(card),
+        'no SPEECH.* confirmation may go through expo-speech — that is the device voice, not Hera (CLAUDE.md: Hera is the in-app voice)',
+      );
+      expectTruthy(
+        card.includes('speakConfirmation(SPEECH.SENT)'),
+        'the send confirmation must route through the shared helper',
+      );
+      expectTruthy(
+        card.includes('speakResponse('),
+        'that helper must use the app\'s own speech path, which text-to-speech resolves to aura-hera-en',
+      );
+      // The fallback must survive: silence after tapping Send is worse than the
+      // wrong voice, because the user is left not knowing whether it sent.
+      expectTruthy(
+        /falling back to device voice/.test(card) && /Speech\.speak\(text/.test(card),
+        'a device-voice fallback must remain for the case where Hera fails',
+      );
+    },
+  },
 ];
 
 /**
