@@ -715,7 +715,18 @@ function DraftCard({ action, onManualSend }: { action: import('@/lib/naavi-clien
         <Text style={styles.draftFieldLabel}>To: </Text>
         {String(action.to_display ?? matchedName ?? toRaw)}
         {(() => {
-          const dest = String(action.to_phone ?? action.to_email ?? resolvedContact ?? '');
+          // B11l fix-2 (2026-09-01) — `||`, NOT `??`. naavi-chat:2181 sets
+          // `to_phone: params.to_phone ?? ''` for an ordinary contact, so the
+          // field is an EMPTY STRING, not undefined. `??` only falls through on
+          // null/undefined, so the empty string won and the number vanished
+          // from every third-party card — while the self case still showed one,
+          // because there to_phone holds a real value. Wael caught it on build
+          // 329: "To: Bob" with no digits.
+          //
+          // That regression removed the exact signal that found this defect in
+          // the first place — he caught the original bug by READING THE NUMBER
+          // on the card, not the name. The destination must always be visible.
+          const dest = String(action.to_phone || action.to_email || resolvedContact || '');
           if (!dest) return null;
           // Suppress only when the label already IS the destination — showing
           // "+1613… (+1613…)" helps nobody.

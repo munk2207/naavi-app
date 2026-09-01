@@ -44,6 +44,7 @@ import { expectTruthy } from '../lib/assertions';
 import type { TestCase } from '../lib/types';
 
 const NAAVI_CHAT_PATH = join(process.cwd(), 'supabase', 'functions', 'naavi-chat', 'index.ts');
+const APP_INDEX_PATH   = join(process.cwd(), 'app', 'index.tsx');
 
 /** The helper, isolated from the rest of the file. */
 function selfBranch(src: string): string {
@@ -202,6 +203,32 @@ export const b11lSelfRecipientTests: TestCase[] = [
       expectTruthy(
         code.includes('catch (e)') && code.includes('console.error('),
         'the catch must log with context — AI Coding Discipline #21, no silent failures',
+      );
+    },
+  },
+  {
+    id: 'b11l.card-destination-survives-empty-string',
+    category: 'rules',
+    description: 'THE REGRESSION THAT SHIPPED IN BUILD 329. The card must show the destination, and naavi-chat sends an EMPTY STRING for an ordinary contact — so the fallback must use || not ??, which only falls through on null/undefined',
+    async run() {
+      const card = readFileSync(APP_INDEX_PATH, 'utf8');
+      const line = card.split('\n').find((l) => l.includes('const dest = String('));
+      expectTruthy(!!line, 'the DraftCard must compute a displayed destination');
+      expectTruthy(
+        !/const dest = String\([^)]*\?\?/.test(String(line)),
+        'must NOT use ?? — naavi-chat sets to_phone to "" for a normal contact, so ?? keeps the empty string and the number disappears from the card',
+      );
+      expectTruthy(
+        /to_phone \|\| /.test(String(line)),
+        'must fall through an empty to_phone with || so the resolved contact number still displays',
+      );
+      // The whole point of the card. Wael caught the original defect by reading
+      // the digits, not the name — a card naming a stranger with no number to
+      // check is the defect wearing a different face.
+      const src = readFileSync(NAAVI_CHAT_PATH, 'utf8');
+      expectTruthy(
+        src.includes("to_phone: params.to_phone ?? ''"),
+        'this test guards against naavi-chat:2181 emitting "" — if that ever becomes undefined, re-verify the card rather than assuming',
       );
     },
   },
