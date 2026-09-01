@@ -2,7 +2,7 @@
 
 ## ⭐⭐⭐⭐⭐ ENGINEERING PROCESS
 
-All development work must comply with `docs/AI_DEVELOPMENT_GOVERNANCE.md` (Release Gate Workflow v4.2). Keep this version number in sync with the governance document's own version line whenever it changes.
+All development work must comply with `docs/AI_DEVELOPMENT_GOVERNANCE.md` (Release Gate Workflow v4.3). Keep this version number in sync with the governance document's own version line whenever it changes.
 
 ---
 
