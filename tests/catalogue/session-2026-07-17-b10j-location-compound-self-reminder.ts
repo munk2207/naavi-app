@@ -66,6 +66,33 @@ async function expectMajoritySelfPrimary(ctx: any, phrase: string, testLabel: st
   );
 }
 
+// ⭐ 2026-09-01 — three phrases changed from unresolvable recipients to Bob.
+//
+// These are classification guards: they prove B10j's compound-splitting change
+// did not break SINGLE-action location alerts. The recipient's NAME is
+// incidental — the variation under test is arrive/leave, text/email, and the
+// place.
+//
+// [[B9x]] (2026-08-27) made recipient resolution a PRECONDITION of emitting a
+// location rule at all: a person the account cannot identify means the rule is
+// deliberately NOT saved and a question is asked instead. So "Text Sarah when I
+// leave home" stopped reaching the outcome these tests measure — it began
+// testing B9x's resolver rather than B10j's classifier, and errored with
+// "expected truthy, got null".
+//
+// Evidence it was B9x and not missing data: these passed continuously through
+// 2026-08-24 with no Sarah contact ever present, because before B9x no
+// resolution happened. The first full run after B9x was 2026-09-01, eight days
+// later, and all three errored.
+//
+// ⛔ The fix is NOT to add Sarah and "my wife" to the test account. That would
+// turn all three green while hiding a real, deliberate behaviour change —
+// exactly the "insert and test and keep us happy with a fake test" Wael
+// rejected in [[T15]]. Bob is an existing fixture contact and resolves on both
+// environments, so the classification assertion survives without inventing data.
+//
+// Relationship words and unresolvable recipients ARE covered — by
+// session-2026-08-13's relationship tests and by B9x's own suite respectively.
 const NEGATIVE_CONTROLS: Array<{ id: string; phrase: string }> = [
   { id: 'costco-self', phrase: 'Alert me when I arrive at Costco' },
   { id: 'text-bob-50-elm', phrase: 'Text Bob when I arrive at 50 Elm Street' },
@@ -74,12 +101,12 @@ const NEGATIVE_CONTROLS: Array<{ id: string; phrase: string }> = [
   { id: 'call-self-override-50-elm', phrase: 'Call me at +16135551234 when I arrive at 50 Elm Street' },
   { id: 'remind-bob-kid-sam', phrase: "Remind me with Bob's kid Sam when I arrive at Bob's home" },
   { id: 'alert-office', phrase: 'Alert me when I arrive at the office' },
-  { id: 'text-sarah-leave-home', phrase: 'Text Sarah when I leave home' },
+  { id: 'text-sarah-leave-home', phrase: 'Text Bob when I leave home' },
   { id: 'notify-shoppers', phrase: 'Notify me when I arrive at Shoppers Drug Mart' },
   { id: 'let-me-know-gym', phrase: 'Let me know when I get to the gym' },
-  { id: 'text-wife-work', phrase: 'Text my wife when I arrive at work' },
+  { id: 'text-wife-work', phrase: 'Text Bob when I arrive at work' },
   { id: 'alert-leave-office', phrase: 'Alert me when I leave the office' },
-  { id: 'email-sarah-work', phrase: 'Email Sarah when I reach work' },
+  { id: 'email-sarah-work', phrase: 'Email Bob when I reach work' },
   { id: 'text-bob-home', phrase: 'Text Bob when I arrive home' },
   { id: 'whatsapp-costco', phrase: 'WhatsApp me when I arrive at Costco' },
 ];
