@@ -66,12 +66,11 @@ It would not crash — the card falls back to the old lookup — but B11l would 
 for real users while appearing shipped.** That is the [[B11h]] shape.
 **Deploy `naavi-chat` to production first. Needs Wael's explicit words (staging-first).**
 
-**3.2 — Gate 1 is one error short of green.** `prompt-regression.comparison-chatgpt-single-mention`
-— [[B11z]]. Naavi names the competitor twice instead of once. **Intermittent: it errored on
-staging, passed on production an hour later, errored on production again — roughly 2 in 3.**
-Rule 15 requires 100% green. Wael was offered three options and had not ruled when the
-session ended: fix it (Full governance), **waive Gate 1 for this build (recommended)**, or
-re-run until green (**named as the fake-test pattern and not recommended**).
+**3.2 — ✅ RESOLVED. Gate 1 is WAIVED for this build — Wael, 2026-09-02: *"B11z does not block AAB 332."*** The suite stands at **574 of 575**; the one error is `prompt-regression.comparison-chatgpt-single-mention` ([[B11z]]), intermittent at roughly 2 failures in 3.
+
+**The waiver is narrow and does not travel.** It covers **this build** and **this test**. It does not fix or close B11z, and **Rule 15 remains absolute for every future AAB.** Do not read "AAB 332 shipped" as "Gate 1 was green." It was not — it was 574 of 575 with one named exception.
+
+**Recorded on the B11z row as well as here**, because [[F20]]'s waiver was later restated as broader than it was, and CLAUDE.md's lesson from it is that *"a partial waiver restated as a full one is how a real defect enters through a door nobody remembers opening."*
 
 **3.3 — Gates 2 and 3 have not run.** Voice regression, then Firebase Test Lab.
 
