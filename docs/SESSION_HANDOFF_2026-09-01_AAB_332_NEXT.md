@@ -1,6 +1,6 @@
 # Session handoff — 2026-09-01 → next session: **build AAB 332**
 
-**Next job: build production AAB 332.** Four things stand in front of it, listed in §3.
+**Next job: build production AAB 332.** **Three** things stand in front of it, listed in §3 — a fourth, Gate 1, was waived by Wael on 2026-09-02.
 **Read Part 1 as fact. Part 2 is this session's reading — do NOT inherit it as fact.**
 
 ---
@@ -52,7 +52,7 @@ approval. **Architecture Reference is now `2026.09.01.16`.**
 control), T4 (per-environment push identity), T8 (Epic disconnected), B11n (fired alert
 stays in the brief), B11l.
 
-## 3. ⛔ Four things stand in front of AAB 332
+## 3. ⛔ Three things stand in front of AAB 332 *(was four — §3.2 waived 2026-09-02)*
 
 **3.1 — `naavi-chat` is NOT on production.** Verified live at the end of this session:
 
