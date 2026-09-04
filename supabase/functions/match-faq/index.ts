@@ -28,10 +28,19 @@
  * Anyone who finds the URL can call it. Three controls, approved as c + e + b:
  *   (c) input validation before any model call
  *   (e) cache by normalised input — a repeat, real or a probe, costs nothing
- *   (b) per-IP rate limit
+ *   (b) rate limit per SUBJECT — the signed-in user where there is one, the
+ *       address otherwise. It was per-IP until F25 Stage 2 (2026-09-04); the
+ *       mobile app arrives behind carrier NAT, where an address is shared by
+ *       many people. See resolveSubject().
  * Option (d) — keyword-filter first, AI only on a miss — was REJECTED: it
  * reverses the AI-every-submission behaviour Wael approved on 2026-09-02.
  * Do not reintroduce it as an optimisation.
+ *
+ * ⚠️ THIS FUNCTION MUST STAY DEPLOYED WITH --no-verify-jwt.
+ * It reads an Authorization header when one is present, but it must remain
+ * callable with none: mynaavi.com/report and /contact send no credentials.
+ * With gateway JWT verification on, those pages get a 401 BEFORE this code
+ * runs, and no amount of correct fail-open in here would help.
  *
  * ── Phase 3 A3 — non-determinism ──────────────────────────────────────────
  * The model is given the slug list and asked to select from it; every returned
@@ -59,6 +68,62 @@ const WINDOW_MINUTES = 5;
 const MAX_PER_WINDOW = 20;
 
 const MAX_MATCHES = 3;
+
+/**
+ * Who is this request counted against?
+ *
+ * A signed-in caller is counted as themselves; everyone else is counted by
+ * address. Added by F25 Stage 2 because the mobile app arrives behind carrier
+ * NAT, where many customers share one address and an IP-keyed limit would put
+ * them in a single bucket.
+ *
+ * ⚠️ THREE THINGS THIS MUST KEEP DOING, each with a reason:
+ *
+ *  1. It must never refuse. The function stays fully usable with no
+ *     credentials at all — the public website sends none. Identity decides
+ *     WHICH bucket a caller is counted in, never WHETHER they are served.
+ *
+ *  2. It must not call getUser when no real token arrived. Verification was
+ *     measured at 132 ms; paying that on every website request for a token
+ *     nobody sent is pure waste.
+ *
+ *  3. ⭐ The anon key is NOT an identity. app/contact.tsx falls back to it
+ *     when there is no session, and that value is byte-identical on every
+ *     install — so treating it as a subject would put every signed-out app
+ *     user in ONE bucket, which is strictly worse than the address they came
+ *     from. It resolves to no identity and falls through.
+ *
+ * The "user:" / "ip:" prefixes keep the two namespaces from colliding: an
+ * address can never hash to the same subject as an account.
+ */
+async function resolveSubject(
+  req: Request,
+  admin: ReturnType<typeof createClient>,
+): Promise<{ hash: string; kind: 'user' | 'ip' }> {
+  const ipFallback = async () => {
+    const ip = (req.headers.get('x-forwarded-for') ?? '').split(',')[0].trim() || 'unknown';
+    return { hash: await sha256(`ip:${ip}`), kind: 'ip' as const };
+  };
+
+  const token = (req.headers.get('authorization') ?? '').replace('Bearer ', '').trim();
+
+  // (2) and (3): no token, or the anon key, is no identity — and no auth call.
+  if (!token) return ipFallback();
+  if (token === Deno.env.get('SUPABASE_ANON_KEY')) return ipFallback();
+
+  try {
+    const { data, error } = await admin.auth.getUser(token);
+    if (error || !data?.user?.id) return ipFallback();
+    return { hash: await sha256(`user:${data.user.id}`), kind: 'user' as const };
+  } catch (err) {
+    // (1) — an auth outage must not take the FAQ matcher down with it.
+    console.error(
+      '[match-faq] identity check threw, counting by address instead:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return ipFallback();
+  }
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -109,30 +174,49 @@ serve(async (req) => {
       return json({ ok: true, cached: true, ...(row.result as Record<string, unknown>) });
     }
 
-    // ── (b) rate limit — only for calls that will actually cost money ─────
-    const ip = (req.headers.get('x-forwarded-for') ?? '').split(',')[0].trim() || 'unknown';
-    const ipHash = await sha256(ip);
+    // ── identity, then (b) rate limit ─────────────────────────────────────
+    //
+    // Placement is load-bearing and was approved as part of the design, not
+    // chosen here: AFTER the cache, BEFORE the limiter. A cached answer then
+    // costs neither the model call nor the 132 ms an auth round trip was
+    // measured to take — the same reasoning the limiter itself already
+    // carries, "only for calls that will actually cost money".
+    const subject = await resolveSubject(req, admin);
     const windowStart = new Date(Math.floor(Date.now() / (WINDOW_MINUTES * 60_000)) * (WINDOW_MINUTES * 60_000)).toISOString();
 
-    const { data: rl } = await admin
-      .from('faq_rate_limit')
-      .select('request_count')
-      .eq('ip_hash', ipHash)
-      .eq('window_start', windowStart)
-      .maybeSingle();
+    // A2 — one atomic statement increments and returns the resulting count, so
+    // "did this request cross the threshold" is answered by the statement that
+    // produced the number. It used to be select -> compute -> upsert, which
+    // lost updates under concurrency; mobile is the population most able to
+    // produce that. See the migration and Architecture Reference §2c.
+    const { data: countAfter, error: countErr } = await admin.rpc('count_faq_match_request', {
+      p_subject_hash: subject.hash,
+      p_window_start: windowStart,
+    });
 
-    const used = (rl as { request_count: number } | null)?.request_count ?? 0;
-    if (used >= MAX_PER_WINDOW) {
-      console.warn(`[match-faq] rate limited ip_hash=${ipHash.slice(0, 8)}… surface=${surface}`);
-      // 'unavailable', not 'no_match' — nothing was checked, and the page must
-      // be able to tell the difference (contract property 3).
+    if (countErr) {
+      // A1 — FAIL OPEN, LOUDLY. Wael, 2026-09-04: log the failure, preserve
+      // availability. Refusing a real customer to guard against a cost that
+      // only appears while the database is unhealthy is the wrong trade for a
+      // support form.
+      //
+      // This block exists because the previous code discarded this error
+      // entirely: a failed read produced used = 0, so the limit silently never
+      // tripped, and the only control between a public paid endpoint and an
+      // unbounded bill could stop working without a single log line.
+      console.error(
+        `[match-faq] RATE LIMIT NOT ENFORCED — counter failed for ${subject.kind} ` +
+        `surface=${surface}: ${countErr.message}`,
+      );
+    } else if ((countAfter as number) > MAX_PER_WINDOW) {
+      console.warn(
+        `[match-faq] rate limited ${subject.kind}=${subject.hash.slice(0, 8)}… ` +
+        `surface=${surface} count=${countAfter}`,
+      );
+      // 'unavailable', not 'no_match' — nothing was checked, and the caller
+      // must be able to tell the difference (contract property 3).
       return json({ ok: false, status: 'unavailable', matches: [], error: 'rate_limited' }, 429);
     }
-
-    await admin.from('faq_rate_limit').upsert(
-      { ip_hash: ipHash, window_start: windowStart, request_count: used + 1 },
-      { onConflict: 'ip_hash,window_start' },
-    );
 
     // ── the published answers the model may choose from ───────────────────
     const { data: items, error: itemsErr } = await admin

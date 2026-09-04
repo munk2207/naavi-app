@@ -9,7 +9,7 @@
  * Accessed from Help → "Report a problem".
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -29,7 +29,18 @@ import Constants from 'expo-constants';
 import { Colors } from '@/constants/Colors';
 import { supabase } from '@/lib/supabase';
 import { queryWithTimeout, getSessionWithTimeout } from '@/lib/invokeWithTimeout';
-import { suggestFaq, faqUrl, type FaqEntry } from '@/lib/faq';
+/* F25 Stage 2 (2026-09-04) — this screen used to match against lib/faq.ts, a
+ * hand-written copy of 12 questions inside the app. It knew 12 of 26 published
+ * answers, and its scoring could not clear its own threshold on a single word.
+ * It now asks match-faq, the same matcher the website uses, on Send.
+ *
+ * ON SEND, never while typing. Wael, 2026-09-04: "Do not make paid AI calls
+ * while typing." The old debounce ran on every keystroke, which was free
+ * because the matching was local arithmetic. This is not. */
+type FaqMatch = { slug: string; question: string; url: string; confidence?: string };
+
+const FAQ_MATCH_URL = `${process.env.EXPO_PUBLIC_SUPABASE_URL ?? ''}/functions/v1/match-faq`;
+const FAQ_MATCH_TIMEOUT_MS = 4_000;
 
 const SUPABASE_URL  = process.env.EXPO_PUBLIC_SUPABASE_URL  ?? '';
 const SUPABASE_ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -55,18 +66,12 @@ export default function ReportScreen() {
   const [success, setSuccess]         = useState(false);
   const [errorText, setErrorText]     = useState<string | null>(null);
   // FAQ suggestion panel — debounced match against description + context.
-  // Dismissed flag lets the user hide the panel if the suggestions don't fit,
-  // so it doesn't keep resurfacing as they keep typing.
-  const [suggestions, setSuggestions] = useState<FaqEntry[]>([]);
+  // Dismissed flag lets the user hide the panel if the suggestions don't fit.
+  const [suggestions, setSuggestions] = useState<FaqMatch[]>([]);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
-  useEffect(() => {
-    if (suggestionsDismissed) { setSuggestions([]); return; }
-    const combined = `${description} ${context}`.trim();
-    const t = setTimeout(() => {
-      setSuggestions(suggestFaq(combined, { max: 2, minScore: 2 }));
-    }, 300);
-    return () => clearTimeout(t);
-  }, [description, context, suggestionsDismissed]);
+  /* Asked once per visit, exactly as the website does (report.html:294).
+     A ref, not state — flipping it must not re-render the form mid-submit. */
+  const faqChecked = useRef(false);
 
   // Prefill email + user identity from the signed-in session + user_settings.
   // Falls through silently if the user is signed out — they can still submit
@@ -93,6 +98,56 @@ export default function ReportScreen() {
     })();
   }, []);
 
+  /**
+   * Ask whether an answer already exists. Returns true when the customer
+   * should be given a chance to look before the ticket is filed.
+   *
+   * ⚠️ EVERY failure path returns false and lets the ticket through — a
+   * timeout, a network error, a rate limit, 'unavailable', 'no_match', a
+   * malformed body. Nobody is ever blocked from reaching support because a
+   * suggestion lookup went wrong. This mirrors report.html:294-314 deliberately:
+   * the two surfaces should behave the same at the same moment.
+   */
+  async function faqCheckBlocks(text: string): Promise<boolean> {
+    if (faqChecked.current) return false;
+    faqChecked.current = true;
+    if (text.length < 8) return false;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FAQ_MATCH_TIMEOUT_MS);
+    try {
+      const session = await getSessionWithTimeout();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON,
+      };
+      /* Send the session token when there is one, and NOTHING when there is
+         not. The anon key is identical on every install, so sending it here
+         would put every signed-out user in one rate-limit bucket — worse than
+         the address they came from. match-faq treats it as no identity, but
+         not sending it at all is the honest signal. */
+      if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+
+      const res = await fetch(FAQ_MATCH_URL, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ text, surface: 'app-report' }),
+        signal: controller.signal,
+      });
+      const d = await res.json();
+      if (d?.ok && d.status === 'matched' && Array.isArray(d.matches) && d.matches.length) {
+        setSuggestions(d.matches as FaqMatch[]);
+        setSuggestionsDismissed(false);
+        return true;
+      }
+    } catch (e) {
+      console.error('[faq-check] report: failed, sending anyway:', e instanceof Error ? e.message : String(e));
+    } finally {
+      clearTimeout(timer);
+    }
+    return false;
+  }
+
   async function handleSubmit() {
     setErrorText(null);
     const desc = description.trim();
@@ -100,6 +155,8 @@ export default function ReportScreen() {
     if (!email.trim() || !/@/.test(email)) { setErrorText('Your email is needed so we can reply.'); return; }
 
     setSubmitting(true);
+    // Both fields, the same text the old local matcher combined.
+    if (await faqCheckBlocks(`${desc} ${context}`.trim())) { setSubmitting(false); return; }
     try {
       const appVersion = `${Constants.expoConfig?.version ?? '?'} (build ${Constants.expoConfig?.android?.versionCode ?? '?'})`;
       const platform   = `${Platform.OS} ${Platform.Version}`;
@@ -198,7 +255,10 @@ export default function ReportScreen() {
                   key={s.slug}
                   style={styles.suggestRow}
                   onPress={() => {
-                    Linking.openURL(faqUrl(s)).catch(() => { /* silent — no network alerts mid-form */ });
+                    /* The URL comes back in the match. lib/faq.ts used to
+                       build it from a slug it also stored; there is nothing
+                       left to keep in sync. */
+                    Linking.openURL(s.url).catch(() => { /* silent — no network alerts mid-form */ });
                   }}
                   activeOpacity={0.75}
                 >

@@ -493,8 +493,37 @@ export const faqTests: TestCase[] = [
         '"try fewer words" must survive for the words-only case, but never as the catch-all',
       );
       expectTruthy(
-        /items\.length === 1 \? 'answer' : 'answers'/.test(src),
-        'the status line must pluralise on the total it names, not on the filtered count — it read "1 of 23 answer"',
+        /out\.length \+ ' ' \+ \(out\.length === 1 \? 'answer' : 'answers'\)/.test(src),
+        'the status line must report only how many are on screen, pluralised on that number',
+      );
+      expectTruthy(
+        !/' of ' \+ items\.length/.test(src),
+        'the status line must not read "2 of 26" — Wael, 2026-09-04: the total is not information a customer came for, and a filtered result should not read as a fraction of a catalogue',
+      );
+    },
+  },
+  {
+    id: 'f25.customer-page-controls-are-labelled-and-do-not-fight',
+    category: 'faq',
+    description:
+      'Both controls carry a visible label, and choosing a category clears the search box. A placeholder names a box only while it is empty, which is when it is least needed. And the two controls narrow the same list, so leaving words behind when a category is picked is how a customer lands on nothing — "morning" finds 4, the category holds 4, together they find none. Wael, 2026-09-04',
+    async run() {
+      const src = readFileSync(join(WEB, 'faq.html'), 'utf8');
+      expectTruthy(
+        /<label for="faq-search">Search<\/label>/.test(src),
+        'the search box needs a visible label bound to it',
+      );
+      expectTruthy(
+        /<label for="faq-category">Category<\/label>/.test(src),
+        'the category dropdown needs a visible label bound to it',
+      );
+      expectTruthy(
+        /elCat\.addEventListener\('change', function \(\) \{\s*elSearch\.value = '';/.test(src),
+        'choosing a category must clear the search box — picking a category is a fresh question, not a second filter on the previous one',
+      );
+      expectTruthy(
+        /function clearCategory\(\) \{\s*elCat\.value = '';\s*apply\(\);/.test(src),
+        'the "Show all categories" recovery must clear the category WITHOUT clearing the words — it exists to show the customer the answers their words already match',
       );
     },
   },
@@ -528,22 +557,95 @@ export const faqTests: TestCase[] = [
     },
   },
 
-  // ── the live read, and the anchors the mobile app depends on ────────────
+  // ── Stage 2: the app's own copy is gone ─────────────────────────────────
+  //
+  // These three replace `f25.get-faq-serves-every-anchor-the-app-links-to`,
+  // which read lib/faq.ts and asserted it held exactly 12 entries. That test
+  // did not DETECT the staleness — it recorded it as expected, and would have
+  // failed if anyone had fixed the file by adding the missing 14. It is
+  // replaced rather than deleted because what it protected is still real: a
+  // deep link inside the shipped app that no longer resolves.
   {
-    id: 'f25.get-faq-serves-every-anchor-the-app-links-to',
+    id: 'f25.stage2.app-has-no-private-copy-of-the-faq',
     category: 'faq',
-    description: 'Every slug the mobile app deep-links (lib/faq.ts) resolves to a published answer. These are addresses, not internal ids — breaking one silently breaks a link inside the shipped app',
+    description: 'lib/faq.ts is gone and nothing imports it. The app carried its own 12 of 26 published answers, with a header telling a human to keep it in sync and nothing enforcing that — the drift this whole item exists to remove',
+    async run() {
+      expectTruthy(
+        !existsSync(join(ROOT, 'lib', 'faq.ts')),
+        'lib/faq.ts must not exist — the app no longer keeps its own copy of the FAQ',
+      );
+      for (const screen of ['contact.tsx', 'report.tsx']) {
+        const src = readFileSync(join(ROOT, 'app', screen), 'utf8');
+        expectTruthy(
+          !/from '@\/lib\/faq'/.test(src),
+          `app/${screen} must not import the deleted lib/faq`,
+        );
+        expectTruthy(
+          !/suggestFaq\(|scoreEntry\(/.test(src),
+          `app/${screen} must not carry its own matching logic — that is match-faq's job now`,
+        );
+      }
+    },
+  },
+  {
+    id: 'f25.stage2.app-matches-on-send-and-never-blocks-the-ticket',
+    category: 'faq',
+    description: 'Both screens ask match-faq once, on Send, with a timeout — and every failure path lets the ticket through. Wael, 2026-09-04: "Do not make paid AI calls while typing." A customer must never be held on a Send button by a suggestion lookup',
+    async run() {
+      for (const screen of ['contact.tsx', 'report.tsx']) {
+        const src = readFileSync(join(ROOT, 'app', screen), 'utf8');
+        expectTruthy(src.includes('functions/v1/match-faq'), `app/${screen} must call match-faq`);
+        expectTruthy(
+          /faqChecked\.current = true/.test(src),
+          `app/${screen} must ask at most once per visit, as the website does`,
+        );
+        expectTruthy(
+          /FAQ_MATCH_TIMEOUT_MS = 4_000/.test(src) && /controller\.abort\(\)/.test(src),
+          `app/${screen} must time the call out rather than hold the customer on Send`,
+        );
+        // The gate must be inside handleSubmit, not in an effect on the text.
+        expectTruthy(
+          !/setTimeout\([\s\S]{0,80}match-faq/.test(src) && !/useEffect\([\s\S]{0,200}match-faq/.test(src),
+          `app/${screen} must not call match-faq from a debounce or an effect — that is the per-keystroke behaviour Wael rejected`,
+        );
+        // Every failure falls through. The catch must not re-throw or return true.
+        expectTruthy(
+          /catch \(e\)[\s\S]{0,220}return false;/.test(src),
+          `app/${screen} must return false from its failure path so the ticket is still filed`,
+        );
+        expectTruthy(
+          /if \(session\?\.access_token\) headers\['Authorization'\]/.test(src),
+          `app/${screen} must send the session token ONLY when there is one — the anon key is identical on every install and would collapse every signed-out user into one rate-limit bucket`,
+        );
+      }
+    },
+  },
+  {
+    id: 'f25.stage2.every-slug-the-matcher-can-return-is-published',
+    category: 'faq',
+    description: 'What the retired test actually protected: a deep link the app opens must resolve. It used to be checked against a hand-maintained list of 12; now match-faq can only return slugs it was given from published answers, so this holds by construction — and this test proves the construction, live',
     async run() {
       if (!liveReady()) throw new TestSkippedError('staging env not set');
-      const appSlugs = [...readFileSync(join(ROOT, 'lib', 'faq.ts'), 'utf8').matchAll(/slug:\s*'([^']+)'/g)].map(m => m[1]);
-      expectTruthy(appSlugs.length === 12, `lib/faq.ts is expected to hold 12 entries; found ${appSlugs.length}`);
+      const pub = (await (await fetch(`${stagingUrl()}/functions/v1/get-faq`)).json()) as {
+        ok?: boolean; items?: { slug: string }[];
+      };
+      expectTruthy(pub.ok === true, 'get-faq must return ok');
+      const published = new Set((pub.items ?? []).map(i => i.slug));
+      expectTruthy(published.size > 0, 'no published answers to check against');
 
-      const r = await fetch(`${stagingUrl()}/functions/v1/get-faq`);
-      const d = (await r.json()) as { ok?: boolean; items?: { slug: string }[] };
-      expectTruthy(d.ok === true, 'get-faq must return ok');
-      const live = new Set((d.items ?? []).map(i => i.slug));
-      const missing = appSlugs.filter(s => !live.has(s));
-      expectTruthy(missing.length === 0, `these app deep-links have no published answer: ${missing.join(', ')}`);
+      const r = await fetch(`${stagingUrl()}/functions/v1/match-faq`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'how do i delete an alert', surface: 'test-stage2' }),
+      });
+      const d = (await r.json()) as { matches?: { slug: string; url: string }[] };
+      for (const m of d.matches ?? []) {
+        expectTruthy(published.has(m.slug), `match-faq returned an unpublished slug: ${m.slug}`);
+        expectTruthy(
+          m.url === `https://mynaavi.com/faq#${m.slug}`,
+          `match-faq must return the deep link the app opens; got ${m.url}`,
+        );
+      }
     },
   },
   // ── §10: the answers must stay readable without JavaScript ─────────────
