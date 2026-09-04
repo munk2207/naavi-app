@@ -5,7 +5,31 @@
 **Phase 6:** Approved with 3 mandatory changes. #1 and #2 closed; **#3 is this document.**
 **Environment:** staging (`xugvnfudofuskxoknhve`). **Nothing committed, pushed, or deployed to production.**
 
-> ## STATUS: HELD — awaiting Wael's authorisation to deploy to production
+> ## ⚠️ STATUS SUPERSEDED — the hold was lifted, and this document was never updated
+>
+> **Corrected 2026-09-04.** Everything below was true when written on 2026-09-02 and stopped being
+> true when the deploy was authorised. **The hold no longer applies:** the migration and the three
+> Edge Functions are live on production, the staff portal and the website are pushed, Wael completed
+> the manual validation this document says is missing, and **six defects were found by doing so.**
+>
+> **The original text is preserved unchanged below.** Wael's instruction, 2026-09-04: *"Do not
+> rewrite history — record the actual deployment/manual-validation sequence and defects
+> discovered."* That record is `docs/FAQ_REBUILD_PHASE8_MERGE_2026-09-04.md`, which is retrospective
+> and says so.
+>
+> **In particular, three statements below are now false** and must not be read as current:
+> *"STATUS: HELD"* · *"Phase 8 is not authorized by this document"* (§5) · *"The staff-facing
+> surface is not verified at all"* (§5).
+>
+> **How this was found:** not by any check. Wael asked four times whether Stage 2's Phase 3 review
+> reflected everything open; the first three answers audited code, then tests, then documents. **The
+> record was the last place anyone looked, and nothing in this project would have caught it** — the
+> FOR WAEL'S EYES gate says so of itself: it verifies a line exists and is short, never that it is
+> still true.
+>
+> ---
+>
+> ## ORIGINAL, 2026-09-02 — STATUS: HELD — awaiting Wael's authorisation to deploy to production
 >
 > **Phase 7 review returned HOLD** on 2026-09-02: the staff-facing surface is completely untested, and it cannot be tested from staging because the staff portal points at production.
 >
