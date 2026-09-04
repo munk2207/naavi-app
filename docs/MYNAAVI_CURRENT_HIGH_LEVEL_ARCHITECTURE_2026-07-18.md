@@ -1,6 +1,8 @@
 # MyNaavi — Current High-Level Architecture Reference
 
-**Architecture Version:** 2026.09.01.16 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+**Architecture Version:** 2026.09.03.17 (date-and-revision format — avoids the ambiguity of a bare "latest Architecture Reference" reference elsewhere in the governance doc).
+
+**Revision 17 (2026-09-03, [[F25]] Phase 8):** adds **two entire repositories**, the **FAQ**, the **support ticket system** and **staff authentication** — none of which this document has ever mentioned. **The omission was larger than the work item that found it.** F25's Phase 1A searched for `faq`, `staff portal`, `staff.mynaavi` and `ticket` and got one hit, which was the word "ticket" used as a document type in the attachment-classification list. Checking again at Phase 8 found the rest: **this document named exactly two repositories, `naavi-app` and `naavi-voice-server`,** and §0 opened by stating that Naavi *"is not one program — it's three."* There are five deployable codebases. `munk2207/naavi-staff` has been shipped since June ([[F6a]], closed 2026-06-12) with its own repository, its own Vercel deployment, an OTP login and a three-tier role model; `munk2207/mynaavi-website` has been live far longer and is **where the customer FAQ actually lives** — so the surface F25 exists to rebuild was absent from the map of the system it belongs to. **Outcome 3 under the Architecture Drift Rule: stale long before this work began**, recorded at Phase 1A and reconciled here under Governance v4.3's Reference-Document Read-Only Rule. ⭐ **The scope of this revision is wider than the scope Wael approved at Phase 1A**, which named the FAQ, the staff portal and the ticket system. The website was found while verifying those three, and **Wael approved adding it on 2026-09-03** rather than let a freshly-written document stay wrong about where this feature runs. **The Duplicated → Shared Core ownership change is recorded per §4's Ownership Change Rule, approved separately by Wael on 2026-09-02.** ⚠️ **What this revision deliberately does NOT do: expand §4 Protected Core.** F25 touched Database schema, API contracts and Permissions, and all three are already rows — the new tables and functions fall inside them. Stated rather than left to inference, because silently widening Protected Core would raise the process cost of every future change without anyone deciding to. **The lesson is one this document already teaches about itself and had not applied to its own opening sentence: a count is a claim, and it decays like any other.** Bumped in the same commit as the edits.
 
 **Revision 16 (2026-09-01, [[B11l]] Phase 8):** adds the three rows this document has never had for **immediate message drafting** — a §2 capability row, a §2b recipient-resolution row, and a §5a duplication row. **The omission was total: no row in §2, §2b or §5a, and the only mention anywhere was §2e noting in passing that Site B "shares its exit with `DRAFT_MESSAGE`."** **The cost is measurable in B11l's own record.** Its Phase 1 concluded the defect was a mobile-client bug and never opened `naavi-chat`, because the map gave it nowhere else to look; Phase 1A then found the origin was Shared Core with **two** construction sites and a tool contract handing recipient resolution to the client. **A whole phase ran against a map that did not mention the capability** — the same failure as revision 11's *"cron-driven"*, except an omission is harder to notice than a wrong word, because there is no sentence to disagree with. Outcome 3 under the Architecture Drift Rule: stale before the work began. **Under the old rule this would have blocked Phase 2; under Governance v4.3's Reference-Document Read-Only Rule it was recorded at Phase 1A and carried here — and B11l is the originating case for that rule.** ⭐ **Also note what this revision deliberately does NOT contain.** An earlier draft added the read-only rule itself to §8 of this document. **Wael rejected that on 2026-09-01: the rule is process, and process belongs in Governance — this document describes architecture.** That edit was discarded rather than committed, and `AI_DEVELOPMENT_GOVERNANCE.md` v4.3 is its sole authority. **The version's date component moves to 2026.09.01 by Wael's instruction**, so the identifier reflects when the content was verified rather than the filename's original date. Bumped in the same commit as the edits.
 
@@ -29,10 +31,10 @@
 ⚠️ **Revision 4's description below does not cover everything in the document, because three sets of edits landed between revisions 4 and 5 without the version being bumped:** T2's §0b (deployment environments), the 2026-08-19 consolidation that folded in §2b and superseded four older architecture documents, and the 2026-08-19 §0b entry recording that the demo line has two numbers and no environment of its own. None of them altered any claim [[S1]] relied on — all three concern deployment topology, not Shared Core boundaries — so no re-evaluation was required at S1's Phase 8 version check. **The lesson is the version line's own: a revision number only means something if bumping it is part of editing.** Whoever next edits this document should bump it in the same commit.
 
 **Revision 4** was T1a's Phase 4 output: corrects the "Action Rules — execution/firing" row (§2) to reflect an intra-Shared-Core duplication proven by three incidents, cross-references ADR 0003 from the "Reminders" row, and adds two previously-missing rows to §5a's Duplication Inventory. See `docs/T1A_PHASE2_CHANGE_PLAN_2026-07-18.md` and `docs/T1A_PHASE5_EVIDENCE_2026-07-18.md` for the full audit trail.
-**Diagram Version:** 1 (the Data Flow diagram in §6 — increments independently of the document's overall version when the diagram itself changes)
+**Diagram Version:** 2 (the Data Flow diagram in §6 — increments independently of the document's overall version when the diagram itself changes. Bumped 2026-09-03: the diagram showed two clients while §0 now says five, and a diagram that contradicts its own document is worse than one that is merely thin)
 **Last Verified:** 2026-07-18
 **Verified Against:** direct code inspection of `munk2207/naavi-app` and `munk2207/naavi-voice-server`, both at their `main` branch HEAD as of the date above. **Note (T2, 2026-08-19):** `naavi-voice-server` now also has a `staging` branch, merged level with `main` at `2124150`. Section 0b describes the topology; this line is retained as written because it records what was verified on 2026-07-18.
-**Repositories:** `munk2207/naavi-app`, `munk2207/naavi-voice-server`
+**Repositories:** `munk2207/naavi-app`, `munk2207/naavi-voice-server`, `munk2207/naavi-staff`, `munk2207/mynaavi-website` *(the last two added 2026-09-03, revision 17 — this line named only the first two while both others were live, which is the same omission §0 carried)*
 **Architecture Owner:** Wael. Claude proposes architecture changes and updates to this document; ChatGPT reviews them; only Wael approves an architectural ownership change (per Governance §4's Ownership Change Rule) or a new Architecture Version.
 
 **Purpose:** a single reference for where things actually live in this codebase — not where they were designed to live, not where a comment claims they live, but where direct code verification confirms they live. This document exists because assumptions about "shared vs. duplicated" have caused real bugs this project has already paid for (see §5 and the Appendix). Every claim below was checked against the actual source, not inferred from file names or comments.
@@ -54,15 +56,21 @@
 > one believed to be live had a single commit in four months. See CLAUDE.md, ARCHITECTURE DOCUMENTATION.
 
 
-## 0. The Three Codebases
+## 0. The Five Codebases
 
-Naavi is not one program — it's three, talking to one shared database:
+Naavi is not one program — it's five, talking to one shared database:
 
 1. **Mobile app** (`munk2207/naavi-app`, this repo) — the Android app itself (React Native/Expo), plus its backend Edge Functions (`supabase/functions/*`), which run on Supabase.
 2. **Voice server** (`munk2207/naavi-voice-server`, separate repo, `naavi-voice-server/src/index.js`) — a single large Node.js program on Railway that answers phone calls via Twilio.
-3. **Supabase** — the shared Postgres database, Edge Functions, and cron jobs both the mobile backend and the voice server call into.
+3. **Supabase** — the shared Postgres database, Edge Functions, and cron jobs every other codebase calls into.
+4. **Staff portal** (`munk2207/naavi-staff`, separate repo) — four static pages on Vercel at `staff.mynaavi.com`, where staff work tickets, manage staffers, and write FAQ answers. Shipped as [[F6a]] in June 2026.
+5. **Marketing website** (`munk2207/mynaavi-website`, separate repo) — static pages on Vercel at `mynaavi.com`, including the customer-facing FAQ and the two support forms that file tickets.
 
-The mobile app and the voice server **do not call each other**. They are two independent clients of the same backend. Whether a capability is "shared" depends entirely on whether both clients call the *same* Edge Function, or whether each has written its own version of the same logic.
+**⭐ This section said "three" until 2026-09-03, and named only the first two repositories.** Codebases 4 and 5 were both live and neither appeared anywhere in this document — see the revision 17 note. Both are static-page front ends with no backend of their own, which is presumably why they were never written down; but "has no backend" is not "is not part of the system," and one of them serves the FAQ.
+
+**None of the five call each other.** They are independent clients of the same Supabase backend. Whether a capability is "shared" depends entirely on whether the clients call the *same* Edge Function, or whether each has written its own version of the same logic.
+
+**The two Vercel front ends differ from the other three in one way that governs release planning: they have no staging environment and go live the instant they are pushed.** See §0b.
 
 ### 0a. Ownership Model
 
@@ -71,6 +79,8 @@ The mobile app and the voice server **do not call each other**. They are two ind
 | Shared Core (Supabase Edge Functions + Postgres) | The Edge Functions codebase, `munk2207/naavi-app/supabase/functions/*` |
 | Voice | The Voice Server, `munk2207/naavi-voice-server` |
 | Mobile | The React Native App, `munk2207/naavi-app` (client code under `app/`, `hooks/`) |
+| Staff portal | `munk2207/naavi-staff` — `index.html` (home + OTP sign-in), `support.html` (tickets), `admin.html` (staffers), `faq.html` (FAQ authoring). Routed by a `vercel.json` rewrite: `/support`, `/admin`, `/faq` |
+| Marketing website | `munk2207/mynaavi-website` — the public site, including `faq.html`, `contact.html` and `report.html` |
 
 Each component's owner is the single codebase responsible for that component's correctness. "I thought the other side handled it" is not a valid explanation for a gap — if a capability's owner is genuinely ambiguous, that ambiguity is itself a defect to resolve, not a reason to skip verification.
 
@@ -86,6 +96,16 @@ Each codebase — and the demo line that rides on one of them — has a differen
 | Voice server | 2 (since 2026-08-19) | Two Railway services in one project: `naavi-voice-staging` deploying from branch `staging`, and `naavi-voice-server` deploying from `main`. Separated by which Twilio number is dialled: `+13435041572` reaches staging, `+12495235394` reaches production. |
 | Demo line | 2 numbers, but **0 independent code paths** | Not a platform. A routing mode of the voice server, selected by `DEMO_USER_ID` and by which number is dialled. `+18889162284` (production demo) runs on the **voice production server itself**; `+18734462284` (staging demo) runs on a separate Railway service, **`generous-tenderness`** (domain `generous-tenderness-production-9235.up.railway.app`), which deploys the **same `staging` branch** as voice-staging. |
 | Supabase | 2 | The two projects above. |
+| **Staff portal** | **1** | Vercel, from `origin/main` of `munk2207/naavi-staff`. **Live on push.** Its pages call **production** Supabase, hardcoded in each page — so a change cannot be exercised against staging at all. |
+| **Marketing website** | **1** | Vercel, from `origin/main` of `munk2207/mynaavi-website`. **Live on push.** Same consequence. |
+
+**⭐ Two of the five codebases have no staging environment, and this is the single most release-relevant fact about them.** Every other surface can be exercised somewhere safe first; these two cannot. Three consequences that have already shaped real work:
+
+1. **A web page must not be pushed before the functions it calls exist in production**, because the page points there the moment it lands. This is why [[F25]]'s build order deploys Edge Functions first and pushes the website last — not caution, arithmetic.
+2. **The staff portal cannot be tested from staging.** It authenticates against production and reads production data, so a staff-facing change is verified either on production or not at all. F25 reached production having never been opened by anyone, which is what that constraint produces if it is not planned around.
+3. **A staff-portal push is a production release** in every sense except that its audience is small and signed in. It carries no gate, no drift check and no review step.
+
+**Neither repository is covered by the mobile repo's pre-push hooks**, which run only in `naavi-app`. Nothing checks either front end before it goes live.
 
 **Before 2026-08-19 the voice server had ONE environment.** Every voice change for real callers was developed and deployed straight against production. T2 built the staging half; see `docs/T2_PHASE_0_CREATING_VOICE_STAGING_2026-08-19.md` onward for the full governed record.
 
@@ -338,6 +358,11 @@ For each capability, where the authoritative implementation actually lives — v
 | **Voice PIN — failure counting, alerting, and lockdown state** | `manage-voice-pin` (Shared Core), atop the `record_voice_pin_failure()` Postgres function | **Ownership moved out of the voice server at S1 Phase 6** (2026-08-19) — see §2c |
 | **Action execution and outcome-truthful reply (app path)** | `naavi-chat` Step 1.4 executors (Shared Core) | Genuinely shared for the seven intents it covers (`SET_REMINDER`, `CREATE_EVENT`, `REMEMBER`, `DELETE_RULE`, `DELETE_MEMORY`, `ADD_CONTACT`, `DELETE_EVENT`), and the **reference contract** for this capability: execute, then derive the reply's speech from the result. §2b previously described Step 1.4 only as the marker's read-back point; that it also owns the execute-then-speak contract was unrecorded until [[B11k]] Phase 1A. **Voice does not call it** — see §5's Priority 1c |
 | **Action outcome reporting / failure surfacing** | **Duplicated, three independent implementations** | The capability [[B11k]] exists to fix. See §5's Priority 1c |
+| **FAQ — published content and read** | `get-faq` (Shared Core) | **Shared Core since [[F25]] (2026-09-02).** One `faq_items` record replaces content that was authored as markup in three places. Unauthenticated by design — this is public content — and it holds service-role privileges against a table no client can read, so it accepts **no caller-controlled filtering of any kind** and its response shape is fixed in code. Chosen over an RLS public-read policy at Phase 1A precisely so a column added later cannot publish itself. **Still partially duplicated:** `lib/faq.ts` holds a separate 12-entry copy for the app's support forms until the mobile stage — see §5a |
+| **FAQ — authoring and classification** | `manage-faq` (Shared Core) | **The one write entry point** (CLAUDE.md DATA INTEGRITY Layer 2); RLS denies every client role, so no second path exists to drift from. Staff-gated by `check-staff`, with service-role as a documented second path for the one-time migration. Claude Haiku assigns categories and search terms on create, and again on update **only when the words change** (content hash). It **selects** from `faq_categories` and anything unrecognised is discarded, so it cannot invent a category. **Fails open:** a classifier outage never costs a staffer their answer — the row saves, flagged, and stays published and searchable |
+| **FAQ — matching a described problem to an answer** | `match-faq` (Shared Core) | Unauthenticated. **Selects from published answers and never composes one** — the model is given a slug list and every slug it returns is validated against that set, so an invented answer is structurally impossible rather than merely instructed against. Bounded against abuse by input validation, a result cache and per-IP rate limiting, because a public endpoint that calls a paid model is otherwise an open tab. Consumed by the website's two support forms today; **its response contract was fixed in advance to allow mobile reuse without an API redesign** |
+| **Support tickets** | `ingest-ticket` (Shared Core), table `tickets` | **Single ingress** for every ticket, from the website's forms and the app's. Drafting is `analyze-ticket`, dispatched by `dispatch-ticket-analysis` on a **per-minute cron**; replies go out via `send-ticket-reply` (Postmark) and come back via `receive-ticket-reply` (Postmark inbound webhook) and `check-ticket-replies` (a second per-minute cron reading Gmail); `hubspot-ticket-closed` receives HubSpot stage changes. Worked by staff in `naavi-staff/support.html`. **This capability had no row in this document until 2026-09-03** |
+| **Staff identity and roles** | `check-staff` (Shared Core), table `support_staff` | Verifies the JWT, then requires an **active** `support_staff` row, returning `{authorized, email, role}` with role ∈ superadmin / admin / staff. Staffers are managed by `add-staffer`. **Five consumers:** the staff portal's four pages plus `manage-faq`. Distinct from end-user authentication (§2's row above) — a staffer is not a Naavi user, and the two tables are unrelated |
 | **Immediate message drafting (`DRAFT_MESSAGE`)** | `naavi-chat` (Shared Core) | **Shared Core, internally duplicated across two construction sites** — Layer 2's deterministic classifier (`:2181`) and the Path B tool-use mapper. Recipient resolution is **delegated to the entry point by tool contract** — `_shared/anthropic_tools.ts` states *"Contact NAME only. Orchestrator resolves email/phone"* — which is why the mobile client has historically owned it. **Since [[B11l]] (2026-09-01) a self-reference (`me`, `myself`, …) resolves in Shared Core** before any contact search can run; every other recipient still resolves on the client. **This row did not exist until 2026-09-01** — see the revision 16 note |
 
 ### 2a. Why "Action Rules creation" is the important one
@@ -540,6 +565,12 @@ An "entry point" should only translate between the user and the Shared Core — 
 **Voice server currently also contains (drift from the ideal):**
 - Its own alert-creation classifier and reasoning loop, its own turn-state tracking, its own direct Gmail/Calendar API calls, its own direct database inserts for reminders and rules — none of which route through the mobile backend's equivalent logic. This is the single biggest gap between "what an entry point should do" and "what voice actually does."
 
+**The two web front ends should own (and, unusually, do):**
+- **Marketing website** (`mynaavi-website`) — rendering public pages; reading the FAQ from `get-faq`; asking `match-faq` whether a described problem already has an answer; filing a ticket through `ingest-ticket`.
+- **Staff portal** (`naavi-staff`) — OTP sign-in, then gating every page on `check-staff`; rendering the ticket queue; writing FAQ answers through `manage-faq`.
+- **Neither holds business logic**, and that is worth stating rather than assuming: no matching, no classification, no ticket routing lives in a page. The FAQ page's own search box is the one thing that could be mistaken for a second matcher and is not — it narrows an already-fetched list by word prefix and makes no call. **These are the only entry points in this system that are actually doing only what §3 asks of them**, which says less about their discipline than about their age: they were built after the Shared Core existed, with nowhere else to put the logic.
+- **Their real hazard is not drift, it is release.** No staging, live on push, and no hook or gate in either repository — see §0b.
+
 ---
 
 ## 4. Protected Core
@@ -587,6 +618,8 @@ existence:** the voice instance was found and fixed narrowly three times — the
 independently-discovered follow-up (2026-07-21) — each fixing only the action in front of the person
 who found it, because no inventory row said they were one class. Added 2026-08-23 by B11k Phase 1A.
 
+**Priority 1d — FAQ content duplicated, reduced from three copies to two.** Until [[F25]] (2026-09-02) the same answers were authored as markup in three places: `mynaavi-website/faq.html` as visible HTML, the same file again as a hidden search-engine block, and `lib/faq.ts` as a TypeScript keyword table. **The third had been eleven questions behind for months**, and its own header instructed a human to keep it in sync — the exact "knowledge recorded with nothing enforcing it" pattern this document names about itself. F25 collapsed the first two into one database record generated at build time, so they can no longer disagree. **`lib/faq.ts` remains a second copy.** This is **not** an accepted Architecture Exception and not unexamined debt: it is a deliberate staged deferral, Wael's decision on 2026-09-02, with the mobile scope to be set once the web stage has been tested. **The next decision point is named rather than left to drift** — either the app calls `match-faq` directly, or `lib/faq.ts` is generated from the record (Phase 3's deferred decision D3). Until one of those happens, the app's two support forms know 12 of the published questions and nothing enforces that number.
+
 **Priority 2 — Calendar reads duplicated.** Both sides independently call the Google Calendar API for live event data, instead of sharing one fetch. No unification planned — formally accepted as an Architecture Exception, dated, reviewable 2027-07-18 or at the next Architecture Audit Trigger. See `docs/adr/0002-calendar-reads-remain-duplicated.md`.
 
 **Priority 3 — Gmail reads duplicated.** Both sides independently call the Gmail API for "what's new" reads — separate from the genuinely-shared `sync-gmail` background cron. Voice itself has two independent internal call sites, not just one vs. mobile's one. No unification planned — formally accepted as an Architecture Exception. See `docs/adr/0006-gmail-live-reads-remain-duplicated.md`.
@@ -612,6 +645,10 @@ who found it, because no inventory row said they were one class. Added 2026-08-2
 | **Action Rules creation (classifier)** — Priority 1 | | ✅ | Not scheduled — Accepted as Architecture Exception (ADR 0001), dated, review 2027-07-18 or next Audit Trigger |
 | **Action Rules execution (fan-out), intra-Shared-Core** — Priority 1b | | ✅ | Not fully scheduled — Accepted as Architecture Exception (ADR 0005); narrower per-drift extraction pattern (B10g's `_shared/task_actions.ts`) is the accepted ongoing approach, review 2027-07-18 or next Audit Trigger. **Corrected 2026-07-18 (T1a):** this row previously appeared only in the ✅ Shared section above, worded "genuinely shared" — true only for the mobile-vs-voice axis; the intra-Shared-Core duplication between `evaluate-rules` and `report-location-event` was unstated until this audit |
 | **Action outcome reporting / failure surfacing** — Priority 1c (**new row 2026-08-23, was missing entirely**) | | ✅ | **Not** an accepted Exception. Three independent implementations: voice's action loop (broken — speaks before executing, discards the result), mobile's `useOrchestrator` (`turnSpeechOverride`, correct for most actions), and `naavi-chat`'s Step 1.4 executors (correct, and Shared Core). Nothing enforces consistency. Three narrow fixes to the voice instance landed independently — 2026-05-12, 2026-07-15, 2026-07-21 — without the class being named. Tracked as [[B11k]] |
+| **FAQ content** — Priority 1d (**new row 2026-09-03**) | | ✅ | **Not** an accepted Exception. Was **three** copies — website HTML, the same file's hidden search-engine block, and `lib/faq.ts` — of which the third sat **eleven questions behind** for months. [[F25]] made the first two generated output from one `faq_items` record, so they cannot disagree; `lib/faq.ts` remains, by Wael's deliberate staging decision (2026-09-02), until the mobile scope is set. **Reduced, not closed** |
+| **FAQ read / authoring / matching** (`get-faq`, `manage-faq`, `match-faq`) | ✅ | | Shared Core since F25. Ownership change Duplicated → Shared Core approved by Wael 2026-09-02 per §4's Ownership Change Rule |
+| **Support tickets** (`ingest-ticket` and the analyse/reply chain) | ✅ | | Single ingress, one table. Never documented here until 2026-09-03 |
+| **Staff identity and roles** (`check-staff`, `support_staff`) | ✅ | | Five consumers, one gate. Never documented here until 2026-09-03 |
 | Calendar reads — Priority 2 | | ✅ | Not scheduled — Accepted as Architecture Exception (ADR 0002), dated, review 2027-07-18 or next Audit Trigger |
 | Gmail live reads — Priority 3 | | ✅ | Not scheduled — Accepted as Architecture Exception (ADR 0006), dated, review 2027-07-18 or next Audit Trigger |
 | List reads | | ✅ | Not scheduled — Accepted as Architecture Exception (ADR 0007), dated, review 2027-07-18 or next Audit Trigger |
@@ -626,7 +663,7 @@ who found it, because no inventory row said they were one class. Added 2026-08-2
 
 ## 6. Data Flow
 
-*Diagram Version 1 — see the version block at the top of this document. Bump this label independently when the diagram itself changes, per the Architecture Change Procedure (§8).*
+*Diagram Version 2 — see the version block at the top of this document. Bump this label independently when the diagram itself changes, per the Architecture Change Procedure (§8).*
 
 ```
 Voice caller
@@ -653,9 +690,24 @@ Mobile app (React Native)                                     │
      └──► mobile's OWN logic (hooks/useOrchestrator.ts —      │
            classifier confirm, address resolution, task      │
            creation, its own Gmail/Calendar live reads) ──────┘
+                                                              ▲
+                                                              │
+Customer on mynaavi.com ──► get-faq (read the FAQ) ───────────┤
+  (Vercel, static, no                                         │
+   staging, live on push)   match-faq (describe a problem) ───┤
+                                                              │
+                            ingest-ticket (file a ticket) ────┤
+                                                              │
+Staffer on staff.mynaavi.com ──► check-staff (the gate) ──────┤
+  (Vercel, static, no                                         │
+   staging, live on push)       manage-faq (write answers) ───┤
+                                                              │
+                                tickets (work the queue) ─────┘
 ```
 
-**The one-sentence version:** both clients share the database and a real set of Edge Functions for read-only lookups, sending messages, and firing alerts — but each independently decides *what an alert should be* before it ever reaches that shared layer, and each independently re-fetches live Calendar/Gmail data rather than sharing one fetch.
+**The one-sentence version:** four clients share one database and a real set of Edge Functions — but the two app surfaces each independently decide *what an alert should be* before reaching that shared layer, and each re-fetches live Calendar/Gmail data rather than sharing one fetch.
+
+**The two web front ends are different in kind, and the diagram flattens it.** They hold no business logic at all: every arrow above is a page collecting input, calling one function, and rendering what comes back. That is what an entry point is supposed to be (§3), and it is the one place in this system where the ideal actually holds — worth noticing, given how much of §3 records the opposite. **What they do carry is a release property nothing else has: no staging, and live on push** (§0b).
 
 ---
 

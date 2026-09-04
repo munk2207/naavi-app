@@ -324,6 +324,73 @@ export const faqTests: TestCase[] = [
     },
   },
   {
+    id: 'f25.staff-hidden-item-keeps-a-usable-publish-button',
+    category: 'faq',
+    description:
+      'A hidden answer must not have its own actions faded. The card was one .item at opacity .55 — the whole thing, buttons included — so "Publish again" was present and read as disabled. Wael, 2026-09-04, looking straight at it: "I can not see Publish again." Never dim the one control that reverses a state; say the state in words instead',
+    async run() {
+      if (!existsSync(STAFF_FAQ)) throw new TestSkippedError('naavi-staff checkout not present beside this repo');
+      const src = readFileSync(STAFF_FAQ, 'utf8');
+
+      expectTruthy(
+        !/\.item\.inactive\s*\{[^}]*opacity/.test(src),
+        '.item.inactive must not set opacity on the whole card — that is what hid the button',
+      );
+      expectTruthy(
+        /\.item\.inactive h3[^{]*\{[^}]*opacity/.test(src),
+        'the dimming must be scoped to the card text, not the card',
+      );
+      expectTruthy(
+        src.includes('Hidden from customers'),
+        'a hidden answer must say so in words, not only by looking faded',
+      );
+      expectTruthy(
+        /class="\$\{i\.active \? '' : 'primary'\}"[\s\S]{0,120}Publish again/.test(src),
+        '"Publish again" must render as a primary button so it reads as available',
+      );
+      expectTruthy(
+        /\.item-actions button\.primary\s*\{[^}]*background:var\(--teal\)/.test(src),
+        'the primary action button must carry the teal fill, not inherit the muted default',
+      );
+    },
+  },
+  {
+    id: 'f25.staff-page-can-search-and-warns-before-duplicating',
+    category: 'faq',
+    description:
+      'A staffer about to write an answer must be able to find out whether one already exists. Wael, 2026-09-04: "I want to add a new question, but I need first to know if that question exists and if it is, what was the answer so I can update." Without this the FAQ grows two answers to the same question — which is the duplication F25 was opened to remove, reappearing inside the tool built to remove it. Not in Phase 0 scope; added on Wael\'s explicit authorisation, 2026-09-04',
+    async run() {
+      if (!existsSync(STAFF_FAQ)) throw new TestSkippedError('naavi-staff checkout not present beside this repo');
+      const src = readFileSync(STAFF_FAQ, 'utf8');
+
+      expectTruthy(src.includes('id="q"'), 'the staff list must have a search box');
+      expectTruthy(
+        /function matches\(i, q\)/.test(src) && /indexOf\(w\) === 0/.test(src),
+        'search must match on word prefix, the same rule the customer page uses — plain substring made "PIN" match "typing"',
+      );
+      expectTruthy(
+        /i\.slug\.replace\(\/-\/g, ' '\)/.test(src) && /search_terms \|\| \[\]\)\.join\(' '\)/.test(src),
+        'search must cover the slug and the generated search terms, not only the question text',
+      );
+      expectTruthy(
+        /function similarTo\(question, excludeId\)/.test(src),
+        'saving must check for an existing answer close to the one being written',
+      );
+      expectTruthy(
+        /excludeId/.test(src) && /i\.id !== excludeId/.test(src),
+        'editing an answer must not warn that it duplicates itself',
+      );
+      expectTruthy(
+        src.includes('Save as a new answer anyway'),
+        'the warning must be passable — a staffer who has read the list and still wants a separate answer is usually right',
+      );
+      expectTruthy(
+        /function openExisting\(id\)/.test(src),
+        'the warning must offer to open the existing answer, which is the whole point — update it rather than duplicate it',
+      );
+    },
+  },
+  {
     id: 'f25.staff-category-ops-exist-server-side',
     category: 'faq',
     description:
@@ -354,6 +421,109 @@ export const faqTests: TestCase[] = [
       expectTruthy(
         dup.status === 409 && dupBody.error === 'category_exists',
         `a duplicate category must return 409 category_exists, got ${dup.status} ${JSON.stringify(dupBody)}`,
+      );
+    },
+  },
+
+  {
+    id: 'f25.customer-page-offers-no-empty-category',
+    category: 'faq',
+    description:
+      'The FAQ page must only offer a category that has a published answer in it. Categories and answers are classified independently — a staffer can create a category at any moment, and answers already published keep the categories they were given — so a new category legitimately holds nothing, and offering it produces a dropdown option that leads to a blank page. Found 2026-09-03 by using the page: "morning briefing" was live in the dropdown holding 0 of 26 answers',
+    async run() {
+      const src = readFileSync(join(WEB, 'faq.html'), 'utf8');
+      expectTruthy(
+        /items\.forEach[\s\S]{0,200}?used\[c\] = true/.test(src),
+        'faq.html must count which categories the published answers actually use',
+      );
+      expectTruthy(
+        /categories \|\| \[\]\)\.filter\(function \(c\) \{ return used\[c\]; \}\)/.test(src),
+        'faq.html must build the dropdown from the used set, not from the raw category list',
+      );
+
+      // The live half of this: prove the situation the filter exists for is
+      // real, so nobody later reads the filter as defensive padding and
+      // removes it. get-faq returns the FULL category list by design — the
+      // staff page needs it, empties included — so a gap between the two is
+      // normal, not a data defect.
+      if (!liveReady()) throw new TestSkippedError('staging env not set');
+      const d = (await (await fetch(`${stagingUrl()}/functions/v1/get-faq`)).json()) as {
+        ok?: boolean; categories?: string[]; items?: { categories?: string[] }[];
+      };
+      expectTruthy(d.ok === true, 'get-faq must return ok');
+      const used = new Set((d.items ?? []).flatMap(i => i.categories ?? []));
+      const offered = (d.categories ?? []).filter(c => used.has(c));
+      expectTruthy(
+        offered.length > 0,
+        'every published answer is unclassified — the dropdown would be empty, which is a different defect',
+      );
+      for (const c of offered) {
+        const n = (d.items ?? []).filter(i => (i.categories ?? []).includes(c)).length;
+        expectTruthy(n > 0, `category "${c}" would be offered with ${n} answers behind it`);
+      }
+    },
+  },
+
+  {
+    id: 'f25.customer-page-empty-state-names-the-real-constraint',
+    category: 'faq',
+    description:
+      'When the list comes back empty the page must say which filter emptied it. It used to show one fixed sentence — "Nothing matches that. Try fewer words" — regardless of cause. Wael, 2026-09-04, with one word typed and a category selected: "I selected a category... but I did not enter any words." Measured on the live page: "morning" alone finds 2, the category alone holds 4, only the combination is empty — so removing words could not help and clearing the category would. Advising the one action that cannot work is worse than saying nothing',
+    async run() {
+      const src = readFileSync(join(WEB, 'faq.html'), 'utf8');
+
+      expectTruthy(
+        src.includes('function emptyMessage('),
+        'the empty state must be built per case, not a single fixed string',
+      );
+      expectTruthy(
+        /if \(q && cat\)/.test(src) && /if \(cat\) \{/.test(src),
+        'the three cases — words only, category only, and both — must each be handled',
+      );
+      expectTruthy(
+        src.includes('There are no answers in'),
+        'a category with nothing in it must say so, rather than blame the search words',
+      );
+      expectTruthy(
+        src.includes('faq-clear') && src.includes('function clearCategory'),
+        'when the category is part of the cause, the page must offer a control that removes it',
+      );
+      expectTruthy(
+        /Try fewer words/.test(src) && !/Nothing matches that\. Try fewer words/.test(src),
+        '"try fewer words" must survive for the words-only case, but never as the catch-all',
+      );
+      expectTruthy(
+        /items\.length === 1 \? 'answer' : 'answers'/.test(src),
+        'the status line must pluralise on the total it names, not on the filtered count — it read "1 of 23 answer"',
+      );
+    },
+  },
+
+  {
+    id: 'f25.customer-page-busts-its-cache-when-answers-change',
+    category: 'faq',
+    description:
+      'get-faq is served with max-age=3600 — Wael\'s decision, and right for content that has not changed. It is wrong the moment it has: measured 2026-09-04, a browser returned 23 answers in 11ms from cache while the server held 26, and the page had ALREADY rendered the correct 26 from its generated copy before the stale fetch overwrote them. The page must request a URL carrying the build stamp, which changes on every save-triggered rebuild',
+    async run() {
+      const src = readFileSync(join(WEB, 'faq.html'), 'utf8');
+      expectTruthy(
+        /buildStamp = \(elItems\.innerHTML\.match\(\/F25:generated-at/.test(src),
+        'the page must read the build stamp written into it by build-faq.js',
+      );
+      expectTruthy(
+        /fetch\(ENDPOINT \+ \(buildStamp \? '\?v=' \+ encodeURIComponent\(buildStamp\)/.test(src),
+        'the live read must carry the stamp as a version parameter',
+      );
+      expectTruthy(
+        !/fetch\(ENDPOINT\)/.test(src),
+        'no call may use the bare endpoint — that is the URL a browser holds for an hour',
+      );
+
+      // The stamp only changes if the generator keeps writing one.
+      const gen = readFileSync(join(WEB, 'build-faq.js'), 'utf8');
+      expectTruthy(
+        gen.includes('F25:generated-at'),
+        'build-faq.js must keep stamping the page — the cache-busting depends on it, so removing the stamp would silently restore the stale-for-an-hour behaviour',
       );
     },
   },
