@@ -25,6 +25,7 @@ import { setupSuite, teardownSuite } from './lib/fixtures';
 import { writeReport, renderConsoleSummary } from './lib/report';
 
 import { smokeTests } from './catalogue/smoke';
+import { faqTests } from './catalogue/faq';
 import { chatTests } from './catalogue/chat';
 import { rulesTests } from './catalogue/rules';
 import { contactsTests } from './catalogue/contacts';
@@ -296,6 +297,7 @@ const ALL_TESTS: TestCase[] = [
   ...draftMessageChannelTests,
   ...relationshipContactResolutionTests,
   ...b11xEmailReclassificationTests,
+  ...faqTests,
 ];
 
 // ────────────────────────────────────────────────────────────────────────────

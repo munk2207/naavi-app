@@ -1,6 +1,6 @@
 {
   "note": "Differences known and accepted as of the capture below. The check fails on anything NEW. Regenerate with: npm run drift:check -- --write-baseline",
-  "captured": "2026-08-21, 7:29:19 a.m. EST",
+  "captured": "2026-09-02, 8:09:34 p.m. EST",
   "accepted": {
     "columns": {
       "missing": [],
@@ -10,6 +10,30 @@
         "email_alert_log.rule_id",
         "email_alert_log.sent_at",
         "email_alert_log.user_id",
+        "faq_categories.active",
+        "faq_categories.created_at",
+        "faq_categories.id",
+        "faq_categories.name",
+        "faq_categories.sort_order",
+        "faq_items.active",
+        "faq_items.answer_html",
+        "faq_items.categories",
+        "faq_items.content_hash",
+        "faq_items.created_at",
+        "faq_items.created_by",
+        "faq_items.id",
+        "faq_items.needs_classification",
+        "faq_items.question",
+        "faq_items.search_terms",
+        "faq_items.slug",
+        "faq_items.updated_at",
+        "faq_match_cache.created_at",
+        "faq_match_cache.hit_count",
+        "faq_match_cache.input_hash",
+        "faq_match_cache.result",
+        "faq_rate_limit.ip_hash",
+        "faq_rate_limit.request_count",
+        "faq_rate_limit.window_start",
         "user_settings.azure_voice_offered_at",
         "user_settings.azure_voice_profile_id"
       ],
@@ -28,7 +52,16 @@
         "epic_medications.epic_medications_user_id_fkey",
         "epic_observations.epic_observations_user_id_fkey",
         "epic_tokens.epic_tokens_user_id_fkey",
-        "epic_tokens.epic_tokens_user_id_unique"
+        "epic_tokens.epic_tokens_user_id_unique",
+        "faq_categories.faq_categories_name_not_blank",
+        "faq_categories.faq_categories_pkey",
+        "faq_items.faq_items_answer_present",
+        "faq_items.faq_items_hash_present",
+        "faq_items.faq_items_pkey",
+        "faq_items.faq_items_question_present",
+        "faq_items.faq_items_slug_shape",
+        "faq_match_cache.faq_match_cache_pkey",
+        "faq_rate_limit.faq_rate_limit_pkey"
       ],
       "differing": [
         "calendar_events.calendar_events_user_id_fkey",
@@ -74,6 +107,15 @@
         "email_alert_log_pkey",
         "email_alert_log_rule_id_gmail_message_id_key",
         "epic_tokens_user_id_unique",
+        "faq_categories_name_key",
+        "faq_categories_pkey",
+        "faq_items_active_idx",
+        "faq_items_pkey",
+        "faq_items_slug_key",
+        "faq_match_cache_created_idx",
+        "faq_match_cache_pkey",
+        "faq_rate_limit_pkey",
+        "faq_rate_limit_window_idx",
         "idx_push_subscriptions_user_platform",
         "idx_user_settings_phone_numbers",
         "naavi_notes_is_deleted_idx"
@@ -115,7 +157,11 @@
     "rls_enabled": {
       "missing": [],
       "extra": [
-        "email_alert_log"
+        "email_alert_log",
+        "faq_categories",
+        "faq_items",
+        "faq_match_cache",
+        "faq_rate_limit"
       ],
       "differing": []
     },

@@ -10,7 +10,7 @@
     {
       "name": "naavi-staff",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "C:\\Users\\waela\\OneDrive\\Desktop\\naavi-staff", "--port", "3002", "--no-clipboard"],
+      "runtimeArgs": ["serve", "C:\\Users\\waela\\OneDrive\\Desktop\\naavi-staff", "-l", "3002", "--no-clipboard"],
       "port": 3002
     }
   ]
