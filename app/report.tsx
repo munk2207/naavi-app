@@ -264,7 +264,13 @@ export default function ReportScreen() {
                   }}
                   activeOpacity={0.75}
                 >
-                  <Text style={styles.suggestText} numberOfLines={1}>{s.question}</Text>
+                  {/* Two lines, not one. 8 of the 26 published questions are
+                      longer than fits on one phone line — the longest is 58
+                      characters — and a truncated question cannot be judged.
+                      Wael saw "What is the phone number to call …" cut off on
+                      build 333. The panel's whole job is to be readable enough
+                      to be chosen instead of Send. */}
+                  <Text style={styles.suggestText} numberOfLines={2}>{s.question}</Text>
                   <Ionicons name="open-outline" size={16} color={Colors.textMuted} />
                 </TouchableOpacity>
               ))}

@@ -626,6 +626,14 @@ export const faqTests: TestCase[] = [
           /onPress=\{\(\) => setSuggestions\(\[\]\)\}/.test(src),
           `app/${screen}: the panel's close button must clear the suggestions directly`,
         );
+        /* A suggested question must be readable, or it cannot be chosen
+           instead of Send — which is the panel's only job. 8 of the 26
+           published questions exceed one phone line; the longest is 58
+           characters. Found by Wael on build 333, truncated mid-question. */
+        expectTruthy(
+          /numberOfLines=\{2\}>\{s\.question\}/.test(src),
+          `app/${screen}: the suggested question must wrap to 2 lines, not truncate at 1`,
+        );
         // The STATE must be gone, not every mention of it — the comment
         // explaining why the button broke is worth keeping.
         expectTruthy(
