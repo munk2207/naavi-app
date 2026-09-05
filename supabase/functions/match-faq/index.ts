@@ -125,8 +125,32 @@ async function resolveSubject(
   }
 }
 
+/**
+ * A deliberate delay, for testing a caller's timeout. Off unless asked for.
+ *
+ * Wael required, at Phase 7, that the app's 4-second timeout be proven under
+ * a SLOW response rather than an absent one — airplane mode fails in
+ * milliseconds and never makes the abort fire, so "we tested offline" does
+ * not cover this.
+ *
+ * Gated on an environment variable rather than a temporary edit, because the
+ * alternative was committing a deliberately broken function to main and
+ * hoping nobody deployed it. The variable is set on staging only, for as long
+ * as a test takes, and removed after. Production has never had it, so this is
+ * a no-op there by construction rather than by discipline.
+ *
+ * Capped at 30s so a forgotten variable degrades a request rather than
+ * hanging a connection open indefinitely.
+ */
+const TEST_DELAY_MS = Math.min(Number(Deno.env.get('MATCH_FAQ_TEST_DELAY_MS') ?? 0) || 0, 30_000);
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
+
+  if (TEST_DELAY_MS > 0) {
+    console.warn(`[match-faq] ⚠️ TEST DELAY ACTIVE — sleeping ${TEST_DELAY_MS}ms before responding. MATCH_FAQ_TEST_DELAY_MS must not be set on production.`);
+    await new Promise((r) => setTimeout(r, TEST_DELAY_MS));
+  }
 
   const admin = createClient(
     Deno.env.get('SUPABASE_URL')!,
