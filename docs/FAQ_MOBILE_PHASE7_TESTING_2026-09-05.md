@@ -3,7 +3,10 @@
 **Date:** 2026-09-05
 **Item:** F25 Stage 2
 **Phase 5:** approved with one open requirement — *"the six mobile scenarios still require testing on
-a staging APK."* **This document closes it.**
+a staging APK."* **Closed** — §2.
+**Phase 7 review:** **APPROVED WITH 2 REQUIRED TESTS before production** — the signed-in identity
+path, and the timeout under a deliberately slow response. **Both closed** — §3a. Wael explicitly did
+not require driving the rate-limit ceiling from a device.
 **Phase 6:** PASS / PASS / PASS, Approved with 2 mandatory changes.
 **Environment:** **STAGING** (`xugvnfudofuskxoknhve`) throughout. **Nothing deployed to production;
 no AAB built.**
@@ -67,6 +70,71 @@ device is not.
 
 ---
 
+## 3a. The two tests Wael required — both now PASSED
+
+Phase 7 was approved with two required tests before production. §3 above records what was *not*
+proven at that moment; this section closes both. **Build 335**, on Wael's device, 2026-09-05.
+
+### Required test 1 — the signed-in identity path, end to end · ✅ PASSED
+
+**Method, chosen so the result could not be talked around:** the rate-limit table was emptied, and
+the bucket a signed-in caller *should* produce was computed in advance —
+`sha256('user:d5128ca3-ff73-4693-a758-6d3746cb8a0d')` = `a12859ecc7649b24…`, Wael's staging account.
+Then one Send from the app, with text no one had used, so it would miss the cache and reach the
+counter.
+
+```
+rate-limit rows: 1
+   a12859ecc7649b24…  count 1   <-- Wael's account
+your phrase reached match-faq? YES — result: no_match
+```
+
+**The app sent its session token, `match-faq` verified it, and counted him as a person rather than
+as an address.** That is the carrier-NAT problem — the reason Q3 was asked at all — proven on a real
+device rather than inferred from source.
+
+The send itself behaved correctly: `no_match`, because no published answer covers French or Spanish,
+so the ticket filed with no suggestion.
+
+### ⚠️ The first attempt at test 1 failed, and finding out why found a defect
+
+The first run produced **zero** rate-limit rows. Not an identity failure — `match-faq` was never
+called at all. `faqChecked` is per screen, and Wael had already pressed Send on that screen twice.
+See §4c; the defect is the more valuable half of this test.
+
+### Required test 2 — the 4-second timeout under a slow response · ✅ PASSED
+
+**Airplane mode could never prove this** — a dead network fails in milliseconds and the abort never
+fires. A genuinely slow response was needed.
+
+**Method:** `match-faq` gained an env-gated delay (`MATCH_FAQ_TEST_DELAY_MS`), set to 8000 on
+**staging only**. Gated on a variable rather than a temporary edit, so production is a no-op **by
+construction** rather than by remembering — the alternative was committing a deliberately broken
+function to `main` and trusting nobody deployed it. Measured before the test: staging **9,944 ms**,
+production **1,740 ms**.
+
+**Result, from Wael:** *"4 seconds, no panel, ticket sent."*
+
+The lookup was abandoned at the timeout, the suggestion was skipped, and the ticket went through —
+even though staging would have found a match given ten seconds. **A slow matcher cannot hold a
+customer on a Send button.**
+
+**Cleanup, verified rather than assumed:** the secret was unset **and** the function redeployed,
+because `TEST_DELAY_MS` is read at module scope and a warm instance would have kept the old value.
+Staging measured back at **1,569 ms** afterwards, and `secrets list` shows the variable gone.
+
+*(A production reading of 6,864 ms during cleanup briefly looked alarming and was a cold start —
+production runs `match-faq` v1, which contains no delay code. Five fresh calls: 2272, 2021, 1607,
+1593, 1650 ms. Recorded because the check's own 4-second threshold produced a false alarm.)*
+
+### Not required, and still not proven
+
+**The rate-limit ceiling was never reached from a device.** Wael's ruling: not required — the atomic
+counter is directly tested (Phase 5 §3b). Stated so a later reader does not mistake this for
+coverage.
+
+---
+
 ## 4. ⭐ Two defects were found by using the product, neither by any test
 
 **4a. The suggested question was truncated.** Both screens rendered it with `numberOfLines={1}`.
@@ -81,9 +149,36 @@ nobody. Fixed in build 334, test added.
 **only confirmed fixed when Wael pressed it on 334.** Fourteen source assertions passed while that
 button did nothing.
 
-**The pattern across both, and across Stage 1's six:** every one lived in a state I had built and
-never looked at. Not a testing-volume problem. I verify the path that works and skip the ones that
-do not.
+**4c. ⭐ The FAQ check ran once per SCREEN, not once per ticket.** The most valuable finding of this
+phase, and it surfaced only because required test 1 failed first.
+
+`faqChecked` flipped true on the first Send and never reset, and `setSuccess(true)` swaps to the
+"Thanks" view **inside the same component** — so the screen never unmounts. **A customer filing a
+second ticket in one sitting got no check at all.**
+
+**Measured, not inferred.** Wael filed three tickets on build 334 and **only the first was ever
+offered an answer.** Ticket #1164 — *"Does naavi work when i am traveling abroad"* — is what it
+costs: no suggestion, and a ticket in the inbox.
+
+**Confirmed by discrimination, same app and account, four minutes apart:** at 11:32 without leaving
+the screen, `match-faq` was never called; at 11:36 after backing out, it was called, resolved the
+identity, and returned `no_match`.
+
+**Fixed by resetting the flag when the text changes**, which is what makes "per submission" true.
+Two presses without editing still send, so nobody is trapped.
+
+**⚠️ And the website had the identical defect, live** — `faqChecked` set once per page load, under a
+comment claiming *"only ever ask once per submission attempt"*. It was neither. **I inherited both
+the bug and the false comment when I mirrored the behaviour into the app.** Outside Stage 2's scope;
+fixed on Wael's explicit instruction, 2026-09-05, and verified in a browser on both pages.
+
+**So the sequence is worth stating plainly: the defect was on the website, I copied it into the app,
+Wael found it on the app, and the fix went back to the website.** The mobile testing paid for a live
+web fix.
+
+**The pattern across all three, and across Stage 1's six:** every one lived in a state I had built
+and never looked at. Not a testing-volume problem. I verify the path that works and skip the ones
+that do not.
 
 ---
 
@@ -129,8 +224,15 @@ asking for approval.
 **Manual: PASS.** All seven scenarios exercised on a real device by Wael. **Phase 5's open
 requirement is closed.**
 
-**Not proven, and named in §3:** the timeout under a slow network, the signed-in identity path
-through the app, and the rate-limit ceiling on a device.
+**Both of Wael's required tests: PASSED** — §3a. The signed-in identity path resolved to his own
+account's bucket on a real device, and the timeout abandoned a deliberately slowed lookup at four
+seconds and filed the ticket.
+
+**Still not proven, and not required:** the rate-limit ceiling from a device. Wael's ruling — the
+atomic counter is directly tested.
+
+**Builds used:** 333 (first execution), 334 (truncation fix), 335 (per-submission fix). Three
+staging APKs, no gates, exactly as the two-phase build process intends.
 
 **Phase 8 is not authorised by this document.** Merge additionally requires the three Architecture
 Reference edits Phase 6 §3 records:
