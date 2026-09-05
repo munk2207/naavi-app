@@ -1,6 +1,6 @@
 {
   "note": "What the T12 deploy wrapper recorded deploying, per function per environment. A TRIPWIRE, NOT EVIDENCE — anyone using the raw Supabase CLI bypasses it. Equilibrium may be claimed only on a passing `npm run parity:verify`.",
-  "updated": "2026-09-03, 10:52:42 p.m. EST",
+  "updated": "2026-09-04, 12:02:44 p.m. EST",
   "deployments": {
     "create-contact": {
       "staging": {
@@ -134,6 +134,16 @@
           "supabase/functions/manage-faq/index.ts"
         ],
         "deployed_at": "2026-09-03, 10:52:42 p.m. EST"
+      }
+    },
+    "match-faq": {
+      "staging": {
+        "commit": "e83fdb3a50d53ebf50cba3aedb5d33168b6682ab",
+        "source_sha256": "8dda61d831477a578af210fc38a53c65b7767c97fde9b1313afa02084d90292c",
+        "files": [
+          "supabase/functions/match-faq/index.ts"
+        ],
+        "deployed_at": "2026-09-04, 12:02:44 p.m. EST"
       }
     }
   }

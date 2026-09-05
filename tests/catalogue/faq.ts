@@ -617,6 +617,25 @@ export const faqTests: TestCase[] = [
           /if \(session\?\.access_token\) headers\['Authorization'\]/.test(src),
           `app/${screen} must send the session token ONLY when there is one — the anon key is identical on every install and would collapse every signed-out user into one rate-limit bucket`,
         );
+        /* The close button on the suggestion panel must clear the panel.
+           It used to set a `suggestionsDismissed` flag that the per-keystroke
+           effect read to empty the list; removing that effect left the flag
+           with no reader, and the button silently did nothing. Found at
+           Phase 6, in my own diff. */
+        expectTruthy(
+          /onPress=\{\(\) => setSuggestions\(\[\]\)\}/.test(src),
+          `app/${screen}: the panel's close button must clear the suggestions directly`,
+        );
+        // The STATE must be gone, not every mention of it — the comment
+        // explaining why the button broke is worth keeping.
+        expectTruthy(
+          !/useState[^\n]*suggestionsDismissed|\[suggestionsDismissed,/.test(src),
+          `app/${screen} must not keep the dead suggestionsDismissed state — nothing reads it`,
+        );
+        expectTruthy(
+          !/setSuggestionsDismissed\(/.test(src),
+          `app/${screen} must not call setSuggestionsDismissed — the flag has no reader`,
+        );
       }
     },
   },

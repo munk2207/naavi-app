@@ -66,9 +66,7 @@ export default function ReportScreen() {
   const [success, setSuccess]         = useState(false);
   const [errorText, setErrorText]     = useState<string | null>(null);
   // FAQ suggestion panel — debounced match against description + context.
-  // Dismissed flag lets the user hide the panel if the suggestions don't fit.
   const [suggestions, setSuggestions] = useState<FaqMatch[]>([]);
-  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
   /* Asked once per visit, exactly as the website does (report.html:294).
      A ref, not state — flipping it must not re-render the form mid-submit. */
   const faqChecked = useRef(false);
@@ -137,7 +135,6 @@ export default function ReportScreen() {
       const d = await res.json();
       if (d?.ok && d.status === 'matched' && Array.isArray(d.matches) && d.matches.length) {
         setSuggestions(d.matches as FaqMatch[]);
-        setSuggestionsDismissed(false);
         return true;
       }
     } catch (e) {
@@ -244,7 +241,12 @@ export default function ReportScreen() {
                   <Text style={styles.suggestTitle}>Maybe this helps</Text>
                 </View>
                 <TouchableOpacity
-                  onPress={() => setSuggestionsDismissed(true)}
+                  /* Clears the panel directly. It used to set a
+                     `suggestionsDismissed` flag that an effect read to empty
+                     this list — and when that effect was removed with the
+                     per-keystroke matching, the flag was left with no reader
+                     and this button silently stopped working. */
+                  onPress={() => setSuggestions([])}
                   hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
                 >
                   <Ionicons name="close" size={16} color={Colors.error} />
