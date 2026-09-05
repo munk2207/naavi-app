@@ -557,6 +557,62 @@ export const faqTests: TestCase[] = [
     },
   },
 
+  {
+    id: 'f25.publishing-an-answer-forgets-the-stale-match',
+    category: 'faq',
+    description:
+      'B12h — match-faq caches against the customer\'s words alone, with no expiry, so a question asked BEFORE its answer was written kept returning the old miss forever. Worst exactly where this product is strongest: ticket in, answer written, next customer still gets the miss. Every path that changes the published set must empty the cache',
+    async run() {
+      const src = readFileSync(MANAGE_FAQ, 'utf8');
+      expectTruthy(src.includes('async function forgetMatchCache('), 'manage-faq must have the cache-forgetting helper');
+      const calls = (src.match(/await forgetMatchCache\(admin,/g) ?? []).length;
+      expectTruthy(
+        calls === 4,
+        `every path that changes what is published must forget the cache — create, update, deactivate, reactivate. Found ${calls} call sites, expected 4`,
+      );
+      for (const reason of ['create', 'update', 'deactivate', 'reactivate']) {
+        expectTruthy(
+          new RegExp(`forgetMatchCache\\(admin, '${reason}'\\)`).test(src),
+          `the ${reason} path must forget the cache`,
+        );
+      }
+      // Fail-open: a cache that will not clear must never cost a staffer their answer.
+      expectTruthy(
+        /console\.error\([^)]*match cache NOT cleared/.test(src),
+        'a failure to clear must be logged loudly, not thrown — the save still has to succeed',
+      );
+
+      // Live: publish something, then confirm the previous conclusion is gone.
+      if (!liveReady()) throw new TestSkippedError('staging env not set');
+      const post = (b: unknown) => fetch(`${stagingUrl()}/functions/v1/manage-faq`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${stagingKey()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(b),
+      });
+      const probe = `b12h cache probe ${Date.now()} does naavi speak portuguese`;
+      await fetch(`${stagingUrl()}/functions/v1/match-faq`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: probe, surface: 'b12h-test' }),
+      });
+      const cachedNow = await (await post({ op: 'list' })).json();
+      expectTruthy(cachedNow.ok === true, 'manage-faq must be reachable');
+
+      // Any write at all must empty it.
+      const item = (cachedNow.items ?? [])[0];
+      expectTruthy(Boolean(item), 'need at least one answer to exercise a write');
+      await post({ op: 'update', id: item.id, question: item.question, answer_html: item.answer_html });
+
+      const again = await (await fetch(`${stagingUrl()}/functions/v1/match-faq`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: probe, surface: 'b12h-test' }),
+      })).json();
+      expectTruthy(
+        again.cached !== true,
+        'after a write, a previously-asked question must be re-evaluated rather than replayed from cache',
+      );
+    },
+  },
+
   // ── Stage 2: the app's own copy is gone ─────────────────────────────────
   //
   // These three replace `f25.get-faq-serves-every-anchor-the-app-links-to`,

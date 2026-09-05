@@ -309,7 +309,8 @@ serve(async (req) => {
             .eq('id', id);
           if (upErr) throw upErr;
 
-          await pingDeployHook('update');
+          await forgetMatchCache(admin, 'update');
+        await pingDeployHook('update');
           return json({ ok: true, reclassified: wordsChanged, needs_classification: needsClassification });
         }
 
@@ -334,6 +335,7 @@ serve(async (req) => {
           throw insErr;
         }
 
+        await forgetMatchCache(admin, 'create');
         await pingDeployHook('create');
         return json({ ok: true, slug, needs_classification: !result });
       }
@@ -346,6 +348,7 @@ serve(async (req) => {
           .update({ active: false, updated_at: new Date().toISOString() })
           .eq('id', id);
         if (error) throw error;
+        await forgetMatchCache(admin, 'deactivate');
         await pingDeployHook('deactivate');
         return json({ ok: true });
       }
@@ -358,6 +361,7 @@ serve(async (req) => {
           .update({ active: true, updated_at: new Date().toISOString() })
           .eq('id', id);
         if (error) throw error;
+        await forgetMatchCache(admin, 'reactivate');
         await pingDeployHook('reactivate');
         return json({ ok: true });
       }
@@ -578,6 +582,49 @@ async function classify(
  * lib/faq.ts drift that motivated this whole item. Phase 6 is required to
  * settle how that gets noticed.
  */
+/**
+ * Forget what the matcher previously concluded, because the answers changed.
+ *
+ * match-faq caches its result against the customer's words alone. Nothing in
+ * that key knows which answers existed when the result was computed, so a
+ * question asked BEFORE its answer was written keeps returning the old miss
+ * — permanently. There is no expiry: the table has created_at and an index on
+ * it, and nothing reads either.
+ *
+ * That is worst exactly where this product is strongest. A customer asks
+ * something, gets no match, files a ticket; a staffer turns that ticket into
+ * an FAQ answer; and the next customer who phrases it the same way still gets
+ * the miss. The tool built to end the loop keeps the loop running.
+ *
+ * So: when the published set changes, the cache is emptied. Not expired,
+ * emptied — a window in which a customer gets a stale answer to a question we
+ * have just answered is the whole defect, and a timer leaves one.
+ *
+ * Cheap by construction. The cache exists to stop an identical repeat costing
+ * a model call, not to be durable; it refills on demand.
+ *
+ * ⚠️ Best-effort, deliberately. A failure here is logged and the save still
+ * succeeds — the same fail-open reasoning as the classifier and the deploy
+ * hook. A staffer must never lose an answer they wrote because a cache would
+ * not clear.
+ *
+ * Found 2026-09-04 while copying three answers to staging: the ChatGPT
+ * question was published and the matcher still answered "What is MyNaavi?"
+ * to a phrase probed minutes earlier.
+ */
+async function forgetMatchCache(
+  admin: ReturnType<typeof createClient>,
+  reason: string,
+): Promise<void> {
+  const { error } = await admin
+    .from('faq_match_cache')
+    .delete()
+    .neq('input_hash', '__never_matches__');
+  if (error) {
+    console.error(`[manage-faq] match cache NOT cleared after ${reason} — customers may keep getting a stale answer: ${error.message}`);
+  }
+}
+
 async function pingDeployHook(reason: string): Promise<void> {
   const url = Deno.env.get('VERCEL_DEPLOY_HOOK_URL');
   if (!url) {
