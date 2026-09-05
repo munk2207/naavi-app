@@ -258,7 +258,7 @@ serve(async (req) => {
       const submittedDate = new Date().toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
       const ackText =
         `Hi ${firstName},\n\n` +
-        `Thank you for reaching out to MyNaavi. We've received your support request and a member of our team will follow up within 2 business days.\n\n` +
+        `Thank you for reaching out to MyNaavi. We've received your support request and a member of our team will follow up within one business day.\n\n` +
         `To add more details or follow up, simply reply to this email.\n\n` +
         `── Your ticket details ──────────────────\n` +
         `Ticket #${ticket.ticket_number}\n` +
@@ -269,7 +269,7 @@ serve(async (req) => {
 
       const ackHtml =
         `<p>Hi ${firstName},</p>` +
-        `<p>Thank you for reaching out to MyNaavi. We've received your support request and a member of our team will follow up within 2 business days.</p>` +
+        `<p>Thank you for reaching out to MyNaavi. We've received your support request and a member of our team will follow up within one business day.</p>` +
         `<p>To add more details or follow up, simply reply to this email.</p>` +
         `<table style="border-collapse:collapse;width:100%;max-width:480px;background:#f9f9f7;border-radius:8px;padding:16px;font-size:14px;">` +
         `<tr><td colspan="2" style="padding:8px 12px;font-weight:700;border-bottom:1px solid #e0e0e0;">Ticket #${ticket.ticket_number}</td></tr>` +
@@ -321,7 +321,7 @@ serve(async (req) => {
     // email above already covers it.
     if (!createdBy && (channel === 'voice-call' || channel === 'internal-relay') && reporterPhone && !isTestTicket) {
       try {
-        const smsBody = `MyNaavi support ticket #${ticket.ticket_number} received. We'll follow up by email within 2 business days.`;
+        const smsBody = `MyNaavi support ticket #${ticket.ticket_number} received. We'll follow up by email within one business day.`;
         await fetch(`${supabaseUrl}/functions/v1/send-sms`, {
           method: 'POST',
           headers: {

@@ -65,11 +65,29 @@ export default function ReportScreen() {
   const [submitting, setSubmitting]   = useState(false);
   const [success, setSuccess]         = useState(false);
   const [errorText, setErrorText]     = useState<string | null>(null);
-  // FAQ suggestion panel — debounced match against description + context.
+  // FAQ suggestion panel — filled once per submission, on Send. Not debounced;
+  // the per-keystroke matching was removed in Stage 2.
   const [suggestions, setSuggestions] = useState<FaqMatch[]>([]);
-  /* Asked once per visit, exactly as the website does (report.html:294).
-     A ref, not state — flipping it must not re-render the form mid-submit. */
+  /* Asked once per SUBMISSION, not once per screen.
+   *
+   * This started as "once per visit", copied from the website along with a
+   * comment claiming it was once per submission attempt. It was neither: the
+   * flag never reset, and setSuccess(true) swaps to the "Thanks" view inside
+   * this same component, so the screen does not unmount. A customer filing a
+   * second ticket in one sitting got no check at all.
+   *
+   * Measured on build 334, 2026-09-05: Wael filed three tickets and only the
+   * first was ever offered an answer. For a feature whose whole purpose is
+   * deflection, that is most of the value gone.
+   *
+   * Resetting on a text change is what makes "per submission" true. Pressing
+   * Send twice without editing still sends — the flag is set from the first
+   * press and the text has not changed — so the customer is never trapped.
+   * Editing and sending again is a new question, and gets a new check.
+   *
+   * A ref, not state: flipping it must not re-render the form mid-submit. */
   const faqChecked = useRef(false);
+  useEffect(() => { faqChecked.current = false; }, [description, context]);
 
   // Prefill email + user identity from the signed-in session + user_settings.
   // Falls through silently if the user is signed out — they can still submit
@@ -198,7 +216,7 @@ export default function ReportScreen() {
           <Ionicons name="checkmark-circle" size={72} color={Colors.accent} />
           <Text style={styles.successTitle}>Thanks — we got it.</Text>
           <Text style={styles.successSub}>
-            We read every report and reply within a few days if we need more detail.
+            We read every report and reply within one business day if we need more detail.
           </Text>
           <TouchableOpacity style={styles.successBtn} onPress={() => router.back()}>
             <Text style={styles.successBtnText}>Back to MyNaavi</Text>

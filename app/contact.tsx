@@ -54,9 +54,26 @@ export default function ContactScreen() {
   const [success, setSuccess]     = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<FaqMatch[]>([]);
-  /* Asked once per visit, exactly as the website does (report.html:294).
-     A ref, not state — flipping it must not re-render the form mid-submit. */
+  /* Asked once per SUBMISSION, not once per screen.
+   *
+   * This started as "once per visit", copied from the website along with a
+   * comment claiming it was once per submission attempt. It was neither: the
+   * flag never reset, and setSuccess(true) swaps to the "Thanks" view inside
+   * this same component, so the screen does not unmount. A customer filing a
+   * second ticket in one sitting got no check at all.
+   *
+   * Measured on build 334, 2026-09-05: Wael filed three tickets and only the
+   * first was ever offered an answer. For a feature whose whole purpose is
+   * deflection, that is most of the value gone.
+   *
+   * Resetting on a text change is what makes "per submission" true. Pressing
+   * Send twice without editing still sends — the flag is set from the first
+   * press and the text has not changed — so the customer is never trapped.
+   * Editing and sending again is a new question, and gets a new check.
+   *
+   * A ref, not state: flipping it must not re-render the form mid-submit. */
   const faqChecked = useRef(false);
+  useEffect(() => { faqChecked.current = false; }, [message]);
 
   useEffect(() => {
     (async () => {
@@ -178,7 +195,7 @@ export default function ContactScreen() {
           <Ionicons name="checkmark-circle" size={72} color={Colors.accent} />
           <Text style={styles.successTitle}>Thanks — we got it.</Text>
           <Text style={styles.successSub}>
-            We read every message and reply within a few days. If you included your email, we'll use it.
+            We read every message and reply within one business day. If you included your email, we'll use it.
           </Text>
           <TouchableOpacity style={styles.successBtn} onPress={() => router.back()}>
             <Text style={styles.successBtnText}>Back to MyNaavi</Text>
@@ -287,7 +304,7 @@ export default function ContactScreen() {
           )}
 
           <Text style={styles.footerNote}>
-            Messages go to the MyNaavi team. Reply within a few days.
+            Messages go to the MyNaavi team. Reply within one business day.
           </Text>
         </ScrollView>
     </SafeAreaView>

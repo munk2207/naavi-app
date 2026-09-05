@@ -653,7 +653,17 @@ export const faqTests: TestCase[] = [
         expectTruthy(src.includes('functions/v1/match-faq'), `app/${screen} must call match-faq`);
         expectTruthy(
           /faqChecked\.current = true/.test(src),
-          `app/${screen} must ask at most once per visit, as the website does`,
+          `app/${screen} must not ask twice for the same unchanged submission`,
+        );
+        /* ...and must ask AGAIN for a different one. The flag started as
+           "once per screen" and never reset; setSuccess swaps to the Thanks
+           view inside the same component, so the screen never unmounts and a
+           second ticket got no check at all. Measured on build 334: three
+           tickets filed, one checked. Resetting on a text change is what makes
+           "per submission" true. */
+        expectTruthy(
+          /useEffect\(\(\) => \{ faqChecked\.current = false; \}/.test(src),
+          `app/${screen} must reset the check when the text changes — otherwise only the first ticket of a session is ever checked`,
         );
         expectTruthy(
           /FAQ_MATCH_TIMEOUT_MS = 4_000/.test(src) && /controller\.abort\(\)/.test(src),
