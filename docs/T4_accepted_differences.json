@@ -1,6 +1,6 @@
 {
   "note": "Differences known and accepted as of the capture below. The check fails on anything NEW. Regenerate with: npm run drift:check -- --write-baseline",
-  "captured": "2026-09-02, 8:09:34 p.m. EST",
+  "captured": "2026-09-04, 10:24:10 p.m. EST",
   "accepted": {
     "columns": {
       "missing": [],
@@ -31,8 +31,8 @@
         "faq_match_cache.hit_count",
         "faq_match_cache.input_hash",
         "faq_match_cache.result",
-        "faq_rate_limit.ip_hash",
         "faq_rate_limit.request_count",
+        "faq_rate_limit.subject_hash",
         "faq_rate_limit.window_start",
         "user_settings.azure_voice_offered_at",
         "user_settings.azure_voice_profile_id"
@@ -95,7 +95,8 @@
     "functions": {
       "missing": [],
       "extra": [
-        "check_phone_numbers_unique()"
+        "check_phone_numbers_unique()",
+        "count_faq_match_request(p_subject_hash text, p_window_start timestamp with time zone)"
       ],
       "differing": [
         "search_knowledge_fragments(query_embedding vector, match_count integer, p_user_id uuid)"
